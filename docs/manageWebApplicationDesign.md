@@ -177,7 +177,11 @@ report. Explicit impossible changes, completed-resource seals, and definite CRD
 schema errors block direct submit. Approval-gated, deleting, unavailable, and
 otherwise state-dependent results are warnings because the workflow or cluster
 may make them valid later. Submission prepares and preflights the exact bundle
-before replacing Argo state, then commits it without regenerating.
+before replacing Argo state, then commits it without regenerating. The shared
+report also forecasts which workflow resources will be created or reconciled.
+The review must call out checksum-only reconciles separately from projected
+field changes so a package checksum migration cannot look like an unexplained
+deployment.
 
 The first design does not need to solve every possible dependency visualization. A clear
 list of active work and its current phase is sufficient; richer dependency connections can

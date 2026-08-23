@@ -5,6 +5,7 @@ import {
     ProjectedField,
 } from "@opensearch-migrations/schemas";
 import {createHash} from "crypto";
+import {isDeepStrictEqual} from "util";
 import {z} from "zod";
 import {crdName} from "./crdNaming";
 import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUtils";
@@ -157,7 +158,7 @@ function getPath(source: Record<string, unknown>, path: string[]): unknown {
 }
 
 function stableEqual(left: unknown, right: unknown): boolean {
-    return JSON.stringify(left) === JSON.stringify(right);
+    return isDeepStrictEqual(left, right);
 }
 
 function pathKey(path: string[]): string {

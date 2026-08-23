@@ -233,6 +233,15 @@ button {
   color: #9a5c19;
 }
 
+.submit-preflight.deployment-impact > header svg {
+  color: #236b77;
+}
+
+.deployment-impact > ul > li {
+  border-left: 2px solid #6e9da5;
+  background: #f5f9fa;
+}
+
 .submit-preflight > header strong,
 .submit-preflight > header span {
   display: block;
@@ -2387,203 +2396,278 @@ button {
   color: var(--accent);
 }
 
-.dependency-graph {
-  padding: 12px 14px 20px;
-}
-
-.dependency-level {
+.workflow-dependency-graph {
+  position: relative;
   display: grid;
-  gap: 5px;
+  gap: 26px;
+  padding: 13px 14px 28px 10px;
 }
 
-.dependency-level-label,
-.dependency-run h3,
-.activity-steps h3 {
-  margin: 0 0 3px;
+.workflow-graph-edges {
+  position: absolute;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.workflow-graph-edge {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke: #9ba9af;
+  stroke-width: 1.5;
+  transition:
+    opacity 120ms ease,
+    stroke-width 120ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.workflow-graph-edge-halo {
+  fill: none;
+  stroke: var(--surface);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.workflow-graph-edge.edge-blocked {
+  stroke: #b34d43;
+  stroke-width: 2;
+}
+
+.workflow-graph-edge.edge-approval {
+  stroke: #b27716;
+  stroke-width: 2;
+}
+
+.workflow-graph-edge.edge-unknown {
+  stroke-dasharray: 3 3;
+}
+
+.workflow-graph-edge.path-active {
+  stroke-width: 2.5;
+}
+
+.workflow-graph-edge.path-muted,
+.workflow-graph-port.path-muted {
+  opacity: 0.18;
+}
+
+.workflow-graph-port {
+  fill: var(--surface);
+  stroke: #87979e;
+  stroke-width: 1.5;
+  transition: opacity 120ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.workflow-graph-port.edge-blocked {
+  stroke: #b34d43;
+}
+
+.workflow-graph-port.edge-approval {
+  stroke: #b27716;
+}
+
+#graph-arrow path {
+  fill: #9ba9af;
+}
+
+#graph-arrow-blocked path {
+  fill: #b34d43;
+}
+
+#graph-arrow-approval path {
+  fill: #b27716;
+}
+
+.workflow-graph-level {
+  position: relative;
+  z-index: 1;
+  padding-left: 64px;
+}
+
+.workflow-graph-level-label {
+  display: block;
+  margin: 0 0 5px;
   color: var(--text-muted);
   font-size: 9px;
   font-weight: 750;
   text-transform: uppercase;
 }
 
-.dependency-node {
+.workflow-graph-level-nodes {
+  display: grid;
+  gap: 7px;
+}
+
+.workflow-graph-node {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+
+.workflow-graph-node:hover {
+  border-color: var(--border-strong);
+}
+
+.workflow-graph-node.selected {
+  border-color: #6ba7b0;
+  box-shadow: 0 0 0 1px #a9cfd4;
+}
+
+.workflow-graph-node.path-active:not(.selected) {
+  border-color: #8baeb4;
+}
+
+.workflow-graph-node.path-muted {
+  opacity: 0.42;
+}
+
+.workflow-graph-node.graph-state-blocked {
+  border-color: #d39892;
+  background: #fff8f7;
+}
+
+.workflow-graph-node.graph-state-approval {
+  border-color: #d8b46d;
+  background: #fffaf0;
+}
+
+.workflow-graph-node.unresolved {
+  border-style: dashed;
+}
+
+.workflow-graph-node-main {
   display: grid;
   width: 100%;
-  min-height: 48px;
+  min-height: 45px;
   grid-template-columns: 17px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  padding: 6px 9px;
+  border: 0;
   color: var(--text);
   text-align: left;
-  background: var(--surface);
+  background: transparent;
 }
 
-button.dependency-node:hover:not(:disabled) {
-  border-color: var(--border-strong);
+.workflow-graph-node-main:hover:not(:disabled) {
   background: var(--surface-subtle);
 }
 
-button.dependency-node:disabled {
+.workflow-graph-node-main:disabled {
   color: var(--text);
-  opacity: 0.72;
+  cursor: default;
+  opacity: 0.74;
 }
 
-.dependency-node > span {
+.workflow-graph-node-main > span {
   min-width: 0;
 }
 
-.dependency-node strong,
-.dependency-node small {
+.workflow-graph-node-main strong,
+.workflow-graph-node-main small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dependency-node strong {
+.workflow-graph-node-main strong {
   font-size: 11px;
 }
 
-.dependency-node small {
+.workflow-graph-node-main small {
   color: var(--text-muted);
   font-size: 9px;
   line-height: 13px;
 }
 
-.dependency-node em {
+.workflow-graph-action {
   display: flex;
+  width: calc(100% - 18px);
+  min-height: 27px;
   align-items: center;
-  gap: 3px;
-  margin-top: 3px;
-  color: #7b5309;
-  font-size: 9px;
-  font-style: normal;
-  font-weight: 700;
-}
-
-.dependency-node em svg {
-  width: 11px;
-  height: 11px;
-}
-
-.dependency-selected {
-  border-color: #9fc9ce;
-  background: var(--accent-soft);
-}
-
-.dependency-selected > span > small:first-child {
-  color: #176b78;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.dependency-selected > span > button {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 25px;
-  margin-top: 5px;
-  padding: 0 6px;
-  border: 1px solid #bd8b31;
+  gap: 5px;
+  margin: 0 9px 7px;
+  padding: 0 7px;
+  border: 1px solid #d2aa5c;
   border-radius: 3px;
   color: #6d4a09;
   background: #fff;
   font-size: 9px;
+  font-weight: 700;
 }
 
-.dependency-selected > span > button svg {
-  width: 11px;
+.workflow-graph-action svg {
+  width: 12px;
 }
 
-.dependency-connector {
-  position: relative;
+.workflow-graph-operation {
   display: grid;
-  height: 26px;
-  place-items: center;
-  color: #77878e;
-}
-
-.dependency-connector::before {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: #c5cfd3;
-  content: "";
-}
-
-.dependency-connector svg {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  padding: 2px;
-  background: var(--surface);
-}
-
-.dependency-run {
-  margin: 8px 0 2px 8px;
-  padding: 7px 0 1px 14px;
-  border-left: 1px solid #b8c9cd;
-}
-
-.dependency-run .activity-step {
-  min-height: 42px;
-}
-
-.dependency-run .activity-step:last-child {
-  border-bottom: 0;
-}
-
-.approval-activity {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 27px;
+  grid-template-columns: 13px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
-  padding: 9px 14px;
-  border-bottom: 1px solid #dfc07c;
-  color: #684b0d;
-  background: #fff9e9;
+  gap: 5px;
+  padding: 5px 9px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 9px;
 }
 
-.approval-activity > svg {
-  width: 16px;
+.workflow-graph-operation svg {
+  width: 12px;
 }
 
-.approval-activity strong,
-.approval-activity span {
+.workflow-graph-operation.operation-failed {
+  color: var(--danger);
+  background: #fff3f2;
+}
+
+.workflow-global-operation {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: 17px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.workflow-global-operation > svg {
+  width: 15px;
+}
+
+.workflow-global-operation strong,
+.workflow-global-operation span {
   display: block;
 }
 
-.approval-activity strong {
-  font-size: 11px;
-}
-
-.approval-activity span {
-  margin-top: 1px;
-  color: #6a6252;
-  font-size: 9px;
-  line-height: 13px;
-}
-
-.approval-activity button {
-  min-height: 27px;
-  padding: 0 7px;
-  border: 1px solid #c0923e;
-  border-radius: 3px;
-  background: #fff;
+.workflow-global-operation strong {
   font-size: 10px;
 }
 
-.workflow-summary {
-  gap: 9px;
-  min-height: 58px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-subtle);
+.workflow-global-operation span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-global-operation.operation-failed {
+  color: var(--danger);
+  background: #fff3f2;
 }
 
 .workflow-health {
@@ -2606,82 +2690,6 @@ button.dependency-node:disabled {
   margin-top: 2px;
   color: var(--text-muted);
   font-size: 10px;
-}
-
-.workflow-health button {
-  display: grid;
-  width: 100%;
-  min-height: 34px;
-  grid-template-columns: 17px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  margin-top: 7px;
-  padding: 4px 0 0;
-  border: 0;
-  border-top: 1px solid #e6cecb;
-  color: #7e2f2a;
-  text-align: left;
-  background: transparent;
-}
-
-.workflow-health button:hover {
-  text-decoration: underline;
-}
-
-.workflow-health button svg {
-  width: 15px;
-}
-
-.workflow-health button span {
-  overflow: hidden;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-summary div,
-.activity-step div {
-  min-width: 0;
-}
-
-.workflow-summary strong,
-.workflow-summary span,
-.activity-step strong,
-.activity-step span {
-  display: block;
-}
-
-.workflow-summary strong,
-.activity-step strong {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-summary span,
-.activity-step span {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.activity-steps {
-  padding: 4px 14px 20px;
-}
-
-.activity-steps h3 {
-  padding-top: 8px;
-}
-
-.activity-step {
-  min-height: 52px;
-  gap: 9px;
-  border-bottom: 1px solid var(--border);
-}
-
-.activity-step svg {
-  width: 16px;
-  color: var(--running);
 }
 
 .activity-empty {

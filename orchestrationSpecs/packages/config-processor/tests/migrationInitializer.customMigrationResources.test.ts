@@ -91,6 +91,7 @@ describe('migration initializer CRD resource generation', () => {
         const initializer = new MigrationInitializer();
         const bundle = await initializer.generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
         const resources = bundle.customMigrationResources.items;
+        const preflightResources = (initializer as any).buildSubmissionPreflightResources(bundle);
         const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
 
         const byKind = (kind: string) =>
@@ -142,6 +143,27 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.snapshotPrefix).toBe('snap1');
         expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.metadataMigrationEnableSourcelessMigrations).toBe(false);
         expect(getResource('TrafficReplay', 'target-replay')?.spec.speedupFactor).toBe(1.1);
+        const preflightByKindAndName = (kind: string, name: string) =>
+            preflightResources.find((item: any) =>
+                item.manifest.kind === kind && item.manifest.metadata.name === name);
+        expect(
+            preflightByKindAndName('CaptureProxy', 'source-proxy')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.proxies[0].configChecksum);
+        expect(
+            preflightByKindAndName('CapturedTraffic', 'source-proxy-topic')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.proxies[0].topicConfigChecksum);
+        expect(
+            preflightByKindAndName('DataSnapshot', 'source-snap1')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.snapshots[0].createSnapshotConfig[0].configChecksum);
+        expect(
+            preflightByKindAndName(
+                'SnapshotMigration',
+                'source-target-snap1-migration-0'
+            )?.desiredConfigChecksum
+        ).toBe(bundle.workflows.snapshotMigrations[0].configChecksum);
+        expect(
+            preflightByKindAndName('TrafficReplay', 'target-replay')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.trafficReplays[0].configChecksum);
         expect(getResource('MigrationRun', byKind('MigrationRun')[0])?.spec.resolvedConfig.resources).toEqual(
             bundle.resolvedMigrationResources.resources
         );
@@ -202,6 +224,7 @@ describe('migration initializer CRD resource generation', () => {
         const initializer = new MigrationInitializer();
         const bundle = await initializer.generateMigrationBundle(config, "byoc-workflow", {runNumber: 1700000000000});
         const resources = bundle.customMigrationResources.items;
+        const preflightResources = (initializer as any).buildSubmissionPreflightResources(bundle);
         const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
 
         const byKind = (kind: string) =>
@@ -240,6 +263,13 @@ describe('migration initializer CRD resource generation', () => {
                 sourceKind: "s3",
                 s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz"
             })
+        }));
+        expect(preflightResources).toContainEqual(expect.objectContaining({
+            desiredConfigChecksum: bundle.workflows.s3TrafficLoaders[0].checksumForReplayer,
+            manifest: expect.objectContaining({
+                kind: "CapturedTraffic",
+                metadata: expect.objectContaining({name: "loaded-dump-topic"}),
+            }),
         }));
 
         expect(enrichScript).toContain(

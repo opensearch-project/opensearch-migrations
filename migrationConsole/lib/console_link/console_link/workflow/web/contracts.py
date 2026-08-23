@@ -27,6 +27,7 @@ from ..application.operations import Operation
 from ..application.actions import ApprovalReview
 from ..application.resets import ResetPlan, ResetTarget
 from ..services.admission_preflight import (
+    AdmissionDeploymentAction,
     AdmissionPreflightIssue,
     AdmissionPreflightReport,
 )
@@ -461,6 +462,40 @@ class ConfigReviewV1(WebModel):
         )
 
 
+class AdmissionDeploymentActionV1(WebModel):
+    kind: str
+    name: str
+    plural: Optional[str] = None
+    action: Literal["create", "reconcile"]
+    reason: Literal[
+        "resource-missing",
+        "resource-not-ready",
+        "configuration-changed",
+        "checksum-only",
+    ]
+    message: str
+    resource_id: Optional[str] = None
+    current_config_checksum: Optional[str] = None
+    desired_config_checksum: Optional[str] = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        action: AdmissionDeploymentAction,
+    ) -> "AdmissionDeploymentActionV1":
+        return cls(
+            kind=action.kind,
+            name=action.name,
+            plural=action.plural,
+            action=action.action,
+            reason=action.reason,
+            message=action.message,
+            resource_id=action.resource_id,
+            current_config_checksum=action.current_config_checksum,
+            desired_config_checksum=action.desired_config_checksum,
+        )
+
+
 class AdmissionPreflightIssueV1(WebModel):
     kind: str
     name: str
@@ -499,6 +534,7 @@ class AdmissionPreflightV1(WebModel):
     checked_resources: int
     allowed: bool
     issues: List[AdmissionPreflightIssueV1]
+    deployment_actions: Optional[List[AdmissionDeploymentActionV1]] = None
 
     @classmethod
     def from_domain(
@@ -512,6 +548,14 @@ class AdmissionPreflightV1(WebModel):
                 AdmissionPreflightIssueV1.from_domain(issue)
                 for issue in report.issues
             ],
+            deployment_actions=(
+                [
+                    AdmissionDeploymentActionV1.from_domain(action)
+                    for action in report.deployment_actions
+                ]
+                if report.deployment_actions
+                else None
+            ),
         )
 
 

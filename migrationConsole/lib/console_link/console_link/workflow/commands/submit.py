@@ -234,6 +234,11 @@ def submit_command(
                     "Admission preflight passed for "
                     f"{preflight.checked_resources} resources."
                 )
+                for action in preflight.deployment_actions:
+                    click.echo(
+                        f"Planned {action.action}: "
+                        f"{action.kind} {action.name} - {action.message}"
+                    )
                 for issue in preflight.warning_issues:
                     click.echo(
                         f"Warning: {issue.kind} {issue.name}: "
@@ -246,6 +251,12 @@ def submit_command(
                     f"Admission preflight warning for "
                     f"{issue.kind} {issue.name}: {issue.message}",
                     err=True,
+                )
+
+            for action in preflight.deployment_actions:
+                click.echo(
+                    f"Planned {action.action}: "
+                    f"{action.kind} {action.name} - {action.message}"
                 )
 
             click.echo(f"Initializing workflow from session: {session}")

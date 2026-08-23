@@ -10,6 +10,52 @@ BLOCKING_CLASSIFICATIONS = {"recreate-required", "invalid"}
 
 
 @dataclass(frozen=True)
+class AdmissionDeploymentAction:
+    kind: str
+    name: str
+    plural: Optional[str]
+    action: str
+    reason: str
+    message: str
+    current_config_checksum: Optional[str] = None
+    desired_config_checksum: Optional[str] = None
+
+    @property
+    def resource_id(self) -> Optional[str]:
+        if not self.plural:
+            return None
+        return f"resource:{self.plural}:{self.name}"
+
+    @classmethod
+    def from_payload(
+        cls,
+        payload: Mapping[str, Any],
+    ) -> "AdmissionDeploymentAction":
+        return cls(
+            kind=str(payload.get("kind") or "Unknown"),
+            name=str(payload.get("name") or "unknown"),
+            plural=(
+                str(payload["plural"])
+                if payload.get("plural")
+                else None
+            ),
+            action=str(payload.get("action") or "reconcile"),
+            reason=str(payload.get("reason") or "configuration-changed"),
+            message=str(payload.get("message") or ""),
+            current_config_checksum=(
+                str(payload["currentConfigChecksum"])
+                if payload.get("currentConfigChecksum")
+                else None
+            ),
+            desired_config_checksum=(
+                str(payload["desiredConfigChecksum"])
+                if payload.get("desiredConfigChecksum")
+                else None
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class AdmissionPreflightIssue:
     kind: str
     name: str
@@ -59,6 +105,7 @@ class AdmissionPreflightIssue:
 class AdmissionPreflightReport:
     checked_resources: int
     issues: Tuple[AdmissionPreflightIssue, ...]
+    deployment_actions: Tuple[AdmissionDeploymentAction, ...] = ()
 
     @property
     def allowed(self) -> bool:
@@ -87,5 +134,9 @@ class AdmissionPreflightReport:
             issues=tuple(
                 AdmissionPreflightIssue.from_payload(item)
                 for item in payload.get("issues") or ()
+            ),
+            deployment_actions=tuple(
+                AdmissionDeploymentAction.from_payload(item)
+                for item in payload.get("deploymentActions") or ()
             ),
         )

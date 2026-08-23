@@ -24,11 +24,30 @@ export interface SubmissionPreflightIssue {
     resetTargetId?: string;
 }
 
+export type SubmissionDeploymentReason =
+    | "resource-missing"
+    | "resource-not-ready"
+    | "configuration-changed"
+    | "checksum-only";
+
+export interface SubmissionDeploymentAction {
+    kind: string;
+    name: string;
+    plural?: string;
+    action: "create" | "reconcile";
+    reason: SubmissionDeploymentReason;
+    message: string;
+    resourceId?: string;
+    currentConfigChecksum?: string;
+    desiredConfigChecksum?: string;
+}
+
 export interface SubmissionPreflightReport {
     formatVersion: 1;
     allowed: boolean;
     checkedResources: number;
     issues: SubmissionPreflightIssue[];
+    deploymentActions: SubmissionDeploymentAction[];
 }
 
 export interface SubmissionPreflightResource {
@@ -40,6 +59,7 @@ export interface SubmissionPreflightResource {
         [key: string]: unknown;
     };
     policyResource?: ResolvedMigrationResource;
+    desiredConfigChecksum?: string;
 }
 
 export interface SubmissionCommandResult {
@@ -347,37 +367,151 @@ function projectionIssues(
         ));
 }
 
+function deploymentAction(
+    resource: SubmissionPreflightResource,
+    existing: Record<string, any> | undefined,
+): SubmissionDeploymentAction | undefined {
+    const desiredConfigChecksum = resource.desiredConfigChecksum;
+    if (!desiredConfigChecksum) {
+        return undefined;
+    }
+
+    const {kind, metadata} = resource.manifest;
+    const name = metadata.name;
+    const plural = KIND_TO_PLURAL[kind];
+    const common = {
+        kind,
+        name,
+        ...(plural ? {plural, resourceId: `resource:${plural}:${name}`} : {}),
+        desiredConfigChecksum,
+    };
+    const withWorkflowNote = (message: string) => (
+        kind === "CaptureProxy"
+            ? `${message} The workflow will request proxy approval after deployment succeeds.`
+            : message
+    );
+    if (!existing) {
+        return {
+            ...common,
+            action: "create",
+            reason: "resource-missing",
+            message: withWorkflowNote(
+                "The resource does not exist and will be created.",
+            ),
+        };
+    }
+
+    const currentConfigChecksum = typeof existing.status?.configChecksum === "string"
+        ? existing.status.configChecksum
+        : undefined;
+    if (currentConfigChecksum === desiredConfigChecksum) {
+        return undefined;
+    }
+
+    const phase = typeof existing.status?.phase === "string"
+        ? existing.status.phase
+        : undefined;
+    const projectedChanges = resource.policyResource
+        ? dryRunResourcePolicy(
+            {
+                kind: resource.policyResource.kind,
+                name: resource.policyResource.name,
+                parameters: existing.spec ?? {},
+            },
+            resource.policyResource,
+        ).changes
+        : [];
+    if (phase && phase !== "Ready" && phase !== "Succeeded") {
+        const difference = projectedChanges.length > 0
+            ? (
+                `${projectedChanges.length} projected configuration `
+                + `${projectedChanges.length === 1 ? "field has" : "fields have"} changed.`
+            )
+            : "No projected fields changed, so this is a checksum-only reconcile.";
+        return {
+            ...common,
+            action: "reconcile",
+            reason: "resource-not-ready",
+            message: withWorkflowNote(
+                `The resource is ${phase} and its generated checksum is not current; `
+                + `the workflow will reconcile it. ${difference}`,
+            ),
+            ...(currentConfigChecksum ? {currentConfigChecksum} : {}),
+        };
+    }
+
+    if (projectedChanges.length > 0) {
+        return {
+            ...common,
+            action: "reconcile",
+            reason: "configuration-changed",
+            message: withWorkflowNote(
+                `${projectedChanges.length} projected configuration `
+                + `${projectedChanges.length === 1 ? "field has" : "fields have"} changed; `
+                + "the workflow will reconcile this resource.",
+            ),
+            ...(currentConfigChecksum ? {currentConfigChecksum} : {}),
+        };
+    }
+
+    return {
+        ...common,
+        action: "reconcile",
+        reason: "checksum-only",
+        message: withWorkflowNote(
+            "The workflow will reconcile this resource because its generated "
+            + "checksum changed, although no projected fields changed.",
+        ),
+        ...(currentConfigChecksum ? {currentConfigChecksum} : {}),
+    };
+}
+
 async function preflightResource(
     resource: SubmissionPreflightResource,
     client: SubmissionAdmissionClient,
     namespace?: string,
-): Promise<SubmissionPreflightIssue[]> {
+): Promise<{
+    issues: SubmissionPreflightIssue[];
+    deploymentAction?: SubmissionDeploymentAction;
+}> {
     let existing: Record<string, any> | undefined;
     try {
         existing = await client.read(resource, namespace);
     } catch (error) {
-        return [issue(
-            resource,
-            "warning",
-            errorMessage(error),
-            "kubernetes",
-        )];
+        return {
+            issues: [issue(
+                resource,
+                "warning",
+                errorMessage(error),
+                "kubernetes",
+            )],
+        };
     }
 
     const candidate = candidateForAdmission(resource, existing, namespace);
+    const plannedAction = deploymentAction(resource, existing);
     try {
         await client.dryRun(candidate, existing !== undefined);
-        return [];
+        return {
+            issues: [],
+            ...(plannedAction ? {deploymentAction: plannedAction} : {}),
+        };
     } catch (error) {
         const message = errorMessage(error);
         const classification = classifyFailure(message);
         if (classification === "warning" && existing) {
             const projected = projectionIssues(resource, existing);
             if (projected.length > 0) {
-                return projected;
+                return {
+                    issues: projected,
+                    ...(plannedAction ? {deploymentAction: plannedAction} : {}),
+                };
             }
         }
-        return [issue(resource, classification, message, "kubernetes")];
+        return {
+            issues: [issue(resource, classification, message, "kubernetes")],
+            ...(plannedAction ? {deploymentAction: plannedAction} : {}),
+        };
     }
 }
 
@@ -416,6 +550,7 @@ export async function preflightSubmissionResources(
             allowed: true,
             checkedResources: 0,
             issues: [],
+            deploymentActions: [],
         };
     }
 
@@ -440,20 +575,25 @@ export async function preflightSubmissionResources(
             allowed: true,
             checkedResources: resources.length,
             issues,
+            deploymentActions: [],
         };
     }
 
-    const issueGroups = await mapWithConcurrency(
+    const resourceResults = await mapWithConcurrency(
         resources,
         options.concurrency ?? DEFAULT_SUBMISSION_PREFLIGHT_CONCURRENCY,
         resource => preflightResource(resource, client, options.namespace),
     );
-    const issues = issueGroups.flat();
+    const issues = resourceResults.flatMap(result => result.issues);
+    const deploymentActions = resourceResults.flatMap(result =>
+        result.deploymentAction ? [result.deploymentAction] : []
+    );
     return {
         formatVersion: 1,
         allowed: !issues.some(item => item.blocking),
         checkedResources: resources.length,
         issues,
+        deploymentActions,
     };
 }
 

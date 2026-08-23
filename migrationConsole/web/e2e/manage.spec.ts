@@ -892,7 +892,7 @@ test("keeps the resource overview visible during scoped editing", async ({ page 
 
   await expect(resources).toBeVisible();
   await expect(page.getByRole("heading", {
-    name: "Run & dependencies",
+    name: "Workflow dependencies",
   })).toBeVisible();
   await expect(
     page.getByRole("table", { name: "Configuration fields" }),
@@ -1084,7 +1084,7 @@ test("supports the read-only resource workflow", async ({ page }, testInfo) => {
   const capture = tree.getByRole("treeitem", { name: /^capture, Ready$/ });
   await expect(capture).toBeVisible();
   await expect(page.getByRole("region", {
-    name: "Dependency graph for capture",
+    name: "Workflow dependency graph",
   })).toBeVisible();
   await page.screenshot({
     animations: "disabled",
@@ -1459,9 +1459,11 @@ test("keeps tree and activity reachable at narrow width", async ({ page }, testI
   const activity = page.getByRole("complementary");
   await expect(activity).toBeInViewport();
   await expect(activity.getByRole("heading", {
-    name: "Run & dependencies",
+    name: "Workflow dependencies",
   })).toBeVisible();
-  await expect(activity.getByText("Deploy replay")).toBeVisible();
+  await expect(activity.getByRole("button", {
+    name: "Open replay, Running",
+  })).toBeVisible();
   await page.screenshot({
     animations: "disabled",
     fullPage: true,

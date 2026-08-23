@@ -42,6 +42,7 @@ from console_link.workflow.application.operations import (
 )
 from console_link.workflow.application.actions import ApprovalReview
 from console_link.workflow.services.admission_preflight import (
+    AdmissionDeploymentAction,
     AdmissionPreflightIssue,
     AdmissionPreflightReport,
 )
@@ -848,6 +849,21 @@ class _Drafts:
         self.expected_revision = expected_revision
         return AdmissionPreflightReport(
             checked_resources=2,
+            deployment_actions=(
+                AdmissionDeploymentAction(
+                    kind="CaptureProxy",
+                    name="capture",
+                    plural="captureproxies",
+                    action="reconcile",
+                    reason="checksum-only",
+                    message=(
+                        "The generated checksum changed, although no "
+                        "projected fields changed."
+                    ),
+                    current_config_checksum="old",
+                    desired_config_checksum="new",
+                ),
+            ),
             issues=(
                 AdmissionPreflightIssue(
                     kind="CapturedTraffic",
@@ -1132,6 +1148,22 @@ def test_config_preflight_reports_blocking_and_nonblocking_admission_results(
     assert response.json() == {
         "checkedResources": 2,
         "allowed": False,
+        "deploymentActions": [
+            {
+                "kind": "CaptureProxy",
+                "name": "capture",
+                "plural": "captureproxies",
+                "action": "reconcile",
+                "reason": "checksum-only",
+                "message": (
+                    "The generated checksum changed, although no projected "
+                    "fields changed."
+                ),
+                "resourceId": "resource:captureproxies:capture",
+                "currentConfigChecksum": "old",
+                "desiredConfigChecksum": "new",
+            },
+        ],
         "issues": [
             {
                 "kind": "CapturedTraffic",

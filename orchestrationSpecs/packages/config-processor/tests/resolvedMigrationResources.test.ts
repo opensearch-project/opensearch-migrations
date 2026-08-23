@@ -416,6 +416,41 @@ describe("resolved migration resources", () => {
         }));
     });
 
+    it("treats projected objects as equal regardless of key order", () => {
+        const proxyBefore: ResolvedMigrationResource = {
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "CaptureProxy",
+            name: "p2",
+            parameters: {
+                tls: {
+                    dnsNames: ["p2", "p2.ma"],
+                    issuerRef: {
+                        group: "cert-manager.io",
+                        kind: "ClusterIssuer",
+                        name: "migrations-ca",
+                    },
+                    mode: "certManager",
+                },
+            },
+        };
+        const proxyAfter: ResolvedMigrationResource = {
+            ...proxyBefore,
+            parameters: {
+                tls: {
+                    mode: "certManager",
+                    issuerRef: {
+                        name: "migrations-ca",
+                        kind: "ClusterIssuer",
+                        group: "cert-manager.io",
+                    },
+                    dnsNames: ["p2", "p2.ma"],
+                },
+            },
+        };
+
+        expect(dryRunResourcePolicy(proxyBefore, proxyAfter).changes).toEqual([]);
+    });
+
     it("writes resolvedMigrationResources.json next to workflow outputs for local inspection", async () => {
         const initializer = new MigrationInitializer();
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(sampleConfig());

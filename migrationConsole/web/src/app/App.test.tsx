@@ -48,8 +48,7 @@ test("renders real manage state with exact-node details and capabilities", async
   expect(
     screen.getByRole("heading", { name: "Workflow Manage" }),
   ).toBeInTheDocument();
-  expect(screen.getByText("Connecting to server")).toBeInTheDocument();
-  expect(await screen.findByText("Server ready")).toBeInTheDocument();
+  expect(screen.queryByText("Server ready")).toBeNull();
 
   const tree = await screen.findByRole("tree", { name: "Workflow resources" });
   expect(
@@ -176,31 +175,33 @@ test("separates runtime state from configuration state in the resource tree", as
 });
 
 
-test("shows run state in the context of the selected dependency graph", async () => {
+test("keeps the full dependency graph stable while selection changes", async () => {
   renderApp();
 
   expect(await screen.findByRole("heading", {
-    name: "Run & dependencies",
+    name: "Workflow dependencies",
   })).toBeInTheDocument();
-  let graph = screen.getByRole("region", {
-    name: "Dependency graph for capture",
+  const graph = screen.getByRole("region", {
+    name: "Workflow dependency graph",
   });
-  expect(within(graph).getByText("Selected")).toBeInTheDocument();
   expect(within(graph).getByRole("button", {
-    name: "Show dependent replay, Running",
+    name: "Open capture, Ready",
+  })).toBeInTheDocument();
+  expect(within(graph).getByRole("button", {
+    name: "Open replay, Running",
   })).toBeInTheDocument();
 
   await userEvent.click(within(graph).getByRole("button", {
-    name: "Show dependent replay, Running",
+    name: "Open replay, Running",
   }));
 
-  graph = screen.getByRole("region", {
-    name: "Dependency graph for replay",
-  });
   expect(within(graph).getByRole("button", {
-    name: "Show prerequisite capture, Ready",
+    name: "Open capture, Ready",
   })).toBeInTheDocument();
-  expect(within(graph).getByText("Deploy replay")).toBeInTheDocument();
+  expect(within(graph).getByRole("button", {
+    name: "Open replay, Running",
+  })).toHaveAttribute("aria-current", "true");
+  expect(within(graph).queryByText("Deploy replay")).toBeNull();
 });
 
 
@@ -317,14 +318,12 @@ test("surfaces failed prerequisites in navigation and workflow activity", async 
   expect(within(replay).getByRole("button", {
     name: "View blocker capture",
   })).toHaveTextContent("Blocked by capture");
-  expect(screen.getByText("Running with 1 failed resource")).toBeInTheDocument();
-  expect(screen.getByText("1 downstream resource waiting")).toBeInTheDocument();
-  expect(screen.getByText(
-    "Current blocker: capture / waitForProxyEndpointReady",
-  )).toBeInTheDocument();
+  expect(screen.getByText("1 action needs attention")).toBeInTheDocument();
+  expect(screen.getByText("1 downstream resource is waiting"))
+    .toBeInTheDocument();
 
-  await userEvent.click(within(replay).getByRole("button", {
-    name: "View blocker capture",
+  await userEvent.click(screen.getByRole("button", {
+    name: "Open capture, Error",
   }));
   expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
 });
@@ -1135,7 +1134,7 @@ test("treats workflow absence during submit as tracked replacement progress", as
 
   renderApp();
 
-  expect(await screen.findByText("Waiting for submitted workflow."))
+  expect(await screen.findByText("Submit workflow configuration"))
     .toBeInTheDocument();
   expect(screen.getByText(
     "Workflow accepted; waiting for refreshed cluster state",
@@ -1364,7 +1363,7 @@ test("keeps resource context while scoping edit mode to the selected resource", 
     name: "Workflow resources",
   });
   expect(resources).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Run & dependencies" }))
+  expect(screen.getByRole("heading", { name: "Workflow dependencies" }))
     .toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Edit capture" }))
     .toBeInTheDocument();
@@ -2195,7 +2194,7 @@ test("shows the server reason when configuration cannot be opened", async () => 
     .toBeInTheDocument();
   expect(screen.getByRole("tree", { name: "Workflow resources" }))
     .toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Run & dependencies" }))
+  expect(screen.getByRole("heading", { name: "Workflow dependencies" }))
     .toBeInTheDocument();
 });
 
@@ -3538,6 +3537,62 @@ test("keeps submit enabled for admission warnings that may converge later", asyn
   await waitFor(() => expect(submitRequest).toEqual({
     expectedDraftRevision: "warning-preflight",
   }));
+});
+
+
+test("shows resources that submission will reconcile for checksum-only changes", async () => {
+  const savedDraft = structuredClone(configDraft);
+  savedDraft.dirty = false;
+  savedDraft.draftRevision = "checksum-impact";
+  savedDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(savedDraft)),
+    http.post("*/api/v1/config/review", () => HttpResponse.json({
+      draftRevision: savedDraft.draftRevision,
+      baseRevision: savedDraft.baseRevision,
+      dirty: false,
+      valid: true,
+      validationMessages: [],
+      changes: [],
+    })),
+    http.post("*/api/v1/config/preflight", () => HttpResponse.json({
+      checkedResources: 1,
+      allowed: true,
+      issues: [],
+      deploymentActions: [{
+        kind: "CaptureProxy",
+        name: "p2",
+        plural: "captureproxies",
+        action: "reconcile",
+        reason: "checksum-only",
+        message: (
+          "The workflow will reconcile this resource because its generated "
+          + "checksum changed, although no projected fields changed."
+        ),
+        currentConfigChecksum: "old",
+        desiredConfigChecksum: "new",
+        resourceId: "resource:captureproxies:p2",
+      }],
+    })),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Review and submit",
+  }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Submit configuration?",
+  });
+  expect(within(dialog).getByText("Deployment impact")).toBeInTheDocument();
+  expect(within(dialog).getByText("p2")).toBeInTheDocument();
+  expect(within(dialog).getByText("Checksum-only reconcile")).toBeInTheDocument();
+  expect(within(dialog).getByText(
+    /although no projected fields changed/,
+  )).toBeInTheDocument();
 });
 
 

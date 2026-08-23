@@ -91,7 +91,9 @@ For each generated resource, preflight:
 3. sends a Kubernetes `create` or `replace` request with `dryRun=All`, causing
    the API server to execute normal schema and admission checks without
    persisting the object; and
-4. classifies any response and adds it to the report.
+4. compares each workflow resource's live and desired configuration checksums
+   and projected fields to forecast deployment work; and
+5. classifies any response and adds it to the report.
 
 The read and dry-run must remain ordered for an individual resource because the
 second operation depends on the first. Independent resources are checked
@@ -111,6 +113,19 @@ one normal approval requirement looks like:
   "formatVersion": 1,
   "allowed": false,
   "checkedResources": 3,
+  "deploymentActions": [
+    {
+      "kind": "CaptureProxy",
+      "name": "p2",
+      "plural": "captureproxies",
+      "action": "reconcile",
+      "reason": "checksum-only",
+      "message": "The workflow will reconcile this resource because its generated checksum changed, although no projected fields changed.",
+      "resourceId": "resource:captureproxies:p2",
+      "currentConfigChecksum": "1b6a5004f61b1c9c",
+      "desiredConfigChecksum": "14e8f7cc763affe8"
+    }
+  ],
   "issues": [
     {
       "kind": "CapturedTraffic",
@@ -139,17 +154,25 @@ one normal approval requirement looks like:
 
 `allowed` is false when any issue has `blocking: true`.
 `checkedResources` counts every generated resource, including resources with no
-issue; successful checks do not produce entries. `resourceId` lets a caller
-associate an issue with its workflow resource, while `resetTargetId` identifies
-the reset action for recreate-required resources. `source` distinguishes a
-direct Kubernetes result from a projected-policy fallback or a failure to
-initialize preflight itself.
+issue. `deploymentActions` lists workflow resources that submission is expected
+to create or reconcile. Its reasons distinguish a missing resource, an
+incomplete resource, a projected configuration change, and a checksum-only
+reconcile. The checksum-only case is important during checksum algorithm
+migrations: Kubernetes may accept an unchanged CR spec while the workflow still
+reruns deployment work because its status checksum no longer matches.
+`resourceId` lets a caller associate an issue or action with its workflow
+resource, while `resetTargetId` identifies the reset action for
+recreate-required resources. `source` distinguishes a direct Kubernetes result
+from a projected-policy fallback or a failure to initialize preflight itself.
 
 For users, a blocked report prevents submission before mutation and provides a
 specific reset target or validation message. Approval requirements and
 uncertain warnings remain visible but do not create an impossible submission
-loop. If the Kubernetes client or API server is unavailable, preflight returns
-non-blocking warnings rather than claiming that the candidate is invalid.
+loop. Planned deployment actions are advisory and do not change admission's
+blocking decision, but they prevent accepted checksum or retry work from being
+silent. If the Kubernetes client or API server is unavailable, preflight
+returns non-blocking warnings rather than claiming that the candidate is
+invalid.
 
 ### Performance Impact
 

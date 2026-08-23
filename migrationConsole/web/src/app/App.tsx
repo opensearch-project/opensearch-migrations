@@ -751,15 +751,6 @@ export function App() {
               </output>
             </>
           ) : null}
-          <div className="server-state" aria-live="polite">
-            <span
-              className={`live-dot connection-${eventConnection}`}
-              aria-hidden="true"
-            />
-            {eventConnection === "live" ? "Live" : (
-              eventConnection === "reconnecting" ? "Reconnecting" : "Connecting"
-            )}
-          </div>
           <button
             aria-label="Refresh state"
             className="icon-button"
@@ -781,23 +772,6 @@ export function App() {
           >
             {treeOpen ? <X /> : <Menu />}
           </button>
-        </div>
-        <div className="server-state health-state" aria-live="polite">
-          {health.isPending ? (
-            <>
-              <LoaderCircle className="spin" aria-hidden="true" />
-              Connecting to server
-            </>
-          ) : health.isError ? (
-            <>
-              <CircleAlert aria-hidden="true" />
-              Server unavailable
-            </>
-          ) : (
-            <>
-              <span className="live-dot" aria-hidden="true" />{"Server ready"}
-            </>
-          )}
         </div>
       </header>
       {submitOpen ? (
@@ -834,6 +808,28 @@ export function App() {
         </main>
       ) : state.data ? (
         <>
+          {health.isError ? (
+            <output className="state-banner problem-banner">
+              <CircleAlert aria-hidden="true" />
+              <strong>Workflow Manage server unavailable</strong>
+              <span>Health checks are failing. State may be stale.</span>
+            </output>
+          ) : null}
+          {eventConnection !== "live" ? (
+            <output className="state-banner problem-banner">
+              <CircleAlert aria-hidden="true" />
+              <strong>
+                {eventConnection === "reconnecting"
+                  ? "Live updates interrupted"
+                  : "Connecting to live updates"}
+              </strong>
+              <span>
+                {eventConnection === "reconnecting"
+                  ? "Reconnecting; use refresh for the latest state."
+                  : "State will update automatically once connected."}
+              </span>
+            </output>
+          ) : null}
           {state.data.stale ? (
             <output className="state-banner stale-banner">
               <CircleAlert aria-hidden="true" />

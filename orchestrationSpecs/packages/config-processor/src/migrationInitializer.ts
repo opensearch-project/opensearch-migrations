@@ -192,6 +192,7 @@ export class MigrationInitializer {
             (bundle.resolvedMigrationResources.resources as ResolvedMigrationResource[])
                 .map(resource => [`${resource.kind}:${resource.name}`, resource])
         );
+        const desiredChecksums = this.buildDesiredConfigChecksums(bundle.workflows);
         const manifests = [
             ...(bundle.customMigrationResources.items ?? []),
             ...(bundle.concurrencyConfigMaps.items ?? []),
@@ -201,13 +202,60 @@ export class MigrationInitializer {
             void _status;
             const name = String(item.metadata?.name ?? "");
             const policyResource = resolvedByKey.get(`${item.kind}:${name}`);
+            const desiredConfigChecksum = desiredChecksums.get(`${item.kind}:${name}`);
             return {
                 manifest: policyResource
                     ? {...manifestWithoutStatus, spec: policyResource.parameters}
                     : manifestWithoutStatus,
                 ...(policyResource ? {policyResource} : {}),
+                ...(desiredConfigChecksum ? {desiredConfigChecksum} : {}),
             };
         });
+    }
+
+    private buildDesiredConfigChecksums(workflows: WorkflowConfig): Map<string, string> {
+        const checksums = new Map<string, string>();
+        const add = (kind: string, name: string, checksum: unknown) => {
+            if (typeof checksum === "string" && checksum) {
+                checksums.set(`${kind}:${name}`, checksum);
+            }
+        };
+
+        for (const kafkaCluster of workflows.kafkaClusters ?? []) {
+            add("KafkaCluster", kafkaCluster.name, kafkaCluster.configChecksum);
+        }
+        for (const proxy of workflows.proxies ?? []) {
+            add("CapturedTraffic", `${proxy.name}-topic`, proxy.topicConfigChecksum);
+            add("CaptureProxy", proxy.name, proxy.configChecksum);
+        }
+        for (const loader of workflows.s3TrafficLoaders ?? []) {
+            add("CapturedTraffic", `${loader.name}-topic`, loader.checksumForReplayer);
+        }
+        for (const snapshot of workflows.snapshots ?? []) {
+            for (const item of snapshot.createSnapshotConfig) {
+                add(
+                    "DataSnapshot",
+                    crdName(snapshot.sourceConfig.label, item.label),
+                    item.configChecksum,
+                );
+            }
+        }
+        for (const migration of workflows.snapshotMigrations ?? []) {
+            add(
+                "SnapshotMigration",
+                [
+                    migration.sourceLabel,
+                    migration.targetConfig.label,
+                    migration.label,
+                    migration.migrationLabel,
+                ].join("-"),
+                migration.configChecksum,
+            );
+        }
+        for (const replay of workflows.trafficReplays ?? []) {
+            add("TrafficReplay", replay.name, replay.configChecksum);
+        }
+        return checksums;
     }
 
     private generateHandleK8sResourcesScript(

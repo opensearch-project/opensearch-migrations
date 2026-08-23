@@ -93,11 +93,11 @@ mirror at `localhost:5001`.
 
 Both local flows use the same docker-hosted backend:
 
-* `kindTesting.sh` source `buildImages/backends/dockerHostedBuildkit.sh`. It shares a single `docker-registry`
-  container on the `local-migrations-network` Docker network. Host-side `docker buildx` pushes to `localhost:5001`; pods
-  inside the cluster pull by the in-cluster DNS name `docker-registry:5000`. The cluster's nodes are joined to
-  `local-migrations-network` so the name resolves via Docker's bridge DNS. Plain HTTP is allowed on the in-cluster
-  endpoint in kind via a containerd `hosts.toml`.
+* `kindTesting.sh` sources `buildImages/backends/dockerHostedBuildkit.sh`. It shares a single `docker-registry`
+  container on the `local-migrations-network` Docker network. Host-side `docker buildx` pushes to `localhost:5001`;
+  pods reference `docker-registry:5001`. Each kind node's containerd `hosts.toml` maps that name directly to the
+  Docker host-gateway IP and permits plain HTTP. This avoids an extra Docker-network attachment and survives Docker
+  restarts without relying on an appended `/etc/hosts` entry.
 * EKS / GKE / AKS use `buildImages/backends/eksKubernetesBuildkit.sh`, which spins up amd64 + arm64 buildkit Pods
   directly via `docker buildx --driver=kubernetes` on the cluster's `build-nodepool`.
 

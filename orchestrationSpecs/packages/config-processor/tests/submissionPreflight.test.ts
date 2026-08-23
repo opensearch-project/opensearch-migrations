@@ -78,6 +78,7 @@ describe("submission preflight", () => {
     it("uses create dry run without generated server metadata when absent", async () => {
         const generated = {
             ...impossibleResource,
+            desiredConfigChecksum: "desired-checksum",
             manifest: {
                 ...impossibleResource.manifest,
                 metadata: {
@@ -107,6 +108,123 @@ describe("submission preflight", () => {
 
         expect(report.allowed).toBe(true);
         expect(report.issues).toEqual([]);
+        expect(report.deploymentActions).toEqual([expect.objectContaining({
+            action: "create",
+            reason: "resource-missing",
+            kind: "CapturedTraffic",
+            name: "p2-topic",
+            desiredConfigChecksum: "desired-checksum",
+        })]);
+    });
+
+    it("reports a checksum-only reconcile when projected configuration is unchanged", async () => {
+        const resource: SubmissionPreflightResource = {
+            manifest: {
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "CaptureProxy",
+                metadata: {name: "p2"},
+                spec: {listenPort: 9200},
+            },
+            policyResource: {
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "CaptureProxy",
+                name: "p2",
+                parameters: {listenPort: 9200},
+            },
+            desiredConfigChecksum: "new-checksum",
+        };
+        const client: SubmissionAdmissionClient = {
+            read: async () => ({
+                ...resource.manifest,
+                metadata: {
+                    name: "p2",
+                    resourceVersion: "12",
+                },
+                status: {
+                    phase: "Ready",
+                    configChecksum: "old-checksum",
+                },
+            }),
+            dryRun: async () => undefined,
+        };
+
+        const report = await preflightSubmissionResources(
+            [resource],
+            {namespace: "ma", client},
+        );
+
+        expect(report.deploymentActions).toEqual([expect.objectContaining({
+            action: "reconcile",
+            reason: "checksum-only",
+            currentConfigChecksum: "old-checksum",
+            desiredConfigChecksum: "new-checksum",
+            message: expect.stringContaining("no projected fields changed"),
+        })]);
+        expect(report.deploymentActions[0].message).toContain(
+            "request proxy approval after deployment succeeds",
+        );
+    });
+
+    it("reports a configuration reconcile when projected fields changed", async () => {
+        const resource: SubmissionPreflightResource = {
+            ...impossibleResource,
+            desiredConfigChecksum: "new-checksum",
+        };
+        const client: SubmissionAdmissionClient = {
+            read: async () => ({
+                ...resource.manifest,
+                metadata: {
+                    name: "p2-topic",
+                    resourceVersion: "12",
+                },
+                spec: {sourceLabel: "old-source"},
+                status: {
+                    phase: "Ready",
+                    configChecksum: "old-checksum",
+                },
+            }),
+            dryRun: async () => undefined,
+        };
+
+        const report = await preflightSubmissionResources(
+            [resource],
+            {namespace: "ma", client},
+        );
+
+        expect(report.deploymentActions).toEqual([expect.objectContaining({
+            action: "reconcile",
+            reason: "configuration-changed",
+            currentConfigChecksum: "old-checksum",
+            desiredConfigChecksum: "new-checksum",
+        })]);
+    });
+
+    it("does not report deployment work when the desired checksum is current", async () => {
+        const resource: SubmissionPreflightResource = {
+            ...impossibleResource,
+            desiredConfigChecksum: "same-checksum",
+        };
+        const client: SubmissionAdmissionClient = {
+            read: async () => ({
+                ...resource.manifest,
+                metadata: {
+                    name: "p2-topic",
+                    resourceVersion: "12",
+                },
+                status: {
+                    phase: "Ready",
+                    configChecksum: "same-checksum",
+                },
+            }),
+            dryRun: async () => undefined,
+        };
+
+        const report = await preflightSubmissionResources(
+            [resource],
+            {namespace: "ma", client},
+        );
+
+        expect(report.deploymentActions).toEqual([]);
     });
 
     it("blocks a proven impossible update and returns a structured reset target", async () => {
