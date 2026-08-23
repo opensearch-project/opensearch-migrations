@@ -4323,6 +4323,31 @@ button {
   border: 1px solid var(--border);
 }
 
+.external-resource-dialog {
+  display: grid;
+  width: min(760px, 100%);
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.external-resource-dialog > header > svg {
+  color: var(--accent);
+}
+
+.external-resource-dialog > header > .icon-button {
+  margin-left: auto;
+}
+
+.external-resource-dialog-body {
+  min-height: 180px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.external-resource-dialog .external-resource-list {
+  max-height: none;
+}
+
 .external-entry {
   display: grid;
   gap: 9px;

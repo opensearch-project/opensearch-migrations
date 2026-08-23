@@ -974,6 +974,8 @@ function ConfigPropertyRow({
 }>) {
   const [renaming, setRenaming] = useState(false);
   const [addingCommandId, setAddingCommandId] = useState<string | null>(null);
+  const [externalEditorOpen, setExternalEditorOpen] = useState(false);
+  const externalEditorTriggerRef = useRef<HTMLButtonElement>(null);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
   const children = propertyChildren(node);
   const commands = addCommands(node);
@@ -998,7 +1000,7 @@ function ConfigPropertyRow({
     && !["scalar", "boolean", "union", "command"].includes(node.valueKind)
   );
   const showDetails = Boolean(addingCommand)
-    || (selected && (Boolean(node.externalRef) || structured));
+    || (selected && structured);
   const name = fieldName(node);
   const errorEmphasis = validationErrorEmphasis(node);
   const changeTitle = draftChangeTitle(node);
@@ -1027,11 +1029,20 @@ function ConfigPropertyRow({
       : "",
     effectiveDefaultDescription,
   ].filter(Boolean).join(" ");
+  const closeExternalEditor = () => {
+    setExternalEditorOpen(false);
+    globalThis.setTimeout(() => externalEditorTriggerRef.current?.focus(), 0);
+  };
 
   const valueEditor = node.externalRef ? (
     <button
       className="inline-resource-button"
-      onClick={onSelect}
+      disabled={busy}
+      onClick={() => {
+        onSelect();
+        setExternalEditorOpen(true);
+      }}
+      ref={externalEditorTriggerRef}
       type="button"
     >
       <span>{scalarString(node.value) || "Not selected"}</span>
@@ -1364,20 +1375,22 @@ function ConfigPropertyRow({
                   onComplete={() => setAddingCommandId(null)}
                   parent={node}
                 />
-              ) : node.externalRef ? (
-                <ExternalResourceEditor
-                  busy={busy}
-                  draft={draft}
-                  node={node}
-                  replaceDraft={replaceDraft}
-                  reportError={reportError}
-                />
               ) : structured ? (
                 <StructuredEditor busy={busy} commit={commit} node={node} />
               ) : null}
             </div>
           </td>
         </tr>
+      ) : null}
+      {node.externalRef && externalEditorOpen ? (
+        <ExternalResourceEditor
+          busy={busy}
+          draft={draft}
+          node={node}
+          onClose={closeExternalEditor}
+          replaceDraft={replaceDraft}
+          reportError={reportError}
+        />
       ) : null}
     </>
   );

@@ -770,21 +770,24 @@ test("edits generic configuration and selects a ConfigMap key", async ({ page },
   }).check();
   await expect(page.getByText("runtime timeout")).toBeVisible();
 
-  await configTree.getByRole("row", {
+  const configMapRow = configTree.getByRole("row", {
     name: /ConfigMap/,
-  }).click();
-  await page.getByRole("button", {
-    name: "Browse Kubernetes resources",
-  }).click();
+  });
+  await configMapRow.getByRole("button", { name: /Configure$/ }).click();
+  const selector = page.getByRole("dialog", {
+    name: "Select Transform ConfigMap",
+  });
+  await expect(selector).toBeVisible();
   await expect(
-    page.getByLabel("Keys in transform-code").getByText("settings.json"),
+    selector.getByLabel("Keys in transform-code").getByText("settings.json"),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Inspect transform-code" }).click();
-  await expect(page.getByText("export default () => true;")).toBeVisible();
-  await page.getByRole("button", { name: "Back to resources" }).click();
-  await page.getByRole("button", {
+  await selector.getByRole("button", { name: "Inspect transform-code" }).click();
+  await expect(selector.getByText("export default () => true;")).toBeVisible();
+  await selector.getByRole("button", { name: "Back to resources" }).click();
+  await selector.getByRole("button", {
     name: "Use transform-code and key main.js",
   }).click();
+  await expect(selector).toHaveCount(0);
   await expect(page.getByText("Unsaved changes")).toBeVisible();
   await page.getByRole("button", { name: "Save configuration" }).click();
   await expect(page.getByText("Saved configuration")).toBeVisible();

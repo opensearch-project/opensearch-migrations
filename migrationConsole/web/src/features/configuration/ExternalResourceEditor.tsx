@@ -1,4 +1,11 @@
-import { useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useState,
+  type FormEvent,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Database,
@@ -8,6 +15,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  X,
 } from "lucide-react";
 
 import {
@@ -117,14 +125,24 @@ function createDescriptor(node: EditNode): CreateDescriptor | null {
 }
 
 
+function externalResourceDisplayName(node: EditNode): string {
+  const externalRef = record(node.externalRef);
+  return typeof externalRef.displayName === "string"
+    ? externalRef.displayName
+    : node.label.split(":")[0] || "Kubernetes resource";
+}
+
+
 function ManualExternalResourceForm({
   draft,
   node,
+  onApplied,
   onBack,
   replaceDraft,
 }: Readonly<{
   draft: ConfigDraft;
   node: EditNode;
+  onApplied: () => void;
   onBack: () => void;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
 }>) {
@@ -155,7 +173,7 @@ function ManualExternalResourceForm({
       },
     ));
     setSubmitting(false);
-    if (applied) onBack();
+    if (applied) onApplied();
   };
 
   return (
@@ -275,6 +293,7 @@ function ExternalResourceForm({
   details,
   draft,
   node,
+  onApplied,
   onBack,
   replaceDraft,
   reportError,
@@ -283,6 +302,7 @@ function ExternalResourceForm({
   details?: ExternalResourceDetails;
   draft: ConfigDraft;
   node: EditNode;
+  onApplied: () => void;
   onBack: () => void;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
@@ -319,8 +339,8 @@ function ExternalResourceForm({
         confirmations,
         updating ? details?.name : undefined,
       );
-      await replaceDraft(Promise.resolve(result.draft));
-      onBack();
+      const applied = await replaceDraft(Promise.resolve(result.draft));
+      if (applied) onApplied();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setFormProblem(message);
@@ -494,16 +514,18 @@ function ExternalResourceView({
 }
 
 
-export function ExternalResourceEditor({
+function ExternalResourceDialogContent({
   draft,
   node,
   busy,
+  onClose,
   replaceDraft,
   reportError,
 }: Readonly<{
   draft: ConfigDraft;
   node: EditNode;
   busy: boolean;
+  onClose: () => void;
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
 }>) {
@@ -525,7 +547,7 @@ export function ExternalResourceEditor({
     warning === null,
   );
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setWarning(null);
     try {
@@ -535,7 +557,11 @@ export function ExternalResourceEditor({
     } finally {
       setLoading(false);
     }
-  };
+  }, [draft.draftRevision, node.id, reportError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const inspect = async (name: string, mode: "view" | "update") => {
     setLoading(true);
@@ -562,10 +588,19 @@ export function ExternalResourceEditor({
       setWarning({ selection, message });
       return;
     }
-    await replaceDraft(selectExternalResource(
+    const applied = await replaceDraft(selectExternalResource(
       draft.draftRevision,
       selection,
     ));
+    if (applied) onClose();
+  };
+  const acceptWarning = async () => {
+    if (!warning) return;
+    const applied = await replaceDraft(selectExternalResource(
+      draft.draftRevision,
+      { ...warning.selection, acceptWarning: true },
+    ));
+    if (applied) onClose();
   };
 
   if (descriptor && pane?.mode === "create") {
@@ -574,6 +609,7 @@ export function ExternalResourceEditor({
         descriptor={descriptor}
         draft={draft}
         node={node}
+        onApplied={onClose}
         onBack={() => setPane(null)}
         replaceDraft={replaceDraft}
         reportError={reportError}
@@ -585,6 +621,7 @@ export function ExternalResourceEditor({
       <ManualExternalResourceForm
         draft={draft}
         node={node}
+        onApplied={onClose}
         onBack={() => setPane(null)}
         replaceDraft={replaceDraft}
       />
@@ -597,6 +634,7 @@ export function ExternalResourceEditor({
         details={pane.details}
         draft={draft}
         node={node}
+        onApplied={onClose}
         onBack={() => setPane(null)}
         replaceDraft={replaceDraft}
         reportError={reportError}
@@ -669,7 +707,7 @@ export function ExternalResourceEditor({
             type="button"
           >
             <Keyboard aria-hidden="true" />
-            Enter manually
+            Enter reference manually
           </button>
           <button
             aria-label="Refresh external resources"
@@ -692,10 +730,7 @@ export function ExternalResourceEditor({
           <span>{warning.message || "This resource does not match all requirements."}</span>
           <button
             disabled={busy}
-            onClick={() => void replaceDraft(selectExternalResource(
-              draft.draftRevision,
-              { ...warning.selection, acceptWarning: true },
-            ))}
+            onClick={() => void acceptWarning()}
             type="button"
           >
             Use anyway
@@ -779,5 +814,67 @@ export function ExternalResourceEditor({
         ))}
       </div>
     </section>
+  );
+}
+
+
+export function ExternalResourceEditor({
+  draft,
+  node,
+  busy,
+  onClose,
+  replaceDraft,
+  reportError,
+}: Readonly<{
+  draft: ConfigDraft;
+  node: EditNode;
+  busy: boolean;
+  onClose: () => void;
+  replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
+  reportError: (message: string) => void;
+}>) {
+  const titleId = useId();
+  const displayName = externalResourceDisplayName(node);
+  const dialogRef = useEscapeCancel<HTMLElement>(onClose, busy);
+  return createPortal(
+    <div className="modal-backdrop">
+      <section
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="confirmation-dialog external-resource-dialog"
+        data-escape-cancel-layer
+        ref={dialogRef}
+        role="dialog"
+      >
+        <header>
+          <Database aria-hidden="true" />
+          <div>
+            <span>Kubernetes resource</span>
+            <h2 id={titleId}>Select {displayName}</h2>
+          </div>
+          <button
+            aria-label="Close Kubernetes resource selector"
+            autoFocus
+            className="icon-button"
+            disabled={busy}
+            onClick={onClose}
+            type="button"
+          >
+            <X aria-hidden="true" />
+          </button>
+        </header>
+        <div className="external-resource-dialog-body">
+          <ExternalResourceDialogContent
+            busy={busy}
+            draft={draft}
+            node={node}
+            onClose={onClose}
+            replaceDraft={replaceDraft}
+            reportError={reportError}
+          />
+        </div>
+      </section>
+    </div>,
+    document.body,
   );
 }
