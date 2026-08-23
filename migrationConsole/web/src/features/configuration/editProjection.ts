@@ -1,15 +1,10 @@
 import type {
-  ConfigDraft,
-  EditNode,
   ManageNode,
   ManageSnapshot,
 } from "../../api/client";
 import {
-  resourceAdditionIdentity,
-  resourceAddPlacements,
   type PendingResourceAddition,
   type PendingResourceRename,
-  type ResourceAddPlacement,
 } from "./resourceAdds";
 
 
@@ -28,37 +23,13 @@ export interface ResourceValidationState {
 }
 
 
-function validationState(node: EditNode): ResourceValidationState {
-  const counts = node.statusCounts;
-  let errors = (
-    (counts?.errors ?? 0)
-    + (counts?.required ?? 0)
-    + (counts?.gated ?? 0)
-    + (counts?.blocked ?? 0)
-  );
-  let warnings = counts?.warnings ?? 0;
-  if (errors === 0 && warnings === 0) {
-    if (["required", "error", "gated", "blocked"].includes(node.status ?? "")) {
-      errors = 1;
-    } else if (node.status === "warning") {
-      warnings = 1;
-    }
-  }
-  const childStates = (node.children ?? [])
-    .filter((child) => child.valueKind !== "command")
-    .map(validationState);
-  errors = Math.max(
-    errors,
-    childStates
-      .filter((state) => state.level === "error")
-      .reduce((total, state) => total + state.issueCount, 0),
-  );
-  warnings = Math.max(
-    warnings,
-    childStates
-      .filter((state) => state.level === "warning")
-      .reduce((total, state) => total + state.issueCount, 0),
-  );
+function validationState(
+  node: ManageNode,
+): ResourceValidationState | null {
+  const state = node.configState;
+  if (!state) return null;
+  const errors = state.validationErrors;
+  const warnings = state.validationWarnings;
   if (errors > 0) {
     return {
       issueCount: errors + warnings,
@@ -85,43 +56,14 @@ function validationState(node: EditNode): ResourceValidationState {
 }
 
 
-function flattenEditNodes(nodes: EditNode[]): Map<string, EditNode> {
-  const result = new Map<string, EditNode>();
-  const visit = (node: EditNode) => {
-    result.set(node.id, node);
-    (node.children ?? []).forEach(visit);
-  };
-  nodes.forEach(visit);
-  return result;
-}
-
-
 export function resourceValidationStates(
   snapshot: ManageSnapshot,
-  draft: ConfigDraft | undefined,
 ): Record<string, ResourceValidationState> {
-  if (!draft) return {};
-  const editNodes = flattenEditNodes(draft.editState.nodes);
   const result: Record<string, ResourceValidationState> = {};
   Object.values(snapshot.nodes).forEach((node) => {
     if (node.kind !== "resource") return;
-    const targetId = editTarget(node);
-    const target = targetId ? editNodes.get(targetId) : undefined;
-    if (target) result[node.id] = validationState(target);
-  });
-  resourceAddPlacements().forEach((placement) => {
-    const collection = collectionNode(editNodes, placement);
-    if (!collection) return;
-    const pathLength = placement.collectionPath.split(".").length;
-    (collection.children ?? [])
-      .filter((child) => child.valueKind !== "command")
-      .forEach((child, index) => {
-        const name = child.path[pathLength] ?? "";
-        const identity = resourceAdditionIdentity(placement, name, index);
-        if (snapshot.nodes[identity.id] && !result[identity.id]) {
-          result[identity.id] = validationState(child);
-        }
-      });
+    const state = validationState(node);
+    if (state) result[node.id] = state;
   });
   return result;
 }
@@ -133,9 +75,10 @@ export interface ResourceDraftChangeState {
 }
 
 
-function draftChangeState(node: EditNode): ResourceDraftChangeState | null {
-  const count = node.draftChangeCount
-    || (node.draftChange ? 1 : 0);
+function draftChangeState(
+  node: ManageNode,
+): ResourceDraftChangeState | null {
+  const count = node.configState?.draftChangeCount ?? 0;
   if (!count) return null;
   return {
     count,
@@ -146,71 +89,23 @@ function draftChangeState(node: EditNode): ResourceDraftChangeState | null {
 
 export function resourceDraftChangeStates(
   snapshot: ManageSnapshot,
-  draft: ConfigDraft | undefined,
 ): Record<string, ResourceDraftChangeState> {
-  if (!draft?.dirty) return {};
-  const editNodes = flattenEditNodes(draft.editState.nodes);
   const result: Record<string, ResourceDraftChangeState> = {};
   Object.values(snapshot.nodes).forEach((node) => {
     if (node.kind !== "resource") return;
-    const targetId = editTarget(node);
-    const target = targetId ? editNodes.get(targetId) : undefined;
-    const change = target ? draftChangeState(target) : null;
+    const change = draftChangeState(node);
     if (change) result[node.id] = change;
-  });
-  resourceAddPlacements().forEach((placement) => {
-    const collection = collectionNode(editNodes, placement);
-    if (!collection) return;
-    const pathLength = placement.collectionPath.split(".").length;
-    (collection.children ?? [])
-      .filter((child) => child.valueKind !== "command")
-      .forEach((child, index) => {
-        const name = child.path[pathLength] ?? "";
-        const identity = resourceAdditionIdentity(placement, name, index);
-        const change = draftChangeState(child);
-        if (snapshot.nodes[identity.id] && change && !result[identity.id]) {
-          result[identity.id] = change;
-        }
-      });
   });
   return result;
 }
 
 
-function isConfigResourceTarget(targetId: string): boolean {
-  const path = targetId.startsWith("edit:")
-    ? targetId.slice("edit:".length)
-    : targetId;
-  return resourceAddPlacements().some(
-    ({ collectionPath }) => (
-      path === collectionPath || path.startsWith(`${collectionPath}.`)
-    ),
-  );
-}
-
-
-function removalLabel(node: ManageNode, draft: ConfigDraft): string {
-  if (node.configPresence?.pending === false) {
-    return "Removal pending submission";
-  }
-  return draft.dirty ? "Marked for removal" : "Removal pending submission";
-}
-
-
 function appendAddition(
   nodes: Record<string, ManageNode>,
-  addition: {
-    id: string;
-    editTargetId: string;
-    groupId: string;
-    label: string;
-    resourceName: string;
-    resourcePlural: string;
-  },
+  addition: PendingResourceAddition | PendingResourceRename,
   revision: string,
   status: string,
   valueSummary: string,
-  diagnostics: ManageNode["diagnostics"] = [],
 ) {
   if (nodes[addition.id]) return;
   const group = nodes[addition.groupId];
@@ -226,7 +121,7 @@ function appendAddition(
     status,
     phase: status === "syncing" ? "Syncing" : "Pending Config",
     valueSummary,
-    diagnostics,
+    diagnostics: [],
     capabilities: status === "syncing" ? [] : [{
       kind: "edit",
       editTargetId: addition.editTargetId,
@@ -237,9 +132,11 @@ function appendAddition(
       value: status === "syncing" ? "Syncing" : "Pending Config",
       kind: "phase",
     }],
+    relationships: [],
     comparisons: [],
     resourcePlural: addition.resourcePlural,
     resourceName: addition.resourceName,
+    resourceType: addition.resourceType,
     configPresence: {
       deployed: false,
       pending: true,
@@ -250,55 +147,6 @@ function appendAddition(
     revision: `${group.revision}:${revision}`,
     childIds: [...group.childIds, addition.id],
   };
-}
-
-
-function collectionNode(
-  editNodes: Map<string, EditNode>,
-  placement: ResourceAddPlacement,
-): EditNode | undefined {
-  return editNodes.get(`edit:${placement.collectionPath}`);
-}
-
-
-function projectDraftAdditions(
-  nodes: Record<string, ManageNode>,
-  editNodes: Map<string, EditNode>,
-  draft: ConfigDraft,
-) {
-  resourceAddPlacements().forEach((placement) => {
-    const collection = collectionNode(editNodes, placement);
-    if (!collection) return;
-    const pathLength = placement.collectionPath.split(".").length;
-    (collection.children ?? [])
-      .filter((child) => child.valueKind !== "command")
-      .forEach((child, index) => {
-        if (
-          Object.values(nodes).some(
-            (node) => editTarget(node) === child.id,
-          )
-        ) {
-          return;
-        }
-        const name = child.path[pathLength] ?? "";
-        const identity = resourceAdditionIdentity(placement, name, index);
-        appendAddition(
-          nodes,
-          {
-            ...identity,
-            groupId: placement.groupId,
-            resourcePlural: placement.resourcePlural,
-          },
-          `${draft.draftRevision}:${child.id}:added`,
-          child.status && child.status !== "ok" ? child.status : "changed",
-          "Addition pending submission",
-          (child.diagnostics ?? []).map((diagnostic) => ({
-            ...diagnostic,
-            source: null,
-          })),
-        );
-      });
-  });
 }
 
 
@@ -353,32 +201,27 @@ function projectPendingRename(
 }
 
 
-function configurationOnlySnapshot(
-  snapshot: ManageSnapshot,
-): ManageSnapshot {
-  const workflowStepIds = new Set(
+function withoutWorkflowSteps(snapshot: ManageSnapshot): ManageSnapshot {
+  const stepIds = new Set(
     Object.values(snapshot.nodes)
       .filter((node) => node.kind === "workflow-step")
       .map((node) => node.id),
   );
-  if (workflowStepIds.size === 0) return snapshot;
-  const nodes = Object.fromEntries(
-    Object.entries(snapshot.nodes).flatMap(([nodeId, node]) => (
-      workflowStepIds.has(nodeId)
-        ? []
-        : [[nodeId, {
-          ...node,
-          childIds: node.childIds.filter(
-            (childId) => !workflowStepIds.has(childId),
-          ),
-        }]]
-    )),
-  );
+  if (stepIds.size === 0) return snapshot;
   return {
     ...snapshot,
-    nodes,
-    rootIds: snapshot.rootIds.filter(
-      (rootId) => !workflowStepIds.has(rootId),
+    rootIds: snapshot.rootIds.filter((nodeId) => !stepIds.has(nodeId)),
+    nodes: Object.fromEntries(
+      Object.entries(snapshot.nodes).flatMap(([nodeId, node]) => (
+        stepIds.has(nodeId)
+          ? []
+          : [[nodeId, {
+            ...node,
+            childIds: node.childIds.filter(
+              (childId) => !stepIds.has(childId),
+            ),
+          }]]
+      )),
     ),
   };
 }
@@ -386,54 +229,16 @@ function configurationOnlySnapshot(
 
 export function projectEditSnapshot(
   snapshot: ManageSnapshot,
-  draft: ConfigDraft | undefined,
   pendingAdditions: PendingResourceAddition[] = [],
   pendingRenames: PendingResourceRename[] = [],
 ): ManageSnapshot {
-  const configurationSnapshot = configurationOnlySnapshot(snapshot);
-  if (
-    !draft
-    && pendingAdditions.length === 0
-    && pendingRenames.length === 0
-  ) {
+  // Navigation is absent until the server has its first runtime observation.
+  // Keep that loading fallback free of workflow execution steps.
+  const configurationSnapshot = withoutWorkflowSteps(snapshot);
+  if (pendingAdditions.length === 0 && pendingRenames.length === 0) {
     return configurationSnapshot;
   }
-  const editNodes = flattenEditNodes(draft?.editState.nodes ?? []);
-  const nodes: Record<string, ManageNode> = draft
-    ? Object.fromEntries(Object.entries(configurationSnapshot.nodes).map((
-      [nodeId, node],
-    ) => {
-      const targetId = editTarget(node);
-      const pendingRemoval = (
-        node.configPresence?.pending === false
-        && (
-          node.configPresence.deployed === true
-          || node.configPresence.submitted === true
-        )
-      );
-      if (
-        !pendingRemoval
-        && (
-          !targetId
-          || !isConfigResourceTarget(targetId)
-          || editNodes.has(targetId)
-        )
-      ) {
-        return [nodeId, node];
-      }
-      const label = removalLabel(node, draft);
-      return [
-        nodeId,
-        {
-          ...node,
-          revision: `${node.revision}:${draft.draftRevision}:removed`,
-          status: "removed",
-          valueSummary: label,
-        },
-      ];
-    }))
-    : { ...configurationSnapshot.nodes };
-  if (draft) projectDraftAdditions(nodes, editNodes, draft);
+  const nodes = { ...configurationSnapshot.nodes };
   pendingAdditions.forEach((addition) => appendAddition(
     nodes,
     addition,
@@ -444,7 +249,7 @@ export function projectEditSnapshot(
   pendingRenames.forEach((rename) => projectPendingRename(nodes, rename));
   return {
     ...configurationSnapshot,
-    revision: `${snapshot.revision}:${draft?.draftRevision ?? "loading"}:editing`,
+    revision: `${configurationSnapshot.revision}:optimistic-edit`,
     nodes,
   };
 }

@@ -22,13 +22,11 @@ import {
 } from "lucide-react";
 
 import type { ManageNode, ManageSnapshot } from "../../api/client";
-import { resourceAddPlacements } from "../configuration/resourceAdds";
 import { StatusIndicator } from "../status/StatusIndicator";
 import { statusLabel } from "../status/status";
 import type {
   ResourceAddController,
   ResourceAddOption,
-  ResourceAddPlacement,
   ResourceRenameOption,
 } from "../configuration/resourceAdds";
 import type {
@@ -1185,22 +1183,21 @@ export function ResourceTree({
     };
   })();
   const resourceTypesByNode = useMemo(() => {
-    const placements = resourceAddPlacements();
-    const placementsByGroup = new Map<string, ResourceAddPlacement[]>();
-    placements.forEach((placement) => {
-      const current = placementsByGroup.get(placement.groupId) ?? [];
-      current.push(placement);
-      placementsByGroup.set(placement.groupId, current);
-    });
     const result = new Map<string, string>();
     Object.values(snapshot.nodes).forEach((node) => {
-      if (node.kind !== "resource" || !node.parentId) return;
-      const groupPlacements = placementsByGroup.get(node.parentId) ?? [];
-      if (groupPlacements.length < 2) return;
-      const placement = groupPlacements.find(
-        (candidate) => candidate.resourcePlural === node.resourcePlural,
-      );
-      if (placement) result.set(node.id, placement.resourceType);
+      if (node.kind !== "group") return;
+      const resources = node.childIds
+        .map((childId) => snapshot.nodes[childId])
+        .filter((child) => child?.kind === "resource");
+      const types = new Set(resources.flatMap((resource) => (
+        resource.resourceType ? [resource.resourceType] : []
+      )));
+      if (types.size < 2) return;
+      resources.forEach((resource) => {
+        if (resource.resourceType) {
+          result.set(resource.id, resource.resourceType);
+        }
+      });
     });
     return result;
   }, [snapshot.nodes]);
@@ -1233,11 +1230,6 @@ export function ResourceTree({
   const renameOptionsByResource = useMemo(() => {
     const result = new Map<string, ResourceRenameOption>();
     (resourceAdds?.renames ?? []).forEach((option) => {
-      const exactResource = snapshot.nodes[option.resourceId];
-      if (exactResource?.kind === "resource") {
-        result.set(exactResource.id, option);
-        return;
-      }
       const matchingResource = Object.values(snapshot.nodes).find((node) => (
         node.kind === "resource"
         && (

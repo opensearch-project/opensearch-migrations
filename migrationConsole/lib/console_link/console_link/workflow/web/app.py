@@ -11,6 +11,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..application.config_navigation import project_config_navigation
 from ..application.observations import ObservationCoordinator, ObservationEvent
 from ..application.config_drafts import (
     ConfigDraftConflict,
@@ -146,6 +147,54 @@ def create_app(
                 detail="Configuration editing is not configured",
             )
         return config_drafts
+
+    def draft_navigation(draft: Any) -> Optional[Any]:
+        observation = (
+            getattr(coordinator, "current_observation", None)
+            if coordinator is not None else None
+        )
+        if observation is None:
+            return None
+        try:
+            return project_config_navigation(observation.snapshot, draft)
+        except Exception:
+            logger.exception("Failed to project configuration navigation")
+            return None
+
+    def draft_contract(draft: Any) -> ConfigDraftV1:
+        return ConfigDraftV1.from_domain(
+            draft,
+            navigation=draft_navigation(draft),
+        )
+
+    def _draft_conflict(error: ConfigDraftConflict) -> HTTPException:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "draft_revision_conflict",
+                "message": str(error),
+                "current": draft_contract(error.current).model_dump(
+                    by_alias=True,
+                    exclude_none=True,
+                    mode="json",
+                ),
+            },
+        )
+
+    def _saved_config_conflict(error: SavedConfigConflict) -> HTTPException:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "saved_config_conflict",
+                "message": str(error),
+                "persistedRevision": error.persisted_revision,
+                "current": draft_contract(error.current).model_dump(
+                    by_alias=True,
+                    exclude_none=True,
+                    mode="json",
+                ),
+            },
+        )
 
     def output_service():
         if outputs is None:
@@ -428,7 +477,7 @@ def create_app(
     )
     def open_config() -> ConfigDraftV1:
         try:
-            return ConfigDraftV1.from_domain(draft_service().open())
+            return draft_contract(draft_service().open())
         except HTTPException:
             raise
         except Exception as error:
@@ -463,7 +512,7 @@ def create_app(
             raise _draft_conflict(error) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return ConfigDraftV1.from_domain(draft)
+        return draft_contract(draft)
 
     @app.put(
         "/api/v1/config/raw",
@@ -481,7 +530,7 @@ def create_app(
             )
         except ConfigDraftConflict as error:
             raise _draft_conflict(error) from error
-        return ConfigDraftV1.from_domain(draft)
+        return draft_contract(draft)
 
     @app.post(
         "/api/v1/config/save",
@@ -501,14 +550,14 @@ def create_app(
                     "code": "saved_config_conflict",
                     "message": str(error),
                     "persistedRevision": error.persisted_revision,
-                    "current": ConfigDraftV1.from_domain(error.current).model_dump(
+                    "current": draft_contract(error.current).model_dump(
                         by_alias=True,
                         exclude_none=True,
                         mode="json",
                     ),
                 },
             ) from error
-        return ConfigDraftV1.from_domain(draft)
+        return draft_contract(draft)
 
     @app.post(
         "/api/v1/config/discard",
@@ -521,7 +570,7 @@ def create_app(
             draft = draft_service().discard(request_body.expected_draft_revision)
         except ConfigDraftConflict as error:
             raise _draft_conflict(error) from error
-        return ConfigDraftV1.from_domain(draft)
+        return draft_contract(draft)
 
     @app.post(
         "/api/v1/config/close",
@@ -1015,7 +1064,7 @@ def create_app(
             ) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return ConfigDraftV1.from_domain(draft)
+        return draft_contract(draft)
 
     @app.get(
         "/api/v1/external-resources/details",
@@ -1064,7 +1113,10 @@ def create_app(
             raise _draft_conflict(error) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
-        return ExternalResourceMutationV1.from_domain(mutation)
+        return ExternalResourceMutationV1.from_domain(
+            mutation,
+            navigation=draft_navigation(mutation.draft),
+        )
 
     @app.get(
         "/api/v1/manage/events",
@@ -1213,37 +1265,6 @@ def _log_error(status: int, code: str, error: Any) -> HTTPException:
         detail={
             "code": code,
             "message": str(error),
-        },
-    )
-
-
-def _draft_conflict(error: ConfigDraftConflict) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": "draft_revision_conflict",
-            "message": str(error),
-            "current": ConfigDraftV1.from_domain(error.current).model_dump(
-                by_alias=True,
-                exclude_none=True,
-                mode="json",
-            ),
-        },
-    )
-
-
-def _saved_config_conflict(error: SavedConfigConflict) -> HTTPException:
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": "saved_config_conflict",
-            "message": str(error),
-            "persistedRevision": error.persisted_revision,
-            "current": ConfigDraftV1.from_domain(error.current).model_dump(
-                by_alias=True,
-                exclude_none=True,
-                mode="json",
-            ),
         },
     )
 

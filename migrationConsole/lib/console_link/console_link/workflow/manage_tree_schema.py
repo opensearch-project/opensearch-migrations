@@ -50,6 +50,18 @@ GROUP_PLURALS_BY_PRIMARY: Dict[str, List[str]] = {
     for plurals, _ in groups
 }
 
+RESOURCE_TYPE_LABELS: Dict[str, str] = {
+    "sourceconfigs": "Source cluster",
+    "targetconfigs": "Target cluster",
+    "kafkaconfigs": "Kafka connection",
+    "kafkaclusters": "Kafka cluster",
+    "capturedtraffics": "Captured traffic",
+    "captureproxies": "Capture proxy",
+    "datasnapshots": "Data snapshot",
+    "snapshotmigrations": "Snapshot migration",
+    "trafficreplays": "Traffic replay",
+}
+
 EDIT_ID_BY_TREE_ID: Dict[str, str] = {
     f"section:{WORKFLOW_CONFIGURATION_SECTION}": "edit:workflowConfiguration",
     f"section:{SNAPSHOT_MIGRATION_SECTION}": "edit:snapshotMigration",
@@ -79,3 +91,7 @@ def display_name_for_plural(plural: str) -> Optional[str]:
 
 def group_plurals_for(primary_plural: str) -> List[str]:
     return GROUP_PLURALS_BY_PRIMARY.get(primary_plural, [primary_plural])
+
+
+def resource_type_label_for_plural(plural: str) -> Optional[str]:
+    return RESOURCE_TYPE_LABELS.get(plural)

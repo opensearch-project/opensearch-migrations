@@ -158,6 +158,7 @@ export const manageSnapshot: ManageSnapshot = {
       ],
       resourcePlural: "captureproxies",
       resourceName: "capture",
+      resourceType: "Capture proxy",
     },
     "group:Live Traffic Migration:Replay": {
       id: "group:Live Traffic Migration:Replay",
@@ -211,6 +212,7 @@ export const manageSnapshot: ManageSnapshot = {
       comparisons: [],
       resourcePlural: "trafficreplays",
       resourceName: "replay",
+      resourceType: "Traffic replay",
     },
     "workflow-step:resource:trafficreplays:replay:deploy": {
       id: "workflow-step:resource:trafficreplays:replay:deploy",
@@ -262,6 +264,7 @@ export const configDraft: ConfigDraft = {
     provenance: {
       source: "pending-yaml",
       lossy: false,
+      mode: "structured",
       warnings: [],
     },
     validation: {
@@ -285,6 +288,22 @@ export const configDraft: ConfigDraft = {
         addLabel: "source cluster",
         keyPattern: "^[a-z0-9-]+$",
         message: "Use a Kubernetes-compatible name.",
+        resourceCollection: {
+          navigation: {
+            sectionId: "section:Sources",
+            sectionLabel: "Sources",
+            sectionOrder: 0,
+            groupId: "group:Sources:Sources",
+            groupLabel: "Sources",
+            groupOrder: 0,
+          },
+          resource: {
+            kind: "SourceConfig",
+            plural: "sourceconfigs",
+            typeLabel: "Source cluster",
+            identity: { kind: "named" },
+          },
+        },
       },
       status: "warning",
       statusCounts: { ...zeroCounts, warnings: 1 },

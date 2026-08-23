@@ -5242,7 +5242,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
       "x-ui-hint": {
         "kind": "record",
-        "addLabel": "source cluster"
+        "addLabel": "source cluster",
+        "resourceCollection": {
+          "navigation": {
+            "sectionId": "section:Sources",
+            "sectionLabel": "Sources",
+            "sectionOrder": 0,
+            "groupId": "group:Sources:Sources",
+            "groupLabel": "Sources",
+            "groupOrder": 0
+          },
+          "resource": {
+            "kind": "SourceConfig",
+            "plural": "sourceconfigs",
+            "typeLabel": "Source cluster",
+            "identity": {
+              "kind": "named"
+            }
+          }
+        }
       }
     },
     "targetClusters": {
@@ -5451,7 +5469,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "description": "Target OpenSearch clusters to migrate to.",
       "x-ui-hint": {
         "kind": "record",
-        "addLabel": "target cluster"
+        "addLabel": "target cluster",
+        "resourceCollection": {
+          "navigation": {
+            "sectionId": "section:Targets",
+            "sectionLabel": "Targets",
+            "sectionOrder": 1,
+            "groupId": "group:Targets:Targets",
+            "groupLabel": "Targets",
+            "groupOrder": 0
+          },
+          "resource": {
+            "kind": "TargetConfig",
+            "plural": "targetconfigs",
+            "typeLabel": "Target cluster",
+            "identity": {
+              "kind": "named"
+            }
+          }
+        }
       }
     },
     "snapshotMigrationConfigs": {
@@ -7660,7 +7696,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "description": "List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings.",
       "x-ui-hint": {
         "kind": "array",
-        "addLabel": "snapshot migration"
+        "addLabel": "snapshot migration",
+        "resourceCollection": {
+          "navigation": {
+            "sectionId": "section:Snapshot Migration",
+            "sectionLabel": "Snapshot Migration",
+            "sectionOrder": 2,
+            "groupId": "group:Snapshot Migration:Backfill",
+            "groupLabel": "Backfill",
+            "groupOrder": 1,
+            "addControlId": "section:Snapshot Migration"
+          },
+          "resource": {
+            "kind": "SnapshotMigration",
+            "plural": "snapshotmigrations",
+            "typeLabel": "Snapshot migration",
+            "identity": {
+              "kind": "indexed-config",
+              "prefix": "migration-",
+              "firstIndex": 1
+            }
+          }
+        }
       }
     },
     "traffic": {
@@ -7983,7 +8040,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "addLabel": "Kafka cluster",
             "keyFormat": "k8s-name",
             "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-            "message": "Use a valid Kubernetes DNS name for the Kafka cluster."
+            "message": "Use a valid Kubernetes DNS name for the Kafka cluster.",
+            "resourceCollection": {
+              "navigation": {
+                "sectionId": "section:Live Traffic Migration",
+                "sectionLabel": "Live Traffic Migration",
+                "sectionOrder": 3,
+                "groupId": "group:Live Traffic Migration:Buffer",
+                "groupLabel": "Buffer",
+                "groupOrder": 0
+              },
+              "resource": {
+                "kind": "Kafka",
+                "plural": "kafkaclusters",
+                "typeLabel": "Kafka cluster",
+                "identity": {
+                  "kind": "named"
+                }
+              }
+            }
           }
         },
         "proxies": {
@@ -9127,7 +9202,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "addLabel": "capture proxy",
             "keyFormat": "k8s-name",
             "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-            "message": "Use a valid Kubernetes DNS name for the capture proxy."
+            "message": "Use a valid Kubernetes DNS name for the capture proxy.",
+            "resourceCollection": {
+              "navigation": {
+                "sectionId": "section:Live Traffic Migration",
+                "sectionLabel": "Live Traffic Migration",
+                "sectionOrder": 3,
+                "groupId": "group:Live Traffic Migration:Capture",
+                "groupLabel": "Capture",
+                "groupOrder": 1
+              },
+              "resource": {
+                "kind": "CaptureProxy",
+                "plural": "captureproxies",
+                "typeLabel": "Capture proxy",
+                "identity": {
+                  "kind": "named"
+                }
+              }
+            }
           }
         },
         "s3Sources": {
@@ -9190,7 +9283,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "addLabel": "optional S3 archive source (no capture proxy)",
             "keyFormat": "k8s-name",
             "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-            "message": "Use a valid Kubernetes DNS name for the optional S3 archive source."
+            "message": "Use a valid Kubernetes DNS name for the optional S3 archive source.",
+            "resourceCollection": {
+              "navigation": {
+                "sectionId": "section:Live Traffic Migration",
+                "sectionLabel": "Live Traffic Migration",
+                "sectionOrder": 3,
+                "groupId": "group:Live Traffic Migration:Buffer",
+                "groupLabel": "Buffer",
+                "groupOrder": 0
+              },
+              "resource": {
+                "kind": "CapturedTraffic",
+                "plural": "capturedtraffics",
+                "typeLabel": "S3 source",
+                "identity": {
+                  "kind": "named",
+                  "suffix": "-topic"
+                }
+              }
+            }
           },
           "x-expert": true
         },
@@ -11135,7 +11247,25 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "addLabel": "traffic replay",
             "keyFormat": "k8s-name",
             "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-            "message": "Replay names become Kubernetes TrafficReplay resource names and must use lower-case RFC 1123 syntax."
+            "message": "Replay names become Kubernetes TrafficReplay resource names and must use lower-case RFC 1123 syntax.",
+            "resourceCollection": {
+              "navigation": {
+                "sectionId": "section:Live Traffic Migration",
+                "sectionLabel": "Live Traffic Migration",
+                "sectionOrder": 3,
+                "groupId": "group:Live Traffic Migration:Replay",
+                "groupLabel": "Replay",
+                "groupOrder": 2
+              },
+              "resource": {
+                "kind": "TrafficReplay",
+                "plural": "trafficreplays",
+                "typeLabel": "Traffic replay",
+                "identity": {
+                  "kind": "named"
+                }
+              }
+            }
           }
         }
       },

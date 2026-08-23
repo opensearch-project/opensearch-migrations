@@ -150,6 +150,54 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.kafkaClusters")).toMatchObject({
             essential: true,
         });
+        expect(findNode(state.nodes, "edit:sourceClusters")?.inputHint).toMatchObject({
+            resourceCollection: {
+                navigation: {
+                    sectionId: "section:Sources",
+                    sectionLabel: "Sources",
+                    sectionOrder: 0,
+                    groupId: "group:Sources:Sources",
+                    groupLabel: "Sources",
+                    groupOrder: 0,
+                },
+                resource: {
+                    plural: "sourceconfigs",
+                    typeLabel: "Source cluster",
+                    identity: {kind: "named"},
+                },
+            },
+        });
+        expect(findNode(state.nodes, "edit:traffic.s3Sources")?.inputHint).toMatchObject({
+            resourceCollection: {
+                navigation: {
+                    sectionId: "section:Live Traffic Migration",
+                    groupId: "group:Live Traffic Migration:Buffer",
+                },
+                resource: {
+                    plural: "capturedtraffics",
+                    typeLabel: "S3 source",
+                    identity: {kind: "named", suffix: "-topic"},
+                },
+            },
+        });
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs")?.inputHint).toMatchObject({
+            resourceCollection: {
+                navigation: {
+                    sectionId: "section:Snapshot Migration",
+                    groupId: "group:Snapshot Migration:Backfill",
+                    addControlId: "section:Snapshot Migration",
+                },
+                resource: {
+                    plural: "snapshotmigrations",
+                    typeLabel: "Snapshot migration",
+                    identity: {
+                        kind: "indexed-config",
+                        prefix: "migration-",
+                        firstIndex: 1,
+                    },
+                },
+            },
+        });
         expect(findNode(state.nodes, "edit:traffic.s3Sources")).toMatchObject({
             expert: true,
         });

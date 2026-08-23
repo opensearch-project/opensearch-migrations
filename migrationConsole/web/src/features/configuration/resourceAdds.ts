@@ -1,3 +1,6 @@
+import type { EditNode } from "../../api/client";
+
+
 export interface ResourceAddPlacement {
   addControlId?: string;
   collectionPath: string;
@@ -26,7 +29,6 @@ export interface ResourceRenameOption {
   path: string[];
   pattern?: string;
   placement: ResourceAddPlacement;
-  resourceId: string;
   validationMessage?: string;
 }
 
@@ -51,6 +53,7 @@ export interface PendingResourceAddition {
   label: string;
   resourceName: string;
   resourcePlural: string;
+  resourceType: string;
   status: "syncing" | "awaiting-draft";
 }
 
@@ -64,96 +67,23 @@ export interface PendingResourceRename {
   oldId: string;
   resourceName: string;
   resourcePlural: string;
+  resourceType: string;
   status: "syncing" | "applied";
 }
 
 
-const RESOURCE_ADD_PLACEMENTS: readonly ResourceAddPlacement[] = [
-  {
-    collectionPath: "sourceClusters",
-    groupId: "group:Sources:Sources",
-    resourcePlural: "sourceconfigs",
-    resourceType: "Source cluster",
-  },
-  {
-    collectionPath: "targetClusters",
-    groupId: "group:Targets:Targets",
-    resourcePlural: "targetconfigs",
-    resourceType: "Target cluster",
-  },
-  {
-    addControlId: "section:Snapshot Migration",
-    collectionPath: "snapshotMigrationConfigs",
-    groupId: "group:Snapshot Migration:Backfill",
-    resourcePlural: "snapshotmigrations",
-    resourceType: "Snapshot migration",
-  },
-  {
-    collectionPath: "traffic.kafkaClusters",
-    groupId: "group:Live Traffic Migration:Buffer",
-    resourcePlural: "kafkaclusters",
-    resourceType: "Kafka cluster",
-  },
-  {
-    collectionPath: "traffic.s3Sources",
-    groupId: "group:Live Traffic Migration:Buffer",
-    resourcePlural: "capturedtraffics",
-    resourceType: "S3 source",
-  },
-  {
-    collectionPath: "traffic.proxies",
-    groupId: "group:Live Traffic Migration:Capture",
-    resourcePlural: "captureproxies",
-    resourceType: "Capture proxy",
-  },
-  {
-    collectionPath: "traffic.replayers",
-    groupId: "group:Live Traffic Migration:Replay",
-    resourcePlural: "trafficreplays",
-    resourceType: "Traffic replay",
-  },
-];
-
-
 export function resourceAddPlacement(
-  path: readonly string[],
+  node: Pick<EditNode, "inputHint" | "path">,
 ): ResourceAddPlacement | null {
-  const key = path.join(".");
-  return RESOURCE_ADD_PLACEMENTS.find(
-    (placement) => placement.collectionPath === key,
-  ) ?? null;
-}
-
-
-export function resourceAddPlacements(): readonly ResourceAddPlacement[] {
-  return RESOURCE_ADD_PLACEMENTS;
-}
-
-
-export function resourceAdditionIdentity(
-  placement: ResourceAddPlacement,
-  name: string,
-  index: number,
-) {
-  const isSnapshotMigration = (
-    placement.collectionPath === "snapshotMigrationConfigs"
-  );
-  const authoredName = isSnapshotMigration
-    ? `migration-${index + 1}`
-    : name || `migration-${index + 1}`;
-  const resourceName = placement.collectionPath === "traffic.s3Sources"
-    ? `${authoredName}-topic`
-    : authoredName;
+  const collection = node.inputHint?.resourceCollection;
+  if (!collection) return null;
+  const { navigation, resource } = collection;
   return {
-    id: isSnapshotMigration
-      ? `config:snapshotMigrationConfigs:${index}`
-      : `resource:${placement.resourcePlural}:${resourceName}`,
-    editTargetId: `edit:${[
-      ...placement.collectionPath.split("."),
-      isSnapshotMigration ? String(index) : authoredName,
-    ].join(".")}`,
-    label: resourceName,
-    resourceName,
+    addControlId: navigation.addControlId ?? undefined,
+    collectionPath: node.path.join("."),
+    groupId: navigation.groupId,
+    resourcePlural: resource.plural,
+    resourceType: resource.typeLabel,
   };
 }
 
@@ -163,11 +93,19 @@ export function pendingResourceAddition(
   name: string,
   index: number,
 ): PendingResourceAddition {
-  const identity = resourceAdditionIdentity(option.placement, name, index);
+  const targetKey = option.requiresName ? name : String(index);
+  const editTargetId = `edit:${option.placement.collectionPath}.${targetKey}`;
+  const label = option.requiresName
+    ? name
+    : `${option.label.replace(/^Add\s+/i, "")} ${index + 1}`;
   return {
-    ...identity,
+    id: `optimistic-add:${editTargetId}`,
+    editTargetId,
     groupId: option.placement.groupId,
+    label,
+    resourceName: label,
     resourcePlural: option.placement.resourcePlural,
+    resourceType: option.placement.resourceType,
     status: "syncing",
   };
 }
@@ -178,13 +116,20 @@ export function pendingResourceRename(
   resourceId: string,
   newName: string,
 ): PendingResourceRename {
-  const identity = resourceAdditionIdentity(option.placement, newName, 0);
+  const editTargetId = `edit:${[
+    ...option.path.slice(0, -1),
+    newName,
+  ].join(".")}`;
   return {
-    ...identity,
+    id: `optimistic-rename:${editTargetId}`,
+    editTargetId,
     groupId: option.placement.groupId,
+    label: newName,
     oldEditTargetId: option.editTargetId,
     oldId: resourceId,
+    resourceName: newName,
     resourcePlural: option.placement.resourcePlural,
+    resourceType: option.placement.resourceType,
     status: "syncing",
   };
 }

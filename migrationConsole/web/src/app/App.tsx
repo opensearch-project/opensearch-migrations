@@ -85,17 +85,20 @@ function firstSelectableId(snapshot: ManageSnapshot): string | null {
 }
 
 
-function draftHasEditTarget(
+function navigationResourceId(
   draft: ConfigDraft | undefined,
   targetId: string,
-): boolean {
-  if (!draft) return false;
-  const visit = (nodes: ConfigDraft["editState"]["nodes"]): boolean => (
-    nodes.some((node) => (
-      node.id === targetId || visit(node.children ?? [])
-    ))
+): string | null {
+  const resource = Object.values(draft?.navigation?.nodes ?? {}).find(
+    (node) => (
+      node.kind === "resource"
+      && node.capabilities.some((capability) => (
+        capability.kind === "edit"
+        && capability.editTargetId === targetId
+      ))
+    ),
   );
-  return visit(draft.editState.nodes);
+  return resource?.id ?? null;
 }
 
 
@@ -323,8 +326,7 @@ export function App() {
     () => (
       observedState && editContext
         ? projectEditSnapshot(
-          observedState,
-          configDraft.data,
+          configDraft.data?.navigation ?? observedState,
           pendingResourceAdditions,
           pendingResourceRenames,
         )
@@ -377,18 +379,18 @@ export function App() {
   const resourceDraftChanges = useMemo(
     () => (
       displayedState && editContext
-        ? resourceDraftChangeStates(displayedState, configDraft.data)
+        ? resourceDraftChangeStates(displayedState)
         : {}
     ),
-    [configDraft.data, displayedState, editContext],
+    [displayedState, editContext],
   );
   const resourceValidations = useMemo(
     () => (
       displayedState && editContext
-        ? resourceValidationStates(displayedState, configDraft.data)
+        ? resourceValidationStates(displayedState)
         : {}
     ),
-    [configDraft.data, displayedState, editContext],
+    [displayedState, editContext],
   );
   const observedSelectedNode = useMemo(
     () => (
@@ -513,8 +515,12 @@ export function App() {
     const currentDraft = queryClient.getQueryData<ConfigDraft>([
       "config-draft",
     ]);
+    const resourceId = navigationResourceId(
+      currentDraft,
+      addition.editTargetId,
+    );
     setPendingResourceAdditions((current) => (
-      draftHasEditTarget(currentDraft, addition.editTargetId)
+      resourceId
         ? current.filter((candidate) => candidate.id !== addition.id)
         : current.map((candidate) => (
           candidate.id === addition.id
@@ -522,9 +528,9 @@ export function App() {
             : candidate
         ))
     ));
-    setSelectedId(addition.id);
+    setSelectedId(resourceId ?? addition.id);
     setEditContext({
-      resourceId: addition.id,
+      resourceId: resourceId ?? addition.id,
       targetId: addition.editTargetId,
     });
   }, [queryClient]);
@@ -556,24 +562,42 @@ export function App() {
       });
       return;
     }
-    setPendingResourceRenames((current) => current.map((candidate) => (
-      candidate.oldId === rename.oldId
-        ? { ...candidate, status: "applied" }
-        : candidate
-    )));
-    setSelectedId(rename.id);
+    const currentDraft = queryClient.getQueryData<ConfigDraft>([
+      "config-draft",
+    ]);
+    const resourceId = navigationResourceId(
+      currentDraft,
+      rename.editTargetId,
+    );
+    setPendingResourceRenames((current) => (
+      resourceId
+        ? current.filter((candidate) => candidate.oldId !== rename.oldId)
+        : current.map((candidate) => (
+          candidate.oldId === rename.oldId
+            ? { ...candidate, status: "applied" }
+            : candidate
+        ))
+    ));
+    setSelectedId(resourceId ?? rename.id);
     setEditContext({
-      resourceId: rename.id,
+      resourceId: resourceId ?? rename.id,
       targetId: rename.editTargetId,
     });
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     if (!configDraft.data) return;
     setPendingResourceAdditions((current) => {
       const next = current.filter((addition) => (
         addition.status === "syncing"
-        || !draftHasEditTarget(configDraft.data, addition.editTargetId)
+        || !navigationResourceId(configDraft.data, addition.editTargetId)
+      ));
+      return next.length === current.length ? current : next;
+    });
+    setPendingResourceRenames((current) => {
+      const next = current.filter((rename) => (
+        rename.status === "syncing"
+        || !navigationResourceId(configDraft.data, rename.editTargetId)
       ));
       return next.length === current.length ? current : next;
     });

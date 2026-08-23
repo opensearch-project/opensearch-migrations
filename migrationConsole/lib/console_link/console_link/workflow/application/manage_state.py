@@ -11,7 +11,7 @@ from kubernetes.client.rest import ApiException
 
 from .. import resource_tree as resource_tree_module
 from ..commands.crd_utils import RESETTABLE_PLURALS
-from ..manage_tree_schema import group_plurals_for
+from ..manage_tree_schema import group_plurals_for, resource_type_label_for_plural
 from ..manage_tree_status import same_value_state
 from ..resource_tree import (
     PENDING_CONFIG_PHASE,
@@ -105,6 +105,7 @@ class _NodeDraft:
     comparisons: Tuple[ManageComparison, ...] = ()
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
+    resource_type: Optional[str] = None
     config_presence: Mapping[str, bool] = field(default_factory=dict)
 
 
@@ -400,6 +401,7 @@ class ManageStateService:
             comparisons=comparisons,
             resource_plural=resource.plural,
             resource_name=resource.name,
+            resource_type=resource_type_label_for_plural(resource.plural),
             config_presence=dict(resource.config_presence or {}),
         )
         drafts[resource_id] = draft
@@ -1021,6 +1023,7 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
             comparisons=draft.comparisons,
             resource_plural=draft.resource_plural,
             resource_name=draft.resource_name,
+            resource_type=draft.resource_type,
             config_presence=draft.config_presence,
         )
     return nodes
@@ -1051,6 +1054,7 @@ def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
         "comparisons": [item.to_dict() for item in draft.comparisons],
         "resourcePlural": draft.resource_plural,
         "resourceName": draft.resource_name,
+        "resourceType": draft.resource_type,
         "configPresence": dict(draft.config_presence),
     }
 

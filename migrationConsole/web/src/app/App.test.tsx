@@ -10,7 +10,12 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { expect, test, vi } from "vitest";
 
-import { getHealth } from "../api/client";
+import {
+  getHealth,
+  type ConfigDraft,
+  type ManageNode,
+  type ManageSnapshot,
+} from "../api/client";
 import { configDraft, manageSnapshot } from "../test/fixtures";
 import { server } from "../test/server";
 import { App } from "./App";
@@ -35,6 +40,174 @@ async function enterEditMode() {
   await userEvent.click(
     await screen.findByRole("button", { name: "Edit configuration" }),
   );
+}
+
+
+function configurationNavigation(snapshot: ManageSnapshot): ManageSnapshot {
+  const navigation = structuredClone(snapshot);
+  const stepIds = new Set(Object.values(navigation.nodes)
+    .filter((node) => node.kind === "workflow-step")
+    .map((node) => node.id));
+  stepIds.forEach((nodeId) => delete navigation.nodes[nodeId]);
+  Object.values(navigation.nodes).forEach((node) => {
+    node.childIds = node.childIds.filter((nodeId) => !stepIds.has(nodeId));
+  });
+  navigation.rootIds = navigation.rootIds.filter(
+    (nodeId) => !stepIds.has(nodeId),
+  );
+  return navigation;
+}
+
+
+function setNavigation(
+  draft: ConfigDraft,
+  snapshot: ManageSnapshot = manageSnapshot,
+): ManageSnapshot {
+  const navigation = configurationNavigation(snapshot);
+  draft.navigation = navigation;
+  return navigation;
+}
+
+
+function ensureNavigationGroup(
+  navigation: ManageSnapshot,
+  {
+    sectionId,
+    sectionLabel,
+    groupId,
+    groupLabel,
+  }: {
+    sectionId: string;
+    sectionLabel: string;
+    groupId: string;
+    groupLabel: string;
+  },
+) {
+  if (!navigation.nodes[sectionId]) {
+    navigation.nodes[sectionId] = {
+      id: sectionId,
+      revision: `test:${sectionId}`,
+      parentId: null,
+      childIds: [],
+      kind: "section",
+      label: sectionLabel,
+      description: null,
+      status: "ok",
+      phase: null,
+      valueSummary: null,
+      diagnostics: [],
+      capabilities: [],
+      details: [],
+      relationships: [],
+      comparisons: [],
+      resourcePlural: null,
+      resourceName: null,
+      resourceType: null,
+      configPresence: {},
+    };
+    navigation.rootIds.push(sectionId);
+  }
+  const section = navigation.nodes[sectionId];
+  if (!navigation.nodes[groupId]) {
+    navigation.nodes[groupId] = {
+      id: groupId,
+      revision: `test:${groupId}`,
+      parentId: sectionId,
+      childIds: [],
+      kind: "group",
+      label: groupLabel,
+      description: null,
+      status: "ok",
+      phase: null,
+      valueSummary: null,
+      diagnostics: [],
+      capabilities: [],
+      details: [],
+      relationships: [],
+      comparisons: [],
+      resourcePlural: null,
+      resourceName: null,
+      resourceType: null,
+      configPresence: {},
+    };
+  }
+  if (!section.childIds.includes(groupId)) section.childIds.push(groupId);
+}
+
+
+function addConfigNavigationResource(
+  navigation: ManageSnapshot,
+  {
+    id,
+    groupId,
+    label,
+    editTargetId,
+    resourcePlural,
+    resourceType,
+    status = "changed",
+    valueSummary = "Addition pending submission",
+    diagnostics = [],
+  }: {
+    id: string;
+    groupId: string;
+    label: string;
+    editTargetId: string;
+    resourcePlural: string;
+    resourceType: string;
+    status?: string;
+    valueSummary?: string;
+    diagnostics?: ManageNode["diagnostics"];
+  },
+) {
+  const group = navigation.nodes[groupId];
+  if (!group) throw new Error(`Missing test navigation group ${groupId}`);
+  navigation.nodes[id] = {
+    id,
+    revision: `test:${id}`,
+    parentId: groupId,
+    childIds: [],
+    kind: "resource",
+    label,
+    description: `${resourcePlural}/${label}`,
+    status,
+    phase: "Pending Config",
+    valueSummary,
+    diagnostics,
+    capabilities: [{
+      kind: "edit",
+      editTargetId,
+      label: `Edit ${label}`,
+    }],
+    details: [{
+      label: "Phase",
+      value: "Pending Config",
+      kind: "phase",
+    }],
+    relationships: [],
+    comparisons: [],
+    resourcePlural,
+    resourceName: label,
+    resourceType,
+    configPresence: {
+      deployed: false,
+      pending: true,
+    },
+  };
+  if (!group.childIds.includes(id)) group.childIds.push(id);
+}
+
+
+function addLegacySourceNavigation(draft: ConfigDraft): ConfigDraft {
+  const navigation = setNavigation(draft);
+  addConfigNavigationResource(navigation, {
+    id: "resource:sourceconfigs:legacy",
+    groupId: "group:Sources:Sources",
+    label: "legacy",
+    editTargetId: "edit:sourceClusters.legacy",
+    resourcePlural: "sourceconfigs",
+    resourceType: "Source cluster",
+  });
+  return draft;
 }
 
 
@@ -1459,6 +1632,12 @@ test("shows compact resource validation in navigation and hides valid detail", a
     gated: 0,
     blocked: 0,
   };
+  const navigation = setNavigation(validDraft, snapshot);
+  navigation.nodes[source.id].configState = {
+    validationErrors: 0,
+    validationWarnings: 0,
+    draftChangeCount: 0,
+  };
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
     http.get("*/api/v1/config", () => HttpResponse.json(validDraft)),
@@ -1486,8 +1665,16 @@ test("keeps warning detail inline without error taint or a validation section", 
     editTargetId: "edit:traffic.transform.configMap",
     label: "Edit replay",
   }];
+  const warningDraft = structuredClone(configDraft);
+  const navigation = setNavigation(warningDraft, snapshot);
+  navigation.nodes[replay.id].configState = {
+    validationErrors: 0,
+    validationWarnings: 1,
+    draftChangeCount: 0,
+  };
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => HttpResponse.json(warningDraft)),
   );
   renderApp();
 
@@ -1568,6 +1755,12 @@ test("taints validation errors and their configuration and navigation parents", 
   }];
   secret.label = "Credentials secret";
   secret.value = "";
+  const navigation = setNavigation(invalidDraft, snapshot);
+  navigation.nodes[source.id].configState = {
+    validationErrors: 1,
+    validationWarnings: 0,
+    draftChangeCount: 0,
+  };
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
     http.get("*/api/v1/config", () => HttpResponse.json(invalidDraft)),
@@ -1644,6 +1837,12 @@ test("highlights unsaved resources and fields with previous values", async () =>
     previousValue: "https://legacy.example.com:9200",
     previousValuePresent: true,
   };
+  const navigation = setNavigation(dirtyDraft, snapshot);
+  navigation.nodes[source.id].configState = {
+    validationErrors: 0,
+    validationWarnings: 0,
+    draftChangeCount: 1,
+  };
 
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
@@ -1701,6 +1900,7 @@ test("identifies resources within a mixed-type navigation group", async () => {
     capabilities: [],
     resourcePlural: "kafkaclusters",
     resourceName: "default",
+    resourceType: "Kafka cluster",
   };
   snapshot.nodes[s3Id] = {
     ...capture,
@@ -1713,6 +1913,7 @@ test("identifies resources within a mixed-type navigation group", async () => {
     capabilities: [],
     resourcePlural: "capturedtraffics",
     resourceName: "proxy-topic",
+    resourceType: "Captured traffic",
   };
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
@@ -1724,12 +1925,12 @@ test("identifies resources within a mixed-type navigation group", async () => {
     name: /^default, Kafka cluster, Ready$/,
   });
   const s3 = within(tree).getByRole("treeitem", {
-    name: /^proxy-topic, S3 source, Ready$/,
+    name: /^proxy-topic, Captured traffic, Ready$/,
   });
   expect(within(kafka).getByText("Kafka cluster")).toBeInTheDocument();
   expect(within(kafka).getByText("Ready")).toBeInTheDocument();
   expect(within(kafka).getByText("Configured")).toBeInTheDocument();
-  expect(within(s3).getByText("S3 source")).toBeInTheDocument();
+  expect(within(s3).getByText("Captured traffic")).toBeInTheDocument();
   expect(within(s3).getByText("Ready")).toBeInTheDocument();
   expect(within(s3).getByText("Configured")).toBeInTheDocument();
 });
@@ -1866,6 +2067,27 @@ test("adds a snapshot migration from its section without naming it first", async
     inputHint: {
       kind: "array" as const,
       addLabel: "snapshot migration",
+      resourceCollection: {
+        navigation: {
+          sectionId: "section:Snapshot Migration",
+          sectionLabel: "Snapshot Migration",
+          sectionOrder: 2,
+          groupId: "group:Snapshot Migration:Backfill",
+          groupLabel: "Backfill",
+          groupOrder: 1,
+          addControlId: "section:Snapshot Migration",
+        },
+        resource: {
+          kind: "SnapshotMigration",
+          plural: "snapshotmigrations",
+          typeLabel: "Snapshot migration",
+          identity: {
+            kind: "indexed-config",
+            prefix: "migration-",
+            firstIndex: 1,
+          },
+        },
+      },
     },
     diagnostics: [{
       severity: "warning" as const,
@@ -1884,6 +2106,7 @@ test("adds a snapshot migration from its section without naming it first", async
     diagnostics: [],
     children: [collection],
   });
+  setNavigation(initialDraft, snapshot);
 
   const updatedDraft = structuredClone(initialDraft);
   const updatedCollection = updatedDraft.editState.nodes.at(-1)?.children[0];
@@ -2031,6 +2254,18 @@ test("adds a snapshot migration from its section without naming it first", async
   }, addCommand];
   updatedDraft.dirty = true;
   updatedDraft.draftRevision = "config-draft-snapshot-added";
+  if (!updatedDraft.navigation) {
+    throw new Error("Missing snapshot navigation fixture");
+  }
+  addConfigNavigationResource(updatedDraft.navigation, {
+    id: "config:snapshotMigrationConfigs:0",
+    groupId: "group:Snapshot Migration:Backfill",
+    label: "migration-1",
+    editTargetId: "edit:snapshotMigrationConfigs.0",
+    resourcePlural: "snapshotmigrations",
+    resourceType: "Snapshot migration",
+    status: "required",
+  });
 
   const configuredDraft = structuredClone(updatedDraft);
   const configuredPass = configuredDraft.editState.nodes.at(-1)
@@ -2325,6 +2560,118 @@ test("protects and locally discards unsent raw YAML edits on exit", async () => 
   });
   expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
+});
+
+
+test("restores config-only source and target navigation while editing", async () => {
+  const draft = structuredClone(configDraft);
+  draft.editState.nodes.push({
+    id: "edit:targetClusters",
+    path: ["targetClusters"],
+    label: "Target clusters",
+    valueKind: "record",
+    presence: "required",
+    essential: true,
+    inputHint: {
+      kind: "record",
+      addLabel: "target cluster",
+      resourceCollection: {
+        navigation: {
+          sectionId: "section:Targets",
+          sectionLabel: "Targets",
+          sectionOrder: 1,
+          groupId: "group:Targets:Targets",
+          groupLabel: "Targets",
+          groupOrder: 0,
+        },
+        resource: {
+          kind: "TargetConfig",
+          plural: "targetconfigs",
+          typeLabel: "Target cluster",
+          identity: { kind: "named" },
+        },
+      },
+    },
+    status: "ok",
+    diagnostics: [],
+    children: [{
+      id: "edit:targetClusters.modern",
+      path: ["targetClusters", "modern"],
+      label: "modern",
+      valueKind: "object",
+      presence: "required",
+      removable: true,
+      status: "ok",
+      diagnostics: [],
+      children: [{
+        id: "edit:targetClusters.modern.endpoint",
+        path: ["targetClusters", "modern", "endpoint"],
+        label: "Endpoint: https://target.example.com:9200",
+        value: "https://target.example.com:9200",
+        valueAuthored: true,
+        valueKind: "scalar",
+        valueType: "string",
+        presence: "required",
+        required: true,
+        status: "ok",
+        diagnostics: [],
+        children: [],
+      }],
+    }, {
+      id: "edit:targetClusters:add",
+      path: ["targetClusters"],
+      label: "+ Add target cluster",
+      valueKind: "command",
+      status: "ok",
+      diagnostics: [],
+      command: {
+        requiresName: true,
+        editAdded: true,
+        autoEditAdded: true,
+      },
+      children: [],
+    }],
+  });
+  const navigation = setNavigation(draft);
+  addConfigNavigationResource(navigation, {
+    id: "resource:sourceconfigs:legacy",
+    groupId: "group:Sources:Sources",
+    label: "legacy",
+    editTargetId: "edit:sourceClusters.legacy",
+    resourcePlural: "sourceconfigs",
+    resourceType: "Source cluster",
+  });
+  ensureNavigationGroup(navigation, {
+    sectionId: "section:Targets",
+    sectionLabel: "Targets",
+    groupId: "group:Targets:Targets",
+    groupLabel: "Targets",
+  });
+  addConfigNavigationResource(navigation, {
+    id: "resource:targetconfigs:modern",
+    groupId: "group:Targets:Targets",
+    label: "modern",
+    editTargetId: "edit:targetClusters.modern",
+    resourcePlural: "targetconfigs",
+    resourceType: "Target cluster",
+  });
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const legacy = within(tree).getByRole("treeitem", { name: /^legacy,/ });
+  const modern = within(tree).getByRole("treeitem", { name: /^modern,/ });
+  expect(legacy).toBeInTheDocument();
+  expect(modern).toBeInTheDocument();
+
+  await userEvent.click(modern);
+  expect(await screen.findByRole("heading", { name: "Edit modern" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Endpoint" }))
+    .toHaveValue("https://target.example.com:9200");
 });
 
 
@@ -2738,6 +3085,13 @@ test("keeps a deleted source selected as a tombstone and previews dependents", a
   sources.children = [];
   removedDraft.dirty = true;
   removedDraft.draftRevision = "draft-source-removed";
+  const removedNavigation = setNavigation(removedDraft, snapshot);
+  removedNavigation.nodes[source.id] = {
+    ...removedNavigation.nodes[source.id],
+    revision: "source-removed",
+    status: "removed",
+    valueSummary: "Marked for removal",
+  };
 
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
@@ -2809,8 +3163,16 @@ test("opens a pending removal with a resource fallback target as a tombstone", a
     editTargetId: "edit:sourceconfigs:source",
     label: "Edit source",
   }];
+  const pendingDraft = structuredClone(configDraft);
+  const pendingNavigation = setNavigation(pendingDraft, snapshot);
+  pendingNavigation.nodes[source.id] = {
+    ...pendingNavigation.nodes[source.id],
+    revision: "source-removal-pending",
+    status: "removed",
+  };
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => HttpResponse.json(pendingDraft)),
   );
   renderApp();
 
@@ -2895,6 +3257,26 @@ test("shows a newly added resource while the server operation is pending", async
   ];
   updatedDraft.dirty = true;
   updatedDraft.draftRevision = "config-draft-immediate";
+  const immediateNavigation = setNavigation(updatedDraft);
+  addConfigNavigationResource(immediateNavigation, {
+    id: "resource:sourceconfigs:immediate",
+    groupId: "group:Sources:Sources",
+    label: "immediate",
+    editTargetId: "edit:sourceClusters.immediate",
+    resourcePlural: "sourceconfigs",
+    resourceType: "Source cluster",
+    status: "required",
+    diagnostics: [{
+      severity: "required",
+      message: "endpoint is required.",
+      path: ["sourceClusters", "immediate", "endpoint"],
+      source: null,
+      code: null,
+      title: null,
+      remedy: null,
+      technicalDetail: null,
+    }],
+  });
 
   server.use(
     http.post("*/api/v1/config/operations", async () => {
@@ -2949,6 +3331,10 @@ test("shows a newly added resource while the server operation is pending", async
 
 
 test("cancels inline resource naming and restores tree selection and focus", async () => {
+  const draft = addLegacySourceNavigation(structuredClone(configDraft));
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+  );
   renderApp();
   await enterEditMode();
 
@@ -3047,6 +3433,7 @@ test("abandons inline resource naming when focus moves elsewhere", async () => {
 
 test("renames a named resource from the tree and follows its new identity", async () => {
   let operation: unknown;
+  const initialDraft = addLegacySourceNavigation(structuredClone(configDraft));
   const renamedDraft = structuredClone(configDraft);
   const sourceCollection = renamedDraft.editState.nodes.find(
     (node) => node.id === "edit:sourceClusters",
@@ -3069,8 +3456,18 @@ test("renames a named resource from the tree and follows its new identity", asyn
   source.label = "modern";
   renamedDraft.dirty = true;
   renamedDraft.draftRevision = "config-draft-modern";
+  const renamedNavigation = setNavigation(renamedDraft);
+  addConfigNavigationResource(renamedNavigation, {
+    id: "resource:sourceconfigs:modern",
+    groupId: "group:Sources:Sources",
+    label: "modern",
+    editTargetId: "edit:sourceClusters.modern",
+    resourcePlural: "sourceconfigs",
+    resourceType: "Source cluster",
+  });
 
   server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(initialDraft)),
     http.post("*/api/v1/config/operations", async ({ request }) => {
       const body = await request.json() as { operation: unknown };
       operation = body.operation;
@@ -3108,7 +3505,7 @@ test("renames a named resource from the tree and follows its new identity", asyn
   });
 
   expect(await within(tree).findByRole("treeitem", {
-    name: /^modern, Rename pending submission$/,
+    name: /^modern, Addition pending submission$/,
   })).toHaveAttribute("aria-selected", "true");
   expect(within(tree).queryByRole("treeitem", {
     name: /^legacy,/,
@@ -3122,7 +3519,9 @@ test("renames a named resource from the tree and follows its new identity", asyn
 
 
 test("restores a resource after a tree rename is rejected", async () => {
+  const draft = addLegacySourceNavigation(structuredClone(configDraft));
   server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
     http.post("*/api/v1/config/operations", () =>
       HttpResponse.json(
         { detail: "Config entry already exists at sourceClusters.modern" },

@@ -150,6 +150,18 @@ def test_openapi_exposes_the_versioned_manage_snapshot_contract(tmp_path):
     assert "ManageSnapshotV1" in schemas
     assert "ManageNodeV1" in schemas
     assert schemas["ManageSnapshotV1"]["properties"]["formatVersion"]["const"] == 1
+    assert schemas["ManageNodeV1"]["properties"]["configState"] == {
+        "anyOf": [
+            {"$ref": "#/components/schemas/ConfigNodeStateV1"},
+            {"type": "null"},
+        ],
+        "default": None,
+    }
+    assert schemas["EditInputHintV1"]["properties"][
+        "resourceCollection"
+    ]["anyOf"][0] == {
+        "$ref": "#/components/schemas/ResourceCollectionHintV1",
+    }
 
 
 def test_openapi_generator_writes_current_application_contract(tmp_path):
@@ -178,6 +190,14 @@ class _Coordinator:
         if isinstance(self.observation, Exception):
             raise self.observation
         return self.observation
+
+    @property
+    def current_observation(self):
+        return (
+            self.observation
+            if isinstance(self.observation, Observation)
+            else None
+        )
 
     async def stream_events(self, last_event_id):
         self.event_cursor = last_event_id
@@ -980,6 +1000,76 @@ def test_config_routes_expose_recursive_edit_state_without_raw_yaml(tmp_path):
     assert payload["editState"]["nodes"][0]["children"][0]["value"] is True
     assert payload["editState"]["nodes"][0]["essential"] is True
     assert "rawYaml" not in payload
+
+
+def test_config_routes_include_server_projected_navigation(tmp_path):
+    drafts = _Drafts()
+    state = _edit_state()
+    state["nodes"] = [{
+        "id": "edit:sourceClusters",
+        "path": ["sourceClusters"],
+        "label": "Source clusters",
+        "valueKind": "record",
+        "status": "ok",
+        "inputHint": {
+            "kind": "record",
+            "resourceCollection": {
+                "navigation": {
+                    "sectionId": "section:Sources",
+                    "sectionLabel": "Sources",
+                    "sectionOrder": 0,
+                    "groupId": "group:Sources:Sources",
+                    "groupLabel": "Sources",
+                    "groupOrder": 0,
+                },
+                "resource": {
+                    "kind": "SourceConfig",
+                    "plural": "sourceconfigs",
+                    "typeLabel": "Source cluster",
+                    "identity": {"kind": "named"},
+                },
+            },
+        },
+        "diagnostics": [],
+        "children": [{
+            "id": "edit:sourceClusters.modern",
+            "path": ["sourceClusters", "modern"],
+            "label": "modern",
+            "valueKind": "object",
+            "status": "ok",
+            "diagnostics": [],
+            "children": [],
+        }],
+    }]
+    drafts.current = ConfigDraft(
+        base_revision="base-1",
+        draft_revision="draft-2",
+        dirty=True,
+        edit_state=state,
+    )
+    coordinator = _Coordinator(Observation(snapshot=_snapshot()))
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+        coordinator=coordinator,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    navigation = response.json()["navigation"]
+    assert navigation["rootIds"][0] == "section:Sources"
+    assert navigation["nodes"]["resource:sourceconfigs:modern"][
+        "resourceType"
+    ] == "Source cluster"
+    assert navigation["nodes"]["resource:sourceconfigs:modern"][
+        "configState"
+    ] == {
+        "validationErrors": 0,
+        "validationWarnings": 0,
+        "draftChangeCount": 0,
+    }
 
 
 def test_config_open_returns_actionable_service_error(tmp_path):

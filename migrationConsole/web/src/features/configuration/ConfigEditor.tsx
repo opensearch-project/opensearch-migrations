@@ -42,7 +42,6 @@ import { ExternalResourceEditor } from "./ExternalResourceEditor";
 import {
   pendingResourceAddition,
   pendingResourceRename,
-  resourceAdditionIdentity,
   resourceAddPlacement,
   type PendingResourceAddition,
   type PendingResourceRename,
@@ -130,7 +129,7 @@ function addCommand(node: EditNode): EditNode | null {
 function topLevelAddContexts(nodes: EditNode[]): AddContext[] {
   const result: AddContext[] = [];
   const visit = (node: EditNode) => {
-    if (resourceAddPlacement(node.path)) {
+    if (resourceAddPlacement(node)) {
       const command = addCommand(node);
       if (command) result.push({ command, parent: node });
     }
@@ -174,10 +173,10 @@ const KUBERNETES_NAME_MESSAGE =
 function resourceRenameOptions(nodes: EditNode[]): ResourceRenameOption[] {
   const result: ResourceRenameOption[] = [];
   const visit = (node: EditNode) => {
-    const placement = resourceAddPlacement(node.path);
+    const placement = resourceAddPlacement(node);
     if (placement) {
       const collectionDepth = node.path.length;
-      propertyChildren(node).forEach((child, index) => {
+      propertyChildren(node).forEach((child) => {
         if (
           child.path.length !== collectionDepth + 1
           || !renameableConfigPath(child.path)
@@ -190,15 +189,10 @@ function resourceRenameOptions(nodes: EditNode[]): ResourceRenameOption[] {
         const kubernetesBacked = (
           child.path.length === 3 && child.path[0] === "traffic"
         );
-        const identity = resourceAdditionIdentity(
-          placement,
-          currentName,
-          index,
-        );
         result.push({
           currentName,
           editTargetId: child.id,
-          label: identity.label,
+          label: currentName,
           path: child.path,
           pattern: kubernetesBacked
             ? KUBERNETES_NAME_PATTERN
@@ -208,7 +202,6 @@ function resourceRenameOptions(nodes: EditNode[]): ResourceRenameOption[] {
                 ? childValidation.pattern
                 : undefined,
           placement,
-          resourceId: identity.id,
           validationMessage: kubernetesBacked
             ? KUBERNETES_NAME_MESSAGE
             : typeof parentHint.message === "string"
@@ -984,7 +977,7 @@ function ConfigPropertyRow({
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
   const children = propertyChildren(node);
   const commands = addCommands(node);
-  const topLevelResourceCommand = resourceAddPlacement(node.path)
+  const topLevelResourceCommand = resourceAddPlacement(node)
     ? commands[0] ?? null
     : null;
   const inlineCommands = topLevelResourceCommand ? [] : commands;
@@ -1519,7 +1512,7 @@ export function ConfigEditor({
   );
   const resourceAddOptions = useMemo(
     () => topLevelAdds.flatMap((context) => {
-      const placement = resourceAddPlacement(context.parent.path);
+      const placement = resourceAddPlacement(context.parent);
       const validation = hintRecord(context.command.validation);
       const inputHint = hintRecord(context.command.inputHint);
       return placement ? [{

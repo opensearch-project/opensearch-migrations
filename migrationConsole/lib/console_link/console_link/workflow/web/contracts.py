@@ -152,6 +152,12 @@ class RelationshipV1(WebModel):
     target_status: str
 
 
+class ConfigNodeStateV1(WebModel):
+    validation_errors: int = 0
+    validation_warnings: int = 0
+    draft_change_count: int = 0
+
+
 class ManageNodeV1(WebModel):
     id: str
     revision: str
@@ -170,7 +176,9 @@ class ManageNodeV1(WebModel):
     comparisons: List[ComparisonV1] = Field(default_factory=list)
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
+    resource_type: Optional[str] = None
     config_presence: Dict[str, bool] = Field(default_factory=dict)
+    config_state: Optional[ConfigNodeStateV1] = None
 
 
 class WorkflowV1(WebModel):
@@ -246,6 +254,59 @@ class EditDraftChangeV1(WebModel):
     previous_value_present: bool = False
 
 
+class ResourceNavigationHintV1(WebModel):
+    section_id: str
+    section_label: str
+    section_order: int
+    group_id: str
+    group_label: str
+    group_order: int
+    add_control_id: Optional[str] = None
+
+
+class NamedResourceIdentityHintV1(WebModel):
+    kind: Literal["named"]
+    prefix: Optional[str] = None
+    suffix: Optional[str] = None
+
+
+class IndexedResourceIdentityHintV1(WebModel):
+    kind: Literal["indexed-config"]
+    prefix: str
+    first_index: int
+
+
+ResourceIdentityHintV1 = Annotated[
+    Union[
+        NamedResourceIdentityHintV1,
+        IndexedResourceIdentityHintV1,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+class ResourceDescriptorHintV1(WebModel):
+    kind: str
+    plural: str
+    type_label: str
+    identity: ResourceIdentityHintV1
+
+
+class ResourceCollectionHintV1(WebModel):
+    navigation: ResourceNavigationHintV1
+    resource: ResourceDescriptorHintV1
+
+
+class EditInputHintV1(WebModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="allow",
+    )
+
+    resource_collection: Optional[ResourceCollectionHintV1] = None
+
+
 class EditNodeV1(WebModel):
     id: str
     path: List[str]
@@ -275,7 +336,7 @@ class EditNodeV1(WebModel):
     status_counts: Optional[EditStatusCountsV1] = None
     draft_change: Optional[EditDraftChangeV1] = None
     draft_change_count: Optional[int] = None
-    input_hint: Optional[Dict[str, Any]] = None
+    input_hint: Optional[EditInputHintV1] = None
     external_ref: Optional[Dict[str, Any]] = None
     effective_default: Optional[Dict[str, Any]] = None
     validation: Optional[Dict[str, str]] = None
@@ -311,15 +372,25 @@ class ConfigDraftV1(WebModel):
     draft_revision: str
     dirty: bool
     edit_state: EditStateV1
+    navigation: Optional[ManageSnapshotV1] = None
     raw_yaml: Optional[str] = None
 
     @classmethod
-    def from_domain(cls, draft: ConfigDraft) -> "ConfigDraftV1":
+    def from_domain(
+        cls,
+        draft: ConfigDraft,
+        *,
+        navigation: Optional[ManageSnapshot] = None,
+    ) -> "ConfigDraftV1":
         return cls.model_validate({
             "baseRevision": draft.base_revision,
             "draftRevision": draft.draft_revision,
             "dirty": draft.dirty,
             "editState": draft.edit_state,
+            "navigation": (
+                ManageSnapshotV1.from_domain(navigation)
+                if navigation is not None else None
+            ),
             "rawYaml": draft.repair_yaml,
         })
 
@@ -936,9 +1007,14 @@ class ExternalResourceMutationV1(WebModel):
     def from_domain(
         cls,
         mutation: ExternalResourceMutation,
+        *,
+        navigation: Optional[ManageSnapshot] = None,
     ) -> "ExternalResourceMutationV1":
         return cls.model_validate({
-            "draft": ConfigDraftV1.from_domain(mutation.draft),
+            "draft": ConfigDraftV1.from_domain(
+                mutation.draft,
+                navigation=navigation,
+            ),
             "name": mutation.name,
             "kind": mutation.kind,
             "message": mutation.message,

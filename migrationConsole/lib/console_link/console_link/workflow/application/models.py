@@ -145,6 +145,20 @@ class ManageRelationship:
 
 
 @dataclass(frozen=True)
+class ManageConfigState:
+    validation_errors: int = 0
+    validation_warnings: int = 0
+    draft_change_count: int = 0
+
+    def to_dict(self) -> Dict[str, int]:
+        return {
+            "validationErrors": self.validation_errors,
+            "validationWarnings": self.validation_warnings,
+            "draftChangeCount": self.draft_change_count,
+        }
+
+
+@dataclass(frozen=True)
 class ManageNode:
     id: str
     revision: str
@@ -163,7 +177,9 @@ class ManageNode:
     comparisons: Tuple[ManageComparison, ...] = ()
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
+    resource_type: Optional[str] = None
     config_presence: Mapping[str, bool] = field(default_factory=dict)
+    config_state: Optional[ManageConfigState] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {
@@ -191,8 +207,12 @@ class ManageNode:
             result["resourcePlural"] = self.resource_plural
         if self.resource_name:
             result["resourceName"] = self.resource_name
+        if self.resource_type:
+            result["resourceType"] = self.resource_type
         if self.config_presence:
             result["configPresence"] = dict(self.config_presence)
+        if self.config_state is not None:
+            result["configState"] = self.config_state.to_dict()
         return result
 
 
