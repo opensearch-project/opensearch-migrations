@@ -167,6 +167,11 @@ def test_openapi_exposes_the_versioned_manage_snapshot_contract(tmp_path):
     ]["anyOf"][0] == {
         "$ref": "#/components/schemas/DefinitionCollectionHintV1",
     }
+    assert schemas["DefinitionNavigationHintV1"]["properties"][
+        "groupId"
+    ]["anyOf"][0] == {
+        "type": "string",
+    }
     assert schemas["EditNodeV1"]["properties"]["referenceTargetId"] == {
         "anyOf": [
             {"type": "string"},

@@ -230,7 +230,8 @@ function addSourceDefinitionNavigation(
   const sourceId = "resource:sourceconfigs:legacy";
   const source = navigation.nodes[sourceId];
   if (!source) throw new Error("Missing source navigation node");
-  const groupId = `definition-group:${groupLabel.toLocaleLowerCase()}`;
+  const collectionTargetId = targetId.slice(0, targetId.lastIndexOf("."));
+  const groupId = `definition-group:${collectionTargetId}`;
   const definitionId = `definition:${targetId}`;
   navigation.nodes[groupId] = {
     id: groupId,
@@ -276,6 +277,120 @@ function addSourceDefinitionNavigation(
     resourcePlural: null,
     resourceName: null,
     resourceType: typeLabel,
+    configPresence: {},
+  };
+  source.childIds.push(groupId);
+}
+
+
+function addSourceDefinitionCollection(
+  draft: ConfigDraft,
+  {
+    addLabel,
+    collectionName,
+    groupLabel,
+    groupOrder,
+    typeLabel,
+  }: {
+    addLabel: string;
+    collectionName: string;
+    groupLabel: string;
+    groupOrder: number;
+    typeLabel: string;
+  },
+) {
+  const sourceEdit = draft.editState.nodes
+    .flatMap((node) => node.children)
+    .find((node) => node.id === "edit:sourceClusters.legacy");
+  if (!sourceEdit) throw new Error("Missing source edit node");
+  let snapshotInfo = sourceEdit.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy.snapshotInfo",
+  );
+  if (!snapshotInfo) {
+    snapshotInfo = {
+      id: "edit:sourceClusters.legacy.snapshotInfo",
+      path: ["sourceClusters", "legacy", "snapshotInfo"],
+      label: "Snapshot information",
+      valueKind: "object",
+      status: "ok",
+      diagnostics: [],
+      children: [],
+    };
+    sourceEdit.children.push(snapshotInfo);
+  }
+  const collectionTargetId = [
+    "edit:sourceClusters.legacy.snapshotInfo",
+    collectionName,
+  ].join(".");
+  const collectionPath = [
+    "sourceClusters",
+    "legacy",
+    "snapshotInfo",
+    collectionName,
+  ];
+  const groupId = `definition-group:${collectionTargetId}`;
+  snapshotInfo.children.push({
+    id: collectionTargetId,
+    path: collectionPath,
+    label: groupLabel,
+    valueKind: "record",
+    status: "ok",
+    inputHint: {
+      kind: "record",
+      addLabel,
+      definitionCollection: {
+        ownerAncestorLevels: 2,
+        navigation: {
+          groupLabel,
+          groupOrder,
+          groupId,
+        },
+        definition: {
+          typeLabel,
+        },
+      },
+    },
+    diagnostics: [],
+    children: [{
+      id: `${collectionTargetId}:add`,
+      path: collectionPath,
+      label: `+ Add ${addLabel}`,
+      valueKind: "command",
+      status: "ok",
+      command: {
+        requiresName: true,
+        editAdded: false,
+        autoEditAdded: true,
+      },
+      diagnostics: [],
+      children: [],
+    }],
+  });
+
+  const navigation = draft.navigation;
+  if (!navigation) throw new Error("Missing configuration navigation");
+  const sourceId = "resource:sourceconfigs:legacy";
+  const source = navigation.nodes[sourceId];
+  if (!source) throw new Error("Missing source navigation node");
+  navigation.nodes[groupId] = {
+    id: groupId,
+    revision: `test:${groupId}`,
+    parentId: sourceId,
+    childIds: [],
+    kind: "group",
+    label: groupLabel,
+    description: null,
+    status: "ok",
+    phase: null,
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: null,
+    resourceName: null,
+    resourceType: null,
     configPresence: {},
   };
   source.childIds.push(groupId);
@@ -2360,6 +2475,79 @@ test("offers top-level add actions in navigation during scoped editing", async (
     path: ["sourceClusters"],
     value: { name: "next-source" },
   }]));
+});
+
+
+test("adds nested definitions from their left-navigation groups", async () => {
+  const draft = addLegacySourceNavigation(structuredClone(configDraft));
+  addSourceDefinitionCollection(draft, {
+    addLabel: "snapshot repository",
+    collectionName: "repos",
+    groupLabel: "Repositories",
+    groupOrder: 0,
+    typeLabel: "Snapshot repository",
+  });
+  addSourceDefinitionCollection(draft, {
+    addLabel: "source snapshot",
+    collectionName: "snapshots",
+    groupLabel: "Snapshots",
+    groupOrder: 1,
+    typeLabel: "Source snapshot",
+  });
+  const operations: unknown[] = [];
+  let releaseOperation: (() => void) | null = null;
+  const operationStarted = new Promise<void>((resolve) => {
+    releaseOperation = resolve;
+  });
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      await operationStarted;
+      return HttpResponse.json(draft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  const sourceItem = within(tree).getByRole("treeitem", {
+    name: /^legacy/,
+  });
+  await userEvent.click(within(sourceItem).getByRole("button", {
+    name: "Expand legacy",
+  }));
+  const repositories = within(tree).getByRole("treeitem", {
+    name: /^Repositories$/,
+  });
+  expect(within(repositories).getByRole("button", {
+    name: "Add snapshot repository",
+  })).toBeInTheDocument();
+  expect(within(tree).getByRole("button", {
+    name: "Add source snapshot",
+  })).toBeInTheDocument();
+
+  await userEvent.click(within(repositories).getByRole("button", {
+    name: "Add snapshot repository",
+  }));
+  await userEvent.type(within(tree).getByRole("textbox", {
+    name: "snapshot repository name",
+  }), "repo2");
+  await userEvent.keyboard("{Enter}");
+
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^repo2, Snapshot repository, Syncing configuration$/,
+  })).toHaveAttribute("aria-selected", "true");
+  expect(operations).toEqual([{
+    op: "add",
+    path: ["sourceClusters", "legacy", "snapshotInfo", "repos"],
+    value: { name: "repo2" },
+  }]);
+
+  releaseOperation?.();
 });
 
 

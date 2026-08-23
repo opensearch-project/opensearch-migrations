@@ -161,7 +161,7 @@ function renameableConfigPath(path: readonly string[]): boolean {
     path.length === 5
     && path[0] === "sourceClusters"
     && path[2] === "snapshotInfo"
-    && ["repos", "snapshots"].includes(path[3])
+    && ["repos", "snapshots", "backups"].includes(path[3])
   );
 }
 
@@ -176,12 +176,12 @@ function resourceRenameOptions(nodes: EditNode[]): ResourceRenameOption[] {
   const result: ResourceRenameOption[] = [];
   const visit = (node: EditNode) => {
     const placement = resourceAddPlacement(node);
-    if (placement) {
+    const command = addCommand(node);
+    if (placement && command?.command?.requiresName !== false) {
       const collectionDepth = node.path.length;
       propertyChildren(node).forEach((child) => {
         if (
           child.path.length !== collectionDepth + 1
-          || !renameableConfigPath(child.path)
         ) {
           return;
         }

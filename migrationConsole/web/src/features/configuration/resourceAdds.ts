@@ -5,7 +5,8 @@ export interface ResourceAddPlacement {
   addControlId?: string;
   collectionPath: string;
   groupId: string;
-  resourcePlural: string;
+  nodeKind: "resource" | "config-definition";
+  resourcePlural?: string;
   resourceType: string;
 }
 
@@ -51,8 +52,9 @@ export interface PendingResourceAddition {
   editTargetId: string;
   groupId: string;
   label: string;
+  nodeKind: "resource" | "config-definition";
   resourceName: string;
-  resourcePlural: string;
+  resourcePlural?: string;
   resourceType: string;
   status: "syncing" | "awaiting-draft";
 }
@@ -63,6 +65,7 @@ export interface PendingResourceRename {
   groupId: string;
   id: string;
   label: string;
+  nodeKind: "resource" | "config-definition";
   oldEditTargetId: string;
   oldId: string;
   resourceName: string;
@@ -76,14 +79,24 @@ export function resourceAddPlacement(
   node: Pick<EditNode, "inputHint" | "path">,
 ): ResourceAddPlacement | null {
   const collection = node.inputHint?.resourceCollection;
-  if (!collection) return null;
-  const { navigation, resource } = collection;
+  if (collection) {
+    const { navigation, resource } = collection;
+    return {
+      addControlId: navigation.addControlId ?? undefined,
+      collectionPath: node.path.join("."),
+      groupId: navigation.groupId,
+      nodeKind: "resource",
+      resourcePlural: resource.plural,
+      resourceType: resource.typeLabel,
+    };
+  }
+  const definition = node.inputHint?.definitionCollection;
+  if (!definition?.navigation.groupId) return null;
   return {
-    addControlId: navigation.addControlId ?? undefined,
     collectionPath: node.path.join("."),
-    groupId: navigation.groupId,
-    resourcePlural: resource.plural,
-    resourceType: resource.typeLabel,
+    groupId: definition.navigation.groupId,
+    nodeKind: "config-definition",
+    resourceType: definition.definition.typeLabel,
   };
 }
 
@@ -103,6 +116,7 @@ export function pendingResourceAddition(
     editTargetId,
     groupId: option.placement.groupId,
     label,
+    nodeKind: option.placement.nodeKind,
     resourceName: label,
     resourcePlural: option.placement.resourcePlural,
     resourceType: option.placement.resourceType,
@@ -125,6 +139,7 @@ export function pendingResourceRename(
     editTargetId,
     groupId: option.placement.groupId,
     label: newName,
+    nodeKind: option.placement.nodeKind,
     oldEditTargetId: option.editTargetId,
     oldId: resourceId,
     resourceName: newName,

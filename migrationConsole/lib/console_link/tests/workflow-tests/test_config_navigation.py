@@ -89,6 +89,7 @@ def _definition_collection(
     type_label,
     children,
 ):
+    group_id = f"definition-group:edit:{'.'.join(path)}"
     return {
         "id": f"edit:{'.'.join(path)}",
         "path": path,
@@ -101,6 +102,7 @@ def _definition_collection(
                 "navigation": {
                     "groupLabel": group_label,
                     "groupOrder": group_order,
+                    "groupId": group_id,
                 },
                 "definition": {
                     "typeLabel": type_label,
@@ -371,6 +373,10 @@ def test_project_config_navigation_places_nested_definitions_under_their_owner()
         "definition-group:edit:sourceClusters.legacy.snapshotInfo.snapshots",
     )
     repo_group = projected.nodes[source_node.child_ids[0]]
+    assert repo_group.id == (
+        "definition-group:edit:"
+        "sourceClusters.legacy.snapshotInfo.repos"
+    )
     assert repo_group.label == "Repositories"
     repo = projected.nodes[repo_group.child_ids[0]]
     assert repo.kind == "config-definition"

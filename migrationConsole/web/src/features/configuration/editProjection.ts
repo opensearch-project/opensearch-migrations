@@ -115,9 +115,11 @@ function appendAddition(
     revision,
     parentId: group.id,
     childIds: [],
-    kind: "resource",
+    kind: addition.nodeKind,
     label: addition.label,
-    description: `${addition.resourcePlural}/${addition.resourceName}`,
+    description: addition.nodeKind === "config-definition"
+      ? addition.resourceType
+      : `${addition.resourcePlural}/${addition.resourceName}`,
     status,
     phase: status === "syncing" ? "Syncing" : "Pending Config",
     valueSummary,
@@ -134,8 +136,10 @@ function appendAddition(
     }],
     relationships: [],
     comparisons: [],
-    resourcePlural: addition.resourcePlural,
-    resourceName: addition.resourceName,
+    resourcePlural: addition.resourcePlural ?? null,
+    resourceName: addition.nodeKind === "resource"
+      ? addition.resourceName
+      : null,
     resourceType: addition.resourceType,
     configPresence: {
       deployed: false,

@@ -92,7 +92,7 @@ function navigationResourceId(
 ): string | null {
   const resource = Object.values(draft?.navigation?.nodes ?? {}).find(
     (node) => (
-      node.kind === "resource"
+      ["resource", "config-definition"].includes(node.kind)
       && node.capabilities.some((capability) => (
         capability.kind === "edit"
         && capability.editTargetId === targetId

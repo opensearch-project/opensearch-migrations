@@ -40,6 +40,7 @@ class _Placement:
 class _DefinitionPlacement:
     collection_path: Tuple[str, ...]
     owner_target_id: str
+    group_id: str
     group_label: str
     group_order: int
     definition_type: str
@@ -258,6 +259,8 @@ def _definition_placement(
     definition = _mapping(collection.get("definition"))
     path = node.get("path")
     owner_ancestor_levels = collection.get("ownerAncestorLevels")
+    group_id = navigation.get("groupId")
+    node_id = node.get("id")
     if (
         not isinstance(path, list)
         or not path
@@ -270,10 +273,15 @@ def _definition_placement(
         or not isinstance(definition.get("typeLabel"), str)
     ):
         return None
+    if not isinstance(group_id, str):
+        if not isinstance(node_id, str):
+            return None
+        group_id = f"definition-group:{node_id}"
     owner_path = path[:-owner_ancestor_levels]
     return _DefinitionPlacement(
         collection_path=tuple(path),
         owner_target_id=f"edit:{'.'.join(owner_path)}",
+        group_id=group_id,
         group_label=navigation["groupLabel"],
         group_order=navigation["groupOrder"],
         definition_type=definition["typeLabel"],
@@ -518,7 +526,7 @@ def _add_draft_definitions(
             collection = edit_nodes.get(collection_id)
             if collection is None:
                 continue
-            group_id = f"definition-group:{collection_id}"
+            group_id = placement.group_id
             group_order[group_id] = placement.group_order
             definition_ids: list[str] = []
             for child in _mapping_children(collection):

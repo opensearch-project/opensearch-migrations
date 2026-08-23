@@ -300,6 +300,7 @@ class ResourceCollectionHintV1(WebModel):
 class DefinitionNavigationHintV1(WebModel):
     group_label: str
     group_order: int
+    group_id: Optional[str] = None
 
 
 class DefinitionDescriptorHintV1(WebModel):

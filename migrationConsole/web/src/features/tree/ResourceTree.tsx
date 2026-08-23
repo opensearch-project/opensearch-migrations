@@ -1236,14 +1236,15 @@ export function ResourceTree({
     const result = new Map<string, ResourceRenameOption>();
     (resourceAdds?.renames ?? []).forEach((option) => {
       const matchingResource = Object.values(snapshot.nodes).find((node) => (
-        node.kind === "resource"
+        ["resource", "config-definition"].includes(node.kind)
         && (
           node.capabilities.some((capability) => (
             capability.kind === "edit"
             && capability.editTargetId === option.editTargetId
           ))
           || (
-            node.resourcePlural === option.placement.resourcePlural
+            option.placement.resourcePlural
+            && node.resourcePlural === option.placement.resourcePlural
             && (
               node.resourceName === option.currentName
               || node.label === option.label

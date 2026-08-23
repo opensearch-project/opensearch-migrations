@@ -460,8 +460,22 @@ function resolveInputHint(
     if (!inputHint) {
         return undefined;
     }
+    const definitionCollection = inputHint.definitionCollection;
+    const resolvedHint = definitionCollection
+        ? {
+            ...inputHint,
+            definitionCollection: {
+                ...definitionCollection,
+                navigation: {
+                    ...definitionCollection.navigation,
+                    groupId: definitionCollection.navigation.groupId
+                        ?? `definition-group:edit:${currentPath.join(".")}`,
+                },
+            },
+        }
+        : inputHint;
     const options = referenceOptions ?? resolveReferenceOptions(inputHint, currentPath, context);
-    return options ? {...inputHint, options} : inputHint;
+    return options ? {...resolvedHint, options} : resolvedHint;
 }
 
 function schemaConstructorName(schema: any): string {

@@ -1248,6 +1248,7 @@ describe("editConfig state", () => {
                     navigation: {
                         groupLabel: "Repositories",
                         groupOrder: 0,
+                        groupId: "definition-group:edit:sourceClusters.legacy.snapshotInfo.repos",
                     },
                     definition: {
                         typeLabel: "Snapshot repository",
@@ -1269,6 +1270,7 @@ describe("editConfig state", () => {
                     navigation: {
                         groupLabel: "Snapshots",
                         groupOrder: 1,
+                        groupId: "definition-group:edit:sourceClusters.legacy.snapshotInfo.snapshots",
                     },
                     definition: {
                         typeLabel: "Source snapshot",
@@ -1685,13 +1687,21 @@ describe("editConfig state", () => {
 
         expect(findNode(state.nodes, "edit:sourceClusters.solr.snapshotInfo.repos")?.inputHint).toMatchObject({
             definitionCollection: {
-                navigation: {groupLabel: "Repositories", groupOrder: 0},
+                navigation: {
+                    groupLabel: "Repositories",
+                    groupOrder: 0,
+                    groupId: "definition-group:edit:sourceClusters.solr.snapshotInfo.repos",
+                },
                 definition: {typeLabel: "Snapshot repository"},
             },
         });
         expect(findNode(state.nodes, "edit:sourceClusters.solr.snapshotInfo.backups")?.inputHint).toMatchObject({
             definitionCollection: {
-                navigation: {groupLabel: "Backups", groupOrder: 1},
+                navigation: {
+                    groupLabel: "Backups",
+                    groupOrder: 1,
+                    groupId: "definition-group:edit:sourceClusters.solr.snapshotInfo.backups",
+                },
                 definition: {typeLabel: "Source backup"},
             },
         });

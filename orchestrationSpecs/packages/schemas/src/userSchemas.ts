@@ -44,6 +44,8 @@ export interface DefinitionCollectionHint {
     navigation: {
         groupLabel: string;
         groupOrder: number;
+        // Filled by the edit-model resolver because the collection path is dynamic.
+        groupId?: string;
     };
     definition: {
         typeLabel: string;
