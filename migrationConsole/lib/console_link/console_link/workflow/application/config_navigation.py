@@ -36,6 +36,15 @@ class _Placement:
     identity: _Identity
 
 
+@dataclass(frozen=True)
+class _DefinitionPlacement:
+    collection_path: Tuple[str, ...]
+    owner_target_id: str
+    group_label: str
+    group_order: int
+    definition_type: str
+
+
 def project_config_navigation(
     snapshot: ManageSnapshot,
     draft: ConfigDraft,
@@ -48,6 +57,9 @@ def project_config_navigation(
 
     edit_nodes = _edit_nodes(draft.edit_state.get("nodes") or ())
     placements = _resource_placements(draft.edit_state.get("nodes") or ())
+    definition_placements = _definition_placements(
+        draft.edit_state.get("nodes") or ()
+    )
     nodes = {
         node_id: _project_existing_node(
             node,
@@ -64,6 +76,13 @@ def project_config_navigation(
         nodes,
         edit_nodes,
         placements,
+        draft.draft_revision,
+        draft.dirty,
+    )
+    _add_draft_definitions(
+        nodes,
+        edit_nodes,
+        definition_placements,
         draft.draft_revision,
         draft.dirty,
     )
@@ -211,6 +230,54 @@ def _resource_placements(
 
     visit(roots)
     return tuple(result.values())
+
+
+def _definition_placements(
+    roots: Iterable[Mapping[str, Any]],
+) -> Tuple[_DefinitionPlacement, ...]:
+    result: Dict[Tuple[str, ...], _DefinitionPlacement] = {}
+
+    def visit(nodes: Iterable[Mapping[str, Any]]) -> None:
+        for node in nodes:
+            placement = _definition_placement(node)
+            if placement is not None:
+                result[placement.collection_path] = placement
+            visit(_mapping_children(node))
+
+    visit(roots)
+    return tuple(result.values())
+
+
+def _definition_placement(
+    node: Mapping[str, Any],
+) -> Optional[_DefinitionPlacement]:
+    collection = _mapping(
+        _mapping(node.get("inputHint")).get("definitionCollection")
+    )
+    navigation = _mapping(collection.get("navigation"))
+    definition = _mapping(collection.get("definition"))
+    path = node.get("path")
+    owner_ancestor_levels = collection.get("ownerAncestorLevels")
+    if (
+        not isinstance(path, list)
+        or not path
+        or not all(isinstance(part, str) for part in path)
+        or not isinstance(owner_ancestor_levels, int)
+        or owner_ancestor_levels <= 0
+        or owner_ancestor_levels >= len(path)
+        or not isinstance(navigation.get("groupLabel"), str)
+        or not isinstance(navigation.get("groupOrder"), int)
+        or not isinstance(definition.get("typeLabel"), str)
+    ):
+        return None
+    owner_path = path[:-owner_ancestor_levels]
+    return _DefinitionPlacement(
+        collection_path=tuple(path),
+        owner_target_id=f"edit:{'.'.join(owner_path)}",
+        group_label=navigation["groupLabel"],
+        group_order=navigation["groupOrder"],
+        definition_type=definition["typeLabel"],
+    )
 
 
 def _placement(node: Mapping[str, Any]) -> Optional[_Placement]:
@@ -419,6 +486,100 @@ def _add_draft_resources(
                     revision=f"{group.revision}:{revision}",
                     child_ids=(*group.child_ids, node.id),
                 )
+
+
+def _add_draft_definitions(
+    nodes: Dict[str, ManageNode],
+    edit_nodes: Mapping[str, Mapping[str, Any]],
+    placements: Tuple[_DefinitionPlacement, ...],
+    revision: str,
+    dirty: bool,
+) -> None:
+    owners_by_target = {
+        target: node
+        for node in nodes.values()
+        if (target := _edit_target(node)) is not None
+    }
+    placements_by_owner: Dict[str, list[_DefinitionPlacement]] = {}
+    for placement in placements:
+        placements_by_owner.setdefault(
+            placement.owner_target_id,
+            [],
+        ).append(placement)
+
+    for owner_target_id, owner_placements in placements_by_owner.items():
+        owner = owners_by_target.get(owner_target_id)
+        if owner is None:
+            continue
+        group_order: Dict[str, int] = {}
+        child_ids = list(owner.child_ids)
+        for placement in owner_placements:
+            collection_id = f"edit:{'.'.join(placement.collection_path)}"
+            collection = edit_nodes.get(collection_id)
+            if collection is None:
+                continue
+            group_id = f"definition-group:{collection_id}"
+            group_order[group_id] = placement.group_order
+            definition_ids: list[str] = []
+            for child in _mapping_children(collection):
+                if child.get("valueKind") == "command":
+                    continue
+                target_id = child.get("id")
+                path = child.get("path")
+                if (
+                    not isinstance(target_id, str)
+                    or not isinstance(path, list)
+                    or len(path) <= len(placement.collection_path)
+                ):
+                    continue
+                label = str(path[len(placement.collection_path)])
+                definition_id = f"definition:{target_id}"
+                diagnostics = tuple(
+                    diagnostic
+                    for value in child.get("diagnostics") or ()
+                    if (diagnostic := _diagnostic(value)) is not None
+                )
+                status_value = child.get("status")
+                status = (
+                    status_value
+                    if isinstance(status_value, str)
+                    else "ok"
+                )
+                nodes[definition_id] = ManageNode(
+                    id=definition_id,
+                    revision=f"{revision}:{target_id}",
+                    parent_id=group_id,
+                    kind="config-definition",
+                    label=label,
+                    description=placement.definition_type,
+                    status=status,
+                    diagnostics=diagnostics,
+                    capabilities=(
+                        ManageCapability(
+                            kind="edit",
+                            target_id=target_id,
+                            label=f"Edit {label}",
+                        ),
+                    ),
+                    resource_type=placement.definition_type,
+                    config_state=_config_state(child, dirty),
+                )
+                definition_ids.append(definition_id)
+            nodes[group_id] = ManageNode(
+                id=group_id,
+                revision=f"{revision}:{collection_id}",
+                parent_id=owner.id,
+                child_ids=tuple(definition_ids),
+                kind="group",
+                label=placement.group_label,
+                status="ok",
+            )
+            child_ids.append(group_id)
+        nodes[owner.id] = replace(
+            owner,
+            revision=f"{owner.revision}:{revision}:definitions",
+            child_ids=tuple(_ordered_ids(child_ids, group_order)),
+        )
 
 
 def _resource_identity(

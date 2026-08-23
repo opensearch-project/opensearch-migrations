@@ -211,6 +211,77 @@ function addLegacySourceNavigation(draft: ConfigDraft): ConfigDraft {
 }
 
 
+function addSourceDefinitionNavigation(
+  draft: ConfigDraft,
+  {
+    groupLabel,
+    itemLabel,
+    targetId,
+    typeLabel,
+  }: {
+    groupLabel: string;
+    itemLabel: string;
+    targetId: string;
+    typeLabel: string;
+  },
+) {
+  const navigation = draft.navigation;
+  if (!navigation) throw new Error("Missing configuration navigation");
+  const sourceId = "resource:sourceconfigs:legacy";
+  const source = navigation.nodes[sourceId];
+  if (!source) throw new Error("Missing source navigation node");
+  const groupId = `definition-group:${groupLabel.toLocaleLowerCase()}`;
+  const definitionId = `definition:${targetId}`;
+  navigation.nodes[groupId] = {
+    id: groupId,
+    revision: `test:${groupId}`,
+    parentId: sourceId,
+    childIds: [definitionId],
+    kind: "group",
+    label: groupLabel,
+    description: null,
+    status: "ok",
+    phase: null,
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: null,
+    resourceName: null,
+    resourceType: null,
+    configPresence: {},
+  };
+  navigation.nodes[definitionId] = {
+    id: definitionId,
+    revision: `test:${definitionId}`,
+    parentId: groupId,
+    childIds: [],
+    kind: "config-definition",
+    label: itemLabel,
+    description: typeLabel,
+    status: "ok",
+    phase: null,
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [{
+      kind: "edit",
+      editTargetId: targetId,
+      label: `Edit ${itemLabel}`,
+    }],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: null,
+    resourceName: null,
+    resourceType: typeLabel,
+    configPresence: {},
+  };
+  source.childIds.push(groupId);
+}
+
+
 function rawRepairDraft() {
   const draft = structuredClone(configDraft);
   draft.draftRevision = "raw-repair-1";
@@ -1720,6 +1791,176 @@ test("keeps resource context while scoping edit mode to the selected resource", 
   expect(within(config).queryByRole("row", {
     name: /Endpoint/,
   })).toBeNull();
+});
+
+
+test("opens nested definitions from navigation and referenced fields", async () => {
+  const draft = addLegacySourceNavigation(structuredClone(configDraft));
+  const source = draft.editState.nodes[0]?.children?.[0];
+  if (!source) throw new Error("Missing source edit node");
+  source.children = [
+    ...(source.children ?? []),
+    {
+      id: "edit:sourceClusters.legacy.snapshotInfo",
+      path: ["sourceClusters", "legacy", "snapshotInfo"],
+      label: "Snapshot information",
+      valueKind: "object",
+      status: "ok",
+      diagnostics: [],
+      children: [{
+        id: "edit:sourceClusters.legacy.snapshotInfo.repos",
+        path: ["sourceClusters", "legacy", "snapshotInfo", "repos"],
+        label: "Repositories",
+        valueKind: "record",
+        status: "ok",
+        diagnostics: [],
+        children: [{
+          id: "edit:sourceClusters.legacy.snapshotInfo.repos.repo1",
+          path: [
+            "sourceClusters",
+            "legacy",
+            "snapshotInfo",
+            "repos",
+            "repo1",
+          ],
+          label: "repo1",
+          valueKind: "object",
+          removable: true,
+          status: "ok",
+          diagnostics: [],
+          children: [{
+            id: "edit:sourceClusters.legacy.snapshotInfo.repos.repo1.repoPathUri",
+            path: [
+              "sourceClusters",
+              "legacy",
+              "snapshotInfo",
+              "repos",
+              "repo1",
+              "repoPathUri",
+            ],
+            label: "Repository URI",
+            value: "s3://snapshots/repo1",
+            valueKind: "scalar",
+            valueType: "string",
+            status: "ok",
+            diagnostics: [],
+            children: [],
+          }],
+        }],
+      }, {
+        id: "edit:sourceClusters.legacy.snapshotInfo.snapshots",
+        path: ["sourceClusters", "legacy", "snapshotInfo", "snapshots"],
+        label: "Snapshots",
+        valueKind: "record",
+        status: "ok",
+        diagnostics: [],
+        children: [{
+          id: "edit:sourceClusters.legacy.snapshotInfo.snapshots.nightly",
+          path: [
+            "sourceClusters",
+            "legacy",
+            "snapshotInfo",
+            "snapshots",
+            "nightly",
+          ],
+          label: "nightly",
+          valueKind: "object",
+          removable: true,
+          referenceTargetId:
+            "edit:sourceClusters.legacy.snapshotInfo.snapshots.nightly",
+          status: "ok",
+          diagnostics: [],
+          children: [{
+            id: "edit:sourceClusters.legacy.snapshotInfo.snapshots.nightly.repoName",
+            path: [
+              "sourceClusters",
+              "legacy",
+              "snapshotInfo",
+              "snapshots",
+              "nightly",
+              "repoName",
+            ],
+            label: "Repository",
+            value: "repo1",
+            valueKind: "scalar",
+            valueType: "string",
+            status: "ok",
+            inputHint: {
+              kind: "reference",
+              options: [{
+                label: "repo1",
+                value: "repo1",
+                editTargetId:
+                  "edit:sourceClusters.legacy.snapshotInfo.repos.repo1",
+              }],
+            },
+            diagnostics: [],
+            children: [],
+          }],
+        }],
+      }],
+    },
+  ];
+  addSourceDefinitionNavigation(draft, {
+    groupLabel: "Repositories",
+    itemLabel: "repo1",
+    targetId: "edit:sourceClusters.legacy.snapshotInfo.repos.repo1",
+    typeLabel: "Snapshot repository",
+  });
+  addSourceDefinitionNavigation(draft, {
+    groupLabel: "Snapshots",
+    itemLabel: "nightly",
+    targetId: "edit:sourceClusters.legacy.snapshotInfo.snapshots.nightly",
+    typeLabel: "Source snapshot",
+  });
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  const sourceItem = await within(tree).findByRole("treeitem", {
+    name: /^legacy/,
+  });
+  await userEvent.click(within(sourceItem).getByRole("button", {
+    name: "Expand legacy",
+  }));
+  await userEvent.click(await within(tree).findByRole("treeitem", {
+    name: /^nightly/,
+  }));
+
+  expect(await screen.findByRole("heading", { name: "Edit nightly" }))
+    .toBeInTheDocument();
+  const config = screen.getByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(within(config).getByRole("row", { name: /Repository/ }))
+    .toBeInTheDocument();
+  expect(within(config).queryByRole("row", { name: /Endpoint/ })).toBeNull();
+
+  await userEvent.click(sourceItem);
+  expect(await screen.findByRole("heading", { name: "Edit legacy" }))
+    .toBeInTheDocument();
+  const snapshotRow = await within(config).findByRole("row", {
+    name: /^nightly/,
+  });
+  await userEvent.click(within(snapshotRow).getByRole("button", {
+    name: "Open nightly",
+  }));
+  expect(await screen.findByRole("heading", { name: "Edit nightly" }))
+    .toBeInTheDocument();
+
+  await userEvent.click(within(config).getByRole("button", {
+    name: "Open repo1",
+  }));
+
+  expect(await screen.findByRole("heading", { name: "Edit repo1" }))
+    .toBeInTheDocument();
+  expect(within(config).getByRole("row", { name: /Repository URI/ }))
+    .toBeInTheDocument();
+  expect(within(tree).getByRole("treeitem", { name: /^repo1/ }))
+    .toHaveAttribute("aria-selected", "true");
 });
 
 

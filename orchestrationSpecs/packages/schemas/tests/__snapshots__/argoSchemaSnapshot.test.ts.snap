@@ -394,7 +394,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "kind": "record",
                                 "addLabel": "snapshot repository",
                                 "keyPattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
-                                "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #."
+                                "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #.",
+                                "definitionCollection": {
+                                  "ownerAncestorLevels": 2,
+                                  "navigation": {
+                                    "groupLabel": "Repositories",
+                                    "groupOrder": 0
+                                  },
+                                  "definition": {
+                                    "typeLabel": "Snapshot repository"
+                                  }
+                                }
                               }
                             },
                             "snapshots": {
@@ -593,13 +603,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
                                     "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.",
                                     "x-ui-hint": {
-                                      "kind": "text",
-                                      "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
-                                      "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #.",
-                                      "examples": [
-                                        "migration-repository",
-                                        "snapshots_prod"
-                                      ]
+                                      "kind": "reference",
+                                      "sourcePathTemplate": [
+                                        "sourceClusters",
+                                        {
+                                          "pathSegmentFromEnd": 5
+                                        },
+                                        "snapshotInfo",
+                                        "repos"
+                                      ],
+                                      "message": "Choose a repository defined under this source cluster's snapshotInfo.repos."
                                     }
                                   }
                                 },
@@ -612,7 +625,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster.",
                               "x-ui-hint": {
                                 "kind": "record",
-                                "addLabel": "source snapshot"
+                                "addLabel": "source snapshot",
+                                "definitionCollection": {
+                                  "ownerAncestorLevels": 2,
+                                  "navigation": {
+                                    "groupLabel": "Snapshots",
+                                    "groupOrder": 1
+                                  },
+                                  "definition": {
+                                    "typeLabel": "Source snapshot"
+                                  }
+                                }
                               }
                             },
                             "serializeSnapshotCreation": {
@@ -664,7 +687,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "description": "Solr backup repositories registered with the source cluster.",
                               "x-ui-hint": {
                                 "kind": "record",
-                                "addLabel": "snapshot repository"
+                                "addLabel": "snapshot repository",
+                                "definitionCollection": {
+                                  "ownerAncestorLevels": 2,
+                                  "navigation": {
+                                    "groupLabel": "Repositories",
+                                    "groupOrder": 0
+                                  },
+                                  "definition": {
+                                    "typeLabel": "Snapshot repository"
+                                  }
+                                }
                               }
                             },
                             "backups": {
@@ -680,7 +713,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                       },
                                       "repoName": {
                                         "type": "string",
-                                        "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                        "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos.",
+                                        "x-ui-hint": {
+                                          "kind": "reference",
+                                          "sourcePathTemplate": [
+                                            "sourceClusters",
+                                            {
+                                              "pathSegmentFromEnd": 5
+                                            },
+                                            "snapshotInfo",
+                                            "repos"
+                                          ],
+                                          "message": "Choose a repository defined under this source cluster's snapshotInfo.repos."
+                                        }
                                       },
                                       "collectionAllowlist": {
                                         "type": "array",
@@ -741,7 +786,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "properties": {
                                       "repoName": {
                                         "type": "string",
-                                        "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                        "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos.",
+                                        "x-ui-hint": {
+                                          "kind": "reference",
+                                          "sourcePathTemplate": [
+                                            "sourceClusters",
+                                            {
+                                              "pathSegmentFromEnd": 5
+                                            },
+                                            "snapshotInfo",
+                                            "repos"
+                                          ],
+                                          "message": "Choose a repository defined under this source cluster's snapshotInfo.repos."
+                                        }
                                       },
                                       "createBackupConfig": {
                                         "type": "object",
@@ -811,7 +868,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 ],
                                 "description": "Solr backup source: either reference an existing backup or configure creation of a new one."
                               },
-                              "description": "Solr backups to use or create for this source cluster."
+                              "description": "Solr backups to use or create for this source cluster.",
+                              "x-ui-hint": {
+                                "kind": "record",
+                                "addLabel": "source backup",
+                                "definitionCollection": {
+                                  "ownerAncestorLevels": 2,
+                                  "navigation": {
+                                    "groupLabel": "Backups",
+                                    "groupOrder": 1
+                                  },
+                                  "definition": {
+                                    "typeLabel": "Source backup"
+                                  }
+                                }
+                              }
                             },
                             "serializeSnapshotCreation": {
                               "type": "boolean",
@@ -4800,7 +4871,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "kind": "record",
                       "addLabel": "snapshot repository",
                       "keyPattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
-                      "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #."
+                      "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #.",
+                      "definitionCollection": {
+                        "ownerAncestorLevels": 2,
+                        "navigation": {
+                          "groupLabel": "Repositories",
+                          "groupOrder": 0
+                        },
+                        "definition": {
+                          "typeLabel": "Snapshot repository"
+                        }
+                      }
                     }
                   },
                   "snapshots": {
@@ -4999,13 +5080,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
                           "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.",
                           "x-ui-hint": {
-                            "kind": "text",
-                            "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
-                            "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #.",
-                            "examples": [
-                              "migration-repository",
-                              "snapshots_prod"
-                            ]
+                            "kind": "reference",
+                            "sourcePathTemplate": [
+                              "sourceClusters",
+                              {
+                                "pathSegmentFromEnd": 5
+                              },
+                              "snapshotInfo",
+                              "repos"
+                            ],
+                            "message": "Choose a repository defined under this source cluster's snapshotInfo.repos."
                           }
                         }
                       },
@@ -5018,7 +5102,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "Elasticsearch/OpenSearch snapshots to use or create for this source cluster.",
                     "x-ui-hint": {
                       "kind": "record",
-                      "addLabel": "source snapshot"
+                      "addLabel": "source snapshot",
+                      "definitionCollection": {
+                        "ownerAncestorLevels": 2,
+                        "navigation": {
+                          "groupLabel": "Snapshots",
+                          "groupOrder": 1
+                        },
+                        "definition": {
+                          "typeLabel": "Source snapshot"
+                        }
+                      }
                     }
                   },
                   "serializeSnapshotCreation": {
@@ -5070,7 +5164,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "Solr backup repositories registered with the source cluster.",
                     "x-ui-hint": {
                       "kind": "record",
-                      "addLabel": "snapshot repository"
+                      "addLabel": "snapshot repository",
+                      "definitionCollection": {
+                        "ownerAncestorLevels": 2,
+                        "navigation": {
+                          "groupLabel": "Repositories",
+                          "groupOrder": 0
+                        },
+                        "definition": {
+                          "typeLabel": "Snapshot repository"
+                        }
+                      }
                     }
                   },
                   "backups": {
@@ -5086,7 +5190,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             },
                             "repoName": {
                               "type": "string",
-                              "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                              "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos.",
+                              "x-ui-hint": {
+                                "kind": "reference",
+                                "sourcePathTemplate": [
+                                  "sourceClusters",
+                                  {
+                                    "pathSegmentFromEnd": 5
+                                  },
+                                  "snapshotInfo",
+                                  "repos"
+                                ],
+                                "message": "Choose a repository defined under this source cluster's snapshotInfo.repos."
+                              }
                             },
                             "collectionAllowlist": {
                               "type": "array",
@@ -5147,7 +5263,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "properties": {
                             "repoName": {
                               "type": "string",
-                              "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."
+                              "description": "Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos.",
+                              "x-ui-hint": {
+                                "kind": "reference",
+                                "sourcePathTemplate": [
+                                  "sourceClusters",
+                                  {
+                                    "pathSegmentFromEnd": 5
+                                  },
+                                  "snapshotInfo",
+                                  "repos"
+                                ],
+                                "message": "Choose a repository defined under this source cluster's snapshotInfo.repos."
+                              }
                             },
                             "createBackupConfig": {
                               "type": "object",
@@ -5217,7 +5345,21 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       ],
                       "description": "Solr backup source: either reference an existing backup or configure creation of a new one."
                     },
-                    "description": "Solr backups to use or create for this source cluster."
+                    "description": "Solr backups to use or create for this source cluster.",
+                    "x-ui-hint": {
+                      "kind": "record",
+                      "addLabel": "source backup",
+                      "definitionCollection": {
+                        "ownerAncestorLevels": 2,
+                        "navigation": {
+                          "groupLabel": "Backups",
+                          "groupOrder": 1
+                        },
+                        "definition": {
+                          "typeLabel": "Source backup"
+                        }
+                      }
+                    }
                   },
                   "serializeSnapshotCreation": {
                     "type": "boolean",

@@ -204,21 +204,39 @@ function recordGroupNode(spec: RecordGroupSpec): EditNode {
     });
 }
 
-function optionsFromRecord(record: Record<string, unknown> | undefined): EditOption[] {
+function optionsFromRecord(
+    record: Record<string, unknown> | undefined,
+    sourcePath: string[],
+): EditOption[] {
     if (!record || typeof record !== "object" || Array.isArray(record)) {
         return [];
     }
     return Object.keys(record ?? {})
         .sort((a, b) => a.localeCompare(b))
-        .map(name => ({label: name, value: name}));
+        .map(name => ({
+            label: name,
+            value: name,
+            editTargetId: `edit:${[...sourcePath, name].join(".")}`,
+        }));
 }
 
 function sourceSnapshotOptions(sourceClusters: Record<string, any> | undefined): Record<string, EditOption[]> {
     return Object.fromEntries(
-        Object.entries(sourceClusters ?? {}).map(([sourceName, sourceConfig]) => [
-            sourceName,
-            optionsFromRecord(sourceConfig?.snapshotInfo?.snapshots),
-        ]),
+        Object.entries(sourceClusters ?? {}).map(([sourceName, sourceConfig]) => {
+            const snapshotInfo = sourceConfig?.snapshotInfo;
+            const itemKey = isPlainObject(snapshotInfo) && "backups" in snapshotInfo
+                ? "backups"
+                : "snapshots";
+            return [
+                sourceName,
+                optionsFromRecord(
+                    isPlainObject(snapshotInfo)
+                        ? snapshotInfo[itemKey] as Record<string, unknown>
+                        : undefined,
+                    ["sourceClusters", sourceName, "snapshotInfo", itemKey],
+                ),
+            ];
+        }),
     );
 }
 
@@ -233,6 +251,7 @@ function buildEditContext(config: any): EditContext {
                 description: snapshots.length === 0
                     ? "No snapshots defined"
                     : `${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} defined`,
+                editTargetId: `edit:sourceClusters.${sourceName}`,
             })),
         sourceSnapshotOptions: snapshotOptions,
         schemaContext: {rootConfig: config},
@@ -316,18 +335,6 @@ function proxyTlsNode(
     return finalizeNode(node);
 }
 
-function snapshotRepoReferenceHint(sourceName: string, repoOptions: EditOption[]): EditInputHint {
-    const repoPath = ["sourceClusters", sourceName || "<source>", "snapshotInfo", "repos"];
-    return {
-        kind: "reference",
-        sourcePath: repoPath,
-        options: repoOptions,
-        message: repoOptions.length
-            ? `Choose a repository defined under ${repoPath.join(".")}.`
-            : `First define at least one repository under ${repoPath.join(".")} before binding source snapshots.`,
-    };
-}
-
 function missingSnapshotRepoMessage(sourceName: string): string {
     const repoPath = ["sourceClusters", sourceName || "<source>", "snapshotInfo", "repos"];
     return `First define at least one repository under ${repoPath.join(".")} before adding source snapshots.`;
@@ -341,25 +348,37 @@ function withSnapshotRepoHint(description: string | undefined, sourceName: strin
         : `${description ? `${description} ` : ""}${hint}`;
 }
 
-function applySnapshotRepoReferenceOptions(children: EditNode[], path: string[], info: Record<string, any>): void {
+function applySnapshotRepoConstraints(children: EditNode[], path: string[], info: Record<string, any>): void {
     const sourceName = path[1] ?? "";
-    const repoOptions = optionsFromRecord(info.repos);
-    const repoHint = snapshotRepoReferenceHint(sourceName, repoOptions);
-    const snapshotsNode = children.find(child => child.path[child.path.length - 1] === "snapshots");
-    if (!repoOptions.length && snapshotsNode) {
-        const addNode = snapshotsNode.children?.find(child => child.valueKind === "command" && child.id.endsWith(":add"));
+    const hasRepos = isPlainObject(info.repos)
+        && Object.keys(info.repos).length > 0;
+    const definitionsNode = children.find(child =>
+        ["snapshots", "backups"].includes(child.path[child.path.length - 1] ?? ""));
+    if (!hasRepos && definitionsNode) {
+        const addNode = definitionsNode.children?.find(child => child.valueKind === "command" && child.id.endsWith(":add"));
         if (addNode) {
             const message = missingSnapshotRepoMessage(sourceName);
             addNode.description = message;
             addNode.command = {...addNode.command, blockedMessage: message};
         }
     }
-    for (const snapshotNode of snapshotsNode?.children ?? []) {
-        const repoNameNode = snapshotNode.children?.find(child => child.path[child.path.length - 1] === "repoName");
+    for (const definitionNode of definitionsNode?.children ?? []) {
+        const repoNameNode = definitionNode.children?.find(child => child.path[child.path.length - 1] === "repoName");
         if (!repoNameNode) {
             continue;
         }
-        repoNameNode.inputHint = repoHint;
+        repoNameNode.inputHint = {
+            ...repoNameNode.inputHint,
+            sourcePath: [
+                "sourceClusters",
+                sourceName,
+                "snapshotInfo",
+                "repos",
+            ],
+            message: hasRepos
+                ? `Choose a repository defined under sourceClusters.${sourceName}.snapshotInfo.repos.`
+                : `First define at least one repository under sourceClusters.${sourceName}.snapshotInfo.repos before binding source snapshots.`,
+        } as EditInputHint;
         repoNameNode.description = withSnapshotRepoHint(repoNameNode.description, sourceName);
     }
 }
@@ -368,7 +387,12 @@ function sourceVersionIsSolr(version: unknown): boolean {
     return typeof version === "string" && version.startsWith("SOLR ");
 }
 
-function snapshotInfoNode(path: string[], snapshotInfo: unknown, sourceVersion?: unknown): EditNode {
+function snapshotInfoNode(
+    path: string[],
+    snapshotInfo: unknown,
+    sourceVersion: unknown,
+    context: SchemaEditContext,
+): EditNode {
     const info = snapshotInfo && typeof snapshotInfo === "object" ? snapshotInfo as any : {};
     const isSolrSnapshotInfo = sourceVersionIsSolr(sourceVersion)
         || (isPlainObject(info) && "backups" in info && !("snapshots" in info));
@@ -380,7 +404,7 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown, sourceVersion?:
     const fields = isSolrSnapshotInfo
         ? ["repos", "backups", "serializeSnapshotCreation"]
         : ["repos", "snapshots", "serializeSnapshotCreation"];
-    const children = schemaFieldNodes(schema, path, info, fields);
+    const children = schemaFieldNodes(schema, path, info, fields, context);
     for (const child of children) {
         const childKey = child.path[child.path.length - 1];
         if (childKey === "repos" || childKey === "snapshots" || childKey === "backups") {
@@ -394,7 +418,7 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown, sourceVersion?:
             child.diagnostics = [];
         }
     }
-    applySnapshotRepoReferenceOptions(children, path, info);
+    applySnapshotRepoConstraints(children, path, info);
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -680,10 +704,22 @@ function snapshotPerConfigNode(path: string[], value: unknown, ctx: EditContext,
         ...recordNames.filter(name => !availableNames.includes(name)).sort((a, b) => a.localeCompare(b)),
     ];
     const children = orderedNames.map(snapshotName => {
+        const referenceTargetId = snapshotOptions.find(
+            option => option.value === snapshotName,
+        )?.editTargetId;
         if (!configuredNames.has(snapshotName)) {
-            return snapshotConfigureSlotNode([...path, snapshotName], snapshotName);
+            return snapshotConfigureSlotNode(
+                [...path, snapshotName],
+                snapshotName,
+                referenceTargetId,
+            );
         }
-        const node = snapshotMigrationPassArrayNode([...path, snapshotName], snapshotName, recordValue[snapshotName]);
+        const node = snapshotMigrationPassArrayNode(
+            [...path, snapshotName],
+            snapshotName,
+            recordValue[snapshotName],
+            referenceTargetId,
+        );
         node.removable = true;
         return node;
     });
@@ -728,7 +764,11 @@ function snapshotPerConfigLabel(missing: boolean, configuredCount: number, avail
     return `perSnapshotConfig: ${configuredCount} configured, ${unconfiguredCount} unconfigured`;
 }
 
-function snapshotConfigureSlotNode(path: string[], snapshotName: string): EditNode {
+function snapshotConfigureSlotNode(
+    path: string[],
+    snapshotName: string,
+    referenceTargetId?: string,
+): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
         path,
@@ -737,12 +777,18 @@ function snapshotConfigureSlotNode(path: string[], snapshotName: string): EditNo
         presence: "optional",
         essential: true,
         description: `Configure migration passes for source snapshot '${snapshotName}'.`,
+        referenceTargetId,
         command: {requiresName: false, editAdded: false, autoEditAdded: false},
         status: "ok",
     });
 }
 
-function snapshotMigrationPassArrayNode(path: string[], snapshotName: string, value: unknown): EditNode {
+function snapshotMigrationPassArrayNode(
+    path: string[],
+    snapshotName: string,
+    value: unknown,
+    referenceTargetId?: string,
+): EditNode {
     const arrayValue = Array.isArray(value) ? value : [];
     const children = [
         ...arrayValue.map((itemValue, index) => snapshotMigrationPassNode([...path, String(index)], index, itemValue)),
@@ -766,6 +812,7 @@ function snapshotMigrationPassArrayNode(path: string[], snapshotName: string, va
         presence: "required",
         essential: true,
         description: "Migration passes to run for this snapshot.",
+        referenceTargetId,
         required: true,
         status: "ok",
         children,
@@ -858,17 +905,22 @@ function snapshotMigrationGroupNode(configs: any[] | undefined, ctx: EditContext
     });
 }
 
-function clusterNode(kind: "source" | "target", name: string, value: any): EditNode {
+function clusterNode(kind: "source" | "target", name: string, value: any, ctx: EditContext): EditNode {
     const rootPath = [kind === "source" ? "sourceClusters" : "targetClusters", name];
     const clusterSchema = kind === "source" ? SOURCE_CLUSTER_CONFIG : TARGET_CLUSTER_CONFIG;
     const children = schemaFieldNodes(clusterSchema, rootPath, value, [
         "endpoint",
         "allowInsecure",
         ...(kind === "source" ? ["version"] : []),
-    ]);
+    ], ctx.schemaContext);
     children.push(authNode([...rootPath, "authConfig"], value?.authConfig));
     if (kind === "source") {
-        children.push(snapshotInfoNode([...rootPath, "snapshotInfo"], value?.snapshotInfo, value?.version));
+        children.push(snapshotInfoNode(
+            [...rootPath, "snapshotInfo"],
+            value?.snapshotInfo,
+            value?.version,
+            ctx.schemaContext,
+        ));
     }
 
     return finalizeNode({
@@ -882,7 +934,11 @@ function clusterNode(kind: "source" | "target", name: string, value: any): EditN
     });
 }
 
-function clusterGroupNode(kind: "source" | "target", config: Record<string, any> | undefined): EditNode {
+function clusterGroupNode(
+    kind: "source" | "target",
+    config: Record<string, any> | undefined,
+    ctx: EditContext,
+): EditNode {
     const path = kind === "source" ? ["sourceClusters"] : ["targetClusters"];
     const recordHint = kind === "source" ? SOURCE_RECORD_HINT : TARGET_RECORD_HINT;
     return recordGroupNode({
@@ -891,7 +947,7 @@ function clusterGroupNode(kind: "source" | "target", config: Record<string, any>
         description: kind === "source" ? SOURCE_CLUSTERS_DESCRIPTION : TARGET_CLUSTERS_DESCRIPTION,
         inputHint: recordHint,
         config,
-        itemNode: (name, value) => clusterNode(kind, name, value),
+        itemNode: (name, value) => clusterNode(kind, name, value, ctx),
         addLabel: `${kind} cluster`,
         addDescription: kind === "source"
             ? "Create a new source cluster entry in pending workflow YAML."
@@ -912,14 +968,14 @@ function sectionNode(id: string, label: string, description: string, children: E
     });
 }
 
-function workflowConfigurationNode(config: any): EditNode {
+function workflowConfigurationNode(config: any, ctx: EditContext): EditNode {
     return sectionNode(
         "edit:workflowConfiguration",
         "Workflow Configuration",
         "Shared workflow configuration used by migration resources.",
         [
-            clusterGroupNode("source", config?.sourceClusters),
-            clusterGroupNode("target", config?.targetClusters),
+            clusterGroupNode("source", config?.sourceClusters, ctx),
+            clusterGroupNode("target", config?.targetClusters, ctx),
         ],
     );
 }
@@ -1186,7 +1242,7 @@ export async function submitValidationForConfig(config: unknown): Promise<EditSt
 export function buildEditStateFromObject(config: any, validationOverride?: EditStateV1["validation"]): EditStateV1 {
     const ctx = buildEditContext(config);
     const nodes = [
-        workflowConfigurationNode(config),
+        workflowConfigurationNode(config, ctx),
         snapshotMigrationSectionNode(config, ctx),
         trafficGroupNode(config?.traffic, ctx),
     ];

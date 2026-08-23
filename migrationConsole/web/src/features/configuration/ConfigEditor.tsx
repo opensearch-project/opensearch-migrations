@@ -14,6 +14,7 @@ import {
   ChevronRight,
   ChevronsDown,
   LoaderCircle,
+  Link2,
   Pencil,
   Plus,
   Save,
@@ -65,6 +66,7 @@ interface ConfigEditorProps {
     applied: boolean,
   ) => void;
   onResourceAddsReady: (controller: ResourceAddController | null) => void;
+  onNavigateEditTarget: (targetId: string) => void;
   onSubmitted: () => void;
   removalState?: string | null;
   resourceLabel: string;
@@ -466,6 +468,7 @@ function hintOptions(node: EditNode): {
   label: string;
   value: unknown;
   description?: string;
+  editTargetId?: string;
 }[] {
   const options = hintRecord(node.inputHint).options;
   if (!Array.isArray(options)) return [];
@@ -477,6 +480,9 @@ function hintOptions(node: EditNode): {
         value: value.value,
         description: typeof value.description === "string"
           ? value.description
+          : undefined,
+        editTargetId: typeof value.editTargetId === "string"
+          ? value.editTargetId
           : undefined,
       }]
       : [];
@@ -945,6 +951,7 @@ function ConfigPropertyRow({
   onRequestRemoval,
   onSelectAdded,
   onSelect,
+  onNavigateEditTarget,
   onRevealChildren,
   onToggle,
   rowRef,
@@ -967,6 +974,7 @@ function ConfigPropertyRow({
   onRequestRemoval: (node: EditNode) => void;
   onSelectAdded: (nodeId: string, parentId: string | null) => void;
   onSelect: () => void;
+  onNavigateEditTarget: (targetId: string) => void;
   onRevealChildren: () => void;
   onToggle: () => void;
   rowRef: (element: HTMLTableRowElement | null) => void;
@@ -1021,6 +1029,14 @@ function ConfigPropertyRow({
         (option) => String(option.value) === scalarString(node.value),
       )?.description
   );
+  const selectedReference = hintOptions(node).find(
+    (option) => String(option.value) === scalarString(node.value),
+  );
+  const referenceTargetId = node.referenceTargetId
+    ?? selectedReference?.editTargetId;
+  const referenceLabel = selectedReference?.label
+    ?? node.path.at(-1)
+    ?? "definition";
   const fieldDescription = node.description ?? selectedDescription;
   const generatedTitle = [
     "Generated from defaults or related configuration, not explicitly set here.",
@@ -1177,6 +1193,17 @@ function ConfigPropertyRow({
             key={`${node.id}-${draft.draftRevision}`}
           >
             {valueEditor}
+            {referenceTargetId ? (
+              <button
+                className="inline-reference-link"
+                onClick={() => onNavigateEditTarget(referenceTargetId)}
+                title={`Open the definition referenced by ${name}`}
+                type="button"
+              >
+                <Link2 aria-hidden="true" />
+                Open {referenceLabel}
+              </button>
+            ) : null}
             {inlineCommands.length > 0 ? (
               <div className="inline-add-actions">
                 {inlineCommands.map((command) => {
@@ -1406,6 +1433,7 @@ export function ConfigEditor({
   onResourceRenameStarted,
   onResourceRenameSettled,
   onResourceAddsReady,
+  onNavigateEditTarget,
   onSubmitted,
   removalState,
   resourceLabel,
@@ -2624,6 +2652,7 @@ export function ConfigEditor({
                     removing={removingIds.has(node.id)}
                     showDocumentation={showDocumentation}
                     onLocalDirtyChange={markLocalEdit}
+                    onNavigateEditTarget={onNavigateEditTarget}
                     onRequestRemoval={(removalNode) => {
                       void requestRemoval(removalNode);
                     }}

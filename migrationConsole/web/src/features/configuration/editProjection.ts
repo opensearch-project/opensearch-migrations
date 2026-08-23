@@ -61,7 +61,7 @@ export function resourceValidationStates(
 ): Record<string, ResourceValidationState> {
   const result: Record<string, ResourceValidationState> = {};
   Object.values(snapshot.nodes).forEach((node) => {
-    if (node.kind !== "resource") return;
+    if (!["resource", "config-definition"].includes(node.kind)) return;
     const state = validationState(node);
     if (state) result[node.id] = state;
   });
@@ -92,7 +92,7 @@ export function resourceDraftChangeStates(
 ): Record<string, ResourceDraftChangeState> {
   const result: Record<string, ResourceDraftChangeState> = {};
   Object.values(snapshot.nodes).forEach((node) => {
-    if (node.kind !== "resource") return;
+    if (!["resource", "config-definition"].includes(node.kind)) return;
     const change = draftChangeState(node);
     if (change) result[node.id] = change;
   });

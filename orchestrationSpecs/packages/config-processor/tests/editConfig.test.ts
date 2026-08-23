@@ -1242,6 +1242,18 @@ describe("editConfig state", () => {
             valueKind: "record",
             presence: "optional",
             essential: true,
+            inputHint: {
+                definitionCollection: {
+                    ownerAncestorLevels: 2,
+                    navigation: {
+                        groupLabel: "Repositories",
+                        groupOrder: 0,
+                    },
+                    definition: {
+                        typeLabel: "Snapshot repository",
+                    },
+                },
+            },
         });
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.repos:add")?.label).toBe(
             "+ Add snapshot repository"
@@ -1251,6 +1263,18 @@ describe("editConfig state", () => {
             presence: "required",
             essential: true,
             status: "ok",
+            inputHint: {
+                definitionCollection: {
+                    ownerAncestorLevels: 2,
+                    navigation: {
+                        groupLabel: "Snapshots",
+                        groupOrder: 1,
+                    },
+                    definition: {
+                        typeLabel: "Source snapshot",
+                    },
+                },
+            },
         });
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo.snapshots:add")?.label).toBe(
             "+ Add source snapshot"
@@ -1285,6 +1309,14 @@ describe("editConfig state", () => {
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.s3Sources.archive"))).toBe("archive");
         expect(cleanLabel(findNode(state.nodes, "edit:traffic.replayers.replay"))).toBe("replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.fromSource")?.inputHint).toMatchObject({
+            kind: "reference",
+            options: [{
+                label: "legacy",
+                value: "legacy",
+                editTargetId: "edit:sourceClusters.legacy",
+            }],
+        });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig")).toMatchObject({
             valueKind: "record",
             presence: "optional",
@@ -1298,7 +1330,11 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.proxies.capture.source")?.inputHint).toMatchObject({
             kind: "reference",
             sourcePath: ["sourceClusters"],
-            options: [{label: "legacy", value: "legacy"}],
+            options: [{
+                label: "legacy",
+                value: "legacy",
+                editTargetId: "edit:sourceClusters.legacy",
+            }],
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.fromCapturedTraffic")?.inputHint).toMatchObject({
             kind: "reference",
@@ -1328,7 +1364,18 @@ describe("editConfig state", () => {
                 "snapshotInfo",
                 "snapshots",
             ],
-            options: [{label: "snap1", value: "snap1"}, {label: "snap2", value: "snap2"}],
+            options: [
+                {
+                    label: "snap1",
+                    value: "snap1",
+                    editTargetId: "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap1",
+                },
+                {
+                    label: "snap2",
+                    value: "snap2",
+                    editTargetId: "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap2",
+                },
+            ],
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.replayerConfig")).toMatchObject({
             valueKind: "object",
@@ -1448,8 +1495,16 @@ describe("editConfig state", () => {
                 kind: "reference",
                 sourcePath: ["sourceClusters", "legacy", "snapshotInfo", "repos"],
                 options: [
-                    {label: "repo1", value: "repo1"},
-                    {label: "repo2", value: "repo2"},
+                    {
+                        label: "repo1",
+                        value: "repo1",
+                        editTargetId: "edit:sourceClusters.legacy.snapshotInfo.repos.repo1",
+                    },
+                    {
+                        label: "repo2",
+                        value: "repo2",
+                        editTargetId: "edit:sourceClusters.legacy.snapshotInfo.repos.repo2",
+                    },
                 ],
                 message: "Choose a repository defined under sourceClusters.legacy.snapshotInfo.repos.",
             },
@@ -1467,6 +1522,7 @@ describe("editConfig state", () => {
             valueKind: "array",
             presence: "required",
             essential: true,
+            referenceTargetId: "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap1",
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap2:add")).toMatchObject({
             valueKind: "command",
@@ -1585,6 +1641,70 @@ describe("editConfig state", () => {
             state.nodes,
             "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap1.repoName",
         )?.description).toContain("First define repositories under sourceClusters.legacy.snapshotInfo.repos.");
+    });
+
+    it("projects Solr repositories and backups as navigable definitions", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                solr: {
+                    endpoint: "https://solr.example.com:8983",
+                    version: "SOLR 9.7.0",
+                    snapshotInfo: {
+                        repos: {
+                            repo1: {
+                                repoPathUri: "s3://snapshot-bucket/solr",
+                                awsRegion: "us-east-1",
+                            },
+                        },
+                        backups: {
+                            backup1: {
+                                repoName: "repo1",
+                                externalBackupName: "external-backup",
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [{
+                fromSource: "solr",
+                toTarget: "target",
+                perSnapshotConfig: {
+                    backup1: [{documentBackfillConfig: {}}],
+                },
+            }],
+            traffic: {
+                kafkaClusters: {},
+                proxies: {},
+                s3Sources: {},
+                replayers: {},
+            },
+        });
+
+        expect(findNode(state.nodes, "edit:sourceClusters.solr.snapshotInfo.repos")?.inputHint).toMatchObject({
+            definitionCollection: {
+                navigation: {groupLabel: "Repositories", groupOrder: 0},
+                definition: {typeLabel: "Snapshot repository"},
+            },
+        });
+        expect(findNode(state.nodes, "edit:sourceClusters.solr.snapshotInfo.backups")?.inputHint).toMatchObject({
+            definitionCollection: {
+                navigation: {groupLabel: "Backups", groupOrder: 1},
+                definition: {typeLabel: "Source backup"},
+            },
+        });
+        expect(findNode(state.nodes, "edit:sourceClusters.solr.snapshotInfo.backups.backup1.repoName")?.inputHint).toMatchObject({
+            options: [{
+                label: "repo1",
+                value: "repo1",
+                editTargetId: "edit:sourceClusters.solr.snapshotInfo.repos.repo1",
+            }],
+        });
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.backup1")).toMatchObject({
+            referenceTargetId: "edit:sourceClusters.solr.snapshotInfo.backups.backup1",
+        });
     });
 
     it("switches a source snapshot from externally managed to create-snapshot without deleting the snapshot", () => {

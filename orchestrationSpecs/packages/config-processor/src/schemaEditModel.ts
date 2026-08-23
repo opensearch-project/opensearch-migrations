@@ -20,6 +20,7 @@ export type EditInputHint = UiHint & {
         label: string;
         value: string;
         description?: string;
+        editTargetId?: string;
     }[];
 };
 
@@ -56,6 +57,7 @@ export interface EditNode {
     };
     diagnostics?: EditDiagnostic[];
     collapsed?: boolean;
+    referenceTargetId?: string;
     variants?: {
         label: string;
         value: unknown;
@@ -330,13 +332,20 @@ function valueAtPath(value: unknown, path: string[]): unknown {
     return current;
 }
 
-function referenceOptionsFromRecord(record: unknown): EditOption[] {
+function referenceOptionsFromRecord(
+    record: unknown,
+    sourcePath: string[],
+): EditOption[] {
     if (!isPlainObject(record)) {
         return [];
     }
     return Object.keys(record)
         .sort((a, b) => a.localeCompare(b))
-        .map(name => ({label: name, value: name}));
+        .map(name => ({
+            label: name,
+            value: name,
+            editTargetId: `edit:${[...sourcePath, name].join(".")}`,
+        }));
 }
 
 function resolveRelativeConfigPath(basePath: string[], relativePath: unknown): string[] | undefined {
@@ -373,7 +382,20 @@ function resolveReferencePathTemplate(
             continue;
         }
         if (!isPlainObject(segment) || !Array.isArray(segment.valueFrom)) {
-            return undefined;
+            const pathSegmentFromEnd = segment.pathSegmentFromEnd;
+            if (
+                typeof pathSegmentFromEnd !== "number"
+                || !Number.isInteger(pathSegmentFromEnd)
+                || pathSegmentFromEnd <= 0
+            ) {
+                return undefined;
+            }
+            const value = currentPath.at(-pathSegmentFromEnd);
+            if (value === undefined || value === "") {
+                return undefined;
+            }
+            path.push(value);
+            continue;
         }
         const valuePath = resolveRelativeConfigPath(currentPath, segment.valueFrom);
         const value = valuePath ? valueAtPath(context?.rootConfig, valuePath) : undefined;
@@ -417,7 +439,10 @@ function resolveReferenceOptions(
     }
     const optionsByValue = new Map<string, EditOption>();
     for (const sourcePath of resolveReferenceSourcePaths(inputHint, currentPath, context)) {
-        for (const option of referenceOptionsFromRecord(valueAtPath(context.rootConfig, sourcePath))) {
+        for (const option of referenceOptionsFromRecord(
+            valueAtPath(context.rootConfig, sourcePath),
+            sourcePath,
+        )) {
             if (!optionsByValue.has(option.value)) {
                 optionsByValue.set(option.value, option);
             }

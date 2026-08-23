@@ -162,6 +162,18 @@ def test_openapi_exposes_the_versioned_manage_snapshot_contract(tmp_path):
     ]["anyOf"][0] == {
         "$ref": "#/components/schemas/ResourceCollectionHintV1",
     }
+    assert schemas["EditInputHintV1"]["properties"][
+        "definitionCollection"
+    ]["anyOf"][0] == {
+        "$ref": "#/components/schemas/DefinitionCollectionHintV1",
+    }
+    assert schemas["EditNodeV1"]["properties"]["referenceTargetId"] == {
+        "anyOf": [
+            {"type": "string"},
+            {"type": "null"},
+        ],
+        "title": "Referencetargetid",
+    }
 
 
 def test_openapi_generator_writes_current_application_contract(tmp_path):

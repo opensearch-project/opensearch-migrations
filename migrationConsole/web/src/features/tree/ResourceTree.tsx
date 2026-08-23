@@ -1185,6 +1185,11 @@ export function ResourceTree({
   const resourceTypesByNode = useMemo(() => {
     const result = new Map<string, string>();
     Object.values(snapshot.nodes).forEach((node) => {
+      if (node.kind === "config-definition" && node.resourceType) {
+        result.set(node.id, node.resourceType);
+      }
+    });
+    Object.values(snapshot.nodes).forEach((node) => {
       if (node.kind !== "group") return;
       const resources = node.childIds
         .map((childId) => snapshot.nodes[childId])

@@ -646,6 +646,19 @@ export function App() {
     setSelectedId(nodeId);
     setTreeOpen(false);
   };
+  const navigateEditTarget = (targetId: string) => {
+    const navigation = resourceNavigationState ?? displayedState;
+    const node = Object.values(navigation?.nodes ?? {}).find(
+      (candidate) => editTarget(candidate) === targetId,
+    );
+    if (!node) return;
+    setSelectedId(node.id);
+    setEditContext({
+      resourceId: node.id,
+      targetId,
+    });
+    setTreeOpen(false);
+  };
   const editApprovalResource = (candidate: ApprovalCandidate) => {
     const node = state.data?.nodes[candidate.nodeId];
     const targetId = candidate.editTargetId ?? (
@@ -1002,6 +1015,7 @@ export function App() {
                   onResourceRenameSettled={resourceRenameSettled}
                   onResourceRenameStarted={resourceRenameStarted}
                   onResourceAddsReady={registerResourceAdds}
+                  onNavigateEditTarget={navigateEditTarget}
                   onSubmitted={() => {
                     setEditContext(null);
                     void queryClient.invalidateQueries({

@@ -5,7 +5,10 @@ import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
 // Downstream dependency names used in checksumFor annotations.
 export type ChecksumDependency = 'snapshot' | 'snapshotMigration' | 'replayer';
 export type UiTextFormat = 'text' | 'http-endpoint' | 'optional-http-endpoint' | 'cluster-version' | 'k8s-name' | 'oci-image-reference';
-export type UiReferencePathTemplateSegment = string | { valueFrom: string[] };
+export type UiReferencePathTemplateSegment =
+    | string
+    | { valueFrom: string[] }
+    | { pathSegmentFromEnd: number };
 export interface ResourceNavigationHint {
     sectionId: string;
     sectionLabel: string;
@@ -35,9 +38,21 @@ export interface ResourceCollectionHint {
         identity: ResourceIdentityHint;
     };
 }
+export interface DefinitionCollectionHint {
+    // Climb from the collection node to the configuration resource that owns it.
+    ownerAncestorLevels: number;
+    navigation: {
+        groupLabel: string;
+        groupOrder: number;
+    };
+    definition: {
+        typeLabel: string;
+    };
+}
 export type UiHint = {
     label?: string;
     resourceCollection?: ResourceCollectionHint;
+    definitionCollection?: DefinitionCollectionHint;
 } & (
     | {
         kind: 'text';
@@ -150,6 +165,36 @@ const TRAFFIC_REPLAY_RESOURCE_COLLECTION = resourceCollection(
     'trafficreplays',
     'Traffic replay',
 );
+const SNAPSHOT_REPOSITORY_DEFINITION_COLLECTION: DefinitionCollectionHint = {
+    ownerAncestorLevels: 2,
+    navigation: {
+        groupLabel: 'Repositories',
+        groupOrder: 0,
+    },
+    definition: {
+        typeLabel: 'Snapshot repository',
+    },
+};
+const SOURCE_SNAPSHOT_DEFINITION_COLLECTION: DefinitionCollectionHint = {
+    ownerAncestorLevels: 2,
+    navigation: {
+        groupLabel: 'Snapshots',
+        groupOrder: 1,
+    },
+    definition: {
+        typeLabel: 'Source snapshot',
+    },
+};
+const SOURCE_BACKUP_DEFINITION_COLLECTION: DefinitionCollectionHint = {
+    ownerAncestorLevels: 2,
+    navigation: {
+        groupLabel: 'Backups',
+        groupOrder: 1,
+    },
+    definition: {
+        typeLabel: 'Source backup',
+    },
+};
 
 export interface EffectiveDefaultHint {
     label: string;
@@ -2102,6 +2147,7 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
     .uiHint({
         kind: 'record',
         addLabel: 'snapshot repository',
+        definitionCollection: SNAPSHOT_REPOSITORY_DEFINITION_COLLECTION,
     })
     .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
 
@@ -2112,6 +2158,7 @@ export const ELASTICSEARCH_SOURCE_CLUSTER_REPOS_RECORD =
         addLabel: 'snapshot repository',
         keyPattern: SNAPSHOT_REPOSITORY_NAME_PATTERN.source,
         message: SNAPSHOT_REPOSITORY_NAME_MESSAGE,
+        definitionCollection: SNAPSHOT_REPOSITORY_DEFINITION_COLLECTION,
     })
     .describe("Map of Elasticsearch/OpenSearch snapshot repository names to their backing-store configurations. Keys must follow the repository naming rules enforced by Elasticsearch and OpenSearch.");
 
@@ -2331,6 +2378,16 @@ export const ELASTICSEARCH_DYNAMIC_SNAPSHOT_CONFIG = z.object({
         .describe("Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."),
     repoName: SNAPSHOT_REPOSITORY_NAME
         .describe("Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.")
+        .uiHint({
+            kind: 'reference',
+            sourcePathTemplate: [
+                'sourceClusters',
+                {pathSegmentFromEnd: 5},
+                'snapshotInfo',
+                'repos',
+            ],
+            message: "Choose a repository defined under this source cluster's snapshotInfo.repos.",
+        })
 }).describe("An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository.");
 
 export const ELASTICSEARCH_SNAPSHOT_CONFIGS_MAP = z.record(
@@ -2339,6 +2396,7 @@ export const ELASTICSEARCH_SNAPSHOT_CONFIGS_MAP = z.record(
 ).uiHint({
     kind: 'record',
     addLabel: 'source snapshot',
+    definitionCollection: SOURCE_SNAPSHOT_DEFINITION_COLLECTION,
 }).describe("Map of snapshot names to their configurations. Keys are used as labels and in snapshot name generation.");
 
 export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
@@ -2374,7 +2432,17 @@ export const SOLR_CREATE_BACKUP_OPTIONS = z.object({
 
 export const SOLR_CREATE_BACKUP_CONFIG = z.object({
     repoName: z.string()
-        .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."),
+        .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos.")
+        .uiHint({
+            kind: 'reference',
+            sourcePathTemplate: [
+                'sourceClusters',
+                {pathSegmentFromEnd: 5},
+                'snapshotInfo',
+                'repos',
+            ],
+            message: "Choose a repository defined under this source cluster's snapshotInfo.repos.",
+        }),
     createBackupConfig: SOLR_CREATE_BACKUP_OPTIONS
         .describe("Configuration for creating a new Solr backup of the source cluster."),
 }).describe("Configuration to create a new Solr backup of the source cluster as part of the migration workflow.");
@@ -2383,7 +2451,17 @@ export const SOLR_EXTERNAL_BACKUP_CONFIG = z.object({
     externalBackupName: z.string()
         .describe("Name of a pre-existing Solr backup in the configured repository. The workflow prepares and validates this backup before metadata and document migration."),
     repoName: z.string()
-        .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos."),
+        .describe("Name of the Solr backup repository. Must match a key in the source cluster's snapshotInfo.repos.")
+        .uiHint({
+            kind: 'reference',
+            sourcePathTemplate: [
+                'sourceClusters',
+                {pathSegmentFromEnd: 5},
+                'snapshotInfo',
+                'repos',
+            ],
+            message: "Choose a repository defined under this source cluster's snapshotInfo.repos.",
+        }),
     ...SOLR_BACKUP_PROCESS_OPTIONS,
 }).describe("Externally-managed Solr backup configuration. Solr backups are prepared and validated automatically; collectionAllowlist scopes the collections/cores to validate and migrate.");
 
@@ -2395,7 +2473,11 @@ export const SOLR_BACKUP_CONFIG = z.union([
 export const SOLR_BACKUPS_MAP = z.record(
     z.string(),
     SOLR_BACKUP_CONFIG
-).describe("Map of Solr backup labels to their configurations. Keys are used as labels and in backup name generation.");
+).uiHint({
+    kind: 'record',
+    addLabel: 'source backup',
+    definitionCollection: SOURCE_BACKUP_DEFINITION_COLLECTION,
+}).describe("Map of Solr backup labels to their configurations. Keys are used as labels and in backup name generation.");
 
 export const SOLR_SNAPSHOT_INFO = z.object({
     repos: SOURCE_CLUSTER_REPOS_RECORD.optional()

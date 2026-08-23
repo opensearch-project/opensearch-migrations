@@ -80,6 +80,39 @@ def _resource_edit(
     return result
 
 
+def _definition_collection(
+    path,
+    *,
+    owner_ancestor_levels,
+    group_label,
+    group_order,
+    type_label,
+    children,
+):
+    return {
+        "id": f"edit:{'.'.join(path)}",
+        "path": path,
+        "label": group_label,
+        "valueKind": "record",
+        "inputHint": {
+            "kind": "record",
+            "definitionCollection": {
+                "ownerAncestorLevels": owner_ancestor_levels,
+                "navigation": {
+                    "groupLabel": group_label,
+                    "groupOrder": group_order,
+                },
+                "definition": {
+                    "typeLabel": type_label,
+                },
+            },
+        },
+        "status": "ok",
+        "diagnostics": [],
+        "children": children,
+    }
+
+
 def _draft(nodes, *, dirty=True, mode="structured"):
     return ConfigDraft(
         base_revision="base-1",
@@ -265,6 +298,97 @@ def test_project_config_navigation_associates_existing_resource_edit_state():
     assert legacy.config_state.validation_errors == 0
     assert legacy.config_state.validation_warnings == 1
     assert legacy.config_state.draft_change_count == 2
+
+
+def test_project_config_navigation_places_nested_definitions_under_their_owner():
+    repos = _definition_collection(
+        ["sourceClusters", "legacy", "snapshotInfo", "repos"],
+        owner_ancestor_levels=2,
+        group_label="Repositories",
+        group_order=0,
+        type_label="Snapshot repository",
+        children=[
+            _resource_edit(
+                [
+                    "sourceClusters",
+                    "legacy",
+                    "snapshotInfo",
+                    "repos",
+                    "repo1",
+                ],
+                draft_change_count=1,
+            ),
+        ],
+    )
+    snapshots = _definition_collection(
+        ["sourceClusters", "legacy", "snapshotInfo", "snapshots"],
+        owner_ancestor_levels=2,
+        group_label="Snapshots",
+        group_order=1,
+        type_label="Source snapshot",
+        children=[
+            _resource_edit(
+                [
+                    "sourceClusters",
+                    "legacy",
+                    "snapshotInfo",
+                    "snapshots",
+                    "snap1",
+                ],
+            ),
+        ],
+    )
+    source = _resource_edit(
+        ["sourceClusters", "legacy"],
+        children=[
+            _resource_edit(
+                ["sourceClusters", "legacy", "snapshotInfo"],
+                children=[repos, snapshots],
+            ),
+        ],
+    )
+    sources = _collection(
+        ["sourceClusters"],
+        section_id="section:Sources",
+        section_label="Sources",
+        section_order=0,
+        group_id="group:Sources:Sources",
+        group_label="Sources",
+        group_order=0,
+        plural="sourceconfigs",
+        resource_type="Source cluster",
+        children=[source],
+    )
+
+    projected = project_config_navigation(
+        _runtime_snapshot(),
+        _draft([sources]),
+    )
+
+    source_node = projected.nodes["resource:sourceconfigs:legacy"]
+    assert source_node.child_ids == (
+        "definition-group:edit:sourceClusters.legacy.snapshotInfo.repos",
+        "definition-group:edit:sourceClusters.legacy.snapshotInfo.snapshots",
+    )
+    repo_group = projected.nodes[source_node.child_ids[0]]
+    assert repo_group.label == "Repositories"
+    repo = projected.nodes[repo_group.child_ids[0]]
+    assert repo.kind == "config-definition"
+    assert repo.label == "repo1"
+    assert repo.resource_type == "Snapshot repository"
+    assert repo.capabilities[0].target_id == (
+        "edit:sourceClusters.legacy.snapshotInfo.repos.repo1"
+    )
+    assert repo.config_state is not None
+    assert repo.config_state.draft_change_count == 1
+
+    snapshot_group = projected.nodes[source_node.child_ids[1]]
+    assert snapshot_group.label == "Snapshots"
+    snapshot = projected.nodes[snapshot_group.child_ids[0]]
+    assert snapshot.label == "snap1"
+    assert snapshot.capabilities[0].target_id == (
+        "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap1"
+    )
 
 
 def test_project_config_navigation_aggregates_nested_validation_fallbacks():

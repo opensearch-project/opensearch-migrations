@@ -297,6 +297,21 @@ class ResourceCollectionHintV1(WebModel):
     resource: ResourceDescriptorHintV1
 
 
+class DefinitionNavigationHintV1(WebModel):
+    group_label: str
+    group_order: int
+
+
+class DefinitionDescriptorHintV1(WebModel):
+    type_label: str
+
+
+class DefinitionCollectionHintV1(WebModel):
+    owner_ancestor_levels: int
+    navigation: DefinitionNavigationHintV1
+    definition: DefinitionDescriptorHintV1
+
+
 class EditInputHintV1(WebModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -305,6 +320,7 @@ class EditInputHintV1(WebModel):
     )
 
     resource_collection: Optional[ResourceCollectionHintV1] = None
+    definition_collection: Optional[DefinitionCollectionHintV1] = None
 
 
 class EditNodeV1(WebModel):
@@ -342,6 +358,7 @@ class EditNodeV1(WebModel):
     validation: Optional[Dict[str, str]] = None
     diagnostics: List[EditDiagnosticV1] = Field(default_factory=list)
     collapsed: Optional[bool] = None
+    reference_target_id: Optional[str] = None
     variants: List[EditVariantV1] = Field(default_factory=list)
     command: Optional[EditCommandV1] = None
     children: List["EditNodeV1"] = Field(default_factory=list)

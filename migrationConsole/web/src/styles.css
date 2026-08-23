@@ -3902,6 +3902,29 @@ button {
   flex: 0 0 auto;
 }
 
+.inline-reference-link {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-size: 11px;
+}
+
+.inline-reference-link:hover {
+  text-decoration: underline;
+}
+
+.inline-reference-link svg {
+  width: 13px;
+  height: 13px;
+}
+
 .property-summary {
   display: block;
   padding-top: 5px;
