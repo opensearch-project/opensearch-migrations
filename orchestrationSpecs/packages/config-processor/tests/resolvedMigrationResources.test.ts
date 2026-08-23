@@ -167,6 +167,8 @@ describe("resolved migration resources", () => {
     });
 
     it("isolates source auth changes to DataSnapshot resources", async () => {
+        const withoutAuth = await transformAndResolve(sampleConfig());
+
         const beforeConfig = sampleConfig();
         beforeConfig.sourceClusters.source.authConfig = {
             basic: {secretName: "source-credentials-a"},
@@ -185,11 +187,19 @@ describe("resolved migration resources", () => {
             .toBe(before.workflowConfig.proxies[0].checksumForSnapshot);
         expect(after.workflowConfig.proxies[0].checksumForReplayer)
             .toBe(before.workflowConfig.proxies[0].checksumForReplayer);
+        expect(after.workflowConfig.proxies[0].configChecksum)
+            .toBe(withoutAuth.workflowConfig.proxies[0].configChecksum);
+        expect(after.workflowConfig.proxies[0].checksumForSnapshot)
+            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForSnapshot);
+        expect(after.workflowConfig.proxies[0].checksumForReplayer)
+            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForReplayer);
         expect(after.resource("CaptureProxy", "source-proxy").parameters)
             .not.toHaveProperty("sourceAuthBasicSecretName");
 
         expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
             .not.toBe(before.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
+        expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
+            .not.toBe(withoutAuth.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
         expect(after.singleResource("DataSnapshot").parameters.sourceAuthBasicSecretName)
             .toBe("source-credentials-b");
         expect(after.singleResource("SnapshotMigration").parameters)

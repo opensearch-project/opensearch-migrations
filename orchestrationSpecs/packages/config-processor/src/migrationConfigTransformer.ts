@@ -1558,13 +1558,20 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     static clusterConnectionIdentityWithoutAuth(
         connectionIdentity: Record<string, unknown>
     ): Record<string, unknown> {
-        // Downstream resources consume the source's network/snapshot identity but never its credentials.
+        // Preserve the legacy no-auth hash shape so existing proxies do not redeploy
+        // once when source auth is removed from their deployment contract.
         return {
             label: connectionIdentity.label ?? "",
             version: connectionIdentity.version ?? "",
             endpoint: connectionIdentity.endpoint ?? "",
             allowInsecure: connectionIdentity.allowInsecure ?? false,
             solrContextPath: connectionIdentity.solrContextPath ?? "",
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
         };
     }
 
