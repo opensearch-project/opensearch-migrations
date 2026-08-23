@@ -209,6 +209,49 @@ def test_load_resource_config_snapshots_uses_loose_pending_projection(_list_reso
     assert args[4:] == ("migration", "--validation-mode", "loose")
 
 
+@patch("console_link.workflow.services.config_edit_service.list_resources_full")
+def test_load_resource_config_snapshots_keeps_pending_when_historical_projection_fails(
+    list_resources,
+):
+    list_resources.return_value = {
+        "migrationruns": [{
+            "spec": {
+                "workflowName": "migration",
+                "resolvedConfig": {"workflowConfig": {"historical": "invalid"}},
+            },
+        }],
+    }
+    pending_console = {
+        "sources": [{"refName": "source"}],
+        "targets": [{"refName": "target"}],
+        "kafkas": [],
+        "consumerGroups": [],
+    }
+    runner = MagicMock()
+    runner.run_config_processor_node_script.side_effect = [
+        json.dumps({
+            "resources": [],
+            "consoleResources": pending_console,
+        }),
+        subprocess.CalledProcessError(
+            1,
+            ["node", "resolveConsoleResources"],
+            stderr="historical config no longer passes the current schema",
+        ),
+    ]
+    service = ConfigEditService(
+        namespace="test",
+        store=FakeStore(WorkflowConfig(raw_yaml="sourceClusters: {}")),
+        runner=runner,
+    )
+
+    result = service.load_resource_config_snapshots("migration")
+
+    assert result["submitted_console"] is None
+    assert result["pending_console"] == pending_console
+    assert runner.run_config_processor_node_script.call_count == 2
+
+
 def test_list_external_resources_uses_tls_content_validation_hints():
     service = ConfigEditService(namespace="test", store=FakeStore())
     core = MagicMock()

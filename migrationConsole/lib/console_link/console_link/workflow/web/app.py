@@ -58,6 +58,7 @@ from .contracts import (
     OutputInventoryV1,
     OperationListV1,
     OperationV1,
+    ReplaceRawConfigRequestV1,
     ResetPlanRequestV1,
     ResetPlanV1,
     SaveExternalResourceRequestV1,
@@ -462,6 +463,24 @@ def create_app(
             raise _draft_conflict(error) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+        return ConfigDraftV1.from_domain(draft)
+
+    @app.put(
+        "/api/v1/config/raw",
+        response_model=ConfigDraftV1,
+        response_model_exclude_none=True,
+        tags=["configuration"],
+    )
+    def replace_raw_config(
+        request_body: ReplaceRawConfigRequestV1,
+    ) -> ConfigDraftV1:
+        try:
+            draft = draft_service().replace_raw(
+                request_body.expected_draft_revision,
+                request_body.raw_yaml,
+            )
+        except ConfigDraftConflict as error:
+            raise _draft_conflict(error) from error
         return ConfigDraftV1.from_domain(draft)
 
     @app.post(

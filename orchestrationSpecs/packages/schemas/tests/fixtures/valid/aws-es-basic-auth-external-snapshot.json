@@ -5,9 +5,14 @@
       "endpoint": "https://my-domain.us-east-1.es.amazonaws.com",
       "authConfig": { "basic": { "secretName": "source-creds" } },
       "snapshotInfo": {
+        "repos": {
+          "default": {
+            "repoPathUri": "s3://snapshot-bucket"
+          }
+        },
         "snapshots": {
           "snap1": {
-            "repoName": "",
+            "repoName": "default",
             "config": { "externallyManagedSnapshotName": "my-snapshot" }
           }
         }

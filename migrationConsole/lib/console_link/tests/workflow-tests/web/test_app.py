@@ -800,6 +800,11 @@ class _Drafts:
         self.operation = operation
         return self.current
 
+    def replace_raw(self, expected_revision, raw_yaml):
+        self.expected_revision = expected_revision
+        self.raw_yaml = raw_yaml
+        return self.current
+
     def save(self, expected_revision):
         self.expected_revision = expected_revision
         self.saved = True
@@ -1028,6 +1033,27 @@ def test_config_operation_contract_is_discriminated_and_passed_to_the_service(tm
         "path": ["traffic", "old"],
         "newName": "next",
     }
+
+
+def test_raw_config_repair_is_revisioned_and_passed_to_the_service(tmp_path):
+    drafts = _Drafts()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_drafts=drafts,
+    )
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/config/raw",
+            json={
+                "expectedDraftRevision": "draft-1",
+                "rawYaml": "sourceClusters: {}\n",
+            },
+        )
+
+    assert response.status_code == 200
+    assert drafts.expected_revision == "draft-1"
+    assert drafts.raw_yaml == "sourceClusters: {}\n"
 
 
 def test_config_save_discard_and_close_use_expected_revision(tmp_path):

@@ -5,9 +5,14 @@
       "endpoint": "https://local.testenv.es.amazonaws.com.mydomain.local",
       "authConfig": { "basic": { "secretName": "source-creds" } },
       "snapshotInfo": {
+        "repos": {
+          "default": {
+            "repoPathUri": "s3://snapshot-bucket"
+          }
+        },
         "snapshots": {
           "snap1": {
-            "repoName": "",
+            "repoName": "default",
             "config": { "createSnapshotConfig": {} }
           }
         }

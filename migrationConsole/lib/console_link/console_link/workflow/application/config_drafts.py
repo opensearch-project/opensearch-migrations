@@ -30,6 +30,7 @@ class ConfigDraft:
     draft_revision: str
     dirty: bool
     edit_state: Dict[str, Any]
+    repair_yaml: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,13 @@ class ConfigDraftService:
         with self._lock:
             self._require_revision(expected_revision)
             self._apply_operations((operation,))
+            return self._snapshot()
+
+    def replace_raw(self, expected_revision: str, raw_yaml: str) -> ConfigDraft:
+        with self._lock:
+            self._require_revision(expected_revision)
+            self._raw_yaml = raw_yaml
+            self._edit_state = self._edit_service.project_raw_yaml(raw_yaml)
             return self._snapshot()
 
     def save(self, expected_revision: str) -> ConfigDraft:
@@ -474,6 +482,7 @@ class ConfigDraftService:
     def _snapshot(self) -> ConfigDraft:
         if self._raw_yaml is None or self._base_revision is None:
             raise RuntimeError("Configuration draft is not open")
+        provenance = (self._edit_state or {}).get("provenance") or {}
         return ConfigDraft(
             base_revision=self._base_revision,
             draft_revision=self._draft_revision(),
@@ -481,6 +490,11 @@ class ConfigDraftService:
             edit_state=_annotate_draft_changes(
                 self._edit_state or {},
                 self._base_edit_state or {},
+            ),
+            repair_yaml=(
+                self._raw_yaml
+                if provenance.get("mode") == "raw"
+                else None
             ),
         )
 

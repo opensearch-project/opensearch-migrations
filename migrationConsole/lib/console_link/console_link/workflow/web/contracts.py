@@ -289,6 +289,7 @@ class EditNodeV1(WebModel):
 class EditProvenanceV1(WebModel):
     source: Literal["pending-yaml"]
     lossy: bool
+    mode: Literal["structured", "raw"] = "structured"
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -310,6 +311,7 @@ class ConfigDraftV1(WebModel):
     draft_revision: str
     dirty: bool
     edit_state: EditStateV1
+    raw_yaml: Optional[str] = None
 
     @classmethod
     def from_domain(cls, draft: ConfigDraft) -> "ConfigDraftV1":
@@ -318,6 +320,7 @@ class ConfigDraftV1(WebModel):
             "draftRevision": draft.draft_revision,
             "dirty": draft.dirty,
             "editState": draft.edit_state,
+            "rawYaml": draft.repair_yaml,
         })
 
 
@@ -368,6 +371,10 @@ class ApplyEditOperationRequestV1(WebModel):
 
 class DraftRevisionRequestV1(WebModel):
     expected_draft_revision: str
+
+
+class ReplaceRawConfigRequestV1(DraftRevisionRequestV1):
+    raw_yaml: str
 
 
 class ConfigRemovalImpactRequestV1(DraftRevisionRequestV1):

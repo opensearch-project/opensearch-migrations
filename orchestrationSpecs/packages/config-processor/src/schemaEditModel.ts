@@ -77,6 +77,7 @@ export interface EditStateV1 {
         source: "pending-yaml";
         lossy: boolean;
         warnings: string[];
+        mode?: "structured" | "raw";
     };
     nodes: EditNode[];
     validation: {

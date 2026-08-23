@@ -37,10 +37,10 @@ import {
     USER_PROXY_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
-import {stringify} from "yaml";
-import {parseYaml} from "./userConfigReader";
+import {parse, stringify} from "yaml";
+import {parseYaml, readYamlText} from "./userConfigReader";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
-import {formatInputValidationError, InputValidationError} from "./streamSchemaTransformer";
+import {formatInputValidationError, InputValidationError, stripComments} from "./streamSchemaTransformer";
 import {
     EditApplyResultV1,
     EditDiagnostic,
@@ -958,7 +958,59 @@ function validationSuccess(): EditStateV1["validation"] {
     return {valid: true, errors: []};
 }
 
-function validationFromError(error: unknown): EditStateV1["validation"] {
+function hasValueAtPath(config: unknown, path: PropertyKey[]): boolean {
+    let value = config;
+    for (const part of path) {
+        if (typeof value !== "object" || value === null || !(part in value)) {
+            return false;
+        }
+        value = (value as any)[part];
+    }
+    return value !== undefined;
+}
+
+function actionableZodIssues(
+    issues: z.core.$ZodIssue[],
+    config: unknown,
+): z.core.$ZodIssue[] {
+    return issues.flatMap(issue => {
+        if (issue.code === "invalid_key") {
+            const nested = (issue as any).issues as z.core.$ZodIssue[] | undefined;
+            if (nested?.length) {
+                return actionableZodIssues(
+                    nested.map(child => ({
+                        ...child,
+                        path: [...issue.path, ...child.path],
+                    })),
+                    config,
+                );
+            }
+        }
+        if (issue.code !== "invalid_union") {
+            return [issue];
+        }
+        const branches = ((issue as any).errors ?? []) as z.core.$ZodIssue[][];
+        const candidates = branches.map(branch => actionableZodIssues(
+            branch.map(child => ({
+                ...child,
+                path: [...issue.path, ...child.path],
+            })),
+            config,
+        ));
+        const ranked = candidates
+            .map(branch => ({
+                branch,
+                presentValues: branch.filter(candidate =>
+                    hasValueAtPath(config, candidate.path)).length,
+            }))
+            .sort((left, right) =>
+                right.presentValues - left.presentValues
+                || left.branch.length - right.branch.length);
+        return ranked[0]?.presentValues ? ranked[0].branch : [issue];
+    });
+}
+
+function validationFromError(error: unknown, config?: unknown): EditStateV1["validation"] {
     if (error instanceof InputValidationError) {
         return {
             valid: false,
@@ -971,10 +1023,13 @@ function validationFromError(error: unknown): EditStateV1["validation"] {
         };
     }
     if (error instanceof z.ZodError) {
+        const issues = config === undefined
+            ? error.issues
+            : actionableZodIssues(error.issues, config);
         return {
             valid: false,
-            errors: error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`),
-            diagnostics: error.issues.map(issue => ({
+            errors: issues.map(issue => `${issue.path.join(".")}: ${issue.message}`),
+            diagnostics: issues.map(issue => ({
                 severity: zodIssueSeverity(issue),
                 message: issue.message,
                 path: diagnosticPath(issue.path),
@@ -989,7 +1044,121 @@ function validationFromError(error: unknown): EditStateV1["validation"] {
     };
 }
 
+function inputSchemaValidationError(config: unknown): EditStateV1["validation"] | undefined {
+    const strippedConfig = stripComments(config);
+    const schemaResult = OVERALL_MIGRATION_CONFIG.safeParse(strippedConfig);
+    if (!schemaResult.success) {
+        return validationFromError(schemaResult.error, strippedConfig);
+    }
+    return undefined;
+}
+
+function rawRepairState(
+    validation: EditStateV1["validation"],
+    warning: string,
+): EditStateV1 {
+    return {
+        formatVersion: 1,
+        provenance: {
+            source: "pending-yaml",
+            lossy: true,
+            mode: "raw",
+            warnings: [warning],
+        },
+        nodes: [],
+        validation,
+    };
+}
+
+function syntaxValidation(error: unknown): EditStateV1["validation"] {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+        valid: false,
+        errors: [message],
+        diagnostics: [{
+            severity: "error",
+            message,
+            path: [],
+        }],
+    };
+}
+
+function recordHasObjectValues(value: unknown): boolean {
+    return isPlainObject(value)
+        && Object.values(value).every(child => isPlainObject(child));
+}
+
+function optionalRecordHasObjectValues(value: unknown): boolean {
+    return value === undefined || recordHasObjectValues(value);
+}
+
+function configShapeSupportsStructuredEdit(config: unknown): boolean {
+    if (!isPlainObject(config)) {
+        return false;
+    }
+    if (
+        !optionalRecordHasObjectValues(config.sourceClusters)
+        || !optionalRecordHasObjectValues(config.targetClusters)
+    ) {
+        return false;
+    }
+    if (
+        config.snapshotMigrationConfigs !== undefined
+        && (
+            !Array.isArray(config.snapshotMigrationConfigs)
+            || !config.snapshotMigrationConfigs.every(isPlainObject)
+        )
+    ) {
+        return false;
+    }
+    if (config.traffic !== undefined && !isPlainObject(config.traffic)) {
+        return false;
+    }
+    const traffic = isPlainObject(config.traffic) ? config.traffic : {};
+    if (
+        !optionalRecordHasObjectValues(traffic.kafkaClusters)
+        || !optionalRecordHasObjectValues(traffic.proxies)
+        || !optionalRecordHasObjectValues(traffic.s3Sources)
+        || !optionalRecordHasObjectValues(traffic.replayers)
+    ) {
+        return false;
+    }
+    for (const source of Object.values(
+        isPlainObject(config.sourceClusters) ? config.sourceClusters : {}
+    )) {
+        if (!isPlainObject(source) || source.snapshotInfo === undefined) {
+            continue;
+        }
+        if (!isPlainObject(source.snapshotInfo)) {
+            return false;
+        }
+        if (
+            !optionalRecordHasObjectValues(source.snapshotInfo.repos)
+            || !optionalRecordHasObjectValues(source.snapshotInfo.snapshots)
+            || !optionalRecordHasObjectValues(source.snapshotInfo.backups)
+        ) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function validationRequiresRawRepair(
+    config: unknown,
+    validation: EditStateV1["validation"],
+): boolean {
+    if (!configShapeSupportsStructuredEdit(config)) {
+        return true;
+    }
+    return (validation.diagnostics ?? []).some(diagnostic =>
+        diagnostic.message.startsWith("Unrecognized key "));
+}
+
 export function validationForConfig(config: unknown): EditStateV1["validation"] {
+    const schemaValidation = inputSchemaValidationError(config);
+    if (schemaValidation) {
+        return schemaValidation;
+    }
     try {
         new MigrationConfigTransformer().validateInput(config);
         return validationSuccess();
@@ -999,6 +1168,10 @@ export function validationForConfig(config: unknown): EditStateV1["validation"] 
 }
 
 export async function submitValidationForConfig(config: unknown): Promise<EditStateV1["validation"]> {
+    const schemaValidation = inputSchemaValidationError(config);
+    if (schemaValidation) {
+        return schemaValidation;
+    }
     try {
         await new MigrationConfigTransformer(
             {},
@@ -1024,6 +1197,7 @@ export function buildEditStateFromObject(config: any, validationOverride?: EditS
         provenance: {
             source: "pending-yaml",
             lossy: false,
+            mode: "structured",
             warnings: [],
         },
         nodes,
@@ -1032,7 +1206,14 @@ export function buildEditStateFromObject(config: any, validationOverride?: EditS
 }
 
 export async function buildEditStateFromObjectForSubmit(config: any): Promise<EditStateV1> {
-    return buildEditStateFromObject(config, await submitValidationForConfig(config));
+    const validation = await submitValidationForConfig(config);
+    if (validationRequiresRawRepair(config, validation)) {
+        return rawRepairState(
+            validation,
+            "The saved YAML contains structures that cannot be represented safely by the form editor.",
+        );
+    }
+    return buildEditStateFromObject(config, validation);
 }
 
 function ensureContainer(parent: any, key: string): Record<string, unknown> {
@@ -1855,7 +2036,20 @@ export async function main() {
     if (pendingConfigFlag !== "--pending-config" || !pendingConfigPath) {
         usage();
     }
-    const config = await parseYaml(pendingConfigPath);
+    const yamlContents = await readYamlText(pendingConfigPath);
+    let config: unknown;
+    try {
+        config = parse(yamlContents);
+    } catch (error) {
+        if (subcommand === "state" && args.length === 0) {
+            process.stdout.write(JSON.stringify(rawRepairState(
+                syntaxValidation(error),
+                "The saved YAML must be repaired before the form editor can open it.",
+            ), null, 2));
+            return;
+        }
+        throw error;
+    }
     if (subcommand === "state") {
         if (args.length > 0) {
             usage();

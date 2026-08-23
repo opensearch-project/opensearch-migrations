@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 import subprocess
 import tempfile
 import time
@@ -29,6 +30,9 @@ from .admission_preflight import (
     AdmissionPreflightReport,
 )
 from .script_runner import ScriptRunner
+
+
+logger = logging.getLogger(__name__)
 
 
 STATUS_PRIORITY = {
@@ -105,6 +109,10 @@ class ConfigEditService:
 
     def load_edit_state(self) -> Dict[str, Any]:
         return self.load_edit_session().edit_state
+
+    def project_raw_yaml(self, raw_yaml: str) -> Dict[str, Any]:
+        """Build a structured or raw-repair edit projection without saving."""
+        return self._run_edit_state(raw_yaml, validate_external_refs=True)
 
     def apply_operation(self, raw_yaml: str, operation: Dict[str, Any]) -> ConfigEditApplyResult:
         with tempfile.NamedTemporaryFile(mode="w", suffix=YAML_SUFFIX, delete=True) as operation_file:
@@ -253,10 +261,22 @@ class ConfigEditService:
         pending = self.load_pending_resolved_config(workflow_name, validation_mode="loose")
         submitted_console = (submitted or {}).get("consoleResources")
         if submitted and submitted_console is None and submitted.get("workflowConfig"):
-            submitted_console = self._run_resolve_console_resources(submitted, "--resolved-config")
+            try:
+                submitted_console = self._run_resolve_console_resources(submitted, "--resolved-config")
+            except Exception as error:
+                logger.warning(
+                    "Could not project console resources from the latest submitted config: %s",
+                    error,
+                )
         pending_console = (pending or {}).get("consoleResources")
         if pending and pending_console is None and pending.get("workflowConfig"):
-            pending_console = self._run_resolve_console_resources(pending, "--resolved-config")
+            try:
+                pending_console = self._run_resolve_console_resources(pending, "--resolved-config")
+            except Exception as error:
+                logger.warning(
+                    "Could not project console resources from the pending config: %s",
+                    error,
+                )
         return {
             "submitted": submitted,
             "pending": pending,

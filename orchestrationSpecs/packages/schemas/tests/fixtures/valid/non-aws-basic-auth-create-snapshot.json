@@ -5,9 +5,14 @@
       "endpoint": "https://my-cluster.example.com:9200",
       "authConfig": { "basic": { "secretName": "source-creds" } },
       "snapshotInfo": {
+        "repos": {
+          "default": {
+            "repoPathUri": "s3://snapshot-bucket"
+          }
+        },
         "snapshots": {
           "snap1": {
-            "repoName": "",
+            "repoName": "default",
             "config": { "createSnapshotConfig": {} }
           }
         }

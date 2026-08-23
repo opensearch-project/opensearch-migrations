@@ -38,6 +38,35 @@ async function enterEditMode() {
 }
 
 
+function rawRepairDraft() {
+  const draft = structuredClone(configDraft);
+  draft.draftRevision = "raw-repair-1";
+  draft.editState = {
+    formatVersion: 1,
+    provenance: {
+      source: "pending-yaml",
+      lossy: true,
+      mode: "raw",
+      warnings: [
+        "The saved YAML must be repaired before the form editor can open it.",
+      ],
+    },
+    nodes: [],
+    validation: {
+      valid: false,
+      errors: ["Flow sequence in block collection must be closed"],
+      diagnostics: [{
+        severity: "error",
+        message: "Flow sequence in block collection must be closed",
+        path: [],
+      }],
+    },
+  };
+  draft.rawYaml = "sourceClusters:\n  source: [\n";
+  return draft;
+}
+
+
 test("renders real manage state with exact-node details and capabilities", async () => {
   await expect(getHealth()).resolves.toEqual({
     status: "ok",
@@ -2195,6 +2224,106 @@ test("shows the server reason when configuration cannot be opened", async () => 
   expect(screen.getByRole("tree", { name: "Workflow resources" }))
     .toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Workflow dependencies" }))
+    .toBeInTheDocument();
+});
+
+
+test("repairs raw YAML and returns to the structured editor", async () => {
+  const rawDraft = rawRepairDraft();
+  const repairedDraft = structuredClone(configDraft);
+  repairedDraft.draftRevision = "structured-repair-2";
+  repairedDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  let replacement: unknown;
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(rawDraft)),
+    http.put("*/api/v1/config/raw", async ({ request }) => {
+      replacement = await request.json();
+      return HttpResponse.json(repairedDraft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const yaml = await screen.findByRole("textbox", { name: "Workflow YAML" });
+  expect(yaml).toHaveValue(rawDraft.rawYaml);
+  expect(screen.getByText(
+    "Flow sequence in block collection must be closed",
+  )).toBeInTheDocument();
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  const capture = within(tree).getByRole("treeitem", { name: /^capture$/ });
+  expect(within(capture).queryByText(/remov/i)).toBeNull();
+
+  const repairedYaml = [
+    "sourceClusters:",
+    "  source:",
+    "    endpoint: https://source.example.com:9200",
+    "    version: OS 2.19",
+    "targetClusters: {}",
+    "snapshotMigrationConfigs: []",
+    "",
+  ].join("\n");
+  fireEvent.change(yaml, { target: { value: repairedYaml } });
+  await userEvent.click(screen.getByRole("button", { name: "Check YAML" }));
+
+  await waitFor(() => expect(replacement).toEqual({
+    expectedDraftRevision: "raw-repair-1",
+    rawYaml: repairedYaml,
+  }));
+  expect(await screen.findByRole("table", {
+    name: "Configuration fields",
+  })).toBeInTheDocument();
+  expect(screen.queryByRole("textbox", { name: "Workflow YAML" })).toBeNull();
+});
+
+
+test("protects and locally discards unsent raw YAML edits on exit", async () => {
+  const rawDraft = rawRepairDraft();
+  let rawReplacementCalls = 0;
+  let closeRequest: unknown;
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(rawDraft)),
+    http.put("*/api/v1/config/raw", () => {
+      rawReplacementCalls += 1;
+      return HttpResponse.json(rawDraft);
+    }),
+    http.post("*/api/v1/config/close", async ({ request }) => {
+      closeRequest = await request.json();
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  fireEvent.change(
+    await screen.findByRole("textbox", { name: "Workflow YAML" }),
+    { target: { value: "sourceClusters: {}\n" } },
+  );
+  await userEvent.click(screen.getByRole("button", {
+    name: "Exit editing",
+  }));
+  const firstPrompt = screen.getByRole("dialog", { name: "Leave editing?" });
+  await userEvent.click(within(firstPrompt).getByRole("button", {
+    name: "Continue editing",
+  }));
+  expect(screen.getByRole("textbox", { name: "Workflow YAML" }))
+    .toHaveValue("sourceClusters: {}\n");
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Exit editing",
+  }));
+  await userEvent.click(screen.getByRole("button", {
+    name: "Discard and exit",
+  }));
+
+  expect(rawReplacementCalls).toBe(0);
+  expect(closeRequest).toEqual({
+    expectedDraftRevision: "raw-repair-1",
+  });
+  expect(await screen.findByRole("button", { name: "Edit configuration" }))
     .toBeInTheDocument();
 });
 

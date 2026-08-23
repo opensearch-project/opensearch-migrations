@@ -692,6 +692,23 @@ export const REPO_CONFIG = z.object({
     "For GCS, authentication is expected to be provided to the source cluster out-of-band " +
     "(e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity).");
 
+// OpenSearch and Elasticsearch both reject empty repository names, '#', and their
+// shared invalid-filename set: \ / * ? " < > | space and comma.
+// https://docs.opensearch.org/latest/api-reference/snapshots/create-repository/
+// https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-snapshot-create-repository
+export const SNAPSHOT_REPOSITORY_NAME_PATTERN = /^[^\\/*?"<>| ,#]+$/;
+export const SNAPSHOT_REPOSITORY_NAME_MESSAGE =
+    "Use a non-empty repository name without spaces or any of these characters: \\, /, *, ?, \", <, >, |, comma, #.";
+export const SNAPSHOT_REPOSITORY_NAME = z.string()
+    .regex(SNAPSHOT_REPOSITORY_NAME_PATTERN, SNAPSHOT_REPOSITORY_NAME_MESSAGE)
+    .describe("Elasticsearch/OpenSearch snapshot repository name.")
+    .uiHint({
+        kind: 'text',
+        pattern: SNAPSHOT_REPOSITORY_NAME_PATTERN.source,
+        message: SNAPSHOT_REPOSITORY_NAME_MESSAGE,
+        examples: ['migration-repository', 'snapshots_prod'],
+    });
+
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
 export const HOSTNAME_PATTERN = "[^:\\/\\s]+";
@@ -1980,6 +1997,16 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
     })
     .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value's repoPathUri scheme determines the backend (s3:// or gs://).");
 
+export const ELASTICSEARCH_SOURCE_CLUSTER_REPOS_RECORD =
+    z.record(SNAPSHOT_REPOSITORY_NAME, REPO_CONFIG)
+    .uiHint({
+        kind: 'record',
+        addLabel: 'snapshot repository',
+        keyPattern: SNAPSHOT_REPOSITORY_NAME_PATTERN.source,
+        message: SNAPSHOT_REPOSITORY_NAME_MESSAGE,
+    })
+    .describe("Map of Elasticsearch/OpenSearch snapshot repository names to their backing-store configurations. Keys must follow the repository naming rules enforced by Elasticsearch and OpenSearch.");
+
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
         .describe("Label of the Kafka cluster to use for captured traffic. Must match a key in traffic.kafkaClusters.")
@@ -2191,7 +2218,7 @@ export const ELASTICSEARCH_SNAPSHOT_NAME_CONFIG = z.union([
 export const ELASTICSEARCH_DYNAMIC_SNAPSHOT_CONFIG = z.object({
     config: ELASTICSEARCH_SNAPSHOT_NAME_CONFIG
         .describe("Elasticsearch/OpenSearch snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."),
-    repoName: z.string()
+    repoName: SNAPSHOT_REPOSITORY_NAME
         .describe("Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.")
 }).describe("An Elasticsearch/OpenSearch snapshot configuration bound to a specific repository.");
 
@@ -2204,7 +2231,7 @@ export const ELASTICSEARCH_SNAPSHOT_CONFIGS_MAP = z.record(
 }).describe("Map of snapshot names to their configurations. Keys are used as labels and in snapshot name generation.");
 
 export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
-    repos: SOURCE_CLUSTER_REPOS_RECORD.optional()
+    repos: ELASTICSEARCH_SOURCE_CLUSTER_REPOS_RECORD.optional()
         .describe("Elasticsearch/OpenSearch snapshot repositories registered with the source cluster."),
     snapshots: ELASTICSEARCH_SNAPSHOT_CONFIGS_MAP
         .describe("Elasticsearch/OpenSearch snapshots to use or create for this source cluster."),

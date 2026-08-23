@@ -138,6 +138,30 @@ export async function applyEditOperation(
 }
 
 
+export async function replaceRawConfig(
+  draftRevision: string,
+  rawYaml: string,
+): Promise<ConfigDraft> {
+  const { data, error, response } = await client.PUT(
+    "/api/v1/config/raw",
+    {
+      body: {
+        expectedDraftRevision: draftRevision,
+        rawYaml,
+      },
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "The YAML could not be checked",
+      error,
+    );
+  }
+  return data;
+}
+
+
 export async function saveConfigDraft(
   draftRevision: string,
 ): Promise<ConfigDraft> {

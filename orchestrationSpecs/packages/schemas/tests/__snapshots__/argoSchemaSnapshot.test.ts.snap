@@ -392,7 +392,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster.",
                               "x-ui-hint": {
                                 "kind": "record",
-                                "addLabel": "snapshot repository"
+                                "addLabel": "snapshot repository",
+                                "keyPattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
+                                "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #."
                               }
                             },
                             "snapshots": {
@@ -588,7 +590,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   },
                                   "repoName": {
                                     "type": "string",
-                                    "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
+                                    "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
+                                    "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.",
+                                    "x-ui-hint": {
+                                      "kind": "text",
+                                      "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
+                                      "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #.",
+                                      "examples": [
+                                        "migration-repository",
+                                        "snapshots_prod"
+                                      ]
+                                    }
                                   }
                                 },
                                 "required": [
@@ -4786,7 +4798,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "Elasticsearch/OpenSearch snapshot repositories registered with the source cluster.",
                     "x-ui-hint": {
                       "kind": "record",
-                      "addLabel": "snapshot repository"
+                      "addLabel": "snapshot repository",
+                      "keyPattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
+                      "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #."
                     }
                   },
                   "snapshots": {
@@ -4982,7 +4996,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "repoName": {
                           "type": "string",
-                          "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
+                          "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
+                          "description": "Name of the Elasticsearch/OpenSearch snapshot repository. Must match a key in the source cluster's snapshotInfo.repos.",
+                          "x-ui-hint": {
+                            "kind": "text",
+                            "pattern": "^[^\\\\\\\\/*?\\"<>| ,#]+$",
+                            "message": "Use a non-empty repository name without spaces or any of these characters: \\\\, /, *, ?, \\", <, >, |, comma, #.",
+                            "examples": [
+                              "migration-repository",
+                              "snapshots_prod"
+                            ]
+                          }
                         }
                       },
                       "required": [

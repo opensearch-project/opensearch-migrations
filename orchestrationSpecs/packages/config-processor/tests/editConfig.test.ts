@@ -534,6 +534,59 @@ describe("editConfig state", () => {
         expect(endpoint?.status).toBe("error");
     });
 
+    it("keeps clusters and invalid snapshot repository names editable", async () => {
+        const state = await buildEditStateFromObjectForSubmit({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "OS 2.19",
+                    snapshotInfo: {
+                        repos: {
+                            "r a": {
+                                awsRegion: "us-east-1",
+                                repoPathUri: "s3://bucket/path",
+                            },
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "r a",
+                                config: {externallyManagedSnapshotName: "snapshot-1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(findNode(state.nodes, "edit:sourceClusters.source")).toBeDefined();
+        expect(findNode(state.nodes, "edit:targetClusters.target")).toBeDefined();
+        expect(findNode(
+            state.nodes,
+            "edit:sourceClusters.source.snapshotInfo.repos.r a",
+        )).toMatchObject({
+            status: "error",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    message: expect.stringContaining("repository name"),
+                    path: ["sourceClusters", "source", "snapshotInfo", "repos", "r a"],
+                }),
+            ]),
+        });
+        expect(findNode(
+            state.nodes,
+            "edit:sourceClusters.source.snapshotInfo.snapshots.snap1.repoName",
+        )).toMatchObject({
+            value: "r a",
+            status: "error",
+        });
+        expect(state.validation.valid).toBe(false);
+        expect(state.provenance.mode).toBe("structured");
+    });
+
     it("returns structured validation diagnostics from schema refinements", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {
@@ -2861,5 +2914,151 @@ describe("editConfig state", () => {
         expect(result.stdout.trimStart().startsWith("{")).toBe(true);
         expect(() => JSON.parse(result.stdout)).not.toThrow();
         expect(result.stderr).toBe("");
+    });
+
+    it("returns raw repair state instead of failing for invalid YAML", () => {
+        const tempDir = mkdtempSync(path.join(tmpdir(), "edit-config-invalid-yaml-"));
+        try {
+            const configPath = path.join(tempDir, "invalid.yaml");
+            writeFileSync(configPath, "sourceClusters:\n  source: [\n");
+            const cliPath = path.resolve(__dirname, "../src/cliRouter.ts");
+
+            const result = spawnSync(
+                process.execPath,
+                [
+                    "--import",
+                    "tsx",
+                    cliPath,
+                    "editConfig",
+                    "state",
+                    "--pending-config",
+                    configPath,
+                ],
+                {encoding: "utf8"}
+            );
+
+            expect(result.status).toBe(0);
+            const state = JSON.parse(result.stdout);
+            expect(state.provenance).toMatchObject({
+                source: "pending-yaml",
+                lossy: true,
+                mode: "raw",
+            });
+            expect(state.nodes).toEqual([]);
+            expect(state.validation.valid).toBe(false);
+            expect(state.validation.diagnostics[0]).toMatchObject({
+                severity: "error",
+                path: [],
+            });
+        } finally {
+            rmSync(tempDir, {recursive: true, force: true});
+        }
+    });
+
+    it("uses raw repair state when malformed containers cannot be edited safely", async () => {
+        const state = await buildEditStateFromObjectForSubmit({
+            sourceClusters: "not-a-record",
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(state.provenance).toMatchObject({
+            lossy: true,
+            mode: "raw",
+        });
+        expect(state.nodes).toEqual([]);
+        expect(state.validation.valid).toBe(false);
+    });
+
+    it.each([
+        ["top-level null", null],
+        ["top-level scalar", "not-a-workflow"],
+        ["top-level array", []],
+        [
+            "malformed source collection",
+            {
+                sourceClusters: "not-a-record",
+                targetClusters: {},
+                snapshotMigrationConfigs: [],
+            },
+        ],
+        [
+            "malformed source entry",
+            {
+                sourceClusters: {source: "not-an-object"},
+                targetClusters: {},
+                snapshotMigrationConfigs: [],
+            },
+        ],
+        [
+            "malformed target entry",
+            {
+                sourceClusters: {},
+                targetClusters: {target: []},
+                snapshotMigrationConfigs: [],
+            },
+        ],
+        [
+            "malformed traffic object",
+            {
+                sourceClusters: {},
+                targetClusters: {},
+                traffic: "not-an-object",
+                snapshotMigrationConfigs: [],
+            },
+        ],
+        [
+            "malformed traffic collection",
+            {
+                sourceClusters: {},
+                targetClusters: {},
+                traffic: {proxies: []},
+                snapshotMigrationConfigs: [],
+            },
+        ],
+        [
+            "malformed traffic entry",
+            {
+                sourceClusters: {},
+                targetClusters: {},
+                traffic: {replayers: {replay: "not-an-object"}},
+                snapshotMigrationConfigs: [],
+            },
+        ],
+        [
+            "unknown top-level content",
+            {
+                sourceClusters: {},
+                targetClusters: {},
+                snapshotMigrationConfigs: [],
+                unexpectedWorkflowSection: {preserveMe: true},
+            },
+        ],
+        [
+            "unknown nested content",
+            {
+                sourceClusters: {
+                    source: {
+                        endpoint: "https://source.example.com:9200",
+                        version: "OS 2.19",
+                        unexpectedSourceOption: true,
+                    },
+                },
+                targetClusters: {},
+                snapshotMigrationConfigs: [],
+            },
+        ],
+    ])("uses raw repair for %s", async (_description, config) => {
+        const state = await buildEditStateFromObjectForSubmit(config);
+
+        expect(state.provenance).toMatchObject({
+            lossy: true,
+            mode: "raw",
+        });
+        expect(state.nodes).toEqual([]);
+        expect(state.validation.valid).toBe(false);
+        expect(state.validation.diagnostics?.length).toBeGreaterThan(0);
     });
 });

@@ -29,6 +29,7 @@ import {
   discardConfigDraft,
   getConfigDraft,
   getConfigRemovalImpact,
+  replaceRawConfig,
   saveConfigDraft,
   type ConfigDraft,
   type ConfigRemovalImpact,
@@ -1433,6 +1434,8 @@ export function ConfigEditor({
   const [locallyEditedIds, setLocallyEditedIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [rawYamlText, setRawYamlText] = useState("");
+  const [rawYamlDirty, setRawYamlDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [problem, setProblem] = useState("");
@@ -1619,7 +1622,12 @@ export function ConfigEditor({
     pendingRowAnchor.current = null;
   }, [expansionScopeId]);
 
-  const hasLocalEdits = locallyEditedIds.size > 0;
+  const hasLocalEdits = locallyEditedIds.size > 0 || rawYamlDirty;
+  useEffect(() => {
+    if (draft?.rawYaml === undefined) return;
+    setRawYamlText(draft.rawYaml);
+    setRawYamlDirty(false);
+  }, [draft?.draftRevision, draft?.rawYaml]);
 
   useEffect(() => {
     if (!draft?.dirty && !hasLocalEdits) return;
@@ -2033,11 +2041,38 @@ export function ConfigEditor({
     return pending ?? true;
   };
 
+  const checkRawYaml = async (): Promise<ConfigDraft | null> => {
+    const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+    if (!current) return null;
+    if (!rawYamlDirty) return current;
+    setBusy(true);
+    setProblem("");
+    try {
+      const next = await replaceRawConfig(
+        current.draftRevision,
+        rawYamlText,
+      );
+      queryClient.setQueryData(["config-draft"], next);
+      setRawYamlDirty(false);
+      return next;
+    } catch (error) {
+      if (error instanceof ConfigApiError && error.current) {
+        queryClient.setQueryData(["config-draft"], error.current);
+      }
+      setProblem(error instanceof Error ? error.message : String(error));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async () => {
     setActionPending(true);
     try {
       if (!await waitForPendingCommit()) return;
-      const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
+      const current = rawYamlDirty
+        ? await checkRawYaml()
+        : queryClient.getQueryData<ConfigDraft>(["config-draft"]);
       if (!current?.dirty) return;
       if (await replaceDraft(saveConfigDraft(current.draftRevision))) {
         setLocallyEditedIds(new Set());
@@ -2054,12 +2089,19 @@ export function ConfigEditor({
       const current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
       if (!current?.dirty) {
         setLocallyEditedIds(new Set());
+        if (current?.rawYaml !== undefined && current.rawYaml !== null) {
+          setRawYamlText(current.rawYaml);
+          setRawYamlDirty(false);
+        }
         return true;
       }
       const discarded = await replaceDraft(discardConfigDraft(
         current.draftRevision,
       ));
-      if (discarded) setLocallyEditedIds(new Set());
+      if (discarded) {
+        setLocallyEditedIds(new Set());
+        setRawYamlDirty(false);
+      }
       return discarded;
     } finally {
       setActionPending(false);
@@ -2188,6 +2230,10 @@ export function ConfigEditor({
       let current = queryClient.getQueryData<ConfigDraft>(["config-draft"]);
       if (!current) return;
       try {
+        if (saveChanges && rawYamlDirty) {
+          current = await checkRawYaml();
+          if (!current) return;
+        }
         if (saveChanges && current.dirty) {
           current = await saveConfigDraft(current.draftRevision);
           queryClient.setQueryData(["config-draft"], current);
@@ -2284,7 +2330,8 @@ export function ConfigEditor({
               : "Saved configuration")}
           </span>
         </div>
-        {!removalState ? <div className="config-toolbar-filters">
+        {!removalState && draft.rawYaml === undefined
+          ? <div className="config-toolbar-filters">
           <label>
             <input
               checked={showOptional}
@@ -2327,6 +2374,16 @@ export function ConfigEditor({
             <Undo2 />
             <span>Revert</span>
           </button>
+          {draft.rawYaml !== undefined ? (
+            <button
+              disabled={actionPending || busy || !rawYamlDirty}
+              onClick={() => void checkRawYaml()}
+              type="button"
+            >
+              <ChevronRight />
+              <span>Check YAML</span>
+            </button>
+          ) : null}
           <button
             aria-label="Save configuration"
             className="primary-button"
@@ -2369,7 +2426,42 @@ export function ConfigEditor({
           <button onClick={() => setProblem("")} type="button">Dismiss</button>
         </div>
       ) : null}
-      {removalState ? (
+      {draft.rawYaml !== undefined ? (
+        <section className="raw-config-repair">
+          <header>
+            <div>
+              <span>Configuration repair</span>
+              <h2>Workflow YAML</h2>
+            </div>
+            <span className="field-status status-error">
+              {draft.editState.validation.errors.length} {
+                draft.editState.validation.errors.length === 1
+                  ? "issue"
+                  : "issues"
+              }
+            </span>
+          </header>
+          <textarea
+            aria-label="Workflow YAML"
+            onChange={(event) => {
+              setRawYamlText(event.target.value);
+              setRawYamlDirty(event.target.value !== draft.rawYaml);
+            }}
+            spellCheck={false}
+            value={rawYamlText}
+          />
+          <div className="raw-config-diagnostics" role="alert">
+            {(draft.editState.validation.diagnostics ?? []).map(
+              (diagnostic, index) => (
+                <p key={`${diagnostic.message}:${index}`}>
+                  <AlertTriangle aria-hidden="true" />
+                  <span>{diagnostic.message}</span>
+                </p>
+              ),
+            )}
+          </div>
+        </section>
+      ) : removalState ? (
         <section className="config-removal-workspace" role="status">
           <div className="config-removal-icon" aria-hidden="true">
             <Trash2 />

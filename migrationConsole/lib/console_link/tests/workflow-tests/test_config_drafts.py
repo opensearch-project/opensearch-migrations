@@ -135,6 +135,29 @@ class _FakeEditService:
             edit_state=_edit_state(f"operation-{len(self.operations)}"),
         )
 
+    def project_raw_yaml(self, raw_yaml):
+        if raw_yaml.startswith("broken:"):
+            return {
+                "formatVersion": 1,
+                "provenance": {
+                    "source": "pending-yaml",
+                    "lossy": True,
+                    "mode": "raw",
+                    "warnings": ["Repair the YAML."],
+                },
+                "nodes": [],
+                "validation": {
+                    "valid": False,
+                    "errors": ["Invalid YAML"],
+                    "diagnostics": [{
+                        "severity": "error",
+                        "message": "Invalid YAML",
+                        "path": [],
+                    }],
+                },
+            }
+        return _edit_state(raw_yaml.strip().split(": ", 1)[-1])
+
     def save_raw_yaml(self, raw_yaml):
         self.saved_yaml = raw_yaml
         self.saved.append(raw_yaml)
@@ -197,6 +220,30 @@ def test_open_starts_from_saved_config_and_does_not_return_raw_yaml():
         == "changed-outside-draft"
     )
     assert not hasattr(reopened, "raw_yaml")
+    assert reopened.repair_yaml is None
+
+
+def test_raw_repair_draft_exposes_text_and_revalidates_without_saving():
+    edit_service = _FakeEditService()
+    edit_service.edit_state_override = edit_service.project_raw_yaml("broken: [")
+    edit_service.saved_yaml = "broken: ["
+    drafts = ConfigDraftService(edit_service)
+
+    opened = drafts.open()
+
+    assert opened.repair_yaml == "broken: ["
+    assert opened.edit_state["provenance"]["mode"] == "raw"
+
+    still_broken = drafts.replace_raw(opened.draft_revision, "broken: {")
+    assert still_broken.repair_yaml == "broken: {"
+    assert still_broken.dirty is True
+    assert edit_service.saved == []
+
+    repaired = drafts.replace_raw(still_broken.draft_revision, "value: fixed\n")
+    assert repaired.repair_yaml is None
+    assert repaired.edit_state["provenance"].get("mode") != "raw"
+    assert repaired.dirty is True
+    assert edit_service.saved == []
 
 
 @pytest.mark.parametrize(

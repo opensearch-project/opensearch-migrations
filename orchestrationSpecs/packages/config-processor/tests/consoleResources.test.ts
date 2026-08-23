@@ -331,6 +331,26 @@ describe("console resources", () => {
         expect(resources.sources.map(source => source.refName)).toEqual(["sourceA", "sourceB"]);
     });
 
+    it("projects historical resolved configs that fail current nested validation", async () => {
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(multiResourceConfig());
+        const resolvedConfig = buildResolvedMigrationResources(workflowConfig, "workflow-a") as any;
+        const sourceConfigs = [
+            ...resolvedConfig.workflowConfig.proxies.map((proxy: any) => proxy.sourceConfig),
+            ...resolvedConfig.workflowConfig.snapshots.map((snapshot: any) => snapshot.sourceConfig),
+        ].filter((source: any) => source.label === "sourceA" && source.snapshotInfo);
+        for (const sourceConfig of sourceConfigs) {
+            sourceConfig.snapshotInfo.repos["r a"] = sourceConfig.snapshotInfo.repos.repoA;
+            delete sourceConfig.snapshotInfo.repos.repoA;
+            sourceConfig.snapshotInfo.snapshots.snapA.repoName = "r a";
+        }
+
+        const resources = buildConsoleResourcesFromResolvedConfig(resolvedConfig);
+
+        expect(resources.workflowName).toBe("workflow-a");
+        expect(resources.sources.map(source => source.refName)).toEqual(["sourceA", "sourceB"]);
+        expect(resources.targets.map(target => target.refName)).toEqual(["targetX", "targetY"]);
+    });
+
     it("projects externally managed SCRAM Kafka credential metadata", async () => {
         const config = multiResourceConfig();
         config.traffic.kafkaClusters = {

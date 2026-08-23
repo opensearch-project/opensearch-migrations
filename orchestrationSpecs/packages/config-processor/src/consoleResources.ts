@@ -438,8 +438,12 @@ export function buildConsoleResourcesFromResolvedConfig(
         throw new Error("Resolved config does not include a strict workflowConfig.");
     }
     const workflowConfig = normalizeHistoricalWorkflowConfig(resolvedConfig.workflowConfig);
+    const parsed = ARGO_MIGRATION_CONFIG_PRE_ENRICH.safeParse(workflowConfig);
     return buildConsoleResources(
-        ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(workflowConfig),
+        // MigrationRun snapshots were validated when they were submitted. A
+        // newer console schema may reject a nested value that does not affect
+        // this projection, but that must not hide the historical resources.
+        parsed.success ? parsed.data : workflowConfig as WorkflowConfig,
         resolvedConfig.workflowName,
         "migrationRun"
     );
