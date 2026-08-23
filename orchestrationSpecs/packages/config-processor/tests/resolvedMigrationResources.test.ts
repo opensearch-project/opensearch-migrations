@@ -173,6 +173,80 @@ describe("resolved migration resources", () => {
             .toBe("broker-b:9092");
     });
 
+    it("isolates source auth changes to DataSnapshot resources", async () => {
+        const withoutAuth = await transformAndResolve(sampleConfig());
+
+        const beforeConfig = sampleConfig();
+        beforeConfig.sourceClusters.source.authConfig = {
+            basic: {secretName: "source-credentials-a"},
+        };
+        const before = await transformAndResolve(beforeConfig);
+
+        const afterConfig = sampleConfig();
+        afterConfig.sourceClusters.source.authConfig = {
+            basic: {secretName: "source-credentials-b"},
+        };
+        const after = await transformAndResolve(afterConfig);
+
+        expect(after.workflowConfig.proxies[0].configChecksum)
+            .toBe(before.workflowConfig.proxies[0].configChecksum);
+        expect(after.workflowConfig.proxies[0].checksumForSnapshot)
+            .toBe(before.workflowConfig.proxies[0].checksumForSnapshot);
+        expect(after.workflowConfig.proxies[0].checksumForReplayer)
+            .toBe(before.workflowConfig.proxies[0].checksumForReplayer);
+        expect(after.workflowConfig.proxies[0].configChecksum)
+            .toBe(withoutAuth.workflowConfig.proxies[0].configChecksum);
+        expect(after.workflowConfig.proxies[0].checksumForSnapshot)
+            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForSnapshot);
+        expect(after.workflowConfig.proxies[0].checksumForReplayer)
+            .toBe(withoutAuth.workflowConfig.proxies[0].checksumForReplayer);
+        expect(after.resource("CaptureProxy", "source-proxy").parameters)
+            .not.toHaveProperty("sourceAuthBasicSecretName");
+
+        expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
+            .not.toBe(before.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
+        expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
+            .not.toBe(withoutAuth.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
+        expect(after.singleResource("DataSnapshot").parameters.sourceAuthBasicSecretName)
+            .toBe("source-credentials-b");
+        expect(after.singleResource("SnapshotMigration").parameters)
+            .not.toHaveProperty("sourceAuthBasicSecretName");
+    });
+
+    it("does not invalidate an external-snapshot migration when source auth changes", async () => {
+        const externalSnapshotConfig = (secretName: string) => {
+            const config = sampleConfig();
+            config.sourceClusters.source.authConfig = {basic: {secretName}};
+            config.sourceClusters.source.snapshotInfo = {
+                repos: {
+                    default: {
+                        awsRegion: "us-east-2",
+                        repoPathUri: "s3://bucket/path",
+                    },
+                },
+                snapshots: {
+                    snap1: {
+                        repoName: "default",
+                        config: {externallyManagedSnapshotName: "existing-snapshot"},
+                    },
+                },
+            } as any;
+            return config;
+        };
+
+        const before = await transformAndResolve(externalSnapshotConfig("source-credentials-a"));
+        const after = await transformAndResolve(externalSnapshotConfig("source-credentials-b"));
+        const beforeMigration = before.workflowConfig.snapshotMigrations[0];
+        const afterMigration = after.workflowConfig.snapshotMigrations[0];
+
+        expect(before.resolvedMigrationResources.resources)
+            .not.toContainEqual(expect.objectContaining({kind: "DataSnapshot"}));
+        expect(afterMigration.configChecksum).toBe(beforeMigration.configChecksum);
+        expect(afterMigration.workloadIdentityChecksum).toBe(beforeMigration.workloadIdentityChecksum);
+        expect(after.singleResource("SnapshotMigration").parameters)
+            .not.toHaveProperty("sourceAuthBasicSecretName");
+    });
+
     it("emits empty-string defaults for default-less fields so resolved params match the applied CR spec", async () => {
         // The apply manifests always write these default-less string fields with "" (expr.dig(..., "")).
         // The resolved parameters must emit the same keys so MigrationRun history / the dry-run preview
@@ -449,6 +523,28 @@ describe("resolved migration resources", () => {
         };
 
         expect(dryRunResourcePolicy(proxyBefore, proxyAfter).changes).toEqual([]);
+    });
+
+    it("does not report legacy source auth fields as CaptureProxy or SnapshotMigration blockers", () => {
+        for (const kind of ["CaptureProxy", "SnapshotMigration"]) {
+            const before: ResolvedMigrationResource = {
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind,
+                name: "resource",
+                parameters: {sourceAuthType: "basic", sourceAuthBasicSecretName: "credentials-a"},
+            };
+            const after: ResolvedMigrationResource = {
+                ...before,
+                parameters: {sourceAuthType: "basic", sourceAuthBasicSecretName: "credentials-b"},
+            };
+
+            expect(dryRunResourcePolicy(before, after)).toEqual({
+                kind,
+                name: "resource",
+                allowed: true,
+                changes: [],
+            });
+        }
     });
 
     it("writes resolvedMigrationResources.json next to workflow outputs for local inspection", async () => {

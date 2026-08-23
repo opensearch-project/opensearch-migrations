@@ -997,17 +997,23 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const proxyChecksumConfig = proxyDeploymentChecksumConfig(p.proxyConfig as Record<string, unknown>);
             const kafkaChecksum = kafkaChecksums.get(p.kafkaConfig.label) ?? '';
             const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(p.kafkaConfig as Record<string, unknown>);
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(p.sourceConnectionIdentity);
             const topicConfigChecksum = cs(
                 kafkaIdentity,
                 p.kafkaConfig.kafkaTopic,
                 p.kafkaConfig.topicSpecOverrides,
                 kafkaChecksum
             );
-            const sourceConnectionIdentityChecksum = cs(p.sourceConnectionIdentity);
+            const sourceConnectionIdentityChecksum = cs(sourceConnectionIdentityWithoutAuth);
             return {
                 ...p,
                 kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksum },
-                configChecksum: cs(p.sourceConnectionIdentity, proxyChecksumConfig, topicConfigChecksum),
+                configChecksum: cs(
+                    sourceConnectionIdentityWithoutAuth,
+                    proxyChecksumConfig,
+                    topicConfigChecksum
+                ),
                 topicConfigChecksum,
                 checksumForSnapshot: csDep(
                     PROXY_SCHEMA,
@@ -1086,7 +1092,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
             const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
-            const sourceConnectionIdentity = m.sourceConnectionIdentity;
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(m.sourceConnectionIdentity);
             const targetConnectionIdentity = m.targetConnectionIdentity;
             const snapshotRepoIdentity = MigrationConfigTransformer.repoIdentity(
                 (m.snapshotConfig.repoConfig ?? {}) as Record<string, unknown>
@@ -1106,7 +1113,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 snapshotConfigChecksum,
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     m.metadataMigrationConfig,
                     m.documentBackfillConfig,
                     targetConnectionIdentity,
@@ -1116,7 +1123,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ),
                 checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     targetConnectionIdentity,
                     m.snapshotNameResolution,
                     snapshotRepoIdentity,
@@ -1657,6 +1664,26 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             allowInsecure: clusterConfig.allowInsecure ?? false,
             solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static clusterConnectionIdentityWithoutAuth(
+        connectionIdentity: Record<string, unknown>
+    ): Record<string, unknown> {
+        // Preserve the legacy no-auth hash shape so existing proxies do not redeploy
+        // once when source auth is removed from their deployment contract.
+        return {
+            label: connectionIdentity.label ?? "",
+            version: connectionIdentity.version ?? "",
+            endpoint: connectionIdentity.endpoint ?? "",
+            allowInsecure: connectionIdentity.allowInsecure ?? false,
+            solrContextPath: connectionIdentity.solrContextPath ?? "",
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
         };
     }
 

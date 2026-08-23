@@ -319,12 +319,6 @@ function makeCaptureProxyManifest(
         sourceVersion: expr.dig(sourceIdentity, ["version"], expr.literal("")),
         sourceEndpoint: expr.dig(sourceIdentity, ["endpoint"], expr.literal("")),
         sourceAllowInsecure: expr.dig(sourceIdentity, ["allowInsecure"], false),
-        sourceAuthType: expr.dig(sourceIdentity, ["authType"], expr.literal("none")),
-        sourceAuthBasicSecretName: expr.dig(sourceIdentity, ["authBasicSecretName"], expr.literal("")),
-        sourceAuthSigv4Region: expr.dig(sourceIdentity, ["authSigv4Region"], expr.literal("")),
-        sourceAuthSigv4Service: expr.dig(sourceIdentity, ["authSigv4Service"], expr.literal("")),
-        sourceAuthMtlsClientSecretName: expr.dig(sourceIdentity, ["authMtlsClientSecretName"], expr.literal("")),
-        sourceAuthMtlsCaCertHash: expr.dig(sourceIdentity, ["authMtlsCaCertHash"], expr.literal("")),
         loggingConfigurationOverrideConfigMap: expr.dig(
             proxyOpts,
             ["loggingConfigurationOverrideConfigMap"],
@@ -408,22 +402,6 @@ function makeSnapshotMigrationManifest(
             sourceLabel: makeStringTypeProxy(expr.dig(sourceIdentity, ["label"], expr.literal(""))),
             sourceEndpoint: makeStringTypeProxy(expr.dig(sourceIdentity, ["endpoint"], expr.literal(""))),
             sourceAllowInsecure: makeDirectTypeProxy(expr.dig(sourceIdentity, ["allowInsecure"], false)),
-            sourceAuthType: makeStringTypeProxy(expr.dig(sourceIdentity, ["authType"], expr.literal("none"))),
-            sourceAuthBasicSecretName: makeStringTypeProxy(
-                expr.dig(sourceIdentity, ["authBasicSecretName"], expr.literal(""))
-            ),
-            sourceAuthSigv4Region: makeStringTypeProxy(
-                expr.dig(sourceIdentity, ["authSigv4Region"], expr.literal(""))
-            ),
-            sourceAuthSigv4Service: makeStringTypeProxy(
-                expr.dig(sourceIdentity, ["authSigv4Service"], expr.literal(""))
-            ),
-            sourceAuthMtlsClientSecretName: makeStringTypeProxy(
-                expr.dig(sourceIdentity, ["authMtlsClientSecretName"], expr.literal(""))
-            ),
-            sourceAuthMtlsCaCertHash: makeStringTypeProxy(
-                expr.dig(sourceIdentity, ["authMtlsCaCertHash"], expr.literal(""))
-            ),
             targetLabel: makeStringTypeProxy(expr.dig(targetIdentity, ["label"], expr.literal(""))),
             targetEndpoint: makeStringTypeProxy(expr.dig(targetIdentity, ["endpoint"], expr.literal(""))),
             targetAllowInsecure: makeDirectTypeProxy(expr.dig(targetIdentity, ["allowInsecure"], false)),

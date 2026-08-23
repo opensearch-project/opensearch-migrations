@@ -144,12 +144,7 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "CaptureProxy", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CaptureProxy", specPath: ["sourceEndpoint"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "CaptureProxy", specPath: ["sourceAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
-    {resourceKind: "CaptureProxy", specPath: ["sourceAuthType"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "CaptureProxy", specPath: ["sourceAuthBasicSecretName"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "CaptureProxy", specPath: ["sourceAuthSigv4Region"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "CaptureProxy", specPath: ["sourceAuthSigv4Service"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "CaptureProxy", specPath: ["sourceAuthMtlsClientSecretName"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "CaptureProxy", specPath: ["sourceAuthMtlsCaCertHash"], schema: z.string(), changeRestriction: "impossible"},
+    // Source auth is intentionally absent: the proxy forwards network traffic without authenticating to the source.
 
     {resourceKind: "DataSnapshot", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "DataSnapshot", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},
@@ -181,12 +176,7 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "SnapshotMigration", specPath: ["sourceLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceEndpoint"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["sourceAuthType"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["sourceAuthBasicSecretName"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["sourceAuthSigv4Region"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["sourceAuthSigv4Service"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["sourceAuthMtlsClientSecretName"], schema: z.string(), changeRestriction: "impossible"},
-    {resourceKind: "SnapshotMigration", specPath: ["sourceAuthMtlsCaCertHash"], schema: z.string(), changeRestriction: "impossible"},
+    // Source auth belongs to DataSnapshot; migration stages consume the resulting snapshot, not the source cluster.
     {resourceKind: "SnapshotMigration", specPath: ["targetLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["targetEndpoint"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["targetAllowInsecure"], schema: z.boolean(), changeRestriction: "impossible"},
