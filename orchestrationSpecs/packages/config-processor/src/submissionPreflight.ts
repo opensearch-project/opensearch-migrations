@@ -422,6 +422,17 @@ function deploymentAction(
         ).changes
         : [];
     if (phase && phase !== "Ready" && phase !== "Succeeded") {
+        if (!currentConfigChecksum) {
+            return {
+                ...common,
+                action: "reconcile",
+                reason: "resource-not-ready",
+                message: withWorkflowNote(
+                    "Setup has not completed for this configuration. "
+                    + "The workflow will retry setup; no reset is required.",
+                ),
+            };
+        }
         const difference = projectedChanges.length > 0
             ? (
                 `${projectedChanges.length} projected configuration `

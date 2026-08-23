@@ -680,6 +680,55 @@ test("lifts a VAP retry failure and requires reset before resubmitting", async (
 });
 
 
+test("does not offer old-workflow creation for an absent immutable resource", async () => {
+  const blockedSnapshot = structuredClone(manageSnapshot);
+  const captureId = "resource:captureproxies:capture";
+  const capture = blockedSnapshot.nodes[captureId];
+  capture.configPresence = { deployed: false };
+  capture.diagnostics = [{
+    severity: "error",
+    message: "Impossible: sourceLabel cannot be changed. Delete and recreate.",
+    path: [],
+    source: "workflow-apply",
+    code: "immutable-resource-update",
+    title: "Apply failed; reset required",
+    remedy: "Create the resource in a replacement workflow.",
+  }];
+  capture.capabilities = [
+    ...capture.capabilities.filter((capability) => (
+      capability.kind !== "approve" && capability.kind !== "reset"
+    )),
+    {
+      kind: "approve",
+      approvalTargetId: "approval:absent-capture",
+      label: "Retry apply",
+      disabledReason: null,
+    },
+  ];
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(blockedSnapshot),
+    ),
+  );
+
+  renderApp();
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "Review required actions",
+  });
+  expect(within(dialog).getByText(
+    "Impossible update / resource absent",
+  )).toBeInTheDocument();
+  expect(await within(dialog).findByText(
+    "The resource is absent. A replacement workflow is required to recreate it.",
+  )).toBeInTheDocument();
+  expect(within(dialog).queryByRole("button", {
+    name: "Retry create",
+  })).not.toBeInTheDocument();
+});
+
+
 test("starts pauses and explicitly stops bounded resource logs", async () => {
   let startRequest: unknown;
   let stoppedStream: string | undefined;

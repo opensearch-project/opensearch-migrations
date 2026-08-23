@@ -165,6 +165,41 @@ describe("submission preflight", () => {
         );
     });
 
+    it("describes a created resource without a checksum as incomplete setup", async () => {
+        const resource: SubmissionPreflightResource = {
+            ...impossibleResource,
+            desiredConfigChecksum: "desired-checksum",
+        };
+        const client: SubmissionAdmissionClient = {
+            read: async () => ({
+                ...resource.manifest,
+                metadata: {
+                    name: "p2-topic",
+                    resourceVersion: "12",
+                },
+                status: {
+                    phase: "Created",
+                    configChecksum: "",
+                },
+            }),
+            dryRun: async () => undefined,
+        };
+
+        const report = await preflightSubmissionResources(
+            [resource],
+            {namespace: "ma", client},
+        );
+
+        expect(report.deploymentActions).toEqual([expect.objectContaining({
+            action: "reconcile",
+            reason: "resource-not-ready",
+            message: (
+                "Setup has not completed for this configuration. "
+                + "The workflow will retry setup; no reset is required."
+            ),
+        })]);
+    });
+
     it("reports a configuration reconcile when projected fields changed", async () => {
         const resource: SubmissionPreflightResource = {
             ...impossibleResource,

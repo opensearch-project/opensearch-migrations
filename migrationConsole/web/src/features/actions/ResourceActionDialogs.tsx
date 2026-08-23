@@ -224,36 +224,40 @@ export function ApprovalDialog({
                 key={candidate.targetId}
               >
                 <header>
-                  {impossible
-                    ? <AlertTriangle aria-hidden="true" />
-                    : <ShieldCheck aria-hidden="true" />}
+                  {waiting
+                    ? <LoaderCircle className="spin" aria-hidden="true" />
+                    : impossible
+                      ? <AlertTriangle aria-hidden="true" />
+                      : <ShieldCheck aria-hidden="true" />}
                   <div>
                     <span>
-                      {resetRequired
-                        ? "Impossible update / reset required"
-                        : impossible
-                          ? "Impossible update / resource absent"
-                          : "Approval required"}
+                      {waiting
+                        ? "Action in progress"
+                        : resetRequired
+                          ? "Impossible update / reset required"
+                          : impossible
+                            ? "Impossible update / resource absent"
+                            : "Approval required"}
                     </span>
                     <h3>
                       {review?.data?.resourceName ?? candidate.nodeLabel}
                     </h3>
                   </div>
-                  {review?.data ? (
+                  {!waiting && review?.data ? (
                     <strong>{review.data.stage}</strong>
                   ) : null}
                 </header>
-                {review?.isPending ? (
+                {!waiting && review?.isPending ? (
                   <div className="action-review-loading" role="status">
                     <LoaderCircle className="spin" aria-hidden="true" />
                     Resolving the exact gate
                   </div>
-                ) : review?.isError ? (
+                ) : !waiting && review?.isError ? (
                   <DialogError
                     error={review.error}
                     retry={() => void review.refetch()}
                   />
-                ) : review?.data ? (
+                ) : !waiting && review?.data ? (
                   <>
                     <p className="approval-item-effect">
                       {review.data.effect}
@@ -274,8 +278,8 @@ export function ApprovalDialog({
                       </p>
                     ) : impossible ? (
                       <p className="approval-remedy">
-                        The old resource is already absent. Edit the
-                        configuration or retry creating it.
+                        The resource is absent. A replacement workflow is
+                        required to recreate it.
                       </p>
                     ) : null}
                     <small
@@ -299,53 +303,50 @@ export function ApprovalDialog({
                     {problems[candidate.targetId]}
                   </p>
                 ) : null}
-                <footer>
-                  {candidate.editTargetId ? (
-                    <button
-                      disabled={busy || waiting}
-                      onClick={() => onEdit(candidate)}
-                      type="button"
-                    >
-                      <Pencil aria-hidden="true" />
-                      Edit configuration
-                    </button>
-                  ) : null}
-                  {resetRequired ? (
-                    <button
-                      className="danger-confirm"
-                      disabled={busy || waiting}
-                      onClick={() => void resetAndResubmit([candidate])}
-                      type="button"
-                    >
-                      {busy
-                        ? <LoaderCircle className="spin" aria-hidden="true" />
-                        : <RotateCcw aria-hidden="true" />}
-                      Reset &amp; resubmit
-                    </button>
-                  ) : (
-                    <button
-                      className="primary-button"
-                      disabled={
-                        busy
-                        || waiting
-                        || !review?.data
-                        || (!impossible && Boolean(candidate.disabledReason))
-                      }
-                      onClick={() => void approve(candidate)}
-                      title={
-                        !impossible
-                          ? candidate.disabledReason ?? undefined
-                          : undefined
-                      }
-                      type="button"
-                    >
-                      {busy
-                        ? <LoaderCircle className="spin" aria-hidden="true" />
-                        : <ShieldCheck aria-hidden="true" />}
-                      {impossible ? "Retry create" : "Approve"}
-                    </button>
-                  )}
-                </footer>
+                {!waiting ? (
+                  <footer>
+                    {candidate.editTargetId ? (
+                      <button
+                        disabled={busy}
+                        onClick={() => onEdit(candidate)}
+                        type="button"
+                      >
+                        <Pencil aria-hidden="true" />
+                        Edit configuration
+                      </button>
+                    ) : null}
+                    {resetRequired ? (
+                      <button
+                        className="danger-confirm"
+                        disabled={busy}
+                        onClick={() => void resetAndResubmit([candidate])}
+                        type="button"
+                      >
+                        {busy
+                          ? <LoaderCircle className="spin" aria-hidden="true" />
+                          : <RotateCcw aria-hidden="true" />}
+                        Reset &amp; resubmit
+                      </button>
+                    ) : !impossible ? (
+                      <button
+                        className="primary-button"
+                        disabled={
+                          busy
+                          || !review?.data
+                          || Boolean(candidate.disabledReason)
+                        }
+                        onClick={() => void approve(candidate)}
+                        title={candidate.disabledReason ?? undefined}
+                        type="button"
+                      >
+                        {busy
+                          ? <LoaderCircle className="spin" aria-hidden="true" />
+                          : <ShieldCheck aria-hidden="true" />}
+                        Approve
+                      </button>
+                    ) : null}
+                  </footer>
+                ) : null}
               </article>
             );
           })}
