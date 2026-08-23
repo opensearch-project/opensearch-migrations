@@ -52,6 +52,9 @@
               "name": "snapshotK8sLabel"
             },
             {
+              "name": "dataSnapshotUid"
+            },
+            {
               "name": "taskK8sLabel",
               "value": "snapshot"
             },
@@ -129,7 +132,8 @@
           "labels": {
             "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
-            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+            "migrations.opensearch.org/migration-resource-uid": "{{inputs.parameters.dataSnapshotUid}}"
           },
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
@@ -363,6 +367,10 @@
                     "value": "{{inputs.parameters.createSnapshotConfig}}"
                   },
                   {
+                    "name": "dataSnapshotUid",
+                    "value": "{{inputs.parameters.dataSnapshotUid}}"
+                  },
+                  {
                     "name": "sourceType",
                     "value": "{{inputs.parameters.sourceType}}"
                   },
@@ -472,6 +480,10 @@
                   {
                     "name": "createSnapshotConfig",
                     "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "dataSnapshotUid",
+                    "value": "{{inputs.parameters.dataSnapshotUid}}"
                   },
                   {
                     "name": "sourceType",

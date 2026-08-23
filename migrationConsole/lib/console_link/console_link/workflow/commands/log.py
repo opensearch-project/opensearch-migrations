@@ -25,12 +25,7 @@ from ..models.utils import load_k8s_config, get_current_namespace
 
 
 logger = logging.getLogger(__name__)
-_RESOURCE_OUTPUT_LABELS = {'strimzi.io/cluster'}
-# Labels present on CRs but not propagated to workflow pods.
-_LABELS_NOT_PROPAGATED_TO_PODS = {
-    'migrations.opensearch.org/run-number',
-    'migrations.opensearch.org/workflow-name',
-}
+MIGRATION_RESOURCE_UID_LABEL = 'migrations.opensearch.org/migration-resource-uid'
 
 # `workflow log` is intentionally for pod logs only. Durable command output is
 # handled by the workflow templates instead: the few output-producing steps
@@ -175,22 +170,20 @@ def _find_resource_object(namespace, resource_name):
     return None
 
 
-def _resource_label_selectors(ctx, namespace, resource_name, prefix):
+def _resource_label_selectors(ctx, namespace, resource_name):
     resource = _find_resource_object(namespace, resource_name)
     if not resource:
         click.echo(f"No migration resource matching '{resource_name}'.", err=True)
         ctx.exit(1)
-    labels = resource.get('metadata', {}).get('labels', {}) or {}
-    selectors = [
-        f"{key}={value}"
-        for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and
-        key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
-    ]
-    if not selectors:
-        click.echo(f"Migration resource '{resource_name}' has no output labels.", err=True)
+    resource_uid = resource.get('metadata', {}).get('uid')
+    if not resource_uid:
+        click.echo(
+            f"Migration resource '{resource_name}' has no Kubernetes UID; "
+            "resource logs cannot be selected safely.",
+            err=True,
+        )
         ctx.exit(1)
-    return selectors
+    return [f"{MIGRATION_RESOURCE_UID_LABEL}={resource_uid}"]
 
 
 def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
@@ -342,12 +335,10 @@ def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, p
         click.echo(f"Error: could not load Kubernetes configuration: {e}", err=True)
         ctx.exit(1)
         return
-    resource_selectors = _resource_label_selectors(ctx, namespace, resource_name, prefix)
-    uses_external_resource_selector = any(
-        selector.startswith('strimzi.io/cluster=') for selector in resource_selectors
-    )
-    effective_name = None if all_workflows or uses_external_resource_selector else workflow_name
-    full_selector = _selector_parts(resource_selectors, prefix, effective_name)
+    resource_selectors = _resource_label_selectors(ctx, namespace, resource_name)
+    # A Kubernetes UID is globally unique. Do not narrow it with a workflow
+    # label: controller-created and monitor pods can outlive their Argo workflow.
+    full_selector = _selector_parts(resource_selectors, prefix, None)
     _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args)
 
 

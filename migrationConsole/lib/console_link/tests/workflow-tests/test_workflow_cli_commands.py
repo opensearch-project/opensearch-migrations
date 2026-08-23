@@ -905,12 +905,13 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_uses_resource_labels(self, mock_history, mock_client, _mock_k8s):
+    def test_output_resource_uses_resource_uid(self, mock_history, mock_client, _mock_k8s):
         runner = CliRunner()
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
             'metadata': {
+                'uid': 'a9cc8399-1286-4d47-8bd0-d72c24acc1d3',
                 'labels': {
                     'migrations.opensearch.org/source': 'source1',
                     'migrations.opensearch.org/target': 'target1',
@@ -932,15 +933,14 @@ class TestWorkflowCLICommands:
         )
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/source=source1,'
-            'migrations.opensearch.org/target=target1,'
-            'strimzi.io/cluster=default'
+            'migrations.opensearch.org/migration-resource-uid='
+            'a9cc8399-1286-4d47-8bd0-d72c24acc1d3'
         )
 
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_excludes_cr_only_labels(self, mock_history, mock_client, _mock_k8s):
+    def test_output_resource_requires_uid(self, mock_history, mock_client, _mock_k8s):
         runner = CliRunner()
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
@@ -957,18 +957,14 @@ class TestWorkflowCLICommands:
 
         result = runner.invoke(workflow_cli, ['log', 'resource', 'datasnapshot.source-backfill-snapshot'])
 
-        assert result.exit_code == 0
-        args, _ = mock_history.call_args
-        assert args[2] == (
-            'migrations.opensearch.org/snapshot=backfill-snapshot,'
-            'migrations.opensearch.org/source=source,'
-            'workflows.argoproj.io/workflow=migration-workflow'
-        )
+        assert result.exit_code == 1
+        assert 'has no Kubernetes UID' in result.output
+        mock_history.assert_not_called()
 
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_keeps_workflow_selector_for_workflow_pods(
+    def test_output_resource_does_not_add_workflow_selector(
         self, mock_history, mock_client, _mock_k8s
     ):
         runner = CliRunner()
@@ -976,6 +972,7 @@ class TestWorkflowCLICommands:
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
             'metadata': {
+                'uid': 'e4834eed-2f91-477c-a0dd-9e10479c1370',
                 'labels': {
                     'migrations.opensearch.org/source': 'source1',
                     'migrations.opensearch.org/task': 'captureProxy',
@@ -988,9 +985,8 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/source=source1,'
-            'migrations.opensearch.org/task=captureProxy,'
-            'workflows.argoproj.io/workflow=migration-workflow'
+            'migrations.opensearch.org/migration-resource-uid='
+            'e4834eed-2f91-477c-a0dd-9e10479c1370'
         )
 
     @patch('console_link.workflow.commands.log._run_history_mode')

@@ -26,6 +26,7 @@ import {makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 function getSnapshotDoneCronJobName(dataSnapshotName: BaseExpression<string>) {
     return expr.concat(dataSnapshotName, expr.literal("-snapshot-done"));
@@ -89,6 +90,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("createSnapshotConfig", typeToken<z.infer<typeof ARGO_CREATE_SNAPSHOT_OPTIONS>>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("dataSnapshotUid", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "snapshot")
         // Explicit CreateSnapshot --source-type. Empty (default) lets the Java side auto-detect the
         // source engine via live cluster-version detection (the create path's behavior). The Solr
@@ -139,7 +141,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 labels: {
                     'migrations.opensearch.org/source': inputs.sourceK8sLabel,
                     'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
-                    'migrations.opensearch.org/task': inputs.taskK8sLabel
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel,
+                    [MIGRATION_RESOURCE_UID_LABEL]: inputs.dataSnapshotUid,
                 }
             }))
         )

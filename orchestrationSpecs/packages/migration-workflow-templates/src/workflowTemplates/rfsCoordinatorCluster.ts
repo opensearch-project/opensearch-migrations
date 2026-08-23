@@ -15,6 +15,7 @@ import {
 } from "./commonUtils/resourceRetryStrategy";
 import {makePodDisruptionBudgetDefinition} from "./commonUtils/podDisruptionBudget";
 import {workflowParameterAsNumber} from "./commonUtils/scalableWorkload";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -102,7 +103,8 @@ function createRfsCoordinatorStatefulSetManifest(
             ownerReferences: makeOwnerReferences(ownerName, ownerUid),
             labels: {
                 app: makeStringTypeProxy(clusterName),
-                "app.kubernetes.io/instance": makeStringTypeProxy(clusterName)
+                "app.kubernetes.io/instance": makeStringTypeProxy(clusterName),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(ownerUid),
             }
         },
         spec: {
@@ -121,7 +123,8 @@ function createRfsCoordinatorStatefulSetManifest(
                 metadata: {
                     labels: {
                         app: makeStringTypeProxy(clusterName),
-                        "app.kubernetes.io/instance": makeStringTypeProxy(clusterName)
+                        "app.kubernetes.io/instance": makeStringTypeProxy(clusterName),
+                        [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(ownerUid),
                     }
                 },
                 spec: {

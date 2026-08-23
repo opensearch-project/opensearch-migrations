@@ -51,6 +51,7 @@ import {
     scalingFromOptions,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -240,7 +241,8 @@ function getRfsDeploymentManifest
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                 "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
                 "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
-                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
+                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.crdUid),
             },
         },
         spec: {
@@ -268,7 +270,8 @@ function getRfsDeploymentManifest
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                         "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
                         "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
-                        "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
+                        "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                        [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.crdUid),
                     },
                 },
                 spec: {
