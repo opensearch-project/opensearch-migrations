@@ -92,7 +92,7 @@ async function mockManageApi(page: Page) {
     id: `operation-${kind}-${operations.length + 1}`,
     kind,
     label,
-    status: kind === "reset" ? "succeeded" : "waiting",
+    status: "waiting",
     targetIds: ["resource:captureproxies:capture"],
     createdAt: "2026-08-13T13:00:00Z",
     updatedAt: "2026-08-13T13:00:01Z",
@@ -100,6 +100,62 @@ async function mockManageApi(page: Page) {
     detail: null,
     result: {},
   });
+  const refreshDraftNavigation = () => {
+    const navigation = structuredClone(snapshot);
+    const stepIds = new Set(Object.values(navigation.nodes)
+      .filter((node) => node.kind === "workflow-step")
+      .map((node) => node.id));
+    stepIds.forEach((nodeId) => delete navigation.nodes[nodeId]);
+    Object.values(navigation.nodes).forEach((node) => {
+      node.childIds = node.childIds.filter((nodeId) => !stepIds.has(nodeId));
+    });
+    navigation.rootIds = navigation.rootIds.filter(
+      (nodeId) => !stepIds.has(nodeId),
+    );
+
+    const source = navigation.nodes["resource:captureproxies:capture"];
+    if (source?.resourcePlural === "sourceconfigs") {
+      const sourceCollection = draft.editState.nodes.find(
+        (node) => node.id === "edit:sourceClusters",
+      );
+      const sourceEdit = sourceCollection?.children.find(
+        (node) => node.id === "edit:sourceClusters.legacy",
+      );
+      const issueCounts = (
+        node: NonNullable<typeof sourceEdit>,
+      ): { errors: number; warnings: number } => {
+        const ownErrors = (
+          node.status === "error"
+          || node.status === "required"
+          || node.status === "blocked"
+        ) ? 1 : 0;
+        const ownWarnings = node.status === "warning" ? 1 : 0;
+        return node.children.reduce(
+          (counts, child) => {
+            const childCounts = issueCounts(child);
+            return {
+              errors: counts.errors + childCounts.errors,
+              warnings: counts.warnings + childCounts.warnings,
+            };
+          },
+          { errors: ownErrors, warnings: ownWarnings },
+        );
+      };
+      if (sourceEdit) {
+        const issues = issueCounts(sourceEdit);
+        source.configState = {
+          validationErrors: issues.errors,
+          validationWarnings: issues.warnings,
+          draftChangeCount: sourceEdit.draftChangeCount ?? 0,
+        };
+      } else {
+        source.status = "removed";
+        source.valueSummary = "Marked for removal";
+        delete source.configState;
+      }
+    }
+    draft.navigation = navigation;
+  };
   await page.route("**/api/v1/system/health", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -133,6 +189,7 @@ async function mockManageApi(page: Page) {
     });
   });
   await page.route("**/api/v1/config", async (route) => {
+    refreshDraftNavigation();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
@@ -207,6 +264,7 @@ async function mockManageApi(page: Page) {
         );
       }
     }
+    refreshDraftNavigation();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
@@ -241,6 +299,7 @@ async function mockManageApi(page: Page) {
       dirty: false,
       baseRevision: draft.draftRevision,
     };
+    refreshDraftNavigation();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
@@ -248,6 +307,7 @@ async function mockManageApi(page: Page) {
   });
   await page.route("**/api/v1/config/discard", async (route) => {
     draft = structuredClone(configDraft);
+    refreshDraftNavigation();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
@@ -444,7 +504,7 @@ async function mockManageApi(page: Page) {
     const accepted = operation(
       "reset",
       "Reset captureproxy.capture",
-      "Reset completed for 1 resource",
+      "Reset accepted; removing 1 resource",
     );
     operations = [accepted, ...operations];
     await route.fulfill({
@@ -479,6 +539,7 @@ async function mockManageApi(page: Page) {
       dirty: true,
       draftRevision: `${draft.draftRevision}-selected`,
     };
+    refreshDraftNavigation();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(draft),
@@ -511,6 +572,7 @@ async function mockManageApi(page: Page) {
       dirty: true,
       draftRevision: `${draft.draftRevision}-external-save`,
     };
+    refreshDraftNavigation();
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -1134,7 +1196,6 @@ test("submits pending config without entering edit mode", async ({ page }, testI
   await expect(page.getByText(
     "Workflow accepted; waiting for refreshed cluster state",
   )).toBeVisible();
-  await expect(page.getByText("Waiting for submitted workflow.")).toBeVisible();
   await expect(page.getByText(
     '404: workflows.argoproj.io "migration-workflow" not found',
   )).toHaveCount(0);
@@ -1441,7 +1502,8 @@ test("reviews managed output, approval, and reset actions", async ({ page }, tes
   await expect(reset.getByText("The proxy endpoint will be removed."))
     .toBeVisible();
   await reset.getByRole("button", { name: "Reset exact plan" }).click();
-  await expect(page.getByText("Reset completed for 1 resource")).toBeVisible();
+  await expect(page.getByText("Reset accepted; removing 1 resource"))
+    .toBeVisible();
 });
 
 

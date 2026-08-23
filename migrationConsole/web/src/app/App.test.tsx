@@ -449,6 +449,57 @@ test("keeps workflow execution steps out of configuration navigation", async () 
 });
 
 
+test("refreshes server-projected configuration navigation while editing", async () => {
+  let snapshot = structuredClone(manageSnapshot);
+  let configRequests = 0;
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.get("*/api/v1/config", () => {
+      configRequests += 1;
+      const draft = structuredClone(configDraft);
+      setNavigation(draft, snapshot);
+      return HttpResponse.json(draft);
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  expect(within(tree).queryByText("capture-next")).toBeNull();
+
+  const insertedId = "resource:captureproxies:capture-next";
+  const groupId = "group:Live Traffic Migration:Capture";
+  snapshot = {
+    ...snapshot,
+    revision: "snapshot-with-capture-next",
+    nodes: {
+      ...snapshot.nodes,
+      [groupId]: {
+        ...snapshot.nodes[groupId],
+        childIds: [...snapshot.nodes[groupId].childIds, insertedId],
+      },
+      [insertedId]: {
+        ...snapshot.nodes["resource:captureproxies:capture"],
+        id: insertedId,
+        revision: "capture-next-1",
+        parentId: groupId,
+        childIds: [],
+        label: "capture-next",
+        resourceName: "capture-next",
+      },
+    },
+  };
+  await userEvent.click(screen.getByRole("button", {
+    name: "Refresh state",
+  }));
+
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^capture-next/,
+  })).toBeInTheDocument();
+  expect(configRequests).toBeGreaterThanOrEqual(2);
+});
+
+
 test("shows navigable upstream and downstream runtime dependencies", async () => {
   renderApp();
 

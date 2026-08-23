@@ -787,15 +787,30 @@ export function App() {
           <button
             aria-label="Refresh state"
             className="icon-button"
-            disabled={state.isFetching || operations.isFetching}
+            disabled={
+              state.isFetching
+              || operations.isFetching
+              || configDraft.isFetching
+            }
             onClick={() => {
               void state.refetch();
               void operations.refetch();
+              if (editContext || submissionAvailable) {
+                void configDraft.refetch();
+              }
             }}
             title="Refresh state"
             type="button"
           >
-            <RefreshCw className={state.isFetching ? "spin" : ""} />
+            <RefreshCw
+              className={
+                state.isFetching
+                || operations.isFetching
+                || configDraft.isFetching
+                  ? "spin"
+                  : ""
+              }
+            />
           </button>
           <button
             aria-label={treeOpen ? "Close resources" : "Open resources"}
