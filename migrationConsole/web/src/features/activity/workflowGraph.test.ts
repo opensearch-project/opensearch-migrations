@@ -15,6 +15,15 @@ test("builds the full graph from prerequisite roots to dependents", () => {
     sourceId: "resource:captureproxies:capture",
     targetId: "resource:trafficreplays:replay",
   }]);
+  expect(graph.levels[1][0].steps).toEqual([
+    expect.objectContaining({
+      id: "workflow-step:resource:trafficreplays:replay:deploy",
+      label: "Deploy replay",
+      phase: "Running",
+      status: "running",
+      depth: 0,
+    }),
+  ]);
 });
 
 

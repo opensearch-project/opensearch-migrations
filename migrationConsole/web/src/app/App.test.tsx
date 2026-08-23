@@ -403,7 +403,32 @@ test("keeps the full dependency graph stable while selection changes", async () 
   expect(within(graph).getByRole("button", {
     name: "Open replay, Running",
   })).toHaveAttribute("aria-current", "true");
-  expect(within(graph).queryByText("Deploy replay")).toBeNull();
+  expect(within(graph).getByRole("button", {
+    name: "Open workflow step Deploy replay, Running",
+  })).toBeInTheDocument();
+});
+
+
+test("moves runtime workflow steps from resource navigation into activity", async () => {
+  renderApp();
+
+  const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  const replay = within(tree).getByRole("treeitem", {
+    name: /^replay, Running$/,
+  });
+  expect(within(replay).queryByRole("button", {
+    name: "Expand replay",
+  })).toBeNull();
+  expect(within(tree).queryByText("Deploy replay")).toBeNull();
+
+  const graph = screen.getByRole("region", {
+    name: "Workflow dependency graph",
+  });
+  await userEvent.click(within(graph).getByRole("button", {
+    name: "Open workflow step Deploy replay, Running",
+  }));
+  expect(screen.getByRole("heading", { name: "Deploy replay" }))
+    .toBeInTheDocument();
 });
 
 
@@ -671,12 +696,10 @@ test("lifts a VAP retry failure and requires reset before resubmitting", async (
       "Reset capture before retrying this apply.",
     );
 
-  await userEvent.click(within(capture).getByRole("button", {
-    name: "Expand capture",
-  }));
-  expect(within(tree).getByRole("treeitem", {
-    name: "Apply failed, Blocked",
+  expect(screen.getByRole("button", {
+    name: "Open workflow step Apply failed, Blocked",
   })).toBeInTheDocument();
+  expect(within(tree).queryByText("Apply failed")).toBeNull();
 });
 
 

@@ -46,6 +46,7 @@ import type {
 import { SubmitConfigDialog } from "../features/submission/SubmitConfigDialog";
 import { ResourceTree } from "../features/tree/ResourceTree";
 import {
+  projectResourceNavigation,
   projectResourceView,
   RESOURCE_VIEW_OPTIONS,
   type ResourceViewMode,
@@ -345,6 +346,14 @@ export function App() {
     () => Object.values(displayedState?.nodes ?? {}).filter(
       (node) => node.kind === "resource",
     ).length,
+    [displayedState],
+  );
+  const resourceNavigationState = useMemo(
+    () => (
+      displayedState
+        ? projectResourceNavigation(displayedState)
+        : displayedState
+    ),
     [displayedState],
   );
   const approvals = useMemo(
@@ -940,7 +949,7 @@ export function App() {
                   presentation={editContext ? "configuration" : "runtime"}
                   resourceAdds={editContext ? resourceAdds : null}
                   selectedId={selectedId}
-                  snapshot={displayedState}
+                  snapshot={resourceNavigationState ?? displayedState}
                   validationStates={resourceValidations}
                   viewTransitionKey={
                     editContext

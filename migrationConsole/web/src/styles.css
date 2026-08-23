@@ -2592,6 +2592,93 @@ button {
   line-height: 13px;
 }
 
+.workflow-graph-steps {
+  border-top: 1px solid var(--border);
+  background: #f8fafb;
+}
+
+.workflow-graph-step {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding:
+    4px 8px
+    4px calc(9px + var(--workflow-step-depth) * 9px);
+  border: 0;
+  border-bottom: 1px solid #e8edef;
+  border-radius: 0;
+  color: var(--text);
+  text-align: left;
+  background: #f8fafb;
+}
+
+.workflow-graph-step:hover {
+  background: #eef4f5;
+}
+
+.workflow-graph-step.selected {
+  box-shadow: inset 3px 0 var(--accent);
+  background: var(--accent-soft);
+}
+
+.workflow-graph-step .state-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.workflow-graph-step > span {
+  min-width: 0;
+}
+
+.workflow-graph-step strong,
+.workflow-graph-step small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-graph-step strong {
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 12px;
+}
+
+.workflow-graph-step small {
+  color: var(--text-muted);
+  font-size: 8px;
+  line-height: 11px;
+}
+
+.workflow-graph-step-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 27px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-muted);
+  background: #f8fafb;
+  font-size: 8px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.workflow-graph-step-toggle:hover {
+  color: var(--text);
+  background: #eef4f5;
+}
+
+.workflow-graph-step-toggle svg {
+  width: 11px;
+  height: 11px;
+}
+
 .workflow-graph-action {
   display: flex;
   width: calc(100% - 18px);

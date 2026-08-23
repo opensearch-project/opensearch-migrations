@@ -103,3 +103,33 @@ export function projectResourceView(
     rootIds: snapshot.rootIds.filter((rootId) => included.has(rootId)),
   };
 }
+
+
+export function projectResourceNavigation(
+  snapshot: ManageSnapshot,
+): ManageSnapshot {
+  const workflowStepIds = new Set(
+    Object.values(snapshot.nodes)
+      .filter((node) => node.kind === "workflow-step")
+      .map((node) => node.id),
+  );
+  if (workflowStepIds.size === 0) return snapshot;
+  return {
+    ...snapshot,
+    nodes: Object.fromEntries(
+      Object.entries(snapshot.nodes).flatMap(([nodeId, node]) => (
+        workflowStepIds.has(nodeId)
+          ? []
+          : [[nodeId, {
+            ...node,
+            childIds: node.childIds.filter(
+              (childId) => !workflowStepIds.has(childId),
+            ),
+          }]]
+      )),
+    ),
+    rootIds: snapshot.rootIds.filter(
+      (rootId) => !workflowStepIds.has(rootId),
+    ),
+  };
+}

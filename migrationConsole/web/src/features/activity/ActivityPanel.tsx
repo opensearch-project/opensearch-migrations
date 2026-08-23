@@ -76,7 +76,7 @@ export function ActivityPanel({
         <GitBranch aria-hidden="true" />
         <div>
           <h2>Workflow dependencies</h2>
-          <span>All resources and blockers</span>
+          <span>Resources, active steps, and blockers</span>
         </div>
       </header>
       {blockerIds.size > 0 || approvals.length > 0 || waiting.length > 0 ? (

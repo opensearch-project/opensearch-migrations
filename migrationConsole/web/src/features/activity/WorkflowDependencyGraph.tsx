@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   LoaderCircle,
   ShieldCheck,
@@ -17,10 +19,11 @@ import type {
 } from "../../api/client";
 import type { ApprovalCandidate } from "../actions/approvals";
 import { StatusIndicator } from "../status/StatusIndicator";
-import { statusLabel } from "../status/status";
+import { normalizedStatus, statusLabel } from "../status/status";
 import {
   buildWorkflowGraph,
   type WorkflowGraphNode,
+  type WorkflowGraphStep,
 } from "./workflowGraph";
 import {
   connectedPath,
@@ -53,12 +56,12 @@ interface RoutedPath {
 
 function operationForNode(
   operations: Operation[],
-  nodeId: string,
+  nodeIds: string[],
 ): Operation | undefined {
   return operations
     .filter((operation) => (
       operation.status !== "succeeded"
-      && operation.targetIds.includes(nodeId)
+      && operation.targetIds.some((targetId) => nodeIds.includes(targetId))
     ))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 }
@@ -77,9 +80,19 @@ function graphNodeState(
 }
 
 
+function workflowStepState(step: WorkflowGraphStep): string {
+  return step.phase ?? statusLabel(step.status);
+}
+
+
+function workflowStepActive(step: WorkflowGraphStep): boolean {
+  return normalizedStatus(step.status) !== "ok";
+}
+
+
 function GraphNode({
   graphNode,
-  selected,
+  selectedNodeId,
   operation,
   approval,
   onReviewApproval,
@@ -91,7 +104,7 @@ function GraphNode({
   register,
 }: Readonly<{
   graphNode: WorkflowGraphNode;
-  selected: boolean;
+  selectedNodeId: string | null;
   operation: Operation | undefined;
   approval: ApprovalCandidate | undefined;
   onReviewApproval: (targetId: string) => void;
@@ -102,7 +115,22 @@ function GraphNode({
   pathMuted: boolean;
   register: (nodeId: string, element: HTMLDivElement | null) => void;
 }>) {
+  const [completedStepsExpanded, setCompletedStepsExpanded] = useState(false);
   const state = graphNode.phase ?? statusLabel(graphNode.status);
+  const resourceSelected = graphNode.id === selectedNodeId;
+  const selectedStepId = graphNode.steps.some(
+    (step) => step.id === selectedNodeId,
+  )
+    ? selectedNodeId
+    : null;
+  const selected = resourceSelected || Boolean(selectedStepId);
+  const activeSteps = graphNode.steps.filter(workflowStepActive);
+  const visibleSteps = completedStepsExpanded
+    ? graphNode.steps
+    : graphNode.steps.filter((step) => (
+      workflowStepActive(step) || step.id === selectedStepId
+    ));
+  const hiddenStepCount = graphNode.steps.length - visibleSteps.length;
   return (
     <div
       className={[
@@ -152,6 +180,56 @@ function GraphNode({
           <ShieldCheck aria-hidden="true" />
           {approval.immutable ? "Reset required" : "Review approval"}
         </button>
+      ) : null}
+      {graphNode.steps.length > 0 ? (
+        <section
+          aria-label={`Workflow steps for ${graphNode.label}`}
+          className="workflow-graph-steps"
+        >
+          {visibleSteps.map((step) => {
+            const stepState = workflowStepState(step);
+            return (
+              <button
+                aria-current={step.id === selectedNodeId ? "true" : undefined}
+                aria-label={`Open workflow step ${step.label}, ${stepState}`}
+                className={[
+                  "workflow-graph-step",
+                  step.id === selectedNodeId ? "selected" : "",
+                ].filter(Boolean).join(" ")}
+                key={step.id}
+                onClick={() => onSelectNode(step.id)}
+                style={{
+                  "--workflow-step-depth": step.depth,
+                } as React.CSSProperties}
+                type="button"
+              >
+                <StatusIndicator status={step.phase ?? step.status} />
+                <span>
+                  <strong>{step.label}</strong>
+                  <small>{stepState}</small>
+                </span>
+              </button>
+            );
+          })}
+          {hiddenStepCount > 0 || completedStepsExpanded ? (
+            <button
+              className="workflow-graph-step-toggle"
+              onClick={() => setCompletedStepsExpanded((current) => !current)}
+              type="button"
+            >
+              {completedStepsExpanded
+                ? <ChevronDown aria-hidden="true" />
+                : <ChevronRight aria-hidden="true" />}
+              {completedStepsExpanded
+                ? activeSteps.length > 0
+                  ? "Show active steps"
+                  : "Hide completed steps"
+                : `Show ${hiddenStepCount} completed step${
+                  hiddenStepCount === 1 ? "" : "s"
+                }`}
+            </button>
+          ) : null}
+        </section>
       ) : null}
       {operation ? (
         <div
@@ -454,12 +532,15 @@ export function WorkflowDependencyGraph({
                 onDeactivate={() => setHoveredNodeId(null)}
                 onReviewApproval={onReviewApproval}
                 onSelectNode={onSelectNode}
-                operation={operationForNode(operations, graphNode.id)}
+                operation={operationForNode(operations, [
+                  graphNode.id,
+                  ...graphNode.steps.map((step) => step.id),
+                ])}
                 pathActive={activePath.nodeIds.has(graphNode.id)}
                 pathMuted={Boolean(pathAnchorId)
                   && !activePath.nodeIds.has(graphNode.id)}
                 register={register}
-                selected={graphNode.id === selectedNodeId}
+                selectedNodeId={selectedNodeId}
               />
             ))}
           </div>

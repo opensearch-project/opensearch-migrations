@@ -12,7 +12,18 @@ export interface WorkflowGraphNode {
   resourcePlural: string | null;
   phase: string | null;
   status: string;
+  steps: WorkflowGraphStep[];
   unresolved: boolean;
+}
+
+
+export interface WorkflowGraphStep {
+  depth: number;
+  id: string;
+  label: string;
+  node: ManageNode;
+  phase: string | null;
+  status: string;
 }
 
 
@@ -54,6 +65,32 @@ function unresolvedId(relationship: ManageRelationship): string {
 }
 
 
+function workflowStepsFor(
+  snapshot: ManageSnapshot,
+  resource: ManageNode,
+): WorkflowGraphStep[] {
+  const steps: WorkflowGraphStep[] = [];
+  const visited = new Set<string>();
+  const visit = (nodeId: string, depth: number) => {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+    const node = snapshot.nodes[nodeId];
+    if (!node || node.kind !== "workflow-step") return;
+    steps.push({
+      depth,
+      id: node.id,
+      label: node.label,
+      node,
+      phase: node.phase,
+      status: node.status,
+    });
+    node.childIds.forEach((childId) => visit(childId, depth + 1));
+  };
+  resource.childIds.forEach((childId) => visit(childId, 0));
+  return steps;
+}
+
+
 function relationshipTarget(
   relationship: ManageRelationship,
   resources: WorkflowGraphNode[],
@@ -75,6 +112,7 @@ function relationshipTarget(
     resourcePlural: relationship.targetPlural ?? null,
     phase: relationship.targetPhase ?? null,
     status: relationship.targetStatus,
+    steps: [],
     unresolved: true,
   };
 }
@@ -95,6 +133,7 @@ export function buildWorkflowGraph(snapshot: ManageSnapshot): WorkflowGraph {
       resourcePlural: node.resourcePlural,
       phase: node.phase,
       status: node.status,
+      steps: workflowStepsFor(snapshot, node),
       unresolved: false,
     }));
   const nodes = new Map(resources.map((node) => [node.id, node]));
