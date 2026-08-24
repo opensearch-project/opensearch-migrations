@@ -52,14 +52,6 @@
               "name": "metadataMigrationConfig"
             },
             {
-              "name": "sourceEndpoint",
-              "value": ""
-            },
-            {
-              "name": "sourceConfig",
-              "value": ""
-            },
-            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -125,26 +117,6 @@
               "valueFrom": {
                 "secretKeyRef": {
                   "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
-                  "key": "password",
-                  "optional": true
-                }
-              }
-            },
-            {
-              "name": "SOURCE_USERNAME",
-              "valueFrom": {
-                "secretKeyRef": {
-                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
-                  "key": "username",
-                  "optional": true
-                }
-              }
-            },
-            {
-              "name": "SOURCE_PASSWORD",
-              "valueFrom": {
-                "secretKeyRef": {
-                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
                   "key": "password",
                   "optional": true
                 }
@@ -282,14 +254,6 @@
               "name": "metadataMigrationConfig"
             },
             {
-              "name": "sourceEndpoint",
-              "value": ""
-            },
-            {
-              "name": "sourceConfig",
-              "value": ""
-            },
-            {
               "name": "snapshotConfig",
               "description": "Snapshot storage details (region, endpoint, etc)"
             },
@@ -366,14 +330,6 @@
                   {
                     "name": "metadataMigrationConfig",
                     "value": "{{inputs.parameters.metadataMigrationConfig}}"
-                  },
-                  {
-                    "name": "sourceEndpoint",
-                    "value": "{{inputs.parameters.sourceEndpoint}}"
-                  },
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -496,14 +452,6 @@
                   {
                     "name": "metadataMigrationConfig",
                     "value": "{{inputs.parameters.metadataMigrationConfig}}"
-                  },
-                  {
-                    "name": "sourceEndpoint",
-                    "value": "{{inputs.parameters.sourceEndpoint}}"
-                  },
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
