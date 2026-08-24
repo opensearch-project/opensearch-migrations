@@ -85,6 +85,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         int numRequests = PERMIT_COUNT;
         List<TrackedFuture<String, ?>> requestFutures = new ArrayList<>();
         AtomicInteger permitsReleased = new AtomicInteger(0);
+        CountDownLatch callbacksCompleted = new CountDownLatch(numRequests);
 
         // Schedule requests at far-future timestamps. Each request acquires a permit
         // from the limiter (simulating what TrafficReplayerCore does) and attaches a
@@ -110,6 +111,7 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
                 (v, t) -> {
                     limiter.liveTrafficStreamCostGate.release(1);
                     permitsReleased.incrementAndGet();
+                    callbacksCompleted.countDown();
                 },
                 () -> "releasing permit after request completes"
             );
@@ -127,14 +129,10 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
         // Cancel the connection (simulates partition reassignment)
         pool.cancelConnection(channelKeyCtx, 0);
 
-        // Wait for permits to be released (with the fix, this should complete quickly)
-        boolean allPermitsReleased = limiter.liveTrafficStreamCostGate.tryAcquire(
-            PERMIT_COUNT, 2, TimeUnit.SECONDS);
-
-        if (allPermitsReleased) {
-            // Release them back so the assertion below works cleanly
-            limiter.liveTrafficStreamCostGate.release(PERMIT_COUNT);
-        }
+        // Wait for every completion callback to finish releasing its permit.
+        Assertions.assertTrue(
+            callbacksCompleted.await(2, TimeUnit.SECONDS),
+            "Every request callback should complete after cancellation");
 
         Assertions.assertEquals(PERMIT_COUNT, limiter.liveTrafficStreamCostGate.availablePermits(),
             "All " + PERMIT_COUNT + " permits must be released after cancelConnection(). " +
