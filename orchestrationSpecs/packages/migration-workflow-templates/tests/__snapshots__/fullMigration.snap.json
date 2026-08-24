@@ -1200,10 +1200,6 @@
               "name": "targetConfig"
             },
             {
-              "name": "sourceConfig",
-              "value": ""
-            },
-            {
               "name": "snapshotConfig"
             },
             {
@@ -1229,10 +1225,6 @@
             },
             {
               "name": "groupName_view"
-            },
-            {
-              "name": "sourceEndpoint",
-              "value": ""
             },
             {
               "name": "metadataMigrationConfig",
@@ -1292,14 +1284,6 @@
                   {
                     "name": "metadataMigrationConfig",
                     "value": "{{inputs.parameters.metadataMigrationConfig}}"
-                  },
-                  {
-                    "name": "sourceEndpoint",
-                    "value": "{{inputs.parameters.sourceEndpoint}}"
-                  },
-                  {
-                    "name": "sourceConfig",
-                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "snapshotConfig",
@@ -1677,10 +1661,6 @@
                     "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['targetConfig'])}}"
                   },
                   {
-                    "name": "sourceConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"solrContextPath\", sprig.dig('sourceConnectionIdentity', 'solrContextPath', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
-                  },
-                  {
                     "name": "snapshotConfig",
                     "value": "{{=toJSON(sprig.dict(\"snapshotName\", (('externalSnapshotName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['externalSnapshotName']) : (steps.readSnapshotName.outputs.parameters.snapshotName)), \"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['label'], \"repoConfig\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['repoConfig']))}}"
                   },
@@ -1703,10 +1683,6 @@
                   {
                     "name": "resourceCreationTimestamp",
                     "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceCreationTimestamp}}"
-                  },
-                  {
-                    "name": "sourceEndpoint",
-                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   },
                   {
                     "name": "checksumForReplayer",
