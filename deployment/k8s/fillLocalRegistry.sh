@@ -52,8 +52,10 @@ case $(uname -m) in
   *)       PLATFORM=$(uname -m) ;;
 esac
 
-echo "Building general and test images"
-"$MIGRATIONS_REPO_ROOT_DIR/gradlew" "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
+# buildKitLoadTestAll_* is listed separately: buildImagesToRegistry_* no longer builds the k6
+# scripts image, because load-test images are their own aggregate (see buildImages/build.gradle).
+echo "Building general, test and load test images"
+"$MIGRATIONS_REPO_ROOT_DIR/gradlew" "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" "buildKitLoadTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
 
 echo "Registry contents:"
 curl http://localhost:5001/v2/_catalog
