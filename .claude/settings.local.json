@@ -14,10 +14,7 @@
       "Bash(xargs ls)",
       "Bash(helm version *)",
       "Bash(helm template *)",
-      "Bash(uvx flake8 *)",
-      "Bash(grep -rni 'press .*`n`\\\\|\\\\bn\\\\b.*k6 panel\\\\|k6.*shortcut.*n' TrafficCapture/trafficLoadTest migrationConsole/lib/console_link/console_link/workflow)",
-      "Bash(grep -rn -e 'defaultImagesMap\\\\|configMapKey\\\\|Image\"\\\\|captureProxyImage\\\\|reindexFromSnapshotImage\\\\|coordinatorClusterImage\\\\|toCamel\\\\|Image`\\\\|PullPolicy`' packages/migration-workflow-templates/src)",
-      "Bash(./gradlew :migrationConsole:makeAndStageWorkflowTemplates --console=plain)"
+      "Bash(uvx flake8 *)"
     ]
   }
 }
