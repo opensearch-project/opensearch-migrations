@@ -885,6 +885,31 @@ class TestWorkflowCLICommands:
         assert args[4] == []
 
     @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_verbose_attributes_historical_logs_to_pods(self, mock_history):
+        runner = CliRunner()
+
+        result = runner.invoke(workflow_cli, ['log', 'all', '--verbose'])
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[5] is True
+
+    def test_stream_merged_logs_prefixes_verbose_lines_with_pod_name(self, capsys):
+        from console_link.workflow.commands.log import _stream_merged_logs
+
+        merged_logs = [
+            ('2026-08-23T12:00:00.000000000Z snapshot started\n', 'snapshot-pod'),
+            ('2026-08-23T12:00:01.000000000Z migration started\n', 'migration-pod'),
+        ]
+
+        _stream_merged_logs(merged_logs, show_ts=False, verbose=True)
+
+        assert capsys.readouterr().out.splitlines() == [
+            '[pod/snapshot-pod] snapshot started',
+            '[pod/migration-pod] migration started',
+        ]
+
+    @patch('console_link.workflow.commands.log._run_history_mode')
     def test_output_filter_combines_filter_options(self, mock_history):
         runner = CliRunner()
 

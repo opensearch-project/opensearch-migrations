@@ -19,6 +19,9 @@ from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 
 logger = logging.getLogger(__name__)
+MIGRATION_RESOURCE_UID_LABEL = "migrations.opensearch.org/migration-resource-uid"
+MIGRATION_CRD_GROUP = "migrations.opensearch.org"
+MIGRATION_CRD_VERSION = "v1alpha1"
 
 
 # ============================================================================
@@ -265,6 +268,13 @@ def _wait_for_port_forward(process, port, timeout=10):
     return False
 
 
+def _available_local_port():
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
 @pytest.fixture(scope="session")
 def k8s_cluster(required_workflow_test_kube_context):
     """Require and use the dedicated workflow test cluster."""
@@ -303,15 +313,15 @@ def argo_workflows(k8s_cluster):
     # Set up port-forwarding to argo-server so log command can access it
     logger.info("\nSetting up port-forward to argo-server...")
     port_forward_process = None
+    local_port = _available_local_port()
 
     try:
         # Start kubectl port-forward in background
-        # Forward local port 2746 to argo-server service port 2746
         port_forward_cmd = [
             "kubectl", "port-forward",
             f"--namespace={argo_namespace}",
             "svc/argo-server",
-            "2746:2746"
+            f"{local_port}:2746"
         ]
 
         port_forward_process = subprocess.Popen(
@@ -321,8 +331,8 @@ def argo_workflows(k8s_cluster):
         )
 
         # Wait for port-forward to establish
-        if _wait_for_port_forward(port_forward_process, 2746):
-            logger.info("✓ Port-forward to argo-server established on localhost:2746")
+        if _wait_for_port_forward(port_forward_process, local_port):
+            logger.info(f"✓ Port-forward to argo-server established on localhost:{local_port}")
         else:
             logger.warning("Port-forward not ready - log command tests may fail")
 
@@ -333,7 +343,8 @@ def argo_workflows(k8s_cluster):
     yield {
         "namespace": argo_namespace,
         "version": argo_version,
-        "port_forward_process": port_forward_process
+        "port_forward_process": port_forward_process,
+        "server_url": f"https://localhost:{local_port}",
     }
 
     # Cleanup port-forward
@@ -377,6 +388,81 @@ def test_namespace(k8s_cluster):
     except ApiException as e:
         # Log errors during cleanup but don't fail
         logger.warning(f"Failed to delete namespace {namespace_name}: {e}")
+
+
+def _test_migration_crd(plural, singular, kind):
+    return {
+        "apiVersion": "apiextensions.k8s.io/v1",
+        "kind": "CustomResourceDefinition",
+        "metadata": {
+            "name": f"{plural}.{MIGRATION_CRD_GROUP}",
+            "labels": {
+                "app.kubernetes.io/managed-by": "console-link-integration-test",
+            },
+        },
+        "spec": {
+            "group": MIGRATION_CRD_GROUP,
+            "scope": "Namespaced",
+            "names": {
+                "plural": plural,
+                "singular": singular,
+                "kind": kind,
+            },
+            "versions": [{
+                "name": MIGRATION_CRD_VERSION,
+                "served": True,
+                "storage": True,
+                "schema": {
+                    "openAPIV3Schema": {
+                        "type": "object",
+                        "x-kubernetes-preserve-unknown-fields": True,
+                    },
+                },
+            }],
+        },
+    }
+
+
+@pytest.fixture(scope="session")
+def migration_resource_test_crds(k8s_cluster):
+    """Install the two minimal migration CRDs needed by the log ownership test."""
+    api = client.ApiextensionsV1Api()
+    definitions = (
+        _test_migration_crd("datasnapshots", "datasnapshot", "DataSnapshot"),
+        _test_migration_crd("snapshotmigrations", "snapshotmigration", "SnapshotMigration"),
+    )
+
+    for definition in definitions:
+        name = definition["metadata"]["name"]
+        try:
+            api.create_custom_resource_definition(definition)
+        except ApiException as exc:
+            if exc.status != 409:
+                raise
+            existing = api.read_custom_resource_definition(name)
+            labels = existing.metadata.labels or {}
+            assert labels.get("app.kubernetes.io/managed-by") == "console-link-integration-test", (
+                f"Refusing to reuse non-test CRD {name!r} in the dedicated workflow test cluster"
+            )
+
+    for name in (definition["metadata"]["name"] for definition in definitions):
+        for _ in range(30):
+            crd = api.read_custom_resource_definition(name)
+            conditions = crd.status.conditions or []
+            if any(condition.type == "Established" and condition.status == "True" for condition in conditions):
+                break
+            time.sleep(1)
+        else:
+            pytest.fail(f"Timed out waiting for test CRD {name!r} to become established")
+
+    yield
+
+    for name in reversed([definition["metadata"]["name"] for definition in definitions]):
+        try:
+            api.delete_custom_resource_definition(name)
+        except ApiException as exc:
+            if exc.status != 404:
+                logger.warning("Failed to delete test CRD %s: %s", name, exc)
 
 
 @pytest.fixture
@@ -865,10 +951,201 @@ class TestArgoWorkflows:
             # Test log command with the completed workflow
             logger.info("\nTesting log command for completed workflow...")
             runner = CliRunner()
-            _test_log_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
+            _test_log_command_for_workflow(
+                runner,
+                workflow_name,
+                argo_namespace,
+                argo_workflows["server_url"],
+                test_message,
+            )
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
+
+    def test_workflow_log_resource_selects_only_owned_pods(
+        self,
+        argo_workflows,
+        migration_resource_test_crds,
+    ):
+        """Resource logs exclude related pods that share inherited labels."""
+        namespace = argo_workflows["namespace"]
+        suffix = uuid.uuid4().hex[:8]
+        snapshot_name = f"log-snapshot-{suffix}"
+        migration_name = f"log-migration-{suffix}"
+        custom_api = client.CustomObjectsApi()
+        v1 = client.CoreV1Api()
+        workflow_name = None
+
+        snapshot = custom_api.create_namespaced_custom_object(
+            group=MIGRATION_CRD_GROUP,
+            version=MIGRATION_CRD_VERSION,
+            namespace=namespace,
+            plural="datasnapshots",
+            body={
+                "apiVersion": f"{MIGRATION_CRD_GROUP}/{MIGRATION_CRD_VERSION}",
+                "kind": "DataSnapshot",
+                "metadata": {"name": snapshot_name},
+            },
+        )
+        migration = custom_api.create_namespaced_custom_object(
+            group=MIGRATION_CRD_GROUP,
+            version=MIGRATION_CRD_VERSION,
+            namespace=namespace,
+            plural="snapshotmigrations",
+            body={
+                "apiVersion": f"{MIGRATION_CRD_GROUP}/{MIGRATION_CRD_VERSION}",
+                "kind": "SnapshotMigration",
+                "metadata": {"name": migration_name},
+            },
+        )
+        snapshot_uid = snapshot["metadata"]["uid"]
+        migration_uid = migration["metadata"]["uid"]
+        shared_source = f"shared-source-{suffix}"
+        shared_snapshot = f"shared-snapshot-{suffix}"
+        shared_labels = {
+            "migrations.opensearch.org/source": shared_source,
+            "migrations.opensearch.org/snapshot": shared_snapshot,
+        }
+        snapshot_message = f"snapshot-only-{suffix}"
+        migration_message = f"migration-only-{suffix}"
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-resource-logs-",
+                "namespace": namespace,
+            },
+            "spec": {
+                "entrypoint": "resource-logs",
+                "templates": [
+                    {
+                        "name": "resource-logs",
+                        "dag": {
+                            "tasks": [
+                                {"name": "snapshot", "template": "snapshot"},
+                                {"name": "migration", "template": "migration"},
+                            ],
+                        },
+                    },
+                    {
+                        "name": "snapshot",
+                        "metadata": {
+                            "labels": {
+                                **shared_labels,
+                                MIGRATION_RESOURCE_UID_LABEL: snapshot_uid,
+                            },
+                        },
+                        "container": {
+                            "image": "busybox",
+                            "command": ["sh", "-c"],
+                            "args": [f"echo {snapshot_message}"],
+                        },
+                    },
+                    {
+                        "name": "migration",
+                        "metadata": {
+                            "labels": {
+                                **shared_labels,
+                                MIGRATION_RESOURCE_UID_LABEL: migration_uid,
+                            },
+                        },
+                        "container": {
+                            "image": "busybox",
+                            "command": ["sh", "-c"],
+                            "args": [f"echo {migration_message}"],
+                        },
+                    },
+                ],
+            },
+        }
+
+        try:
+            workflow = custom_api.create_namespaced_custom_object(
+                group="argoproj.io",
+                version="v1alpha1",
+                namespace=namespace,
+                plural="workflows",
+                body=workflow_spec,
+            )
+            workflow_name = workflow["metadata"]["name"]
+
+            for _ in range(60):
+                workflow = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io",
+                    version="v1alpha1",
+                    namespace=namespace,
+                    plural="workflows",
+                    name=workflow_name,
+                )
+                phase = workflow.get("status", {}).get("phase")
+                if phase in ("Succeeded", "Failed", "Error"):
+                    break
+                time.sleep(1)
+            assert phase == "Succeeded", f"Resource log test workflow ended in phase {phase!r}"
+
+            snapshot_pods = v1.list_namespaced_pod(
+                namespace,
+                label_selector=f"{MIGRATION_RESOURCE_UID_LABEL}={snapshot_uid}",
+            ).items
+            migration_pods = v1.list_namespaced_pod(
+                namespace,
+                label_selector=f"{MIGRATION_RESOURCE_UID_LABEL}={migration_uid}",
+            ).items
+            shared_pods = v1.list_namespaced_pod(
+                namespace,
+                label_selector=(
+                    f"migrations.opensearch.org/source={shared_source},"
+                    f"migrations.opensearch.org/snapshot={shared_snapshot}"
+                ),
+            ).items
+            assert len(snapshot_pods) == 1
+            assert len(migration_pods) == 1
+            assert {pod.metadata.name for pod in shared_pods} == {
+                snapshot_pods[0].metadata.name,
+                migration_pods[0].metadata.name,
+            }
+
+            result = CliRunner().invoke(
+                workflow_cli,
+                [
+                    "log", "resource",
+                    "--namespace", namespace,
+                    "--verbose",
+                    f"datasnapshot.{snapshot_name}",
+                ],
+            )
+
+            assert result.exit_code == 0, result.output
+            assert f"[pod/{snapshot_pods[0].metadata.name}]" in result.output
+            assert snapshot_message in result.output
+            assert migration_pods[0].metadata.name not in result.output
+            assert migration_message not in result.output
+        finally:
+            if workflow_name:
+                try:
+                    custom_api.delete_namespaced_custom_object(
+                        group="argoproj.io",
+                        version="v1alpha1",
+                        namespace=namespace,
+                        plural="workflows",
+                        name=workflow_name,
+                    )
+                except ApiException:
+                    pass
+            for plural, name in (
+                ("snapshotmigrations", migration_name),
+                ("datasnapshots", snapshot_name),
+            ):
+                try:
+                    custom_api.delete_namespaced_custom_object(
+                        group=MIGRATION_CRD_GROUP,
+                        version=MIGRATION_CRD_VERSION,
+                        namespace=namespace,
+                        plural=plural,
+                        name=name,
+                    )
+                except ApiException:
+                    pass
 
     def test_workflow_status_after_submit(self, argo_workflows):
         """Test workflow status command after submitting a workflow"""
@@ -967,7 +1244,12 @@ class TestArgoWorkflows:
             # Test status command with the completed workflow
             logger.info("\nTesting status command for completed workflow...")
             runner = CliRunner()
-            _test_status_command_for_workflow(runner, workflow_name, argo_namespace)
+            _test_status_command_for_workflow(
+                runner,
+                workflow_name,
+                argo_namespace,
+                argo_workflows["server_url"],
+            )
 
             logger.info("✓ Status command test completed successfully!")
 
@@ -1068,7 +1350,7 @@ class TestArgoWorkflows:
             status_result = runner.invoke(
                 workflow_cli,
                 ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', argo_namespace,
-                 '--argo-server', 'https://localhost:2746', '--insecure']
+                 '--argo-server', argo_workflows["server_url"], '--insecure']
             )
             assert status_result.exit_code == 0, (
                 f"Status command failed (exit {status_result.exit_code}): {status_result.output}"
@@ -1203,7 +1485,7 @@ class TestArgoWorkflows:
             status_result = runner.invoke(
                 workflow_cli,
                 ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', argo_namespace,
-                 '--argo-server', 'https://localhost:2746', '--insecure']
+                 '--argo-server', argo_workflows["server_url"], '--insecure']
             )
             assert status_result.exit_code == 0, (
                 f"Status command failed (exit {status_result.exit_code}): {status_result.output}"
@@ -1234,7 +1516,7 @@ def test_workflow_test_context_is_configured(required_workflow_test_kube_context
         required_workflow_test_kube_context["expected_context"]
 
 
-def _test_log_command_for_workflow(runner, workflow_name, namespace, expected_message):
+def _test_log_command_for_workflow(runner, workflow_name, namespace, argo_server_url, expected_message):
     """
     Helper function to test log command for a given workflow.
 
@@ -1244,6 +1526,7 @@ def _test_log_command_for_workflow(runner, workflow_name, namespace, expected_me
         runner: Click test runner
         workflow_name: Name of the workflow to get output for
         namespace: Kubernetes namespace
+        argo_server_url: URL for the test's isolated Argo port-forward
         expected_message: The message that should appear in the workflow log output
 
     Raises:
@@ -1252,7 +1535,7 @@ def _test_log_command_for_workflow(runner, workflow_name, namespace, expected_me
     result = runner.invoke(
         workflow_cli,
         ['log', 'filter', '--workflow-name', workflow_name, '--namespace', namespace,
-         '--argo-server', 'https://localhost:2746', '--insecure',
+         '--argo-server', argo_server_url, '--insecure',
          '--prefix', '', '--label', 'test-workflow=hello-world'],
     )
 
@@ -1265,7 +1548,7 @@ def _test_log_command_for_workflow(runner, workflow_name, namespace, expected_me
     logger.info(f"✓ Verified output contains expected message: {expected_message}")
 
 
-def _test_status_command_for_workflow(runner, workflow_name, namespace):
+def _test_status_command_for_workflow(runner, workflow_name, namespace, argo_server_url):
     """
     Helper function to test status command for a given workflow.
 
@@ -1276,6 +1559,7 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
         runner: Click test runner
         workflow_name: Name of the workflow to get status for
         namespace: Kubernetes namespace
+        argo_server_url: URL for the test's isolated Argo port-forward
 
     Raises:
         AssertionError: If status command fails or status information is not retrieved
@@ -1284,7 +1568,7 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     result = runner.invoke(
         workflow_cli,
         ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', namespace,
-         '--argo-server', 'https://localhost:2746', '--insecure']
+         '--argo-server', argo_server_url, '--insecure']
     )
 
     # Verify command succeeded
