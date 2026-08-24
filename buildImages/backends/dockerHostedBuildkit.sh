@@ -44,21 +44,16 @@ ptc_rewrite_image() {
 }
 
 get_docker_network_dns_servers() {
-  local resolv_conf dns_line registry_image servers
+  local resolv_conf dns_line registry_image
   registry_image="$(ptc_rewrite_image registry:2)"
   resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" "${registry_image}" cat /etc/resolv.conf 2>/dev/null || true)"
   dns_line="$(printf '%s\n' "${resolv_conf}" | sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' | head -n1)"
-  # The dns_line value extracted above, on some systems (e.g ubuntu), can point to a loopback on host that is not reachable from inside
-  # the network namespace used by the builtkit builder, which leads to "could not resolve host" errors.
-  # Thus the logic below drops all loopback addresses, and if none remains, checks reachable resolvers (/run/systemd/resolve/resolv.conf).
-  # If that does not yield anything, buildkit will default to Docker's embedded resolver.
-  servers="$(printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -v '^127\.' || true)"
 
-  if [[ -z "${servers}" && -r /run/systemd/resolve/resolv.conf ]]; then
-    servers="$(grep -E '^nameserver' /run/systemd/resolve/resolv.conf | awk '{print $2}' | grep -v '^127\.' || true)"
+  if [[ -z "${dns_line}" ]]; then
+    return 0
   fi
 
-  printf '%s\n' "${servers}"
+  printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
 }
 
 write_buildkit_config() {
