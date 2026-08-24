@@ -425,25 +425,22 @@ def _test_migration_crd(plural, singular, kind):
 
 @pytest.fixture(scope="session")
 def migration_resource_test_crds(k8s_cluster):
-    """Install the two minimal migration CRDs needed by the log ownership test."""
+    """Ensure the two migration CRDs needed by the log ownership test exist."""
     api = client.ApiextensionsV1Api()
     definitions = (
         _test_migration_crd("datasnapshots", "datasnapshot", "DataSnapshot"),
         _test_migration_crd("snapshotmigrations", "snapshotmigration", "SnapshotMigration"),
     )
+    created = []
 
     for definition in definitions:
         name = definition["metadata"]["name"]
         try:
             api.create_custom_resource_definition(definition)
+            created.append(name)
         except ApiException as exc:
             if exc.status != 409:
                 raise
-            existing = api.read_custom_resource_definition(name)
-            labels = existing.metadata.labels or {}
-            assert labels.get("app.kubernetes.io/managed-by") == "console-link-integration-test", (
-                f"Refusing to reuse non-test CRD {name!r} in the dedicated workflow test cluster"
-            )
 
     for name in (definition["metadata"]["name"] for definition in definitions):
         for _ in range(30):
@@ -457,7 +454,7 @@ def migration_resource_test_crds(k8s_cluster):
 
     yield
 
-    for name in reversed([definition["metadata"]["name"] for definition in definitions]):
+    for name in reversed(created):
         try:
             api.delete_custom_resource_definition(name)
         except ApiException as exc:
