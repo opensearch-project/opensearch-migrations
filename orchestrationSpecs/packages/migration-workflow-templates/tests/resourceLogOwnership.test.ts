@@ -70,16 +70,21 @@ describe("migration resource log ownership", () => {
     });
 
     it.each([
-        ["applySnapshotMonitorCronJob.sh", "DATASNAPSHOT_UID"],
-        ["applyRfsMonitorCronJob.sh", "SM_UID"],
+        [CreateSnapshot, "applysnapshotdonecronjob", "applySnapshotMonitorCronJob.sh", "DATASNAPSHOT_UID"],
+        [DocumentBulkLoad, "applyrfsdonecronjob", "applyRfsMonitorCronJob.sh", "SM_UID"],
     ])(
         "labels monitor CronJob pods with their migration CR UID",
-        (scriptName, uidVariable) => {
+        (workflow, templateName, scriptName, uidVariable) => {
+            expect(template(workflow, templateName).container?.env).toContainEqual({
+                name: "MIGRATION_RESOURCE_UID_LABEL",
+                value: RESOURCE_UID_LABEL,
+            });
             const script = fs.readFileSync(
                 path.resolve(__dirname, `../resources/scripts/${scriptName}`),
                 "utf8",
             );
-            expect(script).toContain(`RESOURCE_UID_LABEL="${RESOURCE_UID_LABEL}"`);
+            expect(script).toContain(': "${MIGRATION_RESOURCE_UID_LABEL:?}"');
+            expect(script).toContain('RESOURCE_UID_LABEL="${MIGRATION_RESOURCE_UID_LABEL}"');
             expect(script).toContain('--arg resourceuidkey "$RESOURCE_UID_LABEL"');
             expect(countOccurrences(
                 script,

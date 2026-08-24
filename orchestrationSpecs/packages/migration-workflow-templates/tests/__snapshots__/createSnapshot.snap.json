@@ -265,6 +265,10 @@
               "value": "migrations.opensearch.org/snapshot-monitor-session"
             },
             {
+              "name": "MIGRATION_RESOURCE_UID_LABEL",
+              "value": "migrations.opensearch.org/migration-resource-uid"
+            },
+            {
               "name": "WORKFLOW_SCRIPTS_ROOT",
               "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }

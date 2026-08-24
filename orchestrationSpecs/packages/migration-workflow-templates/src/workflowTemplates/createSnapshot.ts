@@ -177,6 +177,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 CONSOLE_CONFIG_BASE64: expr.toBase64YamlSafe(expr.asString(b.inputs.configContents)),
                 SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL: expr.literal(SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL),
                 SNAPSHOT_MONITOR_SESSION_LABEL: expr.literal(SNAPSHOT_MONITOR_SESSION_LABEL),
+                MIGRATION_RESOURCE_UID_LABEL: expr.literal(MIGRATION_RESOURCE_UID_LABEL),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("applySnapshotMonitorCronJob.sh")])

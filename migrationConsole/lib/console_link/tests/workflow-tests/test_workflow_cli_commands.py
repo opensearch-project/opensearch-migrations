@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli
+from console_link.workflow.commands.log import MIGRATION_RESOURCE_UID_LABEL
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 
@@ -885,16 +886,16 @@ class TestWorkflowCLICommands:
         assert args[4] == []
 
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_verbose_attributes_historical_logs_to_pods(self, mock_history):
+    def test_output_show_pods_attributes_historical_logs_to_pods(self, mock_history):
         runner = CliRunner()
 
-        result = runner.invoke(workflow_cli, ['log', 'all', '--verbose'])
+        result = runner.invoke(workflow_cli, ['log', 'all', '--show-pods'])
 
         assert result.exit_code == 0
         args, _ = mock_history.call_args
         assert args[5] is True
 
-    def test_stream_merged_logs_prefixes_verbose_lines_with_pod_name(self, capsys):
+    def test_stream_merged_logs_prefixes_lines_with_pod_name(self, capsys):
         from console_link.workflow.commands.log import _stream_merged_logs
 
         merged_logs = [
@@ -902,7 +903,7 @@ class TestWorkflowCLICommands:
             ('2026-08-23T12:00:01.000000000Z migration started\n', 'migration-pod'),
         ]
 
-        _stream_merged_logs(merged_logs, show_ts=False, verbose=True)
+        _stream_merged_logs(merged_logs, show_ts=False, show_pods=True)
 
         assert capsys.readouterr().out.splitlines() == [
             '[pod/snapshot-pod] snapshot started',
@@ -958,7 +959,7 @@ class TestWorkflowCLICommands:
         )
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/migration-resource-uid='
+            f'{MIGRATION_RESOURCE_UID_LABEL}='
             'a9cc8399-1286-4d47-8bd0-d72c24acc1d3'
         )
 
@@ -1010,7 +1011,7 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/migration-resource-uid='
+            f'{MIGRATION_RESOURCE_UID_LABEL}='
             'e4834eed-2f91-477c-a0dd-9e10479c1370'
         )
 

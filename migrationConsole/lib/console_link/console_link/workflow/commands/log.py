@@ -40,7 +40,7 @@ MIGRATION_RESOURCE_UID_LABEL = 'migrations.opensearch.org/migration-resource-uid
 # the user had placed them before `--`.
 _PROMOTABLE_FLAGS = {
     '--timestamps': 'timestamps',
-    '--verbose': 'verbose',
+    '--show-pods': 'show_pods',
     '-f': 'follow',
     '--follow': 'follow',
 }
@@ -204,11 +204,11 @@ def _list_available_labels(workflow_name, all_workflows, namespace, **kwargs):
                 click.echo(f"{key}={val}")
 
 
-def _run_output(ctx, namespace, selector, follow, timestamps, passthrough_args, verbose=False):
+def _run_output(ctx, namespace, selector, follow, timestamps, passthrough_args, show_pods=False):
     promoted, passthrough_args = _promote_known_flags(list(passthrough_args))
     follow = follow or 'follow' in promoted
     timestamps = timestamps or 'timestamps' in promoted
-    verbose = verbose or 'verbose' in promoted
+    show_pods = show_pods or 'show_pods' in promoted
 
     if '--help' in passthrough_args:
         _show_underlying_help(follow)
@@ -217,7 +217,7 @@ def _run_output(ctx, namespace, selector, follow, timestamps, passthrough_args, 
     if follow:
         _run_tailing_mode(namespace, selector, timestamps, passthrough_args)
     else:
-        _run_history_mode(ctx, namespace, selector, timestamps, passthrough_args, verbose)
+        _run_history_mode(ctx, namespace, selector, timestamps, passthrough_args, show_pods)
 
 
 def _output_options(func):
@@ -243,7 +243,7 @@ def _output_options(func):
                         help='Stream live logs via stern instead of showing history')(func)
     func = click.option('--timestamps', is_flag=True, default=False,
                         help='Show timestamps in log output')(func)
-    func = click.option('--verbose', is_flag=True, default=False,
+    func = click.option('--show-pods', is_flag=True, default=False,
                         help='Prefix each historical log line with its source pod')(func)
     return func
 
@@ -270,7 +270,7 @@ def log_command():
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def output_all(ctx, workflow_name, all_workflows, namespace, prefix,
-               follow, timestamps, verbose, extra_args, **kwargs):
+               follow, timestamps, show_pods, extra_args, **kwargs):
     """Show all logs for the selected workflow.
 
     \b
@@ -287,7 +287,7 @@ def output_all(ctx, workflow_name, all_workflows, namespace, prefix,
         ctx.exit(1)
     effective_name = None if all_workflows else workflow_name
     full_selector = _selector_parts([], prefix, effective_name)
-    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args, verbose)
+    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args, show_pods)
 
 
 @log_command.command("resource")
@@ -298,7 +298,7 @@ def output_all(ctx, workflow_name, all_workflows, namespace, prefix,
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, prefix,
-                    follow, timestamps, verbose, resource_name, extra_args, **kwargs):
+                    follow, timestamps, show_pods, resource_name, extra_args, **kwargs):
     """Show logs for one migration resource.
 
     \b
@@ -343,7 +343,7 @@ def output_resource(ctx, list_labels, workflow_name, all_workflows, namespace, p
     # A Kubernetes UID is globally unique. Do not narrow it with a workflow
     # label: controller-created and monitor pods can outlive their Argo workflow.
     full_selector = _selector_parts(resource_selectors, prefix, None)
-    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args, verbose)
+    _run_output(ctx, namespace, full_selector, follow, timestamps, passthrough_args, show_pods)
 
 
 @log_command.command("filter")
@@ -411,7 +411,7 @@ def output_filter(ctx, **params):
         params['follow'],
         params['timestamps'],
         passthrough_args,
-        params['verbose'],
+        params['show_pods'],
     )
 
 
@@ -437,7 +437,7 @@ def _attribute_log_stream(pod_name, stream):
         yield line, pod_name
 
 
-def _run_history_mode(ctx, namespace, selector, show_timestamps, passthrough_args, verbose=False):
+def _run_history_mode(ctx, namespace, selector, show_timestamps, passthrough_args, show_pods=False):
     """Handle the complex merging of historical logs from multiple pods."""
     pods = []
     try:
@@ -464,11 +464,11 @@ def _run_history_mode(ctx, namespace, selector, show_timestamps, passthrough_arg
         # Merge and Stream
         streams = [_attribute_log_stream(pod_name, process.stdout) for pod_name, process in processes]
         merged_logs = heapq.merge(*streams, key=lambda item: item[0])
-        _stream_merged_logs(merged_logs, show_timestamps, verbose)
+        _stream_merged_logs(merged_logs, show_timestamps, show_pods)
         _check_process_errors(processes)
 
 
-def _stream_merged_logs(merged_logs, show_ts, verbose=False):
+def _stream_merged_logs(merged_logs, show_ts, show_pods=False):
     """Handle formatting and printing of the log lines."""
     try:
         for line, pod_name in merged_logs:
@@ -476,7 +476,7 @@ def _stream_merged_logs(merged_logs, show_ts, verbose=False):
                 # Strip RFC3339 timestamp
                 parts = line.split(" ", 1)
                 line = parts[1] if len(parts) > 1 else line
-            if verbose:
+            if show_pods:
                 line = f"[pod/{pod_name}] {line}"
             click.echo(line.rstrip())
     except KeyboardInterrupt:
