@@ -51,6 +51,7 @@ import {
     scalingFromOptions,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -240,7 +241,8 @@ function getRfsDeploymentManifest
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                 "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
                 "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
-                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
+                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.crdUid),
             },
         },
         spec: {
@@ -268,7 +270,8 @@ function getRfsDeploymentManifest
                         "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                         "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
                         "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
-                        "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
+                        "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                        [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.crdUid),
                     },
                 },
                 spec: {
@@ -367,6 +370,7 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
                 CONSOLE_CONFIG_BASE64: expr.toBase64YamlSafe(expr.asString(c.inputs.consoleConfigContents)),
                 RFS_MONITOR_WORKFLOW_UID_LABEL: expr.literal(RFS_MONITOR_WORKFLOW_UID_LABEL),
                 RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL),
+                MIGRATION_RESOURCE_UID_LABEL: expr.literal(MIGRATION_RESOURCE_UID_LABEL),
                 ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("applyRfsMonitorCronJob.sh")])

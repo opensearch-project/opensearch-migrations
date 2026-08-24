@@ -30,6 +30,7 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
 const METADATA_TEST_CREDS_VOLUME_NAME = "test-creds";
@@ -262,7 +263,8 @@ function buildMetadataContainer<
                 'migrations.opensearch.org/target': inputs.targetK8sLabel,
                 'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                 'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
-                'migrations.opensearch.org/task': inputs.taskK8sLabel
+                'migrations.opensearch.org/task': inputs.taskK8sLabel,
+                [MIGRATION_RESOURCE_UID_LABEL]: inputs.crdUid,
             }
         }));
 }
