@@ -2,7 +2,7 @@
  * Verify the CloudWatch dashboards managed by the ACK controller.
  *
  * Actions:
- *   create - wait for ACK reconciliation and verify both dashboard bodies exist.
+ *   create - wait for ACK reconciliation and verify both dashboards contain metrics.
  *   delete - delete both CRs, wait for finalizers, and verify both dashboards are gone.
  */
 def call(Map config = [:]) {
@@ -49,8 +49,18 @@ def call(Map config = [:]) {
                   --region '${region}' \
                   --query DashboardBody \
                   --output text)"
-                if [ -z "\$dashboard_body" ] || [ "\$dashboard_body" = "None" ]; then
-                    echo "CloudWatch dashboard '${dashboard.name}' has an empty body" >&2
+                if ! printf '%s\n' "\$dashboard_body" | jq -e '
+                    type == "object"
+                    and ((.widgets | type) == "array")
+                    and (.widgets | length > 0)
+                    and any(
+                        .widgets[];
+                        .type == "metric"
+                        and ((.properties.metrics | type) == "array")
+                        and (.properties.metrics | length > 0)
+                    )
+                ' >/dev/null; then
+                    echo "CloudWatch dashboard '${dashboard.name}' has no populated metric widgets" >&2
                     exit 1
                 fi
             """
