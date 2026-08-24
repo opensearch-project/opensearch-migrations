@@ -14,7 +14,7 @@ rules:
   - apiGroups: ["k6.io"]
     resources: ["testruns"]
     verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  # Read runner pod status/logs for `workflow loadtest list` / `logs`.
+  # Read runner pod status/logs for `loadtest list` / `logs`.
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]

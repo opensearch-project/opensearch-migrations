@@ -12,6 +12,7 @@ setup(
         "console_scripts": [
             "console = console_link.cli:main",
             "workflow = console_link.workflow.cli:main",
+            "loadtest = console_link.loadtest.cli:main",
         ],
     },
     classifiers=[

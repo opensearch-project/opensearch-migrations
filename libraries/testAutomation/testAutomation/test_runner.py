@@ -22,6 +22,10 @@ VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_
                          "SOLR_8.11", "SOLR_9.8"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
+# Release name of the standalone k6LoadTest chart. It matches the default in
+# deployment/k8s/installK6Chart.sh, and is passed to that script explicitly so the install and the
+# uninstall below cannot drift apart.
+K6_RELEASE_NAME = "k6-load-test"
 # ECR format: <account>.dkr.ecr.<region>.amazonaws.com/<repo>. An ECR registry flattens every image
 # into one repo (tag "migrations_<image>_latest"), while any other registry keeps the
 # "<prefix>migrations/<image>" layout — both image lookups below branch on this.
@@ -365,7 +369,11 @@ class TestRunner:
              dependency order and strips stuck finalizers.
           3. helm uninstall ma — tears down the umbrella chart (10m timeout).
 
-        Test-scaffolding extras (steps 4-7):
+        Test-scaffolding extras (steps 3b-7):
+
+          3b. helm uninstall k6-load-test — only for runs that installed it.
+             Removes the cluster-scoped k6-operator objects (CRDs, ClusterRoles)
+             that step 6 cannot reach.
 
           4. cleanup_clusters — source/target test cluster helm releases.
           5. delete_all_pvcs — any non-Kafka residual PVCs (timeout governed
@@ -401,6 +409,15 @@ class TestRunner:
         except Exception as e:
             logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
             helm_uninstall_error = e
+
+        # 3. helm uninstall for test-only k6 load-test release. It is a separate chart with its own release name, so
+        # step 3 cannot reach it.
+        if self._load_test_requested():
+            try:
+                self.k8s_service.helm_uninstall(release_name=K6_RELEASE_NAME)
+            except Exception as e:
+                logger.error(f"Helm uninstall of '{K6_RELEASE_NAME}' release failed: {e}")
+                helm_uninstall_error = e
 
         # 4. Test-only source/target clusters.
         self.cleanup_clusters()
@@ -455,7 +472,8 @@ class TestRunner:
         digest pins, the ECR flat-repo layout) have exactly one implementation.
         """
         cmd = [self.k6_install_script, "--chart", self.k6_chart_path,
-               "--namespace", self.k8s_service.namespace]
+               "--namespace", self.k8s_service.namespace,
+               "--release", K6_RELEASE_NAME]
         if self.k8s_service.kube_context:
             cmd += ["--context", self.k8s_service.kube_context]
         if self.registry_prefix:

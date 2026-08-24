@@ -77,10 +77,14 @@ def get_workflow(namespace, name):
 
 
 def delete_workflow(namespace, name):
-    """Delete a Workflow. Returns True if gone/deleted.
+    """Delete a Workflow. Returns True if it was deleted, False if there was no such Workflow.
 
     There is no graceful pause for a k6 run — stopping one means deleting the Workflow. The TestRun
     carries an owner reference to it, so the CR and the operator's runner pods go with it.
+
+    A 404 is reported as False, not as success. Reporting it as success made `stop` announce that it
+    had stopped a run that was never there, which is exactly the case a user needs to be told about:
+    a typo in the name, or a run that had already finished and been reaped.
     """
     try:
         _custom().delete_namespaced_custom_object(
@@ -89,7 +93,9 @@ def delete_workflow(namespace, name):
         )
         return True
     except ApiException as e:
-        return e.status == 404
+        if e.status == 404:
+            return False
+        raise
 
 
 def get_workflow_template(namespace, name):
@@ -117,23 +123,16 @@ def list_scenarios(namespace):
     """Launchable scenario names, discovered from the chart's WorkflowTemplates. Each carries a
     k6-scenario label, and each is what a run is submitted against, so anything listed here is
     guaranteed launchable. Returns a sorted list, or [] when the chart is absent — callers fall back
-    to their own default so the UI still works."""
+    to their own default so the UI still works.
+
+    This swallows an ApiException on purpose, because its callers (shell completion, the launch
+    form) must degrade to a default rather than fail. Anything that reports to the user whether the
+    chart is installed must call list_k6_workflow_templates directly instead, so a cluster error is
+    not misreported as "not installed" — see runs.chart_missing_hint.
+    """
     try:
         templates = list_k6_workflow_templates(namespace)
     except ApiException:
         return []
     names = {t.get("metadata", {}).get("labels", {}).get("k6-scenario") for t in templates}
     return sorted(n for n in names if n)
-
-
-def loadtest_installed(namespace):
-    """True if the k6 load-test infra is usable in this namespace.
-
-    Argo itself always ships with the migration, so its presence proves nothing — the probe is for
-    the chart's own WorkflowTemplates. Any error is treated as "not installed", so a normal migration
-    deployment leaves the `workflow loadtest` commands inert.
-    """
-    try:
-        return bool(list_k6_workflow_templates(namespace))
-    except Exception:
-        return False

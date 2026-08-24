@@ -27,6 +27,42 @@
       (printf "%s@%s" $scripts.repository $scripts.digest)
       (printf "%s:%s" $scripts.repository ($scripts.tag | default .Chart.AppVersion))
       (ne (toString $scripts.digest) "") }}
+{{- /*
+  Runner env entries that are safe to state here, with the value each scenario would otherwise fall
+  back to in JS (`CFG.X || 'default'`).
+
+  Only keys that NO preset in k6-config/*.env sets may appear here. runnerEnv is not a defaults
+  layer: lib/config.js resolves a run as `{...preset, ...__ENV}`, so an entry here BEATS the
+  selected preset and cannot be overridden by it. Listing a preset-owned key (DURATION, INGEST_RATE,
+  EXECUTOR, RAMP_STAGES, VUs, BULK_BATCH_SIZE, SEED_DOC_COUNT, REGISTRY_ENABLED, …) would force one
+  value on every preset — the ramp and burst profiles deliberately omit DURATION, for instance,
+  because RAMP_STAGES carries their timing.
+*/ -}}
+{{- $envDefaults := dict
+      "ingest" (list
+        (dict "name" "SCHEMA" "value" "nyc_taxis")
+        (dict "name" "NO_CONNECTION_REUSE" "value" "false")
+        (dict "name" "CONTROL_ENABLED" "value" "false")
+        (dict "name" "CONTROL_CMD_KEY" "value" "control_cmd")
+        (dict "name" "BULK_FRACTION" "value" "0.70"))
+      "search" (list
+        (dict "name" "SCHEMA" "value" "nyc_taxis")
+        (dict "name" "NO_CONNECTION_REUSE" "value" "false")
+        (dict "name" "SEARCH_FLAT_FRACTION" "value" "0.60")
+        (dict "name" "SEARCH_AGG_FRACTION" "value" "0.20")
+        (dict "name" "SEARCH_UPDATE_FRACTION" "value" "0.10")
+        (dict "name" "SEARCH_WRITE_FRACTION" "value" "0.05"))
+      "mixed" (list
+        (dict "name" "SCHEMA" "value" "nyc_taxis")
+        (dict "name" "NO_CONNECTION_REUSE" "value" "false")
+        (dict "name" "CONTROL_ENABLED" "value" "false")
+        (dict "name" "CONTROL_CMD_KEY" "value" "control_cmd")
+        (dict "name" "REGISTRY_CAP" "value" "1000")
+        (dict "name" "REGISTRY_KEY" "value" "recent_ids")
+        (dict "name" "BULK_FRACTION" "value" "0.70")
+        (dict "name" "SEARCH_FLAT_FRACTION" "value" "0.60")
+        (dict "name" "SEARCH_AGG_FRACTION" "value" "0.20")
+        (dict "name" "SEARCH_UPDATE_FRACTION" "value" "0.10")) }}
 {{- range $scenario := (list "ingest" "search" "mixed") }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -62,20 +98,23 @@ spec:
       - name: scriptsPullPolicy
         value: {{ $scripts.pullPolicy | quote }}
       - name: runnerEnv
-        value: {{ toJson (list
+        value: {{ toJson (concat (list
               (dict "name" "K6_PRESET" "value" (printf "%s-steady" $scenario))
               (dict "name" "K6_OUT" "value" "opentelemetry")
               (dict "name" "K6_OTEL_GRPC_EXPORTER_ENDPOINT" "value" "otel-collector:4317")
-              (dict "name" "K6_OTEL_GRPC_EXPORTER_INSECURE" "value" "true")) | quote }}
+              (dict "name" "K6_OTEL_GRPC_EXPORTER_INSECURE" "value" "true")
+              (dict "name" "CAPTURE_PROXY_URL" "value" $.Values.captureProxyUrl))
+              (index $envDefaults $scenario)) | quote }}
   templates:
     - name: run
+      # A TestRun that never reaches a terminal stage (for example runner pods that cannot pull an
+      # image) would otherwise block forever, since neither condition can match.
+      # NOTE: this needs to be on top level of the template.
+      activeDeadlineSeconds: {{ $.Values.workflow.activeDeadlineSeconds | int }}
       resource:
         action: create
         # Ties the TestRun's lifetime to the workflow: stopping a run means deleting the workflow.
         setOwnerReference: true
-        # A TestRun that never reaches a terminal stage (for example runner pods that cannot pull an
-        # image) would otherwise block forever, since neither condition can match.
-        activeDeadlineSeconds: {{ $.Values.workflow.activeDeadlineSeconds | int }}
         successCondition: status.stage == finished
         failureCondition: status.stage == error
         manifest: |

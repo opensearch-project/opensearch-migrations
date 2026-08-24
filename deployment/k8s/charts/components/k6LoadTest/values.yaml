@@ -29,8 +29,10 @@ image:
 # rebuilding and pushing this image, not a helm upgrade.
 #
 # It is NOT a released artifact (load testing is a dev/test capability, so it is not published
-# publicly and not mirrored by aws-bootstrap.sh) — build and push it yourself (~25 KB), then point
-# this at wherever it landed:
+# publicly, not mirrored by aws-bootstrap.sh, and not built by :buildImages:buildImagesToRegistry)
+# — build and push it yourself (~25 KB) with
+#   ./gradlew :buildImages:buildKitLoadTestAll -PregistryEndpoint=<registry>
+# then point this at wherever it landed:
 #   local minikube:  --set scriptsImage.repository=localhost:5001/migrations/k6_scripts
 #   ECR (one repo, per-image tags):
 #                    --set scriptsImage.repository=<acct>.dkr.ecr.<region>.amazonaws.com/<repo> \
@@ -82,6 +84,16 @@ testRun:
   parallelism: 1
   separate: false
 
+# Where a run aims its traffic. This is deployment topology — the proxy's service name and namespace
+# — not a load profile, so it belongs to the chart rather than to the k6-config/*.env presets, which
+# describe only the shape of the load. Keeping it here means pointing runs at a differently named
+# proxy is a `helm install` flag instead of a rebuild of the migrations/k6_scripts image.
+#
+# Precedence: `loadtest run --target` / `-e CAPTURE_PROXY_URL=` beats this per run, and this beats
+# the scenarios' own fallback (which still covers k6-run.sh and plain kubectl runs, where no chart
+# supplies the value).
+captureProxyUrl: https://capture-proxy:9201
+
 # Redis + Webdis sidecars, required only by the mixed (write-then-read) and chaos scenarios.
 # Off by default; those scenarios degrade gracefully to flat searches when absent.
 registry:
@@ -93,7 +105,7 @@ dashboard:
   enabled: true
 
 # ServiceAccount of the migration-console pod that submits TestRuns. This chart grants it RBAC on
-# testruns.k6.io, so the `workflow loadtest` CLI is only functional once this chart is installed.
+# testruns.k6.io, so the `loadtest` CLI is only functional once this chart is installed.
 console:
   serviceAccountName: migration-console-access-role
 

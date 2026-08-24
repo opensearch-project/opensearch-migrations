@@ -1,4 +1,4 @@
-"""Tests for the load-test launch form (the `n` modal of the `workflow loadtest` TUI).
+"""Tests for the load-test launch form (the `n` modal of the `loadtest` TUI).
 
 Driven headless via Textual's run_test(); wrapped in asyncio.run so no pytest-asyncio is needed.
 The form returns the build_k6_parameters kwargs directly, or None when cancelled.
@@ -8,7 +8,7 @@ import asyncio
 from textual.app import App
 from textual.widgets import Input, Checkbox, TextArea, Select
 
-from console_link.workflow.tui.loadtest_launch_modal import LoadTestLaunchModal
+from console_link.loadtest.tui.launch_modal import LoadTestLaunchModal
 
 
 class _Host(App):

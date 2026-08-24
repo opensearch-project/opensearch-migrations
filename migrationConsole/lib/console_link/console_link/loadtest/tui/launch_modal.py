@@ -1,4 +1,4 @@
-"""New-run form for the `workflow loadtest` TUI (opened with `n`).
+"""New-run form for the `loadtest` TUI (opened with `n`).
 
 Returns the build_k6_parameters kwargs for the app to submit, or None on close/cancel. Listing and
 stopping runs is the job of the app's run table, not this form.
@@ -14,7 +14,7 @@ from textual.widgets import Static, Button, Input, Select, Checkbox, TextArea
 # Scenarios are discovered from the cluster (the chart's k6-<scenario> WorkflowTemplates) and passed
 # into the modal. This literal is only a fallback for when that lookup returns nothing.
 _FALLBACK_SCENARIOS = ["ingest", "search", "mixed"]
-# Presets live in the scripts image, so the caller passes in the CLI's list (loadtest.CONFIG_PRESETS).
+# Presets live in the scripts image, so the caller passes in the client's list (runs.CONFIG_PRESETS).
 # This literal is only a fallback for when nothing is passed — e.g. a headless test that constructs
 # the modal directly — so the config dropdown is never empty.
 _FALLBACK_PRESETS = [

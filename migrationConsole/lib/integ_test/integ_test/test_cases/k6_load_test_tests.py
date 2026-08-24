@@ -64,8 +64,8 @@ class Test0080CdcK6LoadTest(MATestBase):
     def _run_k6(self, namespace, target_url):
         """Fire a short k6 ingest run at the proxy and wait for the workflow to finish."""
         # Imported inside the method so the case only depends on the k6 module when actually run.
-        from console_link.workflow.models.utils import load_k8s_config
-        from console_link.workflow.commands.loadtest import (
+        from console_link.loadtest.utils import load_k8s_config
+        from console_link.loadtest.runs import (
             build_k6_parameters, submit_k6_run, wait_for_run, SUCCESS_PHASE,
         )
         load_k8s_config()

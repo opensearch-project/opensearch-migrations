@@ -1,7 +1,7 @@
-"""Tests for the `workflow loadtest` TUI (run table + launch/stop/logs).
+"""Tests for the `loadtest` TUI (run table + launch/stop/logs).
 
-Driven headless via Textual's run_test(). The cluster calls all live in commands/loadtest.py and
-commands/testrun_utils.py, so they are patched at those module paths — the app imports them at call
+Driven headless via Textual's run_test(). The cluster calls all live in runs.py and
+testrun_utils.py, so they are patched at those module paths — the app imports them at call
 time.
 """
 import time
@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from console_link.workflow.tui.loadtest_app import LoadTestApp
-from console_link.workflow.tui.loadtest_launch_modal import LoadTestLaunchModal
+from console_link.loadtest.tui.app import LoadTestApp
+from console_link.loadtest.tui.launch_modal import LoadTestLaunchModal
 
-LT = "console_link.workflow.commands.loadtest"
-TESTRUN_UTILS = "console_link.workflow.commands.testrun_utils"
+LT = "console_link.loadtest.runs"
+TESTRUN_UTILS = "console_link.loadtest.testrun_utils"
 
 RUNS = [
     {"name": "k6-run-a", "scenario": "ingest", "phase": "started",
@@ -216,7 +216,7 @@ async def test_logs_pipe_the_shared_kubectl_command_to_the_pager():
         async with app.run_test() as pilot:
             assert await wait_until(pilot, lambda: app.table.row_count == 2)
             with patch.object(app, "suspend", MagicMock()), \
-                    patch("console_link.workflow.tui.loadtest_app.os.system") as system:
+                    patch("console_link.loadtest.tui.app.os.system") as system:
                 await pilot.press("f")
                 await pilot.pause()
 

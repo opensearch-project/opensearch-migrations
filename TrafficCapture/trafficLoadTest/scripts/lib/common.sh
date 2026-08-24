@@ -3,7 +3,7 @@
 #
 # These validate the k6-operator setup against an ALREADY-RUNNING CDC pipeline (bring it up first
 # with deployment/k8s/deployCdcLoadTestConfig.sh up). k6 runs are submitted as Argo Workflows through
-# the migration console (`workflow loadtest …`); assertions query the in-cluster services via kubectl.
+# the migration console (`loadtest …`); assertions query the in-cluster services via kubectl.
 #
 # The pipeline is the one the migration workflow builds, so the things being asserted on are
 # workflow-owned: the capture proxy and replayer are Deployments labelled

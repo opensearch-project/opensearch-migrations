@@ -1,11 +1,10 @@
-"""Text-UI for `workflow loadtest` — a live table of k6 runs, plus launch, stop and log viewing.
+"""Text-UI for `loadtest` — a live table of k6 runs, plus launch, stop and log viewing.
 
-k6 runs are standalone k6-operator TestRun CRs, not Argo workflows, so this app is independent of
-`workflow manage`: launching, stopping or failing a run never touches a migration workflow. Every
-cluster call is wrapped, so a k6-side error only raises a notification instead of killing the UI.
+Every cluster call is wrapped, so a k6-side error only raises a notification instead of killing
+the UI.
 
-The command module (commands/loadtest.py) owns all cluster logic; this file is display and key
-handling only, which keeps the TUI and the non-interactive subcommands on the same code.
+runs.py owns all cluster logic; this file is display and key handling only, which keeps the TUI and
+the non-interactive subcommands on the same code.
 """
 import logging
 import os
@@ -16,7 +15,7 @@ from textual.containers import Container
 from textual.widgets import DataTable, Footer, Header, Static
 
 from .confirm_modal import ConfirmModal
-from .loadtest_launch_modal import LoadTestLaunchModal
+from .launch_modal import LoadTestLaunchModal
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,7 @@ class LoadTestApp(App):
 
     def _refresh_worker(self) -> None:
         """Worker: fetch the runs off the main thread, then route back to it."""
-        from ..commands.loadtest import list_runs
+        from ..runs import list_runs
         try:
             runs, error = list_runs(self._namespace), None
         except Exception as e:
@@ -139,8 +138,8 @@ class LoadTestApp(App):
     # --- Launch ---
 
     def action_new_run(self) -> None:
-        from ..commands.loadtest import CONFIG_PRESETS
-        from ..commands.testrun_utils import list_scenarios
+        from ..runs import CONFIG_PRESETS
+        from ..testrun_utils import list_scenarios
         # Presets ship inside the scripts image, so there is nothing to look up in the cluster.
         try:
             scenarios = list_scenarios(self._namespace)
@@ -154,7 +153,7 @@ class LoadTestApp(App):
         """Submit the form's run. Dismissal (None) is a cancel, not a command."""
         if not fields:
             return
-        from ..commands.loadtest import build_k6_parameters, submit_k6_run
+        from ..runs import build_k6_parameters, submit_k6_run
         try:
             name = submit_k6_run(self._namespace, build_k6_parameters(**fields))
             self.notify(f"✅ Submitted k6 run: {name}")
@@ -184,7 +183,7 @@ class LoadTestApp(App):
                          lambda confirmed: self._stop(names) if confirmed else None)
 
     def _stop(self, names: List[str]) -> None:
-        from ..commands.testrun_utils import delete_workflow
+        from ..testrun_utils import delete_workflow
         try:
             stopped = sum(1 for n in names if delete_workflow(self._namespace, n))
             self.notify(f"⏹ Stopped {stopped}/{len(names)} k6 run(s)")
@@ -206,7 +205,7 @@ class LoadTestApp(App):
         name = self.selected_run_name
         if not name:
             return
-        from ..commands.loadtest import logs_command
+        from ..runs import logs_command
         cmd = " ".join(logs_command(self._namespace, name, follow))
         try:
             with self.suspend():

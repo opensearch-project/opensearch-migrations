@@ -77,7 +77,7 @@ split_ref() {
 derive_registry_prefix() {
   local proxy_img
   proxy_img="$(kubectl --context "$CONTEXT" -n "$NAMESPACE" get cm migration-image-config \
-    -o jsonpath='{.data.captureProxyImage}' 2>/dev/null || true)"
+    -o jsonpath='{.data.captureProxyImage}' 2>/dev/null)"
   case "$proxy_img" in
     *migrations/*) printf '%s' "${proxy_img%migrations/*}" ;;
     *)             printf '' ;;
@@ -104,8 +104,8 @@ split_ref "$SCRIPTS_IMAGE"
 scripts_repo="$ref_repo" scripts_tag="$ref_tag" scripts_digest="$ref_digest"
 
 # ── Install ────────────────────────────────────────────────────────────────────
-helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
-# Vendor the k6-operator subchart: offline from Chart.lock if already vendored, else fetch it.
+helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1
+# Vendor the k6-operator subchart
 helm dependency build "$CHART" >/dev/null 2>&1 \
   || helm dependency update "$CHART" >/dev/null 2>&1 \
   || die "helm dependency build failed for $CHART"
@@ -123,7 +123,7 @@ helm --kube-context "$CONTEXT" upgrade --install "$RELEASE" "$CHART" -n "$NAMESP
   --timeout 300s 2>&1 | sed 's/^/  /'
 
 kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deploy \
-  -l app.kubernetes.io/name=k6-operator --timeout=180s 2>&1 | tail -1 | sed 's/^/  /' || true
+  -l app.kubernetes.io/name=k6-operator --timeout=180s 2>&1 | tail -1 | sed 's/^/  /'
 
 printf '  \033[1;32m✓\033[0m k6 chart installed (runner: %s, scripts: %s)\n' \
   "$RUNNER_IMAGE" "$SCRIPTS_IMAGE"

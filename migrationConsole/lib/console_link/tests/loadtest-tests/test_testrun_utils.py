@@ -1,7 +1,7 @@
 """Tests for testrun_utils helpers (the Workflow / WorkflowTemplate plumbing behind a k6 run).
 
-These exercise the wrappers directly. The `workflow loadtest` command tests patch these names on
-the loadtest module (ltmod.create_workflow, ltmod.get_workflow_template, ...), so the real
+These exercise the wrappers directly. The `loadtest` command tests patch these names on
+runs.py (runs_mod.create_workflow, runs_mod.get_workflow_template, ...), so the real
 implementations — and the 404-vs-other-error handling they encode — are only reached from here.
 """
 import pytest
@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 
 from kubernetes.client.rest import ApiException
 
-from console_link.workflow.commands import testrun_utils
-from console_link.workflow.commands.testrun_utils import (
+from console_link.loadtest import testrun_utils
+from console_link.loadtest.testrun_utils import (
     ARGO_GROUP,
     ARGO_VERSION,
     K6_APP_LABEL,
@@ -20,9 +20,9 @@ from console_link.workflow.commands.testrun_utils import (
     delete_workflow,
     get_workflow,
     get_workflow_template,
+    list_k6_workflow_templates,
     list_scenarios,
     list_workflows,
-    loadtest_installed,
     workflow_template_name,
 )
 
@@ -171,37 +171,43 @@ class TestDeleteWorkflow:
             group=ARGO_GROUP, version=ARGO_VERSION, namespace="ma", plural=WORKFLOW_PLURAL,
             name="k6-ingest-a")
 
-    def test_true_when_already_gone(self):
-        # Stopping is idempotent: a run that finished and was reaped between listing and stopping
-        # counts as stopped, which is what the TUI's "Stopped n/m" tally relies on.
+    def test_false_when_already_gone(self):
+        # A 404 is not a stop. Reporting it as one made `stop` announce that it had stopped a run
+        # that was never there, hiding the case the user needs to see: a typo, or a run that had
+        # already finished and been reaped.
         patcher, _ = _custom_api(delete_namespaced_custom_object=ApiException(status=404))
         with patcher:
-            assert delete_workflow("ma", "gone") is True
+            assert delete_workflow("ma", "gone") is False
 
-    def test_false_on_other_api_error(self):
+    def test_other_api_errors_propagate(self):
+        # An RBAC denial is not "already gone" — the caller must see it rather than read it as
+        # a successful stop or a missing run.
         patcher, _ = _custom_api(delete_namespaced_custom_object=ApiException(status=403))
-        with patcher:
-            assert delete_workflow("ma", "k6-ingest-a") is False
+        with patcher, pytest.raises(ApiException):
+            delete_workflow("ma", "k6-ingest-a")
 
 
-class TestLoadtestInstalled:
-    def test_true_when_the_chart_templates_exist(self):
+class TestListK6WorkflowTemplates:
+    """The chart's own WorkflowTemplates are what proves load testing is available here. Argo itself
+    always ships with the migration, so the Workflow CRD proves nothing."""
+
+    def test_selects_the_chart_templates_by_label(self):
         patcher, fake = _custom_api(list_namespaced_custom_object=_templates("ingest"))
         with patcher:
-            assert loadtest_installed("ma") is True
-        # Argo itself always ships with the migration, so the probe must be for the chart's own
-        # templates rather than for the Workflow CRD.
-        assert fake.list_namespaced_custom_object.call_args.kwargs["plural"] == \
-            WORKFLOW_TEMPLATE_PLURAL
+            assert len(list_k6_workflow_templates("ma")) == 1
+        kwargs = fake.list_namespaced_custom_object.call_args.kwargs
+        assert kwargs["plural"] == WORKFLOW_TEMPLATE_PLURAL
+        assert kwargs["label_selector"] == f"app={K6_APP_LABEL}"
 
-    def test_false_when_chart_absent(self):
+    def test_empty_when_chart_absent(self):
         patcher, _ = _custom_api(list_namespaced_custom_object={"items": []})
         with patcher:
-            assert loadtest_installed("ma") is False
+            assert list_k6_workflow_templates("ma") == []
 
-    def test_false_on_any_other_failure(self):
-        # Deliberately broad: no kubeconfig, RBAC denial, connection refused — a normal migration
-        # deployment must leave the `workflow loadtest` commands inert rather than surfacing an error.
+    def test_errors_propagate(self):
+        # This is what tells a caller whether the chart is installed, so a cluster error must not
+        # be swallowed into "not installed" — that answer would send the user to reinstall a chart
+        # that is already there.
         patcher, _ = _custom_api(list_namespaced_custom_object=RuntimeError("no kubeconfig"))
-        with patcher:
-            assert loadtest_installed("ma") is False
+        with patcher, pytest.raises(RuntimeError):
+            list_k6_workflow_templates("ma")
