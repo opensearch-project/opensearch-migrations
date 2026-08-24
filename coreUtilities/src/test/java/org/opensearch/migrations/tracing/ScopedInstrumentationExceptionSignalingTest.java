@@ -60,10 +60,30 @@ class ScopedInstrumentationExceptionSignalingTest {
         Assertions.assertEquals(StatusCode.ERROR, span.getStatus().getStatusCode());
         Assertions.assertEquals("target unreachable", span.getStatus().getDescription());
         Assertions.assertEquals(
-            IllegalStateException.class.getCanonicalName(),
+            IllegalStateException.class.getName(),
             span.getAttributes().get(ErrorAttributes.ERROR_TYPE)
         );
         Assertions.assertFalse(span.getEvents().isEmpty(), "expected the exception event to be recorded");
+    }
+
+    /**
+     * Exceptions reach us from arbitrary library code, so the type name has to survive classes that
+     * have no canonical or simple name -- getCanonicalName() is null for these and getSimpleName()
+     * is empty, either of which would silently strip the signal off the spans that carry a failure.
+     */
+    @Test
+    void anonymousExceptionStillReportsErrorTypeAndDescription() {
+        var anonymous = new IllegalStateException() {
+        };
+        var span = captureSpanForException(anonymous, true);
+
+        Assertions.assertNull(anonymous.getClass().getCanonicalName(), "expected an anonymous class");
+        Assertions.assertEquals(StatusCode.ERROR, span.getStatus().getStatusCode());
+        Assertions.assertEquals(
+            anonymous.getClass().getName(),
+            span.getAttributes().get(ErrorAttributes.ERROR_TYPE)
+        );
+        Assertions.assertEquals(anonymous.getClass().getName(), span.getStatus().getDescription());
     }
 
     @Test

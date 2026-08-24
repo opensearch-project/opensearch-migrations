@@ -90,9 +90,11 @@ public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttri
         if (isPropagating) {
             // An exception that escapes this scope means the operation failed, which the semantic
             // conventions model as span status ERROR plus error.type -- the removed exception.escaped
-            // attribute recorded the same thing in a form no backend consumes.
+            // attribute recorded the same thing in a form no backend consumes.  getName() rather
+            // than getCanonicalName(), which is null for anonymous and local classes and would drop
+            // error.type entirely on exactly the spans that need it.
             span.setStatus(StatusCode.ERROR, describeThrowable(e));
-            span.setAttribute(ErrorAttributes.ERROR_TYPE, e.getClass().getCanonicalName());
+            span.setAttribute(ErrorAttributes.ERROR_TYPE, e.getClass().getName());
         }
     }
 
@@ -102,7 +104,12 @@ public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttri
      */
     private static String describeThrowable(Throwable e) {
         var message = e.getMessage();
-        return (message == null || message.isEmpty()) ? e.getClass().getSimpleName() : message;
+        if (message != null && !message.isEmpty()) {
+            return message;
+        }
+        // getSimpleName() is empty for anonymous classes, which would leave nothing at all here
+        var simpleName = e.getClass().getSimpleName();
+        return simpleName.isEmpty() ? e.getClass().getName() : simpleName;
     }
 
     @Override
