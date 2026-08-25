@@ -11,6 +11,7 @@ import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
+import org.opensearch.migrations.bulkload.pipeline.spi.CoordinationRequirement;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
@@ -60,6 +61,24 @@ public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBack
     @Override
     public boolean deferUntilWorkAvailable() {
         return true;
+    }
+
+    /** A Solr backup has no target cluster to hold work leases, so one must be supplied. */
+    @Override
+    public CoordinationRequirement coordinationRequirement() {
+        return CoordinationRequirement.EXTERNAL_REQUIRED;
+    }
+
+    /** An s3:// backup is downloaded before it can be read; a file:// one is read where it sits. */
+    @Override
+    public boolean requiresScratchDirectory(SolrBackupSourceSpec spec) {
+        return RepoUri.parse(spec.repoUri()) instanceof RepoUri.S3RepoUri;
+    }
+
+    /** Segments are read out of the backup in place; nothing is unpacked. */
+    @Override
+    public boolean requiresWorkingDirectory(SolrBackupSourceSpec spec) {
+        return false;
     }
 
     @Override

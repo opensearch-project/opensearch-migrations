@@ -6,7 +6,14 @@ import java.nio.file.Path;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
+import org.opensearch.migrations.bulkload.pipeline.spi.CoordinationRequirement;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,6 +35,15 @@ class ExplicitSourceSelectionTest {
 
     private static final String ES_CONFIG =
         "{\"repoUri\":\"file:///snapshots\",\"snapshotName\":\"nightly\",\"version\":\"ES 7.10.2\"}";
+
+    private static final String SOLR_S3_CONFIG =
+        "{\"repoUri\":\"s3://bucket/backups\",\"backupName\":\"nightly\",\"solrMajorVersion\":8,"
+            + "\"s3Region\":\"us-east-1\"}";
+
+    private static final String COORDINATOR = "http://coordinator:9200";
+
+    /** The stub provider ignores its config; the checks under test never read it. */
+    private static final JsonNode STUB_CONFIG = JsonNodeFactory.instance.objectNode();
 
     private static RfsMigrateDocuments.Args argsWithExplicitSource(String kind, String config) {
         var args = new RfsMigrateDocuments.Args();
@@ -191,6 +207,131 @@ class ExplicitSourceSelectionTest {
         withLocalDir.localDir = "/tmp/local";
 
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(withLocalDir));
+    }
+
+    /**
+     * The runtime checks read what a provider declares, not what class it is. A provider the CLI has
+     * never heard of gets held to the same rules, which is the point of moving these off an
+     * {@code instanceof}.
+     */
+    private record StubSpec() implements DocumentSourceSpec {
+        @Override
+        public String kind() {
+            return "stub-source";
+        }
+    }
+
+    private record StubProvider(CoordinationRequirement coordination, boolean needsScratch, boolean needsWorkingDir)
+        implements DocumentSourceProvider<StubSpec> {
+
+        @Override
+        public String kind() {
+            return "stub-source";
+        }
+
+        @Override
+        public StubSpec parseSpec(JsonNode config) {
+            return new StubSpec();
+        }
+
+        @Override
+        public CoordinationRequirement coordinationRequirement() {
+            return coordination;
+        }
+
+        @Override
+        public boolean requiresScratchDirectory(StubSpec spec) {
+            return needsScratch;
+        }
+
+        @Override
+        public boolean requiresWorkingDirectory(StubSpec spec) {
+            return needsWorkingDir;
+        }
+
+        @Override
+        public DocumentSource create(StubSpec spec, SourceRuntime runtime) {
+            throw new UnsupportedOperationException("not needed; runtime checks never construct");
+        }
+    }
+
+    @Test
+    void anyProviderDeclaringExternalCoordinationNeedsACoordinatorHost() {
+        var provider = new StubProvider(CoordinationRequirement.EXTERNAL_REQUIRED, false, false);
+
+        var message = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateRuntimeArgs(new RfsMigrateDocuments.Args(), provider, STUB_CONFIG)).getMessage();
+
+        assertThat(message, containsString("--coordinator-host"));
+        assertThat(message, containsString("stub-source"));
+    }
+
+    @Test
+    void aProviderAllowingTargetCoordinationNeedsNoCoordinatorHost() {
+        var args = new RfsMigrateDocuments.Args();
+        args.luceneDir = "/tmp/lucene";
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateRuntimeArgs(args,
+            new StubProvider(CoordinationRequirement.TARGET_ALLOWED, false, true), STUB_CONFIG));
+    }
+
+    @Test
+    void aProviderDeclaringNoWorkingDirectoryIsNotAskedForOne() {
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateRuntimeArgs(new RfsMigrateDocuments.Args(),
+            new StubProvider(CoordinationRequirement.TARGET_ALLOWED, false, false), STUB_CONFIG));
+    }
+
+    @Test
+    void theTwoRuntimeRequirementsAreCheckedIndependently() {
+        var provider = new StubProvider(CoordinationRequirement.EXTERNAL_REQUIRED, false, true);
+        var args = new RfsMigrateDocuments.Args();
+        args.coordinatorArgs.host = "http://coordinator:9200";
+
+        // Coordination satisfied, working directory still missing.
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateRuntimeArgs(args, provider, STUB_CONFIG)).getMessage(),
+            containsString("--lucene-dir"));
+    }
+
+    @Test
+    void aLocalSolrBackupNeedsNeitherDirectory() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
+        args.coordinatorArgs.host = COORDINATOR;
+
+        // file:// is read where it sits, so nothing is downloaded and nothing is unpacked.
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void anS3SolrBackupIsRejectedWithoutALocalDir() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_S3_CONFIG);
+        args.coordinatorArgs.host = COORDINATOR;
+
+        // Without this the backup would download into java.io.tmpdir; the legacy path rejects it too.
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args)).getMessage(),
+            containsString("--local-dir"));
+    }
+
+    @Test
+    void anS3SolrBackupIsAcceptedWithALocalDir() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_S3_CONFIG);
+        args.coordinatorArgs.host = COORDINATOR;
+        args.localDir = "/tmp/local";
+
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void anS3SolrBackupIsNotSatisfiedByALuceneDirAlone() {
+        var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_S3_CONFIG);
+        args.coordinatorArgs.host = COORDINATOR;
+        args.luceneDir = "/tmp/lucene";
+
+        // scratchDir falls back to luceneDir, but downloads belong in the directory meant for them.
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args)).getMessage(),
+            containsString("--local-dir"));
     }
 
     @Test

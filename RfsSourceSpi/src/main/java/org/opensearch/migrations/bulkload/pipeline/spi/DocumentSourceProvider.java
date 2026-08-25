@@ -36,6 +36,36 @@ public interface DocumentSourceProvider<S extends DocumentSourceSpec> {
         return false;
     }
 
+    /**
+     * Where this source's work coordination can live. Sources that cannot write coordination state
+     * to the target return {@link CoordinationRequirement#EXTERNAL_REQUIRED} so the caller can
+     * insist on an external coordinator without testing for a concrete provider type.
+     */
+    default CoordinationRequirement coordinationRequirement() {
+        return CoordinationRequirement.TARGET_ALLOWED;
+    }
+
+    /**
+     * True when this spec makes the source download or derive data into
+     * {@link SourceRuntime#scratchDir()}. Depends on the spec, not on the provider alone: the same
+     * source may read a local repository in place and download a remote one.
+     *
+     * <p>The caller must supply a real directory when this is true; a temporary directory is not an
+     * acceptable substitute for content that can be large and is expensive to re-fetch.
+     */
+    default boolean requiresScratchDirectory(S spec) {
+        return false;
+    }
+
+    /**
+     * True when this spec makes the source unpack data into {@link SourceRuntime#workDir()}.
+     * Sources that read their input in place return false, and the caller may then leave
+     * {@code workDir()} pointing at a location the source never touches.
+     */
+    default boolean requiresWorkingDirectory(S spec) {
+        return true;
+    }
+
     DocumentSource create(S spec, SourceRuntime runtime) throws IOException;
 
     /**

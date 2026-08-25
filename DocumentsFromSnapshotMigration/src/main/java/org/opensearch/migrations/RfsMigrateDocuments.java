@@ -36,8 +36,10 @@ import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProv
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.CoordinationRequirement;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -518,20 +520,32 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * Requirements that outlive the source spec. Mirrors the inferred paths: a snapshot unpacks
-     * segments and so needs a working directory, a Solr backup reads in place and does not, and a
-     * Solr backup cannot coordinate work on the target.
+     * Requirements that outlive the source spec, checked against what the provider declares rather
+     * than against its concrete type, so a source discovered at runtime is held to the same rules.
+     * The directory requirements depend on the spec, so this parses it before deciding.
      */
-    private static void validateRuntimeArgs(Args args, DocumentSourceProvider<?> provider) {
-        if (provider instanceof SolrBackupSourceProvider) {
-            if (args.coordinatorArgs.host == null) {
-                throw new ParameterException(
-                    "--coordinator-host is required for a Solr backup, which cannot coordinate work on the target."
-                );
-            }
-            return;
+    static <S extends DocumentSourceSpec> void validateRuntimeArgs(
+        Args args,
+        DocumentSourceProvider<S> provider,
+        JsonNode config
+    ) {
+        if (provider.coordinationRequirement() == CoordinationRequirement.EXTERNAL_REQUIRED
+            && args.coordinatorArgs.host == null) {
+            throw new ParameterException("--coordinator-host is required for " + provider.kind()
+                + ", which cannot coordinate work on the target.");
         }
-        if (args.luceneDir == null && args.localDir == null) {
+        S spec;
+        try {
+            spec = provider.parseSpec(config);
+        } catch (RuntimeException e) {
+            throw new ParameterException("--source-config is not valid for " + provider.kind()
+                + ": " + e.getMessage(), e);
+        }
+        if (provider.requiresScratchDirectory(spec) && args.localDir == null) {
+            throw new ParameterException("--local-dir is required for " + provider.kind()
+                + " with a remote repository, which downloads before it can read.");
+        }
+        if (provider.requiresWorkingDirectory(spec) && args.luceneDir == null && args.localDir == null) {
             throw new ParameterException(
                 "--lucene-dir or --local-dir is required so unpacked documents have somewhere to go.");
         }
@@ -541,7 +555,7 @@ public class RfsMigrateDocuments {
         var provider = validateSourceSelection(args);
         if (provider != null) {
             // The provider validates its own config; only the runtime requirements are ours to check.
-            validateRuntimeArgs(args, provider);
+            validateRuntimeArgs(args, provider, readSourceConfig(args.sourceConfig));
             return;
         }
         // Solr backup path
@@ -903,8 +917,8 @@ public class RfsMigrateDocuments {
     }
 
     /**
-     * validateArgs already demands the directory each source that needs one requires, so reaching
-     * the temp-dir fallback means the source reads in place (a local Solr backup) and never uses it.
+     * validateArgs already demands a directory from every provider whose spec declares it needs one
+     * for scratch or for work, so reaching the temp-dir fallback means this spec declared neither.
      */
     private static Path resolveWorkingDir(String preferred, String fallback) {
         var chosen = preferred != null ? preferred : fallback;

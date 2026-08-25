@@ -55,6 +55,13 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
         }
     }
 
+    /** Remote repositories stage blobs locally before they are read; a file:// repo does not. */
+    @Override
+    public boolean requiresScratchDirectory(EsSnapshotSourceSpec spec) {
+        var repo = RepoUri.parse(spec.repoUri());
+        return repo instanceof RepoUri.S3RepoUri || repo instanceof RepoUri.GcsRepoUri;
+    }
+
     @Override
     public DocumentSource create(EsSnapshotSourceSpec spec, SourceRuntime runtime) throws IOException {
         var finder = SnapshotReaderRegistry.getSnapshotFileFinder(
