@@ -7,6 +7,8 @@ Two patch targets, matching the two modules: cluster logic lives in `runs`, and 
 """
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -909,3 +911,82 @@ class TestFallbackListsMatchTheChart:
     def test_tui_fallback_profiles_match(self):
         from console_link.loadtest.tui.launch_modal import _FALLBACK_PROFILES
         assert sorted(_FALLBACK_PROFILES) == sorted(runs_mod.PROFILES)
+
+
+class TestRenderedChartMatchesTheValues:
+    """Renders the chart with helm and checks the OUTPUT, not the values model.
+
+    Everything above reasons about values.yaml the way the template is *meant* to combine it. That
+    is the gap a bug can live in: `DURATION: ""` on a ramping profile modelled correctly here and
+    still rendered as `5m`, because Helm's `merge` fills an empty destination from the source. Only
+    rendering catches that class.
+
+    It also pins the one invariant the template can no longer get for free. The parameter list and
+    the runner env list used to come from a single loop, so they could not drift; the chart-owned
+    settings are now declared in both places by hand, and a key added to one and forgotten in the
+    other would either be a parameter nothing reads or an env var nobody can override.
+
+    Skipped where helm is absent, like the other checks are outside a repo checkout.
+    """
+
+    @staticmethod
+    def _rendered():
+        helm = shutil.which("helm")
+        if helm is None:
+            pytest.skip("helm is not installed")
+        chart = _repo_dir("deployment/k8s/charts/components/k6LoadTest")
+        out = subprocess.run(
+            [helm, "template", "t", str(chart), "--namespace", "ma",
+             "--show-only", "templates/k6-workflowtemplates.yaml"],
+            capture_output=True, text=True)
+        if out.returncode != 0:
+            pytest.fail(f"helm template failed:\n{out.stderr}")
+        return {d["metadata"]["name"]: d
+                for d in yaml.safe_load_all(out.stdout) if d and d.get("kind") == "WorkflowTemplate"}
+
+    @staticmethod
+    def _runner_env(template, defaults):
+        """The TestRun's runner env, with the workflow parameters substituted as Argo does it."""
+        manifest = template["spec"]["templates"][0]["resource"]["manifest"]
+        substituted = re.sub(r"\{\{workflow\.parameters\.([A-Za-z0-9_-]+)\}\}",
+                             lambda m: defaults[m.group(1)], manifest)
+        substituted = substituted.replace("{{workflow.name}}", "a-run")
+        return {e["name"]: e["value"]
+                for e in yaml.safe_load(substituted)["spec"]["runner"]["env"]}
+
+    def test_every_profile_renders_a_template(self):
+        assert set(self._rendered()) == {f"k6-{p}" for p in _chart_values()["profiles"]}
+
+    def test_the_parameters_and_the_runner_env_are_the_same_set(self):
+        for name, template in sorted(self._rendered().items()):
+            defaults = {p["name"]: p.get("value", "")
+                        for p in template["spec"]["arguments"]["parameters"]}
+            settings = {k for k in defaults if runs_mod.ENV_PARAM.fullmatch(k)}
+            env = self._runner_env(template, defaults)
+            assert settings == set(env), (
+                f"{name}: declared as parameters but not in the runner env: "
+                f"{sorted(settings - set(env))}; in the env but not declared: "
+                f"{sorted(set(env) - settings)}")
+
+    def test_rendered_values_are_what_the_values_file_says(self):
+        """The load from scenario+profile, plus the two chart-owned groups, with nothing altered on
+        the way through Helm."""
+        values = _chart_values()
+        for name, template in sorted(self._rendered().items()):
+            profile = name[len("k6-"):]
+            expected = dict(_resolved(values, profile))
+            expected["CAPTURE_PROXY_URL"] = str(values["captureProxyUrl"])
+            expected.update({k: str(v) for k, v in values["k6Output"].items()})
+            defaults = {p["name"]: p.get("value", "")
+                        for p in template["spec"]["arguments"]["parameters"]}
+            actual = {k: v for k, v in defaults.items() if runs_mod.ENV_PARAM.fullmatch(k)}
+            assert actual == expected, f"{name}: rendered settings differ from values.yaml"
+
+    def test_a_ramping_profile_renders_no_duration(self):
+        """The specific regression: the stage list carries the timing, so DURATION must not exist —
+        not as an empty string either, or `--duration` would be accepted and change nothing."""
+        for name, template in sorted(self._rendered().items()):
+            defaults = {p["name"]: p.get("value", "")
+                        for p in template["spec"]["arguments"]["parameters"]}
+            if defaults.get("EXECUTOR", "").startswith("ramping"):
+                assert "DURATION" not in defaults, f"{name} ramps yet renders a DURATION parameter"

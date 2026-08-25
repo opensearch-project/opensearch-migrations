@@ -31,6 +31,7 @@ _DEFAULT_PROFILE = "ingest-steady"
 _REGISTRY_ENV = "REGISTRY_ENABLED"
 _CONTROL_ENV = "CONTROL_ENABLED"
 _FIELD_ENV = {
+    "target": ("CAPTURE_PROXY_URL",),
     "rate": ("INGEST_RATE", "SEARCH_RATE"),
     "duration": ("DURATION",),
     "vus": ("INGEST_VUS", "SEARCH_VUS"),
@@ -79,9 +80,9 @@ class LoadTestLaunchModal(ModalScreen[Optional[dict]]):
                 yield Select([(p, p) for p in self._profiles], value=default,
                              allow_blank=False, id=_PROFILE_ID)
                 yield Static("", id="about")
-                yield Input(value=self._default_target,
-                            placeholder="target URL (optional) — default https://capture-proxy:9200",
-                            id="target")
+                # The placeholder is filled in from the selected profile on mount, so it names the
+                # endpoint THIS chart aims at rather than a stock value written down here.
+                yield Input(value=self._default_target, placeholder="target URL", id="target")
                 with Horizontal(id="row"):
                     yield Input(placeholder="rate", id="rate")
                     yield Input(placeholder="duration", id="duration")
@@ -114,10 +115,12 @@ class LoadTestLaunchModal(ModalScreen[Optional[dict]]):
 
     def _sync_to_profile(self) -> None:
         """Point the form at the selected profile: describe it, show what each field would replace,
-        and seed the checkboxes from the template's own values rather than from the profile's name.
+        seed the checkboxes from the template's own values, and OFFER ONLY WHAT APPLIES.
 
-        A checkbox for a setting the profile does not have is disabled and cleared, so it cannot
-        send an override that the submission would have to reject.
+        A control for a setting the profile does not have is removed from the form, not greyed out.
+        The submission refuses an override the profile has no parameter for, so showing one at all
+        promises something that cannot happen — and `duration` on a ramping profile, whose timing
+        comes from its stage list, is exactly that.
         """
         profile = self.query_one(_PROFILE_SEL, Select).value
         entry = self._catalog.get(profile, {})
@@ -133,15 +136,24 @@ class LoadTestLaunchModal(ModalScreen[Optional[dict]]):
         ramping = env.get("EXECUTOR", "").startswith("ramping")
         for field, names in _FIELD_ENV.items():
             values = [env[n] for n in names if n in env]
+            box = self.query_one(f"#{field}", Input)
+            # With no catalog at all (an API error) nothing is hidden: a field left blank submits
+            # nothing, so offering it costs the user nothing and keeps the form usable.
+            box.display = not env or bool(values)
+            if not box.display:
+                box.value = ""
             if ramping and field in ("rate", "duration"):
                 shown = "set by stages"
             else:
                 shown = "/".join(values)
-            self.query_one(f"#{field}", Input).placeholder = f"{field} ({shown})" if shown else field
+            box.placeholder = f"{field} ({shown})" if shown else field
 
         for widget_id, name in (("registry", _REGISTRY_ENV), ("control", _CONTROL_ENV)):
             box = self.query_one(f"#{widget_id}", Checkbox)
-            box.disabled = name not in env
+            # Stricter than the fields above, because a checkbox is not tri-state: an unchecked box
+            # means "off", so one shown for a setting we cannot vouch for would submit a decision
+            # the user never made. Unknown therefore hides it too.
+            box.display = name in env
             box.value = env.get(name, "").lower() == "true"
 
     # --- Result ---
@@ -159,8 +171,11 @@ class LoadTestLaunchModal(ModalScreen[Optional[dict]]):
             self.dismiss(self._fields())
 
     def _val(self, wid: str) -> Optional[str]:
-        v = self.query_one(f"#{wid}", Input).value.strip()
-        return v or None
+        """A field's value, or None when it is blank or does not apply to this profile."""
+        field = self.query_one(f"#{wid}", Input)
+        if not field.display:
+            return None
+        return field.value.strip() or None
 
     def _toggle(self, wid: str) -> Optional[bool]:
         """A toggle's value, or None when the profile has no such setting.
@@ -171,7 +186,7 @@ class LoadTestLaunchModal(ModalScreen[Optional[dict]]):
         it alone reproduces the profile's own behavior.
         """
         box = self.query_one(f"#{wid}", Checkbox)
-        return None if box.disabled else bool(box.value)
+        return bool(box.value) if box.display else None
 
     def _fields(self) -> dict:
         return {

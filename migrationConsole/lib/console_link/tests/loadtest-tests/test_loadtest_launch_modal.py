@@ -16,18 +16,21 @@ CATALOG = {
     "ingest-steady": {
         "scenario": "ingest", "description": "Steady ingest.",
         "env": {"INGEST_RATE": "50", "INGEST_VUS": "20", "DURATION": "5m",
-                "CONTROL_ENABLED": "false", "EXECUTOR": "constant-arrival-rate"},
+                "CONTROL_ENABLED": "false", "EXECUTOR": "constant-arrival-rate",
+                "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
     },
     "ingest-burst": {
         "scenario": "ingest", "description": "Bursty ingest.",
-        "env": {"INGEST_VUS": "60", "CONTROL_ENABLED": "false",
-                "EXECUTOR": "ramping-arrival-rate"},
+        "env": {"INGEST_RATE": "50", "INGEST_VUS": "60", "CONTROL_ENABLED": "false",
+                "EXECUTOR": "ramping-arrival-rate",
+                "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
     },
     "mixed-steady": {
         "scenario": "mixed", "description": "Both streams.",
         "env": {"INGEST_RATE": "30", "SEARCH_RATE": "20", "INGEST_VUS": "15",
                 "SEARCH_VUS": "15", "DURATION": "5m", "REGISTRY_ENABLED": "true",
-                "CONTROL_ENABLED": "false", "EXECUTOR": "constant-arrival-rate"},
+                "CONTROL_ENABLED": "false", "EXECUTOR": "constant-arrival-rate",
+                "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
     },
 }
 
@@ -57,6 +60,19 @@ def _drive(steps, key=None, click=None, catalog=CATALOG):
                 await pilot.press(key)
             await pilot.pause()
         return app.result
+    return asyncio.run(_run())
+
+
+def _drive_shown(steps, catalog=CATALOG):
+    """The controls on offer after `steps` has run — read inside the running app, since switching
+    profile re-syncs the form on the next tick and the widgets are gone once it exits."""
+    async def _run():
+        app = _Host(catalog=catalog)
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            steps(app.screen)
+            await pilot.pause()
+            return _shown(app.screen)
     return asyncio.run(_run())
 
 
@@ -114,13 +130,50 @@ def test_mixed_registry_can_be_unchecked_to_false():
     assert asyncio.run(_run())["registry_enabled"] is False
 
 
-def test_a_toggle_the_profile_lacks_is_disabled():
-    """A setting the profile does not have cannot be sent — the submission would refuse it, so the
-    form must not offer it."""
+def _shown(m):
+    """The controls the form is currently offering."""
+    fields = [f for f in ("target", "rate", "duration", "vus", "parallelism")
+              if m.query_one(f"#{f}", Input).display]
+    boxes = [b for b in ("registry", "control") if m.query_one(f"#{b}", Checkbox).display]
+    return fields + boxes
+
+
+def test_only_settings_the_profile_has_are_offered():
+    """Not greyed out — absent. The submission refuses an override for a parameter the profile does
+    not have, so offering one at all promises something that cannot happen."""
+    # ingest has no consistency ring, so no registry box; it does have the control bus.
+    assert _drive_shown(lambda m: None) == [
+        "target", "rate", "duration", "vus", "parallelism", "control"]
+
+    def mixed(m):
+        m.query_one("#profile", Select).value = "mixed-steady"
+    assert "registry" in _drive_shown(mixed)
+
+
+def test_a_ramping_profile_offers_no_duration():
+    """The regression this rule exists for: a ramping profile has no DURATION parameter, so the
+    field must go rather than sit there accepting input the submission will reject."""
     def steps(m):
-        assert m.query_one("#registry", Checkbox).disabled is True   # ingest has no ring
-        assert m.query_one("#control", Checkbox).disabled is False
-    _drive(steps, key="escape")
+        m.query_one("#profile", Select).value = "ingest-burst"
+    shown = _drive_shown(steps)
+    assert "duration" not in shown
+    # The rate knob survives: INGEST_RATE is scenario-wide, so a ramping profile still has it
+    # (it feeds the control-bus baseline). Its placeholder says the stages own the arrival rate.
+    assert "rate" in shown
+
+
+def test_nothing_is_hidden_when_the_settings_are_unknown():
+    """No catalog (an API error) must not empty the form. A blank field submits nothing, so the
+    text fields stay; the checkboxes go, because an unchecked box is a decision, not a blank."""
+    assert _drive_shown(lambda m: None, catalog=None) == [
+        "target", "rate", "duration", "vus", "parallelism"]
+
+
+def test_a_hidden_field_submits_nothing():
+    def steps(m):
+        m.query_one("#profile", Select).value = "ingest-burst"
+    f = _drive(steps, key="ctrl+s")
+    assert f["duration"] is None and f["registry_enabled"] is None
 
 
 def test_fields_show_what_the_profile_currently_sets():
@@ -129,6 +182,24 @@ def test_fields_show_what_the_profile_currently_sets():
         assert "5m" in m.query_one("#duration", Input).placeholder
         assert "Steady ingest." in str(m.query_one("#about", Static).content)
     _drive(steps, key="escape")
+
+
+def test_target_placeholder_names_the_endpoint_this_chart_aims_at():
+    """Read from the profile, not written down here: a chart installed against a differently named
+    proxy must show its own endpoint. The hardcoded hint this replaced had the wrong port."""
+    catalog = {p: {**e, "env": {**e["env"], "CAPTURE_PROXY_URL": "https://my-proxy.other-ns:9243"}}
+               for p, e in CATALOG.items()}
+
+    def steps(m):
+        assert m.query_one("#target", Input).placeholder == "target (https://my-proxy.other-ns:9243)"
+    _drive(steps, key="escape", catalog=catalog)
+
+
+def test_target_is_still_submitted_as_an_override():
+    def steps(m):
+        m.query_one("#target", Input).value = "https://typed:9200"
+    f = _drive(steps, key="ctrl+s")
+    assert f["target_url"] == "https://typed:9200"
 
 
 def test_a_ramping_profile_does_not_claim_a_rate():

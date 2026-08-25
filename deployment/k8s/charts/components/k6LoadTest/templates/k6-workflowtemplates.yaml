@@ -49,20 +49,23 @@
 {{- range $profile, $p := .Values.profiles }}
 {{- $s := index $.Values.scenarios $p.scenario | required (printf "profile %q names unknown scenario %q" $profile $p.scenario) }}
 {{- /*
-  The env of one run, fully resolved: what the profile changes wins over the scenario-wide value,
-  and the two chart-owned groups (where traffic is aimed, where metrics go) fill in the rest. Keys
-  are rendered in sorted order, so the output does not churn between renders.
+  THE LOAD of one run, and nothing else: what the profile changes, over the scenario-wide value.
+  The chart-owned settings — where traffic is aimed, where metrics go — are declared on their own
+  below rather than folded in here, so this holds one kind of thing and the parameter list says
+  where each setting came from. Keys render in sorted order, so the output does not churn.
 */ -}}
-{{- $env := merge (deepCopy ($p.env | default dict)) $s.env
-      (dict "CAPTURE_PROXY_URL" $.Values.captureProxyUrl) $.Values.k6Output }}
-{{- range $k, $v := $env }}
+{{- $env := merge (deepCopy ($p.env | default dict)) $s.env }}
 {{- /*
   Values are substituted into single-quoted YAML scalars in the TestRun manifest below (they have to
   be: RAMP_STAGES carries JSON, which double quotes cannot hold). A single quote in a value would
   end that scalar early and produce a manifest that fails to parse at submit time, far from here.
+  Every group that becomes a parameter is checked, not just the load.
 */ -}}
+{{- range $group := (list $env $.Values.k6Output (dict "CAPTURE_PROXY_URL" $.Values.captureProxyUrl)) }}
+{{- range $k, $v := $group }}
 {{- if contains "'" (toString $v) }}
 {{- fail (printf "profile %s: value of %s contains a single quote, which the TestRun manifest cannot carry" $profile $k) }}
+{{- end }}
 {{- end }}
 {{- end }}
 ---
@@ -84,6 +87,15 @@ spec:
   entrypoint: run
   arguments:
     parameters:
+      # Where the run aims its traffic. Deployment topology, not load shape, which is why it is a
+      # chart value and no profile states it. `--target` overrides exactly this parameter.
+      - name: CAPTURE_PROXY_URL
+        value: {{ $.Values.captureProxyUrl | quote }}
+      # Where k6 sends its metrics. k6's own output knobs, not scenario configuration.
+{{- range $k, $v := $.Values.k6Output }}
+      - name: {{ $k }}
+        value: {{ $v | quote }}
+{{- end }}
       # How the run is distributed and which images carry it. A caller overrides these only to
       # depart from the installed chart.
       - name: parallelism
@@ -100,8 +112,9 @@ spec:
         value: {{ $scriptsRef | quote }}
       - name: scriptsPullPolicy
         value: {{ $scripts.pullPolicy | quote }}
-      # The load itself. Every one of these reaches the runner as the environment variable of the
-      # same name; see values.yaml for what each does.
+      # The load itself: everything this scenario reads, at this profile's values. Every one of
+      # these reaches the runner as the environment variable of the same name; see values.yaml for
+      # what each does.
 {{- range $k, $v := $env }}
       - name: {{ $k }}
         value: {{ $v | quote }}
@@ -155,10 +168,17 @@ spec:
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
-              # One entry per parameter, so the container env is a fixed list with no name stated
-              # twice — which of two same-named entries wins is not something a load test should
-              # depend on.
+              # One entry per parameter, in the same three groups as the parameter list above, so
+              # the container env is a fixed list with no name stated twice — which of two
+              # same-named entries wins is not something a load test should depend on. A unit test
+              # renders this chart and fails if the two lists ever stop matching.
               env:
+                - name: CAPTURE_PROXY_URL
+                  value: '{{ printf "{{workflow.parameters.CAPTURE_PROXY_URL}}" }}'
+{{- range $k, $v := $.Values.k6Output }}
+                - name: {{ $k }}
+                  value: '{{ printf "{{workflow.parameters.%s}}" $k }}'
+{{- end }}
 {{- range $k, $v := $env }}
                 - name: {{ $k }}
                   value: '{{ printf "{{workflow.parameters.%s}}" $k }}'
