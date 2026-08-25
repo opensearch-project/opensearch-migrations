@@ -9,6 +9,7 @@ export interface ApprovalCandidate {
   label: string;
   nodeId: string;
   nodeLabel: string;
+  outputTargetId: string | null;
   resetTargetId: string | null;
   resourcePresent: boolean;
   targetId: string;
@@ -62,6 +63,7 @@ export function approvalCandidates(
         label: capability.label,
         nodeId: owner.id,
         nodeLabel: owner.label,
+        outputTargetId: capability.outputTargetId ?? null,
         resetTargetId: resetCapability?.kind === "reset"
           ? resetCapability.resetTargetId
           : null,

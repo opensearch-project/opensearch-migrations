@@ -93,3 +93,60 @@ test("shows active steps and discloses completed steps on their resource", async
 
   expect(onSelectNode).toHaveBeenCalledWith(completedId);
 });
+
+
+test("shows the latest known activity timestamp on a resource", () => {
+  const snapshot = structuredClone(manageSnapshot);
+  Object.assign(snapshot.nodes["resource:captureproxies:capture"], {
+    activityAt: "2026-08-23T22:25:00Z",
+  });
+
+  render(
+    <WorkflowDependencyGraph
+      approvals={[]}
+      onReviewApproval={() => undefined}
+      onSelectNode={() => undefined}
+      operations={[]}
+      selectedNodeId={null}
+      snapshot={snapshot}
+    />,
+  );
+
+  expect(screen.getByText(/Last activity/).closest("time")).toHaveAttribute(
+    "datetime",
+    "2026-08-23T22:25:00Z",
+  );
+});
+
+
+test("discloses failed operation details on the affected resource", async () => {
+  render(
+    <WorkflowDependencyGraph
+      approvals={[]}
+      onReviewApproval={() => undefined}
+      onSelectNode={() => undefined}
+      operations={[{
+        id: "reset-capture",
+        kind: "reset",
+        label: "Reset captureproxies/capture",
+        status: "failed",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-24T04:20:00Z",
+        updatedAt: "2026-08-24T04:20:01Z",
+        message: "Operation failed",
+        detail: "captureproxies.migrations.opensearch.org capture was not found",
+        result: {},
+      }]}
+      selectedNodeId="resource:captureproxies:capture"
+      snapshot={manageSnapshot}
+    />,
+  );
+
+  await userEvent.click(screen.getByText("Operation failed"));
+
+  expect(screen.getByText("Reset captureproxies/capture"))
+    .toBeInTheDocument();
+  expect(screen.getByText(
+    "captureproxies.migrations.opensearch.org capture was not found",
+  )).toBeInTheDocument();
+});

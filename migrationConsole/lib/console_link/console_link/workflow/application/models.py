@@ -54,6 +54,7 @@ class ManageCapability:
     target_id: str
     label: Optional[str] = None
     disabled_reason: Optional[str] = None
+    related_output_target_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = {
@@ -64,6 +65,8 @@ class ManageCapability:
             result["label"] = self.label
         if self.disabled_reason:
             result["disabledReason"] = self.disabled_reason
+        if self.related_output_target_id:
+            result["outputTargetId"] = self.related_output_target_id
         return result
 
 
@@ -170,6 +173,7 @@ class ManageNode:
     description: Optional[str] = None
     phase: Optional[str] = None
     value_summary: Optional[str] = None
+    activity_at: Optional[str] = None
     diagnostics: Tuple[ManageDiagnostic, ...] = ()
     capabilities: Tuple[ManageCapability, ...] = ()
     details: Tuple[ManageDetail, ...] = ()
@@ -203,6 +207,8 @@ class ManageNode:
             result["phase"] = self.phase
         if self.value_summary:
             result["valueSummary"] = self.value_summary
+        if self.activity_at:
+            result["activityAt"] = self.activity_at
         if self.resource_plural:
             result["resourcePlural"] = self.resource_plural
         if self.resource_name:

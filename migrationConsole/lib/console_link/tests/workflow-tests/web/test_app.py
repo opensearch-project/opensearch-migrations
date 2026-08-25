@@ -157,6 +157,14 @@ def test_openapi_exposes_the_versioned_manage_snapshot_contract(tmp_path):
         ],
         "default": None,
     }
+    assert schemas["ManageNodeV1"]["properties"]["activityAt"] == {
+        "anyOf": [
+            {"format": "date-time", "type": "string"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Activityat",
+    }
     assert schemas["EditInputHintV1"]["properties"][
         "resourceCollection"
     ]["anyOf"][0] == {

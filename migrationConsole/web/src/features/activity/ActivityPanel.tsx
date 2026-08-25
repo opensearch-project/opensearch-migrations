@@ -28,6 +28,7 @@ export function ActivityPanel({
   onSelectNode,
   approvals,
   onReviewApproval,
+  onViewApprovalOutput,
 }: Readonly<{
   snapshot: ManageSnapshot;
   selectedNode: ManageNode | null;
@@ -35,6 +36,7 @@ export function ActivityPanel({
   onSelectNode: (nodeId: string) => void;
   approvals: ApprovalCandidate[];
   onReviewApproval: (targetId: string) => void;
+  onViewApprovalOutput: (approval: ApprovalCandidate) => void;
 }>) {
   const resources = Object.values(snapshot.nodes).filter(
     (node) => node.kind === "resource",
@@ -114,6 +116,7 @@ export function ActivityPanel({
       <WorkflowDependencyGraph
         approvals={approvals}
         onReviewApproval={onReviewApproval}
+        onViewApprovalOutput={onViewApprovalOutput}
         onSelectNode={onSelectNode}
         operations={operations}
         selectedNodeId={selectedNode?.id ?? null}

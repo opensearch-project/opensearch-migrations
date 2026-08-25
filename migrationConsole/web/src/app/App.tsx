@@ -43,6 +43,7 @@ import type {
   PendingResourceRename,
   ResourceAddController,
 } from "../features/configuration/resourceAdds";
+import { ApprovalOutputDialog } from "../features/output/OutputPanel";
 import { SubmitConfigDialog } from "../features/submission/SubmitConfigDialog";
 import { ResourceTree } from "../features/tree/ResourceTree";
 import {
@@ -242,6 +243,8 @@ export function App() {
   const [submitOpen, setSubmitOpen] = useState(false);
   const [approvalDialogTargetId, setApprovalDialogTargetId] =
     useState<string | null>(null);
+  const [approvalOutput, setApprovalOutput] =
+    useState<ApprovalCandidate | null>(null);
   const [promptedApprovals] = useState(promptedApprovalKeys);
   const [resourceAdds, setResourceAdds] =
     useState<ResourceAddController | null>(null);
@@ -921,7 +924,14 @@ export function App() {
           reason={resubmissionOnly ? submitSignalText : undefined}
         />
       ) : null}
-      {approvalDialogTargetId && approvals.length > 0 ? (
+      {approvalOutput ? (
+        <ApprovalOutputDialog
+          approval={approvalOutput}
+          onClose={() => setApprovalOutput(null)}
+        />
+      ) : null}
+      {
+        approvalDialogTargetId && approvals.length > 0 && !approvalOutput ? (
         <ApprovalDialog
           candidates={approvals}
           initialTargetId={approvalDialogTargetId}
@@ -930,8 +940,9 @@ export function App() {
             setApprovalDialogTargetId(null);
           }}
           onEdit={editApprovalResource}
+          onViewOutput={setApprovalOutput}
         />
-      ) : null}
+        ) : null}
       {state.isPending ? (
         <main className="shell-loading">
           <LoaderCircle className="spin" aria-hidden="true" />
@@ -1122,12 +1133,14 @@ export function App() {
                 />
               ) : selectedNode ? (
                 <ResourceWorkspace
+                  approvals={approvals}
                   navigationBackLabel={linkedBackLabel}
                   node={selectedNode}
                   onEdit={startEditing}
                   onNavigateBack={navigateLinkedBack}
                   onRequestApproval={setApprovalDialogTargetId}
                   onSelect={navigateLinkedNode}
+                  operations={operations.data ?? []}
                   resetInProgress={resetTargetIds.has(selectedNode.id)}
                 />
               ) : (
@@ -1140,6 +1153,7 @@ export function App() {
                 operations={operations.data ?? []}
                 onReviewApproval={setApprovalDialogTargetId}
                 onSelectNode={selectNode}
+                onViewApprovalOutput={setApprovalOutput}
                 selectedNode={observedSelectedNode}
                 snapshot={observedState ?? state.data}
               />

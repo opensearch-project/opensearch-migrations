@@ -2,6 +2,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  FileOutput,
   LoaderCircle,
   ShieldCheck,
 } from "lucide-react";
@@ -58,12 +59,12 @@ function operationForNode(
   operations: Operation[],
   nodeIds: string[],
 ): Operation | undefined {
-  return operations
+  const latest = operations
     .filter((operation) => (
-      operation.status !== "succeeded"
-      && operation.targetIds.some((targetId) => nodeIds.includes(targetId))
+      operation.targetIds.some((targetId) => nodeIds.includes(targetId))
     ))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  return latest?.status === "succeeded" ? undefined : latest;
 }
 
 
@@ -90,12 +91,41 @@ function workflowStepActive(step: WorkflowGraphStep): boolean {
 }
 
 
+function parsedActivityAt(value: string | null | undefined): number {
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
+}
+
+
+function latestActivityAt(
+  ...values: (string | null | undefined)[]
+): string | null {
+  return values.reduce<string | null>((latest, value) => (
+    parsedActivityAt(value) > parsedActivityAt(latest) ? value ?? null : latest
+  ), null);
+}
+
+
+function formatActivityAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+
 function GraphNode({
   graphNode,
   selectedNodeId,
   operation,
   approval,
   onReviewApproval,
+  onViewApprovalOutput,
   onSelectNode,
   onActivate,
   onDeactivate,
@@ -108,6 +138,7 @@ function GraphNode({
   operation: Operation | undefined;
   approval: ApprovalCandidate | undefined;
   onReviewApproval: (targetId: string) => void;
+  onViewApprovalOutput: (approval: ApprovalCandidate) => void;
   onSelectNode: (nodeId: string) => void;
   onActivate: (nodeId: string) => void;
   onDeactivate: () => void;
@@ -131,6 +162,10 @@ function GraphNode({
       workflowStepActive(step) || step.id === selectedStepId
     ));
   const hiddenStepCount = graphNode.steps.length - visibleSteps.length;
+  const activityAt = latestActivityAt(
+    graphNode.activityAt,
+    operation?.updatedAt,
+  );
   return (
     <div
       className={[
@@ -166,20 +201,42 @@ function GraphNode({
               : ""}
             {graphNode.unresolved ? "Not found" : state}
           </small>
+          {activityAt ? (
+            <small className="workflow-graph-activity">
+              <time
+                dateTime={activityAt}
+                title={new Date(activityAt).toLocaleString()}
+              >
+                Last activity {formatActivityAt(activityAt)}
+              </time>
+            </small>
+          ) : null}
         </span>
       </button>
       {approval ? (
-        <button
-          className="workflow-graph-action"
-          onClick={() => onReviewApproval(approval.targetId)}
-          title={approval.immutable
-            ? approval.immutableReason ?? approval.label
-            : approval.label}
-          type="button"
-        >
-          <ShieldCheck aria-hidden="true" />
-          {approval.immutable ? "Reset required" : "Review approval"}
-        </button>
+        <div className="workflow-graph-actions">
+          {approval.outputTargetId ? (
+            <button
+              className="workflow-graph-action"
+              onClick={() => onViewApprovalOutput(approval)}
+              type="button"
+            >
+              <FileOutput aria-hidden="true" />
+              View output
+            </button>
+          ) : null}
+          <button
+            className="workflow-graph-action"
+            onClick={() => onReviewApproval(approval.targetId)}
+            title={approval.immutable
+              ? approval.immutableReason ?? approval.label
+              : approval.label}
+            type="button"
+          >
+            <ShieldCheck aria-hidden="true" />
+            {approval.immutable ? "Reset required" : "Review approval"}
+          </button>
+        </div>
       ) : null}
       {graphNode.steps.length > 0 ? (
         <section
@@ -206,7 +263,20 @@ function GraphNode({
                 <StatusIndicator status={step.phase ?? step.status} />
                 <span>
                   <strong>{step.label}</strong>
-                  <small>{stepState}</small>
+                  <small>
+                    {stepState}
+                    {step.activityAt ? (
+                      <>
+                        {" · "}
+                        <time
+                          dateTime={step.activityAt}
+                          title={new Date(step.activityAt).toLocaleString()}
+                        >
+                          {formatActivityAt(step.activityAt)}
+                        </time>
+                      </>
+                    ) : null}
+                  </small>
                 </span>
               </button>
             );
@@ -231,15 +301,26 @@ function GraphNode({
           ) : null}
         </section>
       ) : null}
-      {operation ? (
+      {operation?.status === "failed" ? (
+        <details className="workflow-graph-operation operation-failed">
+          <summary>
+            <CircleAlert aria-hidden="true" />
+            <span>{operation.message || operation.label}</span>
+            <ChevronRight
+              aria-hidden="true"
+              className="workflow-graph-operation-chevron"
+            />
+          </summary>
+          <div className="workflow-graph-operation-detail">
+            <strong>{operation.label}</strong>
+            <p>{operation.detail || "No additional failure detail was reported."}</p>
+          </div>
+        </details>
+      ) : operation ? (
         <div
           className={`workflow-graph-operation operation-${operation.status}`}
         >
-          {operation.status === "failed" ? (
-            <CircleAlert aria-hidden="true" />
-          ) : (
-            <LoaderCircle className="spin" aria-hidden="true" />
-          )}
+          <LoaderCircle className="spin" aria-hidden="true" />
           <span>{operation.message || operation.label}</span>
         </div>
       ) : null}
@@ -252,6 +333,7 @@ export function WorkflowDependencyGraph({
   approvals,
   operations,
   onReviewApproval,
+  onViewApprovalOutput,
   onSelectNode,
   selectedNodeId,
   snapshot,
@@ -259,6 +341,7 @@ export function WorkflowDependencyGraph({
   approvals: ApprovalCandidate[];
   operations: Operation[];
   onReviewApproval: (targetId: string) => void;
+  onViewApprovalOutput: (approval: ApprovalCandidate) => void;
   onSelectNode: (nodeId: string) => void;
   selectedNodeId: string | null;
   snapshot: ManageSnapshot;
@@ -269,13 +352,11 @@ export function WorkflowDependencyGraph({
   const [routedPaths, setRoutedPaths] = useState<RoutedPath[]>([]);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const nodeById = useMemo(() => new Map(
-    graph.levels.flat().map((node) => [node.id, node]),
-  ), [graph.levels]);
+    graph.nodes.map((node) => [node.id, node]),
+  ), [graph.nodes]);
   const depthById = useMemo(() => new Map(
-    graph.levels.flatMap((level, depth) => (
-      level.map((node) => [node.id, depth] as const)
-    )),
-  ), [graph.levels]);
+    graph.nodes.map((node) => [node.id, node.depth]),
+  ), [graph.nodes]);
   const pathAnchorId = hoveredNodeId;
   const activePath = useMemo(
     () => connectedPath(graph.edges, pathAnchorId),
@@ -400,7 +481,7 @@ export function WorkflowDependencyGraph({
     };
   }, [approvals, depthById, graph.edges, nodeById]);
 
-  if (graph.levels.length === 0) {
+  if (graph.nodes.length === 0) {
     return (
       <p className="activity-empty">
         No migration resources are available for the dependency graph.
@@ -515,35 +596,28 @@ export function WorkflowDependencyGraph({
           );
         })}
       </svg>
-      {graph.levels.map((level, index) => (
-        <div className="workflow-graph-level" key={`level-${index}`}>
-          <span className="workflow-graph-level-label">
-            {index === 0 ? "Starts with" : `Then · ${index + 1}`}
-          </span>
-          <div className="workflow-graph-level-nodes">
-            {level.map((graphNode) => (
-              <GraphNode
-                approval={approvals.find(
-                  (candidate) => candidate.nodeId === graphNode.id,
-                )}
-                graphNode={graphNode}
-                key={graphNode.id}
-                onActivate={setHoveredNodeId}
-                onDeactivate={() => setHoveredNodeId(null)}
-                onReviewApproval={onReviewApproval}
-                onSelectNode={onSelectNode}
-                operation={operationForNode(operations, [
-                  graphNode.id,
-                  ...graphNode.steps.map((step) => step.id),
-                ])}
-                pathActive={activePath.nodeIds.has(graphNode.id)}
-                pathMuted={Boolean(pathAnchorId)
-                  && !activePath.nodeIds.has(graphNode.id)}
-                register={register}
-                selectedNodeId={selectedNodeId}
-              />
-            ))}
-          </div>
+      {graph.nodes.map((graphNode) => (
+        <div className="workflow-graph-item" key={graphNode.id}>
+          <GraphNode
+            approval={approvals.find(
+              (candidate) => candidate.nodeId === graphNode.id,
+            )}
+            graphNode={graphNode}
+            onActivate={setHoveredNodeId}
+            onDeactivate={() => setHoveredNodeId(null)}
+            onReviewApproval={onReviewApproval}
+            onViewApprovalOutput={onViewApprovalOutput}
+            onSelectNode={onSelectNode}
+            operation={operationForNode(operations, [
+              graphNode.id,
+              ...graphNode.steps.map((step) => step.id),
+            ])}
+            pathActive={activePath.nodeIds.has(graphNode.id)}
+            pathMuted={Boolean(pathAnchorId)
+              && !activePath.nodeIds.has(graphNode.id)}
+            register={register}
+            selectedNodeId={selectedNodeId}
+          />
         </div>
       ))}
     </section>

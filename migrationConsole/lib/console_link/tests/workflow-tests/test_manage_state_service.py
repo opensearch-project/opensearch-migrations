@@ -81,6 +81,7 @@ def test_no_workflow_still_returns_cluster_resources_without_presentation_markup
     resource = _node(snapshot, "captureproxies:capture")
     assert resource.label == "capture"
     assert resource.phase == "Ready"
+    assert resource.activity_at == "2026-08-12T12:00:00Z"
     assert {"edit", "logs", "reset"} <= set(_capabilities(resource))
 
     serialized = json.dumps(snapshot.to_dict(), sort_keys=True)
@@ -88,6 +89,56 @@ def test_no_workflow_still_returns_cluster_resources_without_presentation_markup
     assert "[green]" not in serialized
     assert "✓" not in serialized
     assert "▶" not in serialized
+
+
+def test_resource_activity_uses_the_latest_status_or_workflow_timestamp():
+    resource = ResourceNode(
+        name="catalog",
+        plural="datasnapshots",
+        phase="Running",
+        depends_on=[],
+        spec={},
+        status={
+            "creation": {
+                "updatedAt": "2026-08-12T12:05:00Z",
+            },
+        },
+        created_at="2026-08-12T12:00:00Z",
+        workflow_progress=[{
+            "id": "snapshot",
+            "display_name": "Create snapshot",
+            "phase": "Succeeded",
+            "started_at": "2026-08-12T12:06:00Z",
+            "finished_at": "2026-08-12T12:07:00Z",
+            "children": [{
+                "id": "verify",
+                "display_name": "Verify snapshot",
+                "phase": "Succeeded",
+                "started_at": "2026-08-12T12:07:30Z",
+                "finished_at": "2026-08-12T12:08:00Z",
+                "children": [],
+            }],
+        }],
+    )
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="datasnapshots",
+                    display_name="Snapshots",
+                    resources=[resource],
+                ),
+            ],
+        ),
+    ]
+
+    snapshot = _service({}).build_snapshot(sections)
+
+    resource_node = _node(snapshot, "datasnapshots:catalog")
+    step_node = snapshot.nodes[resource_node.child_ids[0]]
+    assert resource_node.activity_at == "2026-08-12T12:08:00Z"
+    assert step_node.activity_at == "2026-08-12T12:07:00Z"
 
 
 def test_kubernetes_authentication_problem_does_not_expose_raw_response():
@@ -618,7 +669,7 @@ def test_approval_and_output_capabilities_name_exact_targets():
         "inputs": {
             "parameters": [{
                 "name": "resourceName",
-                "value": "snapshotmigration.migration-0.vapretry",
+                "value": "evaluatemetadata.migration-0",
             }],
         },
         "children": [],
@@ -672,9 +723,74 @@ def test_approval_and_output_capabilities_name_exact_targets():
     capabilities = _capabilities(resource_node)
     assert capabilities["approve"].target_id == "approval:approval-node"
     assert capabilities["approve"].label == "Approve metadata"
+    assert capabilities["approve"].related_output_target_id == (
+        "output:snapshotmigrations:migration-0:metadataEvaluate"
+    )
     assert capabilities["output"].target_id == (
         "output:snapshotmigrations:migration-0:metadataEvaluate"
     )
+
+
+def test_retry_and_pod_nodes_produce_one_capability_per_managed_output():
+    resource = ResourceNode(
+        name="migration-0",
+        plural="snapshotmigrations",
+        phase="Created",
+        depends_on=[],
+        spec={},
+        status={},
+    )
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="snapshotmigrations",
+                    display_name="Backfill",
+                    resources=[resource],
+                ),
+            ],
+        ),
+    ]
+    workflow_nodes = {}
+    for output_name in ("Evaluate", "Migrate"):
+        for suffix, node_type in (("", "Retry"), ("(0)", "Pod")):
+            node_id = f"patch-{output_name.lower()}-{node_type.lower()}"
+            workflow_nodes[node_id] = {
+                "id": node_id,
+                "displayName": f"patchMetadata{output_name}Output{suffix}",
+                "type": node_type,
+                "phase": "Succeeded",
+                "inputs": {
+                    "parameters": [{
+                        "name": "resourceName",
+                        "value": "migration-0",
+                    }],
+                },
+            }
+    workflow = {
+        "metadata": {"name": "migration"},
+        "status": {
+            "phase": "Running",
+            "nodes": workflow_nodes,
+        },
+    }
+
+    snapshot = _service({}).build_snapshot(sections, workflow)
+
+    resource_node = _node(snapshot, "snapshotmigrations:migration-0")
+    output_capabilities = [
+        capability
+        for capability in resource_node.capabilities
+        if capability.kind == "output"
+    ]
+    assert [
+        capability.target_id
+        for capability in output_capabilities
+    ] == [
+        "output:snapshotmigrations:migration-0:metadataEvaluate",
+        "output:snapshotmigrations:migration-0:metadataMigrate",
+    ]
 
 
 def test_vap_retry_failure_is_lifted_with_reset_before_retry_remedy():

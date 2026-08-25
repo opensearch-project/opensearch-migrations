@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  FileOutput,
   LoaderCircle,
   Pencil,
   RotateCcw,
@@ -47,12 +48,14 @@ export function ApprovalDialog({
   onClose,
   onEdit,
   onStarted,
+  onViewOutput,
 }: Readonly<{
   candidates: ApprovalCandidate[];
   initialTargetId: string;
   onClose: () => void;
   onEdit: (candidate: ApprovalCandidate) => void;
   onStarted?: (targetId: string) => void;
+  onViewOutput: (candidate: ApprovalCandidate) => void;
 }>) {
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState<Set<string>>(new Set());
@@ -305,6 +308,16 @@ export function ApprovalDialog({
                 ) : null}
                 {!waiting ? (
                   <footer>
+                    {candidate.outputTargetId ? (
+                      <button
+                        disabled={busy}
+                        onClick={() => onViewOutput(candidate)}
+                        type="button"
+                      >
+                        <FileOutput aria-hidden="true" />
+                        View output
+                      </button>
+                    ) : null}
                     {candidate.editTargetId ? (
                       <button
                         disabled={busy}

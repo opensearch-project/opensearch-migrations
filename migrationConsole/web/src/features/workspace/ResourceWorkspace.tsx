@@ -15,10 +15,12 @@ import {
 import type {
   ManageNode,
   ManageRelationship,
+  Operation,
 } from "../../api/client";
 import { OutputPanel } from "../output/OutputPanel";
 import { LogPanel } from "../logviewer/LogPanel";
 import { ResetDialog } from "../actions/ResourceActionDialogs";
+import type { ApprovalCandidate } from "../actions/approvals";
 import { StatusIndicator } from "../status/StatusIndicator";
 
 
@@ -51,6 +53,7 @@ function ResourceActions({
   onApproval,
   onReset,
   cleanupRequired,
+  approvals,
   resetInProgress,
 }: Readonly<{
   node: ManageNode;
@@ -59,6 +62,7 @@ function ResourceActions({
   onApproval: (targetId: string) => void;
   onReset: (targetId: string) => void;
   cleanupRequired: boolean;
+  approvals: ApprovalCandidate[];
   resetInProgress: boolean;
 }>) {
   const capabilities = node.capabilities.filter(
@@ -71,15 +75,24 @@ function ResourceActions({
       && Boolean(capability.disabledReason)
     ),
   );
+  const approvalOutputs = new Set(approvals.flatMap((approval) => (
+    approval.outputTargetId ? [approval.outputTargetId] : []
+  )));
   const orderedCapabilities = [...capabilities].sort((left, right) => {
-    if (!resetBeforeRetry) return 0;
-    const order: Record<string, number> = {
-      reset: 0,
-      logs: 1,
-      approve: 2,
-      output: 3,
+    const rank = (capability: typeof left) => {
+      if (resetBeforeRetry && capability.kind === "reset") return 0;
+      if (capability.kind === "approve") return 1;
+      if (
+        capability.kind === "output"
+        && approvalOutputs.has(capability.outputTargetId)
+      ) {
+        return 2;
+      }
+      if (capability.kind === "logs") return 3;
+      if (capability.kind === "output") return 4;
+      return 5;
     };
-    return (order[left.kind] ?? 4) - (order[right.kind] ?? 4);
+    return rank(left) - rank(right);
   });
   return (
     <div className="resource-actions" aria-label="Available actions">
@@ -255,12 +268,58 @@ function ResourceIssues({
 }
 
 
-function Diagnostics({ node }: Readonly<{ node: ManageNode }>) {
+function RecentOperationFailure({
+  node,
+  operations,
+}: Readonly<{
+  node: ManageNode;
+  operations: Operation[];
+}>) {
+  const nodeIds = new Set([node.id, ...node.childIds]);
+  const latest = operations
+    .filter((operation) => (
+      operation.targetIds.some((targetId) => nodeIds.has(targetId))
+    ))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  if (latest?.status !== "failed") return null;
+  return (
+    <section
+      aria-label="Recent operation failed"
+      className="workspace-section operation-failure"
+      role="alert"
+    >
+      <header>
+        <TriangleAlert aria-hidden="true" />
+        <div>
+          <h3>Recent operation failed</h3>
+          <strong>{latest.label}</strong>
+        </div>
+      </header>
+      <p>{latest.message}</p>
+      <details>
+        <summary>Failure details</summary>
+        <pre>
+          {latest.detail || "No additional failure detail was reported."}
+        </pre>
+      </details>
+    </section>
+  );
+}
+
+
+function Diagnostics({
+  node,
+  suppressEmpty = false,
+}: Readonly<{
+  node: ManageNode;
+  suppressEmpty?: boolean;
+}>) {
   const diagnostics = node.diagnostics.filter((diagnostic) => (
     diagnostic.source !== "workflow-apply"
     && diagnostic.source !== "workflow-step"
   ));
   if (diagnostics.length === 0 && node.diagnostics.length > 0) return null;
+  if (diagnostics.length === 0 && suppressEmpty) return null;
   return (
     <section className="workspace-section">
       <h3>Diagnostics</h3>
@@ -421,6 +480,8 @@ export function ResourceWorkspace({
   onEdit,
   onNavigateBack,
   onRequestApproval,
+  approvals = [],
+  operations = [],
   resetInProgress = false,
 }: Readonly<{
   node: ManageNode;
@@ -429,6 +490,8 @@ export function ResourceWorkspace({
   onEdit?: () => void;
   onNavigateBack?: () => void;
   onRequestApproval?: (targetId: string) => void;
+  approvals?: ApprovalCandidate[];
+  operations?: Operation[];
   resetInProgress?: boolean;
 }>) {
   const [outputTarget, setOutputTarget] = useState<string | null>(null);
@@ -443,6 +506,13 @@ export function ResourceWorkspace({
   const cleanupRequired = (
     node.valueSummary === "Orphaned; cleanup required"
   );
+  const nodeIds = new Set([node.id, ...node.childIds]);
+  const latestRelatedOperation = [...operations]
+    .filter((operation) => (
+      operation.targetIds.some((targetId) => nodeIds.has(targetId))
+    ))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const operationFailed = latestRelatedOperation?.status === "failed";
   return (
     <article className="workspace">
       <header className="workspace-header">
@@ -478,6 +548,7 @@ export function ResourceWorkspace({
         </div>
       </header>
       <ResourceActions
+        approvals={approvals.filter((candidate) => candidate.nodeId === node.id)}
         cleanupRequired={cleanupRequired}
         node={node}
         onLogs={(targetId) => {
@@ -524,6 +595,7 @@ export function ResourceWorkspace({
         onEdit={onEdit}
         onReviewApproval={onRequestApproval}
       />
+      <RecentOperationFailure node={node} operations={operations} />
       <Relationships node={node} onSelect={onSelect} />
       {logTarget ? (
         <LogPanel
@@ -533,6 +605,12 @@ export function ResourceWorkspace({
       ) : null}
       {outputTarget ? (
         <OutputPanel
+          approval={approvals.find(
+            (candidate) => candidate.outputTargetId === outputTarget,
+          )}
+          onApprovalStarted={() => {
+            void 0;
+          }}
           onClose={() => setOutputTarget(null)}
           targetId={outputTarget}
         />
@@ -562,7 +640,7 @@ export function ResourceWorkspace({
           </div>
           ))}
       </dl>
-      <Diagnostics node={node} />
+      <Diagnostics node={node} suppressEmpty={operationFailed} />
       <Comparisons node={node} />
     </article>
   );

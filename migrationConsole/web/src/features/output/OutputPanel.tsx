@@ -1,21 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Check,
   Clipboard,
   Download,
   FileOutput,
   LoaderCircle,
   RefreshCw,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
 import {
+  approveTarget,
+  getApprovalReview,
   getOutputContent,
   getOutputs,
   outputDownloadUrl,
 } from "../../api/client";
 import { useEscapeCancel } from "../../hooks/useEscapeCancel";
+import type { ApprovalCandidate } from "../actions/approvals";
 
 
 function displayContent(content: string, contentType: string): string {
@@ -29,14 +34,22 @@ function displayContent(content: string, contentType: string): string {
 
 
 export function OutputPanel({
+  approval,
+  onApprovalStarted,
   targetId,
   onClose,
 }: Readonly<{
+  approval?: ApprovalCandidate | null;
+  onApprovalStarted?: (targetId: string) => void;
   targetId: string;
   onClose: () => void;
 }>) {
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [approvalAccepted, setApprovalAccepted] = useState(false);
+  const [approvalProblem, setApprovalProblem] = useState("");
   const inventory = useQuery({
     queryKey: ["managed-outputs", targetId],
     queryFn: () => getOutputs(targetId),
@@ -73,12 +86,48 @@ export function OutputPanel({
       : null
   );
   const panelRef = useEscapeCancel<HTMLElement>(onClose);
+  const approvalReview = useQuery({
+    queryKey: ["approval-review", approval?.targetId],
+    queryFn: () => getApprovalReview(approval?.targetId ?? ""),
+    enabled: Boolean(approval),
+    retry: false,
+  });
+
+  useEffect(() => {
+    setApproving(false);
+    setApprovalAccepted(false);
+    setApprovalProblem("");
+  }, [approval?.targetId]);
 
   const copy = async () => {
     if (rendered === null) return;
     await navigator.clipboard.writeText(rendered);
     setCopied(true);
     globalThis.setTimeout(() => setCopied(false), 1400);
+  };
+
+  const approve = async () => {
+    if (!approval || !approvalReview.data) return;
+    setApproving(true);
+    setApprovalProblem("");
+    try {
+      await approveTarget(
+        approval.targetId,
+        approvalReview.data.gateRevision,
+      );
+      setApprovalAccepted(true);
+      onApprovalStarted?.(approval.targetId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["operations"] }),
+        queryClient.invalidateQueries({ queryKey: ["manage-state"] }),
+      ]);
+    } catch (error) {
+      setApprovalProblem(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setApproving(false);
+    }
   };
 
   return (
@@ -106,6 +155,64 @@ export function OutputPanel({
           <X aria-hidden="true" />
         </button>
       </header>
+      {approval ? (
+        <section
+          aria-label="Output approval"
+          className="output-approval"
+        >
+          <ShieldCheck aria-hidden="true" />
+          <div>
+            <strong>
+              {approvalReview.data?.stage ?? approval.label}
+            </strong>
+            <span>
+              Review this output, then approve to continue the workflow.
+            </span>
+          </div>
+          {approvalAccepted ? (
+            <span className="output-approval-accepted" role="status">
+              <LoaderCircle className="spin" aria-hidden="true" />
+              Approval accepted
+            </span>
+          ) : (
+            <button
+              className="primary-button"
+              disabled={
+                approving
+                || approvalReview.isPending
+                || !approvalReview.data
+                || Boolean(approval.disabledReason)
+              }
+              onClick={() => void approve()}
+              title={approval.disabledReason ?? undefined}
+              type="button"
+            >
+              {approving
+                ? <LoaderCircle className="spin" aria-hidden="true" />
+                : <ShieldCheck aria-hidden="true" />}
+              Approve
+            </button>
+          )}
+          {approvalReview.isError ? (
+            <div className="output-approval-error" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <span>{approvalReview.error.message}</span>
+              <button
+                onClick={() => void approvalReview.refetch()}
+                type="button"
+              >
+                Retry
+              </button>
+            </div>
+          ) : null}
+          {approvalProblem ? (
+            <div className="output-approval-error" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <span>{approvalProblem}</span>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {inventory.isPending ? (
         <div className="output-state" role="status">
           <LoaderCircle className="spin" aria-hidden="true" />
@@ -211,5 +318,35 @@ export function OutputPanel({
         </>
       )}
     </section>
+  );
+}
+
+
+export function ApprovalOutputDialog({
+  approval,
+  onApprovalStarted,
+  onClose,
+}: Readonly<{
+  approval: ApprovalCandidate;
+  onApprovalStarted?: (targetId: string) => void;
+  onClose: () => void;
+}>) {
+  if (!approval.outputTargetId) return null;
+  return (
+    <div className="modal-backdrop output-review-backdrop">
+      <section
+        aria-label={`Review output for ${approval.nodeLabel}`}
+        aria-modal="true"
+        className="confirmation-dialog output-review-dialog"
+        role="dialog"
+      >
+        <OutputPanel
+          approval={approval}
+          onApprovalStarted={onApprovalStarted}
+          onClose={onClose}
+          targetId={approval.outputTargetId}
+        />
+      </section>
+    </div>
   );
 }

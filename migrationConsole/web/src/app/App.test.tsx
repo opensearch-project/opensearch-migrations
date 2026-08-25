@@ -1122,6 +1122,67 @@ test("opens resource-owned managed output with context and download", async () =
 });
 
 
+test("reviews managed output and approves from the required-action dialog", async () => {
+  const outputState = structuredClone(manageSnapshot);
+  outputState.nodes["resource:captureproxies:capture"].capabilities.push({
+    kind: "approve",
+    approvalTargetId: "approval:approval-node",
+    label: "Approve metadata",
+    outputTargetId: (
+      "output:snapshotmigrations:migration-0:metadataEvaluate"
+    ),
+  });
+  let approvalRequest: unknown;
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(outputState)),
+    http.post("*/api/v1/approvals", async ({ request }) => {
+      approvalRequest = await request.json();
+      return HttpResponse.json({
+        id: "operation-approve-output",
+        kind: "approve",
+        label: "Approve Metadata evaluation",
+        status: "queued",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-13T13:00:00Z",
+        updatedAt: "2026-08-13T13:00:00Z",
+        message: "Queued",
+        detail: null,
+        result: {},
+      }, { status: 202 });
+    }),
+  );
+  renderApp();
+
+  const requiredActions = await screen.findByRole("dialog", {
+    name: "Review required actions",
+  });
+  await userEvent.click(within(requiredActions).getByRole("button", {
+    name: "View output",
+  }));
+
+  const outputReview = await screen.findByRole("dialog", {
+    name: "Review output for capture",
+  });
+  expect(within(outputReview).getByRole("heading", { name: "Evaluate" }))
+    .toBeInTheDocument();
+  expect(await within(outputReview).findByText(/"documents": 12/))
+    .toBeInTheDocument();
+  expect(within(outputReview).getByText(
+    "Review this output, then approve to continue the workflow.",
+  )).toBeInTheDocument();
+
+  await userEvent.click(within(outputReview).getByRole("button", {
+    name: "Approve",
+  }));
+  await waitFor(() => expect(approvalRequest).toEqual({
+    targetId: "approval:approval-node",
+    expectedGateRevision: "11",
+  }));
+  expect(within(outputReview).getByText("Approval accepted"))
+    .toBeInTheDocument();
+});
+
+
 test("resets and retries all impossible deployed updates in one action", async () => {
   const actionState = structuredClone(manageSnapshot);
   const immutableMessage = (
@@ -1451,6 +1512,43 @@ test("labels orphan cleanup and active removal without implying automatic prunin
   expect(screen.getAllByText("Removing")).not.toHaveLength(0);
   expect(screen.getByRole("button", { name: "Reset capture" }))
     .toBeDisabled();
+});
+
+
+test("shows failed operation details with the selected resource", async () => {
+  server.use(
+    http.get("*/api/v1/operations", () => HttpResponse.json({
+      operations: [{
+        id: "reset-capture",
+        kind: "reset",
+        label: "Reset captureproxies/capture",
+        status: "failed",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-08-24T04:20:00Z",
+        updatedAt: "2026-08-24T04:20:01Z",
+        message: "Operation failed",
+        detail: (
+          "captureproxies.migrations.opensearch.org capture was not found"
+        ),
+        result: {},
+      }],
+    })),
+  );
+
+  renderApp();
+
+  expect(await screen.findByRole("heading", {
+    name: "Recent operation failed",
+  })).toBeInTheDocument();
+  expect(screen.getAllByText("Reset captureproxies/capture"))
+    .not.toHaveLength(0);
+
+  await userEvent.click(screen.getByText("Failure details"));
+
+  expect(screen.getAllByText(
+    "captureproxies.migrations.opensearch.org capture was not found",
+  )).not.toHaveLength(0);
+  expect(screen.queryByText("No diagnostics for this resource.")).toBeNull();
 });
 
 

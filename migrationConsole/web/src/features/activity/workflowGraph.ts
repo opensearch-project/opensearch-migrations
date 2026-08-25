@@ -6,6 +6,8 @@ import type {
 
 
 export interface WorkflowGraphNode {
+  activityAt: string | null;
+  depth: number;
   id: string;
   node: ManageNode | null;
   label: string;
@@ -18,6 +20,7 @@ export interface WorkflowGraphNode {
 
 
 export interface WorkflowGraphStep {
+  activityAt: string | null;
   depth: number;
   id: string;
   label: string;
@@ -35,6 +38,7 @@ export interface WorkflowGraphEdge {
 
 export interface WorkflowGraph {
   levels: WorkflowGraphNode[][];
+  nodes: WorkflowGraphNode[];
   edges: WorkflowGraphEdge[];
 }
 
@@ -77,6 +81,7 @@ function workflowStepsFor(
     const node = snapshot.nodes[nodeId];
     if (!node || node.kind !== "workflow-step") return;
     steps.push({
+      activityAt: node.activityAt,
       depth,
       id: node.id,
       label: node.label,
@@ -107,6 +112,8 @@ function relationshipTarget(
   if (target) return target;
   return {
     id: relationship.targetId ?? unresolvedId(relationship),
+    activityAt: null,
+    depth: 0,
     node: null,
     label: relationship.targetName,
     resourcePlural: relationship.targetPlural ?? null,
@@ -127,6 +134,8 @@ export function buildWorkflowGraph(snapshot: ManageSnapshot): WorkflowGraph {
       - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
     ))
     .map((node): WorkflowGraphNode => ({
+      activityAt: node.activityAt,
+      depth: 0,
       id: node.id,
       node,
       label: node.label,
@@ -155,14 +164,17 @@ export function buildWorkflowGraph(snapshot: ManageSnapshot): WorkflowGraph {
   }
 
   const incoming = new Map<string, number>();
+  const prerequisites = new Map<string, string[]>();
   const outgoing = new Map<string, WorkflowGraphEdge[]>();
   const depths = new Map<string, number>();
   for (const nodeId of nodes.keys()) {
     incoming.set(nodeId, 0);
+    prerequisites.set(nodeId, []);
     outgoing.set(nodeId, []);
   }
   for (const edge of edges.values()) {
     incoming.set(edge.targetId, (incoming.get(edge.targetId) ?? 0) + 1);
+    prerequisites.get(edge.targetId)?.push(edge.sourceId);
     outgoing.get(edge.sourceId)?.push(edge);
   }
 
@@ -187,26 +199,92 @@ export function buildWorkflowGraph(snapshot: ManageSnapshot): WorkflowGraph {
   const maxDepth = Math.max(0, ...depths.values());
   for (const nodeId of nodes.keys()) {
     if (!depths.has(nodeId)) depths.set(nodeId, maxDepth + 1);
+    const node = nodes.get(nodeId);
+    if (node) node.depth = depths.get(nodeId) ?? 0;
   }
 
-  const levels: WorkflowGraphNode[][] = [];
-  for (const node of nodes.values()) {
-    const depth = depths.get(node.id) ?? 0;
-    if (!levels[depth]) levels[depth] = [];
-    levels[depth].push(node);
-  }
-  for (const level of levels) {
-    level.sort((left, right) => {
-      if (left.unresolved !== right.unresolved) return left.unresolved ? -1 : 1;
-      return (
-        (order.get(left.id) ?? Number.MAX_SAFE_INTEGER)
-        - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+  const compareKeys = (left: number[], right: number[]) => {
+    const length = Math.max(left.length, right.length);
+    for (let index = 0; index < length; index += 1) {
+      const difference = (
+        (left[index] ?? Number.MIN_SAFE_INTEGER)
+        - (right[index] ?? Number.MIN_SAFE_INTEGER)
       );
-    });
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  };
+  const insertionOrder = new Map(
+    [...nodes.keys()].map((nodeId, index) => [nodeId, index]),
+  );
+  const fallbackOrder = (node: WorkflowGraphNode): number => (
+    node.unresolved
+      ? -nodes.size + (insertionOrder.get(node.id) ?? 0)
+      : order.get(node.id) ?? Number.MAX_SAFE_INTEGER
+  );
+  const nestedIncoming = new Map<string, number>();
+  for (const nodeId of nodes.keys()) nestedIncoming.set(nodeId, 0);
+  for (const edge of edges.values()) {
+    nestedIncoming.set(
+      edge.targetId,
+      (nestedIncoming.get(edge.targetId) ?? 0) + 1,
+    );
+  }
+  const layoutKeys = new Map<string, number[]>();
+  const roots = [...nodes.values()]
+    .filter((node) => nestedIncoming.get(node.id) === 0)
+    .sort((left, right) => fallbackOrder(left) - fallbackOrder(right));
+  roots.forEach((node, index) => layoutKeys.set(node.id, [index]));
+  const available = [...roots];
+  const nestedNodes: WorkflowGraphNode[] = [];
+  const nestedNodeIds = new Set<string>();
+  while (available.length > 0) {
+    available.sort((left, right) => (
+      compareKeys(
+        layoutKeys.get(left.id) ?? [fallbackOrder(left)],
+        layoutKeys.get(right.id) ?? [fallbackOrder(right)],
+      )
+      || fallbackOrder(left) - fallbackOrder(right)
+    ));
+    const node = available.shift();
+    if (!node || nestedNodeIds.has(node.id)) continue;
+    nestedNodeIds.add(node.id);
+    nestedNodes.push(node);
+    for (const edge of outgoing.get(node.id) ?? []) {
+      const remaining = (nestedIncoming.get(edge.targetId) ?? 1) - 1;
+      nestedIncoming.set(edge.targetId, remaining);
+      if (remaining !== 0) continue;
+      const child = nodes.get(edge.targetId);
+      if (!child) continue;
+      const parentKeys = (prerequisites.get(child.id) ?? [])
+        .flatMap((nodeId) => {
+          const key = layoutKeys.get(nodeId);
+          return key ? [key] : [];
+        })
+        .sort(compareKeys);
+      layoutKeys.set(child.id, [
+        ...(parentKeys[0] ?? [roots.length]),
+        fallbackOrder(child),
+      ]);
+      available.push(child);
+    }
+  }
+
+  // Keep malformed cycles visible after the acyclic workflow resources.
+  [...nodes.values()]
+    .filter((node) => !nestedNodeIds.has(node.id))
+    .sort((left, right) => fallbackOrder(left) - fallbackOrder(right))
+    .forEach((node) => nestedNodes.push(node));
+
+  const levels: WorkflowGraphNode[][] = [];
+  for (const node of nestedNodes) {
+    if (!levels[node.depth]) levels[node.depth] = [];
+    levels[node.depth].push(node);
   }
 
   return {
     levels: levels.filter(Boolean),
+    nodes: nestedNodes,
     edges: [...edges.values()],
   };
 }

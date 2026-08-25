@@ -57,6 +57,10 @@ OUTPUT_STEP_MAPPINGS = {
     "patchMetadataEvaluateOutput": ("snapshotmigrations", "metadataEvaluate"),
     "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
 }
+APPROVAL_OUTPUT_MAPPINGS = {
+    "evaluatemetadata": ("snapshotmigrations", "metadataEvaluate"),
+    "migratemetadata": ("snapshotmigrations", "metadataMigrate"),
+}
 
 _STATUS_RANK = {
     "ok": 0,
@@ -97,6 +101,7 @@ class _NodeDraft:
     description: Optional[str] = None
     phase: Optional[str] = None
     value_summary: Optional[str] = None
+    activity_at: Optional[str] = None
     child_ids: List[str] = field(default_factory=list)
     diagnostics: Tuple[ManageDiagnostic, ...] = ()
     capabilities: Tuple[ManageCapability, ...] = ()
@@ -394,6 +399,7 @@ class ManageStateService:
             phase=resource.phase,
             status=_resource_status(resource, diagnostics),
             value_summary=_resource_value_summary(resource, comparisons),
+            activity_at=_resource_activity_at(resource),
             diagnostics=diagnostics,
             capabilities=capabilities,
             details=_resource_details(resource),
@@ -467,6 +473,10 @@ class ManageStateService:
             label=label,
             phase=phase,
             status=_phase_status(phase),
+            activity_at=_latest_activity_timestamp(
+                step.get("finished_at"),
+                step.get("started_at"),
+            ),
             capabilities=_step_capabilities(
                 step,
                 _approval_disabled_reason(owner, step),
@@ -512,7 +522,11 @@ def _workflow_output_refs(
         output = OUTPUT_STEP_MAPPINGS.get(step_name)
         resource_name = get_node_input_parameter(node, "resourceName")
         if output and resource_name:
-            result.setdefault(str(resource_name), []).append(output)
+            refs = result.setdefault(str(resource_name), [])
+            # Argo exposes a Retry node and its numbered Pod child for the
+            # same logical output patch. Both identify one CR-owned output.
+            if output not in refs:
+                refs.append(output)
     return result
 
 
@@ -563,6 +577,11 @@ def _resource_capabilities(
                 )
             ),
             disabled_reason=_approval_disabled_reason(resource, approval),
+            related_output_target_id=_approval_output_target(
+                resource,
+                approval,
+                output_refs,
+            ),
         ))
     for plural, output_name in output_refs:
         capabilities.append(ManageCapability(
@@ -571,6 +590,25 @@ def _resource_capabilities(
             label=f"View {output_name}",
         ))
     return tuple(sorted(capabilities, key=lambda item: (item.kind, item.target_id)))
+
+
+def _approval_output_target(
+    resource: ResourceNode,
+    approval: Mapping[str, Any],
+    output_refs: Sequence[Tuple[str, str]],
+) -> Optional[str]:
+    gate_name = (
+        get_node_input_parameter(approval, "resourceName")
+        or get_node_input_parameter(approval, "name")
+    )
+    prefix = str(gate_name or "").split(".", 1)[0].lower()
+    output = APPROVAL_OUTPUT_MAPPINGS.get(prefix)
+    if not output or output not in output_refs:
+        return None
+    plural, output_name = output
+    if plural != resource.plural:
+        return None
+    return f"output:{plural}:{resource.name}:{output_name}"
 
 
 def _step_capabilities(
@@ -827,6 +865,63 @@ def _resource_details(resource: ResourceNode) -> Tuple[ManageDetail, ...]:
     return tuple(details)
 
 
+_ACTIVITY_TIMESTAMP_KEYS = {
+    "completionTime",
+    "finished",
+    "finishedAt",
+    "finished_at",
+    "lastTransitionTime",
+    "started",
+    "startedAt",
+    "started_at",
+    "updatedAt",
+}
+
+
+def _activity_timestamps(value: Any) -> Iterable[str]:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if key in _ACTIVITY_TIMESTAMP_KEYS and isinstance(nested, str):
+                yield nested
+            yield from _activity_timestamps(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            yield from _activity_timestamps(nested)
+
+
+def _parsed_timestamp(value: str) -> Optional[datetime]:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_activity_timestamp(*values: Any) -> Optional[str]:
+    candidates = []
+    for value in values:
+        if isinstance(value, str):
+            candidates.append(value)
+        else:
+            candidates.extend(_activity_timestamps(value))
+    parsed = [
+        (timestamp, candidate)
+        for candidate in candidates
+        if (timestamp := _parsed_timestamp(candidate)) is not None
+    ]
+    return max(parsed, default=(None, None), key=lambda item: item[0])[1]
+
+
+def _resource_activity_at(resource: ResourceNode) -> Optional[str]:
+    return _latest_activity_timestamp(
+        resource.created_at,
+        resource.status,
+        resource.workflow_progress or [],
+    )
+
+
 def _resource_relationships(resource: ResourceNode) -> List[ManageRelationship]:
     states_by_name = {
         str(dependency.get("name")): dependency
@@ -1016,6 +1111,7 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
             description=draft.description,
             phase=draft.phase,
             value_summary=draft.value_summary,
+            activity_at=draft.activity_at,
             diagnostics=draft.diagnostics,
             capabilities=draft.capabilities,
             details=draft.details,
@@ -1043,6 +1139,7 @@ def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
         "description": draft.description,
         "phase": draft.phase,
         "valueSummary": draft.value_summary,
+        "activityAt": draft.activity_at,
         "childIds": list(draft.child_ids),
         "diagnostics": [item.to_dict() for item in draft.diagnostics],
         "capabilities": [item.to_dict() for item in draft.capabilities],

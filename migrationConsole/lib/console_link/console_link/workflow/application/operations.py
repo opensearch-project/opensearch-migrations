@@ -6,6 +6,7 @@ import asyncio
 from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import subprocess
 from threading import RLock
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 from uuid import uuid4
@@ -13,6 +14,21 @@ from uuid import uuid4
 
 ACTIVE_OPERATION_STATUSES = {"queued", "running", "waiting"}
 TERMINAL_OPERATION_STATUSES = {"succeeded", "failed"}
+
+
+def _operation_error_detail(error: Exception) -> str:
+    if not isinstance(error, subprocess.CalledProcessError):
+        return str(error) or type(error).__name__
+    details = [f"Command failed with exit code {error.returncode}"]
+    stderr = str(error.stderr or "").strip()
+    stdout = str(error.stdout or "").strip()
+    if stderr:
+        details.append(stderr)
+    if stdout:
+        details.append(f"stdout: {stdout}")
+    if len(details) == 1:
+        details.append(str(error))
+    return "\n".join(details)
 
 
 @dataclass(frozen=True)
@@ -251,7 +267,7 @@ class OperationManager:
         except Exception as error:
             self.fail(
                 operation_id,
-                str(error) or type(error).__name__,
+                _operation_error_detail(error),
             )
             return
         self._update(

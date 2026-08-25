@@ -1732,6 +1732,99 @@ button {
   padding-top: 0;
 }
 
+.output-review-dialog {
+  width: min(980px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+
+.output-review-dialog .output-panel {
+  max-height: calc(100vh - 42px);
+  padding: 0 18px 18px;
+  overflow: auto;
+  border: 0;
+}
+
+.output-approval {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -18px;
+  padding: 11px 18px;
+  border-bottom: 1px solid #dfc07c;
+  color: #5d430b;
+  background: #fff9e9;
+}
+
+.output-approval > svg {
+  width: 18px;
+}
+
+.output-approval > div strong,
+.output-approval > div span {
+  display: block;
+}
+
+.output-approval > div strong {
+  font-size: 12px;
+}
+
+.output-approval > div span {
+  margin-top: 2px;
+  color: #5f6870;
+  font-size: 10px;
+}
+
+.output-approval > button,
+.output-approval-accepted {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #155d68;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.output-approval > button svg,
+.output-approval-accepted svg {
+  width: 14px;
+}
+
+.output-approval-accepted {
+  border-color: #58717e;
+  color: var(--text);
+  background: #edf3f4;
+}
+
+.output-approval-error {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.output-approval-error > svg {
+  width: 15px;
+}
+
+.output-approval-error button {
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid #d6a7a2;
+  border-radius: 3px;
+  color: var(--danger);
+  background: #fff;
+}
+
 .output-panel-header,
 .output-panel-header > div,
 .output-toolbar,
@@ -2430,7 +2523,7 @@ button {
 .workflow-dependency-graph {
   position: relative;
   display: grid;
-  gap: 26px;
+  gap: 7px;
   padding: 13px 14px 28px 10px;
 }
 
@@ -2515,24 +2608,10 @@ button {
   fill: #b27716;
 }
 
-.workflow-graph-level {
+.workflow-graph-item {
   position: relative;
   z-index: 1;
   padding-left: 64px;
-}
-
-.workflow-graph-level-label {
-  display: block;
-  margin: 0 0 5px;
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.workflow-graph-level-nodes {
-  display: grid;
-  gap: 7px;
 }
 
 .workflow-graph-node {
@@ -2621,6 +2700,10 @@ button {
   color: var(--text-muted);
   font-size: 9px;
   line-height: 13px;
+}
+
+.workflow-graph-node-main .workflow-graph-activity {
+  font-size: 8px;
 }
 
 .workflow-graph-steps {
@@ -2731,15 +2814,18 @@ button {
 }
 
 .workflow-graph-operation {
-  display: grid;
   min-height: 27px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.workflow-graph-operation:not(details) {
+  display: grid;
   grid-template-columns: 13px minmax(0, 1fr);
   align-items: center;
   gap: 5px;
   padding: 5px 9px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 9px;
 }
 
 .workflow-graph-operation svg {
@@ -2749,6 +2835,46 @@ button {
 .workflow-graph-operation.operation-failed {
   color: var(--danger);
   background: #fff3f2;
+}
+
+.workflow-graph-operation summary {
+  display: grid;
+  min-height: 27px;
+  grid-template-columns: 13px minmax(0, 1fr) 12px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.workflow-graph-operation summary::-webkit-details-marker {
+  display: none;
+}
+
+.workflow-graph-operation-chevron {
+  transition: transform 140ms ease;
+}
+
+.workflow-graph-operation[open] .workflow-graph-operation-chevron {
+  transform: rotate(90deg);
+}
+
+.workflow-graph-operation-detail {
+  padding: 0 9px 8px 27px;
+}
+
+.workflow-graph-operation-detail strong,
+.workflow-graph-operation-detail p {
+  display: block;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflow-graph-operation-detail p {
+  margin-top: 3px;
+  color: var(--text);
+  line-height: 1.4;
 }
 
 .workflow-global-operation {
@@ -2786,6 +2912,66 @@ button {
 .workflow-global-operation.operation-failed {
   color: var(--danger);
   background: #fff3f2;
+}
+
+.operation-failure {
+  border-top-color: #e4b8b4;
+  border-bottom-color: #e4b8b4;
+  background: #fff8f7;
+}
+
+.operation-failure > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.operation-failure > header > svg {
+  width: 17px;
+  flex: 0 0 17px;
+  color: var(--danger);
+}
+
+.operation-failure h3,
+.operation-failure strong,
+.operation-failure p {
+  margin: 0;
+}
+
+.operation-failure strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.operation-failure > p {
+  margin: 8px 0 0 26px;
+  color: var(--danger);
+}
+
+.operation-failure details {
+  margin: 9px 0 0 26px;
+}
+
+.operation-failure summary {
+  width: max-content;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.operation-failure pre {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #e4b8b4;
+  border-radius: 3px;
+  color: var(--text);
+  background: var(--surface);
+  font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
 }
 
 .workflow-health {

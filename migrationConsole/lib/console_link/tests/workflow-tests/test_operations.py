@@ -1,5 +1,6 @@
 from concurrent.futures import Future
 from datetime import datetime, timezone
+import subprocess
 
 from console_link.workflow.application.operations import (
     OperationManager,
@@ -69,6 +70,32 @@ def test_operation_manager_tracks_waiting_completion_and_failure():
     assert [event.operation_id for event in manager.events_after(0)][-1] == (
         waiting.id
     )
+
+
+def test_operation_failure_preserves_subprocess_output():
+    manager = OperationManager(
+        executor=_InlineExecutor(),
+        clock=_clock,
+    )
+
+    failed = manager.start(
+        kind="reset",
+        label="Reset migration-0",
+        target_ids=("resource:snapshotmigrations:migration-0",),
+        worker=lambda: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(
+                2,
+                ["node", "configProcessor/index.js", "findSecrets"],
+                output="Checking saved configuration",
+                stderr="TypeError: Object.groupBy is not a function",
+            )
+        ),
+    )
+
+    detail = manager.get(failed.id).detail
+    assert "Command failed with exit code 2" in detail
+    assert "TypeError: Object.groupBy is not a function" in detail
+    assert "stdout: Checking saved configuration" in detail
 
 
 def test_operation_history_is_bounded_without_dropping_active_work():

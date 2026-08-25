@@ -88,6 +88,7 @@ class ApproveCapabilityV1(WebModel):
     approval_target_id: str
     label: str
     disabled_reason: Optional[str] = None
+    output_target_id: Optional[str] = None
 
 
 class ResetCapabilityV1(WebModel):
@@ -169,6 +170,7 @@ class ManageNodeV1(WebModel):
     status: str
     phase: Optional[str] = None
     value_summary: Optional[str] = None
+    activity_at: Optional[datetime] = None
     diagnostics: List[DiagnosticV1] = Field(default_factory=list)
     capabilities: List[NodeCapabilityV1] = Field(default_factory=list)
     details: List[DetailV1] = Field(default_factory=list)
@@ -1067,4 +1069,6 @@ def _capability_payload(capability: ManageCapability) -> Dict[str, Any]:
         payload["label"] = capability.label
     if capability.disabled_reason:
         payload["disabledReason"] = capability.disabled_reason
+    if capability.related_output_target_id:
+        payload["outputTargetId"] = capability.related_output_target_id
     return payload
