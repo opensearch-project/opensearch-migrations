@@ -257,7 +257,7 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
-            description = ("Version of the source cluster. Required; a SOLR flavor selects the Solr backup path."))
+            description = ("Version of the source cluster, for example: Elasticsearch 7.10, OS 1.3 or Solr 9. Required."))
         public Version sourceVersion;
 
         @Parameter(required = false,
