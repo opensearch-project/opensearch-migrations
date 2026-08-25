@@ -805,15 +805,11 @@ function CommandEditor({
   const [name, setName] = useState("");
   const pattern = hintRecord(node.validation).pattern
     ?? hintRecord(node.inputHint).pattern;
+  const formRef = useEscapeCancel<HTMLFormElement>(onCancel, busy);
   return (
     <form
       className="field-form inline-command-form"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || busy) return;
-        event.preventDefault();
-        event.stopPropagation();
-        onCancel();
-      }}
+      data-escape-cancel-layer
       onSubmit={(event) => {
         event.preventDefault();
         const trimmedName = name.trim();
@@ -830,6 +826,7 @@ function CommandEditor({
           if (applied) onComplete();
         });
       }}
+      ref={formRef}
     >
       {requiresName ? (
         <label>
@@ -988,6 +985,10 @@ function ConfigPropertyRow({
   const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const externalEditorTriggerRef = useRef<HTMLButtonElement>(null);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
+  const renameFormRef = useEscapeCancel<HTMLFormElement>(
+    () => setRenaming(false),
+    !renaming,
+  );
   const children = propertyChildren(node);
   const commands = addCommands(node);
   const topLevelResourceCommand = resourceAddPlacement(node)
@@ -1348,12 +1349,7 @@ function ConfigPropertyRow({
               {renaming ? (
                 <form
                   className="rename-form"
-                  onKeyDown={(event) => {
-                    if (event.key !== "Escape") return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setRenaming(false);
-                  }}
+                  data-escape-cancel-layer
                   onSubmit={(event: FormEvent) => {
                     event.preventDefault();
                     void commit({
@@ -1364,6 +1360,7 @@ function ConfigPropertyRow({
                       if (applied) setRenaming(false);
                     });
                   }}
+                  ref={renameFormRef}
                 >
                   <label>
                     <span>Configuration name</span>

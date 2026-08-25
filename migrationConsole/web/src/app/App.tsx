@@ -1223,10 +1223,9 @@ export function App() {
                   }
                 />
                 {!editContext ? (
-                  <div
+                  <fieldset
                     aria-label="Resource state view"
                     className="resource-view-switcher"
-                    role="group"
                   >
                     {RESOURCE_VIEW_OPTIONS.map((option) => (
                       <button
@@ -1239,7 +1238,7 @@ export function App() {
                         {option.label}
                       </button>
                     ))}
-                  </div>
+                  </fieldset>
                 ) : null}
               </section>
               {editContext ? (

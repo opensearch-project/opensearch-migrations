@@ -1,7 +1,7 @@
 """Project configuration-edit navigation from runtime state and schema hints."""
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple, cast
 
 from .config_drafts import ConfigDraft
 from .models import (
@@ -87,14 +87,14 @@ def project_config_navigation(
         draft.draft_revision,
         draft.dirty,
     )
-    return replace(
+    return cast(ManageSnapshot, replace(
         configuration,
         revision=(
             f"{snapshot.revision}:{draft.draft_revision}:configuration"
         ),
         root_ids=tuple(root_ids),
         nodes=nodes,
-    )
+    ))
 
 
 def _without_workflow_steps(snapshot: ManageSnapshot) -> ManageSnapshot:
@@ -117,14 +117,14 @@ def _without_workflow_steps(snapshot: ManageSnapshot) -> ManageSnapshot:
         for node_id, node in snapshot.nodes.items()
         if node_id not in step_ids
     }
-    return replace(
+    return cast(ManageSnapshot, replace(
         snapshot,
         root_ids=tuple(
             node_id for node_id in snapshot.root_ids
             if node_id not in step_ids
         ),
         nodes=nodes,
-    )
+    ))
 
 
 def _project_existing_node(
@@ -155,23 +155,17 @@ def _project_existing_node(
         and target_id not in edit_nodes
     )
     if not explicit_removal and not removed_from_draft:
-        return replace(node, config_state=config_state)
-    label = (
-        "Removal pending submission"
-        if node.config_presence.get("pending") is False
-        else (
-            "Marked for removal"
-            if draft.dirty
-            else "Removal pending submission"
-        )
-    )
-    return replace(
+        return cast(ManageNode, replace(node, config_state=config_state))
+    label = "Removal pending submission"
+    if node.config_presence.get("pending") is not False and draft.dirty:
+        label = "Marked for removal"
+    return cast(ManageNode, replace(
         node,
         revision=f"{node.revision}:{draft.draft_revision}:removed",
         status="removed",
         value_summary=label,
         config_state=config_state,
-    )
+    ))
 
 
 def _edit_target(node: ManageNode) -> Optional[str]:
@@ -411,6 +405,93 @@ def _ordered_ids(
     return [node_id for _, node_id in indexed]
 
 
+def _diagnostics(node: Mapping[str, Any]) -> Tuple[ManageDiagnostic, ...]:
+    return tuple(
+        diagnostic
+        for value in node.get("diagnostics") or ()
+        if (diagnostic := _diagnostic(value)) is not None
+    )
+
+
+def _new_draft_resource(
+    placement: _Placement,
+    child: Mapping[str, Any],
+    index: int,
+    revision: str,
+    dirty: bool,
+    existing_targets: set[str],
+    existing_node_ids: set[str],
+) -> Optional[Tuple[ManageNode, str]]:
+    if child.get("valueKind") == "command":
+        return None
+    target_id = child.get("id")
+    if not isinstance(target_id, str) or target_id in existing_targets:
+        return None
+    identity = _resource_identity(placement, child, index)
+    if identity is None or identity[0] in existing_node_ids:
+        return None
+    node_id, resource_name = identity
+    status_value = child.get("status")
+    status = (
+        status_value
+        if isinstance(status_value, str) and status_value != "ok"
+        else "changed"
+    )
+    return (
+        ManageNode(
+            id=node_id,
+            revision=f"{revision}:{target_id}:added",
+            parent_id=placement.group_id,
+            kind="resource",
+            label=resource_name,
+            description=f"{placement.resource_plural}/{resource_name}",
+            status=status,
+            phase="Pending Config",
+            value_summary="Addition pending submission",
+            diagnostics=_diagnostics(child),
+            capabilities=(
+                ManageCapability(
+                    kind="edit",
+                    target_id=target_id,
+                    label=f"Edit {resource_name}",
+                ),
+            ),
+            details=(
+                ManageDetail(
+                    label="Phase",
+                    value="Pending Config",
+                    kind="phase",
+                ),
+            ),
+            resource_plural=placement.resource_plural,
+            resource_name=resource_name,
+            resource_type=placement.resource_type,
+            config_presence={
+                "deployed": False,
+                "pending": True,
+            },
+            config_state=_config_state(child, dirty),
+        ),
+        target_id,
+    )
+
+
+def _append_child(
+    nodes: Dict[str, ManageNode],
+    parent_id: str,
+    child_id: str,
+    revision: str,
+) -> None:
+    parent = nodes.get(parent_id)
+    if parent is None or child_id in parent.child_ids:
+        return
+    nodes[parent.id] = cast(ManageNode, replace(
+        parent,
+        revision=f"{parent.revision}:{revision}",
+        child_ids=(*parent.child_ids, child_id),
+    ))
+
+
 def _add_draft_resources(
     nodes: Dict[str, ManageNode],
     edit_nodes: Mapping[str, Mapping[str, Any]],
@@ -429,71 +510,91 @@ def _add_draft_resources(
         if collection is None:
             continue
         for index, child in enumerate(_mapping_children(collection)):
-            if child.get("valueKind") == "command":
-                continue
-            target_id = child.get("id")
-            if not isinstance(target_id, str) or target_id in existing_targets:
-                continue
-            identity = _resource_identity(placement, child, index)
-            if identity is None or identity[0] in nodes:
-                continue
-            node_id, resource_name = identity
-            diagnostics = tuple(
-                diagnostic
-                for value in child.get("diagnostics") or ()
-                if (diagnostic := _diagnostic(value)) is not None
+            candidate = _new_draft_resource(
+                placement,
+                child,
+                index,
+                revision,
+                dirty,
+                existing_targets,
+                set(nodes),
             )
-            status_value = child.get("status")
-            status = (
-                status_value
-                if isinstance(status_value, str) and status_value != "ok"
-                else "changed"
-            )
-            node = ManageNode(
-                id=node_id,
-                revision=f"{revision}:{target_id}:added",
-                parent_id=placement.group_id,
-                kind="resource",
-                label=resource_name,
-                description=(
-                    f"{placement.resource_plural}/{resource_name}"
-                ),
-                status=status,
-                phase="Pending Config",
-                value_summary="Addition pending submission",
-                diagnostics=diagnostics,
-                capabilities=(
-                    ManageCapability(
-                        kind="edit",
-                        target_id=target_id,
-                        label=f"Edit {resource_name}",
-                    ),
-                ),
-                details=(
-                    ManageDetail(
-                        label="Phase",
-                        value="Pending Config",
-                        kind="phase",
-                    ),
-                ),
-                resource_plural=placement.resource_plural,
-                resource_name=resource_name,
-                resource_type=placement.resource_type,
-                config_presence={
-                    "deployed": False,
-                    "pending": True,
-                },
-                config_state=_config_state(child, dirty),
-            )
+            if candidate is None:
+                continue
+            node, target_id = candidate
             nodes[node.id] = node
             existing_targets.add(target_id)
-            group = nodes.get(placement.group_id)
-            if group is not None and node.id not in group.child_ids:
-                nodes[group.id] = replace(
-                    group,
-                    revision=f"{group.revision}:{revision}",
-                    child_ids=(*group.child_ids, node.id),
-                )
+            _append_child(nodes, placement.group_id, node.id, revision)
+
+
+def _new_draft_definition(
+    child: Mapping[str, Any],
+    placement: _DefinitionPlacement,
+    revision: str,
+    dirty: bool,
+) -> Optional[ManageNode]:
+    if child.get("valueKind") == "command":
+        return None
+    target_id = child.get("id")
+    path = child.get("path")
+    if not isinstance(target_id, str) or not isinstance(path, list):
+        return None
+    if len(path) <= len(placement.collection_path):
+        return None
+    label = str(path[len(placement.collection_path)])
+    status_value = child.get("status")
+    status = status_value if isinstance(status_value, str) else "ok"
+    return ManageNode(
+        id=f"definition:{target_id}",
+        revision=f"{revision}:{target_id}",
+        parent_id=placement.group_id,
+        kind="config-definition",
+        label=label,
+        description=placement.definition_type,
+        status=status,
+        diagnostics=_diagnostics(child),
+        capabilities=(
+            ManageCapability(
+                kind="edit",
+                target_id=target_id,
+                label=f"Edit {label}",
+            ),
+        ),
+        resource_type=placement.definition_type,
+        config_state=_config_state(child, dirty),
+    )
+
+
+def _definition_group(
+    placement: _DefinitionPlacement,
+    collection: Mapping[str, Any],
+    owner_id: str,
+    revision: str,
+    dirty: bool,
+) -> Tuple[ManageNode, Tuple[ManageNode, ...]]:
+    definitions = tuple(
+        definition
+        for child in _mapping_children(collection)
+        if (
+            definition := _new_draft_definition(
+                child,
+                placement,
+                revision,
+                dirty,
+            )
+        ) is not None
+    )
+    collection_id = f"edit:{'.'.join(placement.collection_path)}"
+    group = ManageNode(
+        id=placement.group_id,
+        revision=f"{revision}:{collection_id}",
+        parent_id=owner_id,
+        child_ids=tuple(node.id for node in definitions),
+        kind="group",
+        label=placement.group_label,
+        status="ok",
+    )
+    return group, definitions
 
 
 def _add_draft_definitions(
@@ -526,68 +627,22 @@ def _add_draft_definitions(
             collection = edit_nodes.get(collection_id)
             if collection is None:
                 continue
-            group_id = placement.group_id
-            group_order[group_id] = placement.group_order
-            definition_ids: list[str] = []
-            for child in _mapping_children(collection):
-                if child.get("valueKind") == "command":
-                    continue
-                target_id = child.get("id")
-                path = child.get("path")
-                if (
-                    not isinstance(target_id, str)
-                    or not isinstance(path, list)
-                    or len(path) <= len(placement.collection_path)
-                ):
-                    continue
-                label = str(path[len(placement.collection_path)])
-                definition_id = f"definition:{target_id}"
-                diagnostics = tuple(
-                    diagnostic
-                    for value in child.get("diagnostics") or ()
-                    if (diagnostic := _diagnostic(value)) is not None
-                )
-                status_value = child.get("status")
-                status = (
-                    status_value
-                    if isinstance(status_value, str)
-                    else "ok"
-                )
-                nodes[definition_id] = ManageNode(
-                    id=definition_id,
-                    revision=f"{revision}:{target_id}",
-                    parent_id=group_id,
-                    kind="config-definition",
-                    label=label,
-                    description=placement.definition_type,
-                    status=status,
-                    diagnostics=diagnostics,
-                    capabilities=(
-                        ManageCapability(
-                            kind="edit",
-                            target_id=target_id,
-                            label=f"Edit {label}",
-                        ),
-                    ),
-                    resource_type=placement.definition_type,
-                    config_state=_config_state(child, dirty),
-                )
-                definition_ids.append(definition_id)
-            nodes[group_id] = ManageNode(
-                id=group_id,
-                revision=f"{revision}:{collection_id}",
-                parent_id=owner.id,
-                child_ids=tuple(definition_ids),
-                kind="group",
-                label=placement.group_label,
-                status="ok",
+            group, definitions = _definition_group(
+                placement,
+                collection,
+                owner.id,
+                revision,
+                dirty,
             )
-            child_ids.append(group_id)
-        nodes[owner.id] = replace(
+            group_order[group.id] = placement.group_order
+            nodes[group.id] = group
+            nodes.update((definition.id, definition) for definition in definitions)
+            child_ids.append(group.id)
+        nodes[owner.id] = cast(ManageNode, replace(
             owner,
             revision=f"{owner.revision}:{revision}:definitions",
             child_ids=tuple(_ordered_ids(child_ids, group_order)),
-        )
+        ))
 
 
 def _resource_identity(

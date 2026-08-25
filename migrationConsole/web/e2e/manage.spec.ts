@@ -14,8 +14,8 @@ interface BrowserAnimation {
 
 
 interface BrowserAnimatedElement {
+  dataset: { nodeId?: string };
   getAnimations: () => BrowserAnimation[];
-  getAttribute: (name: string) => string | null;
 }
 
 
@@ -42,6 +42,60 @@ interface BrowserButtonElement {
   ownerDocument: {
     querySelector: (selector: string) => BrowserAnimatedElement | null;
   };
+}
+
+
+function animatedNodeIds(elements: unknown[]): string[] {
+  const nodeIds: string[] = [];
+  for (const row of elements as BrowserAnimatedElement[]) {
+    const nodeId = row.dataset.nodeId;
+    if (!nodeId) continue;
+    for (const animation of row.getAnimations()) {
+      if (animation.id === "tree-layout-transition") {
+        nodeIds.push(nodeId);
+        break;
+      }
+    }
+  }
+  return nodeIds;
+}
+
+
+function treeTransitionDetails(elements: unknown[]) {
+  const details: Array<{
+    fill: string | undefined;
+    usesOpacity: boolean;
+    yDistance: number;
+  }> = [];
+  for (const row of elements as BrowserAnimatedElement[]) {
+    for (const animation of row.getAnimations()) {
+      if (animation.id !== "tree-layout-transition") continue;
+      const keyframes = animation.effect?.getKeyframes() ?? [];
+      const transform = keyframes[0]?.["transform"];
+      const match = typeof transform === "string"
+        ? /^translate\([^,]+,\s*(-?[\d.]+)px\)$/.exec(transform)
+        : null;
+      details.push({
+        fill: animation.effect?.getTiming().fill,
+        usesOpacity: keyframes.some(
+          (keyframe) => keyframe["opacity"] !== undefined,
+        ),
+        yDistance: match?.[1] ? Math.abs(Number(match[1])) : 0,
+      });
+    }
+  }
+  return details;
+}
+
+
+function treeLayoutAnimationCount(elements: unknown[]): number {
+  let count = 0;
+  for (const row of elements as BrowserAnimatedElement[]) {
+    for (const animation of row.getAnimations()) {
+      if (animation.id === "tree-layout-transition") count += 1;
+    }
+  }
+  return count;
 }
 
 
@@ -1248,23 +1302,12 @@ test("animates resource filters and entry into configuration mode", async ({ pag
   const filterY = (await filterInput.boundingBox())!.y;
   const initialIds = await tree.locator(".tree-row").evaluateAll(
     (elements: unknown[]) => (
-      (elements as BrowserAnimatedElement[]).flatMap((row) => {
-        const nodeId = row.getAttribute("data-node-id");
-        return nodeId ? [nodeId] : [];
-      })
+      (elements as BrowserAnimatedElement[])
+        .flatMap((row) => row.dataset.nodeId ?? [])
     ),
   );
   const movingRows = () => tree.locator(".tree-row").evaluateAll(
-    (elements: unknown[]) => (
-      (elements as BrowserAnimatedElement[]).flatMap((row) => {
-        const nodeId = row.getAttribute("data-node-id");
-        return nodeId && row.getAnimations().some(
-          (animation) => animation.id === "tree-layout-transition",
-        )
-          ? [nodeId]
-          : []
-      })
-    ),
+    animatedNodeIds,
   );
 
   await page.getByRole("button", { name: "Submitted" }).click();
@@ -1273,30 +1316,7 @@ test("animates resource filters and entry into configuration mode", async ({ pag
   const filterAnchors = await movingRows();
   expect(filterAnchors.every((nodeId) => initialIds.includes(nodeId))).toBe(true);
   const transitionDetails = await tree.locator(".tree-row").evaluateAll(
-    (elements: unknown[]) => (
-      (elements as BrowserAnimatedElement[]).flatMap((row) => (
-        row.getAnimations().flatMap((animation) => {
-          if (animation.id !== "tree-layout-transition") return [];
-          const keyframes = animation.effect?.getKeyframes() ?? [];
-          const transform = keyframes[0]?.["transform"];
-          const verticalOffset = typeof transform === "string"
-            ? transform.match(
-              /^translate\([^,]+,\s*(-?[\d.]+)px\)$/,
-            )?.[1]
-            : undefined;
-          const yDistance = verticalOffset
-            ? Math.abs(Number(verticalOffset))
-            : 0;
-          return [{
-            fill: animation.effect?.getTiming().fill,
-            usesOpacity: keyframes.some(
-              (keyframe) => keyframe["opacity"] !== undefined,
-            ),
-            yDistance,
-          }];
-        })
-      ))
-    ),
+    treeTransitionDetails,
   );
   expect(transitionDetails.length).toBeGreaterThan(0);
   expect(transitionDetails.every(({ fill }) => fill === "both")).toBe(true);
@@ -1613,13 +1633,7 @@ test("disables insertion motion when reduced motion is requested", async ({ page
     name: "Workflow resources",
   });
   const layoutAnimationCount = () => tree.locator(".tree-row").evaluateAll(
-    (elements: unknown[]) => (
-      (elements as BrowserAnimatedElement[]).reduce((count, row) => (
-        count + row.getAnimations().filter(
-          (animation) => animation.id === "tree-layout-transition",
-        ).length
-      ), 0)
-    ),
+    treeLayoutAnimationCount,
   );
 
   await page.getByRole("button", { name: "Submitted" }).click();

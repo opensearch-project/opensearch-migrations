@@ -47,15 +47,19 @@ export function groupDependencyRoutes(
     group.push(edge);
     grouped.set(key, group);
   }
-  return [...grouped.values()].map((sourceEdges) => ({
-    sourceId: sourceEdges[0].sourceId,
-    targetIds: sourceEdges
-      .sort((left, right) => left.targetY - right.targetY)
-      .map((edge) => edge.targetId),
-    startY: Math.min(...sourceEdges.map((edge) => edge.sourceY)),
-    endY: Math.max(...sourceEdges.map((edge) => edge.targetY)),
-    depth: sourceEdges[0].targetDepth,
-  })).sort((left, right) => (
+  const routes = [...grouped.values()].map((sourceEdges) => {
+    const orderedEdges = [...sourceEdges].sort(
+      (left, right) => left.targetY - right.targetY,
+    );
+    return {
+      sourceId: sourceEdges[0].sourceId,
+      targetIds: orderedEdges.map((edge) => edge.targetId),
+      startY: Math.min(...sourceEdges.map((edge) => edge.sourceY)),
+      endY: Math.max(...sourceEdges.map((edge) => edge.targetY)),
+      depth: sourceEdges[0].targetDepth,
+    };
+  });
+  return routes.sort((left, right) => (
     left.depth - right.depth
     || left.startY - right.startY
     || right.endY - left.endY
@@ -89,8 +93,8 @@ export function connectedPath(
     next: (edge: WorkflowGraphEdge) => string,
   ) => {
     const queue = [start];
-    for (let index = 0; index < queue.length; index += 1) {
-      for (const edge of adjacency.get(queue[index]) ?? []) {
+    for (const queuedNodeId of queue) {
+      for (const edge of adjacency.get(queuedNodeId) ?? []) {
         edgeIds.add(edgeId(edge));
         const nodeId = next(edge);
         if (nodeIds.has(nodeId)) continue;

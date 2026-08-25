@@ -23,6 +23,7 @@ import { StatusIndicator } from "../status/StatusIndicator";
 import { normalizedStatus, statusLabel } from "../status/status";
 import {
   buildWorkflowGraph,
+  type WorkflowGraph,
   type WorkflowGraphNode,
   type WorkflowGraphStep,
 } from "./workflowGraph";
@@ -31,6 +32,8 @@ import {
   dependencyAnchorY,
   edgeId,
   groupDependencyRoutes,
+  type DependencyEdgeSpan,
+  type DependencyRoute,
 } from "./workflowRouting";
 
 
@@ -52,6 +55,147 @@ interface RoutedPath {
   sourceX: number;
   sourceY: number;
   state: RouteState;
+}
+
+
+function measureDependencyEdges(
+  edges: WorkflowGraph["edges"],
+  nodeElements: Map<string, HTMLElement>,
+  graphRect: DOMRect,
+  depthById: Map<string, number>,
+): DependencyEdgeSpan[] {
+  const measuredEdges: DependencyEdgeSpan[] = [];
+  for (const edge of edges) {
+    const source = nodeElements.get(edge.sourceId);
+    const target = nodeElements.get(edge.targetId);
+    if (!source || !target) continue;
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    measuredEdges.push({
+      ...edge,
+      sourceY: dependencyAnchorY(
+        sourceRect.top - graphRect.top,
+        sourceRect.height,
+        "outgoing",
+      ),
+      targetDepth: depthById.get(edge.targetId) ?? 0,
+      targetY: dependencyAnchorY(
+        targetRect.top - graphRect.top,
+        targetRect.height,
+        "incoming",
+      ),
+    });
+  }
+  return measuredEdges;
+}
+
+
+function dependencyLaneGeometry(
+  routes: DependencyRoute[],
+  nodeElements: Map<string, HTMLElement>,
+  graphRect: DOMRect,
+) {
+  const firstNode = nodeElements.values().next().value;
+  const nodeLeft = firstNode
+    ? firstNode.getBoundingClientRect().left - graphRect.left
+    : 72;
+  const maxDepth = Math.max(1, ...routes.map((route) => route.depth));
+  const laneSpacing = Math.min(
+    10,
+    Math.max(5, (nodeLeft - 18) / (maxDepth + 1)),
+  );
+  return {
+    laneSpacing,
+    leftmostX: Math.max(12, nodeLeft - laneSpacing * (maxDepth + 1)),
+  };
+}
+
+
+function routeBranches(
+  route: DependencyRoute,
+  nodeElements: Map<string, HTMLElement>,
+  graphRect: DOMRect,
+  laneX: number,
+): BranchPath[] {
+  const branches: BranchPath[] = [];
+  for (const targetId of route.targetIds) {
+    const target = nodeElements.get(targetId);
+    if (!target) continue;
+    const targetRect = target.getBoundingClientRect();
+    const targetX = targetRect.left - graphRect.left;
+    const targetY = dependencyAnchorY(
+      targetRect.top - graphRect.top,
+      targetRect.height,
+      "incoming",
+    );
+    branches.push({
+      d: `M ${laneX} ${targetY} H ${targetX}`,
+      targetId,
+      targetY,
+    });
+  }
+  return branches;
+}
+
+
+function routedDependencyPaths(
+  routes: DependencyRoute[],
+  nodeElements: Map<string, HTMLElement>,
+  graphRect: DOMRect,
+  nodeById: Map<string, WorkflowGraphNode>,
+  approvals: ApprovalCandidate[],
+): RoutedPath[] {
+  const { laneSpacing, leftmostX } = dependencyLaneGeometry(
+    routes,
+    nodeElements,
+    graphRect,
+  );
+  const paths: RoutedPath[] = [];
+  for (const route of routes) {
+    const source = nodeElements.get(route.sourceId);
+    if (!source) continue;
+    const sourceRect = source.getBoundingClientRect();
+    const sourceX = sourceRect.left - graphRect.left;
+    const sourceY = dependencyAnchorY(
+      sourceRect.top - graphRect.top,
+      sourceRect.height,
+      "outgoing",
+    );
+    const laneX = leftmostX + route.depth * laneSpacing;
+    const branches = routeBranches(
+      route,
+      nodeElements,
+      graphRect,
+      laneX,
+    );
+    const endY = Math.max(
+      sourceY,
+      ...branches.map((branch) => branch.targetY),
+    );
+    const sourceNode = nodeById.get(route.sourceId);
+    paths.push({
+      branches,
+      d: [
+        `M ${sourceX} ${sourceY}`,
+        `H ${laneX}`,
+        `V ${endY}`,
+      ].join(" "),
+      id: `${route.sourceId}:${route.depth}`,
+      sourceId: route.sourceId,
+      sourceX,
+      sourceY,
+      state: sourceNode
+        ? graphNodeState(sourceNode, approvals)
+        : "unknown",
+    });
+  }
+  return paths;
+}
+
+
+function routeMarker(state: RouteState): string {
+  const suffix = state === "normal" || state === "unknown" ? "" : `-${state}`;
+  return `url(#graph-arrow${suffix})`;
 }
 
 
@@ -144,7 +288,7 @@ function GraphNode({
   onDeactivate: () => void;
   pathActive: boolean;
   pathMuted: boolean;
-  register: (nodeId: string, element: HTMLDivElement | null) => void;
+  register: (nodeId: string, element: HTMLElement | null) => void;
 }>) {
   const [completedStepsExpanded, setCompletedStepsExpanded] = useState(false);
   const state = graphNode.phase ?? statusLabel(graphNode.status);
@@ -167,7 +311,7 @@ function GraphNode({
     operation?.updatedAt,
   );
   return (
-    <div
+    <fieldset
       className={[
         "workflow-graph-node",
         `graph-state-${graphNodeState(graphNode, approval ? [approval] : [])}`,
@@ -324,7 +468,7 @@ function GraphNode({
           <span>{operation.message || operation.label}</span>
         </div>
       ) : null}
-    </div>
+    </fieldset>
   );
 }
 
@@ -348,7 +492,7 @@ export function WorkflowDependencyGraph({
 }>) {
   const graph = useMemo(() => buildWorkflowGraph(snapshot), [snapshot]);
   const graphRef = useRef<HTMLDivElement>(null);
-  const nodeElements = useRef(new Map<string, HTMLDivElement>());
+  const nodeElements = useRef(new Map<string, HTMLElement>());
   const [routedPaths, setRoutedPaths] = useState<RoutedPath[]>([]);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const nodeById = useMemo(() => new Map(
@@ -364,7 +508,7 @@ export function WorkflowDependencyGraph({
   );
   const register = useCallback((
     nodeId: string,
-    element: HTMLDivElement | null,
+    element: HTMLElement | null,
   ) => {
     if (element) nodeElements.current.set(nodeId, element);
     else nodeElements.current.delete(nodeId);
@@ -378,93 +522,20 @@ export function WorkflowDependencyGraph({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const graphRect = container.getBoundingClientRect();
-        const measuredEdges = graph.edges.flatMap((edge) => {
-          const source = nodeElements.current.get(edge.sourceId);
-          const target = nodeElements.current.get(edge.targetId);
-          if (!source || !target) return [];
-          const sourceRect = source.getBoundingClientRect();
-          const targetRect = target.getBoundingClientRect();
-          return [{
-            ...edge,
-            sourceY: dependencyAnchorY(
-              sourceRect.top - graphRect.top,
-              sourceRect.height,
-              "outgoing",
-            ),
-            targetDepth: depthById.get(edge.targetId) ?? 0,
-            targetY: dependencyAnchorY(
-              targetRect.top - graphRect.top,
-              targetRect.height,
-              "incoming",
-            ),
-          }];
-        });
+        const measuredEdges = measureDependencyEdges(
+          graph.edges,
+          nodeElements.current,
+          graphRect,
+          depthById,
+        );
         const routes = groupDependencyRoutes(measuredEdges);
-        const firstNode = nodeElements.current.values().next().value;
-        const nodeLeft = firstNode
-          ? firstNode.getBoundingClientRect().left - graphRect.left
-          : 72;
-        const maxDepth = Math.max(
-          1,
-          ...routes.map((route) => route.depth),
-        );
-        const laneSpacing = Math.min(
-          10,
-          Math.max(5, (nodeLeft - 18) / (maxDepth + 1)),
-        );
-        const leftmostX = Math.max(
-          12,
-          nodeLeft - laneSpacing * (maxDepth + 1),
-        );
-        const paths = routes.flatMap((route): RoutedPath[] => {
-          const source = nodeElements.current.get(route.sourceId);
-          if (!source) return [];
-          const sourceRect = source.getBoundingClientRect();
-          const sourceX = sourceRect.left - graphRect.left;
-          const sourceY = dependencyAnchorY(
-            sourceRect.top - graphRect.top,
-            sourceRect.height,
-            "outgoing",
-          );
-          const laneX = leftmostX + route.depth * laneSpacing;
-          const branches = route.targetIds.flatMap((targetId): BranchPath[] => {
-            const target = nodeElements.current.get(targetId);
-            if (!target) return [];
-            const targetRect = target.getBoundingClientRect();
-            const targetX = targetRect.left - graphRect.left;
-            const targetY = dependencyAnchorY(
-              targetRect.top - graphRect.top,
-              targetRect.height,
-              "incoming",
-            );
-            return [{
-              d: `M ${laneX} ${targetY} H ${targetX}`,
-              targetId,
-              targetY,
-            }];
-          });
-          const endY = Math.max(
-            sourceY,
-            ...branches.map((branch) => branch.targetY),
-          );
-          const sourceNode = nodeById.get(route.sourceId);
-          return [{
-            branches,
-            d: [
-              `M ${sourceX} ${sourceY}`,
-              `H ${laneX}`,
-              `V ${endY}`,
-            ].join(" "),
-            id: `${route.sourceId}:${route.depth}`,
-            sourceId: route.sourceId,
-            sourceX,
-            sourceY,
-            state: sourceNode
-              ? graphNodeState(sourceNode, approvals)
-              : "unknown",
-          }];
-        });
-        setRoutedPaths(paths);
+        setRoutedPaths(routedDependencyPaths(
+          routes,
+          nodeElements.current,
+          graphRect,
+          nodeById,
+          approvals,
+        ));
       });
     };
     update();
@@ -537,10 +608,7 @@ export function WorkflowDependencyGraph({
           ));
           const routeMuted = Boolean(pathAnchorId)
             && activeBranches.length === 0;
-          const marker = `url(#graph-arrow${route.state === "normal"
-            || route.state === "unknown"
-            ? ""
-            : `-${route.state}`})`;
+          const marker = routeMarker(route.state);
           return (
             <g key={route.id}>
               <path

@@ -427,22 +427,15 @@ def _gate_summary(
         None,
     )
     approved = phase.lower() == "approved"
-    if succeeded:
-        state = "passed"
-    elif running is not None:
-        state = "accepted" if approved else "blocking"
-    elif workflow_phase in TERMINAL_WORKFLOW_PHASES:
-        state = "not-reached"
-    elif category == RECOVERY_APPROVAL_CLASS:
-        state = "recovery-standby"
-    elif not enabled:
-        state = "not-required"
-    elif phase.lower() == "error":
-        state = "error"
-    elif approved:
-        state = "preapproved"
-    else:
-        state = "upcoming"
+    state = _approval_state(
+        succeeded=succeeded,
+        running=running is not None,
+        approved=approved,
+        workflow_phase=workflow_phase,
+        category=category,
+        enabled=enabled,
+        phase=phase,
+    )
     toggleable = enabled and state in {"upcoming", "preapproved"}
     stage, effect = _approval_stage(name)
     return ApprovalGateSummary(
@@ -478,6 +471,33 @@ def _gate_summary(
             resource_name,
         ),
     )
+
+
+def _approval_state(
+    *,
+    succeeded: bool,
+    running: bool,
+    approved: bool,
+    workflow_phase: str,
+    category: str,
+    enabled: bool,
+    phase: str,
+) -> str:
+    if succeeded:
+        return "passed"
+    if running:
+        return "accepted" if approved else "blocking"
+    if workflow_phase in TERMINAL_WORKFLOW_PHASES:
+        return "not-reached"
+    if category == RECOVERY_APPROVAL_CLASS:
+        return "recovery-standby"
+    if not enabled:
+        return "not-required"
+    if phase.lower() == "error":
+        return "error"
+    if approved:
+        return "preapproved"
+    return "upcoming"
 
 
 def _approval_category(

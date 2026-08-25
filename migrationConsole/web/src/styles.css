@@ -1136,7 +1136,9 @@ button {
 .resource-view-switcher {
   display: grid;
   flex: 0 0 auto;
+  min-inline-size: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0;
   margin: 0 11px 10px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -2911,6 +2913,9 @@ button {
 }
 
 .workflow-graph-node {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 4px;
