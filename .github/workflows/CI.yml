@@ -76,6 +76,8 @@ jobs:
     env:
       WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'libraries/') && format('./{0}', matrix.py-project) || matrix.py-project == 'solrMigrationDevSandbox' && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
       WORKFLOW_TEST_KUBE_CONTEXT: kind-console-link-test
+      # The secrets context is unavailable in a step `if`, so gate on this instead.
+      HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -118,7 +120,7 @@ jobs:
           PY_PROJECT: ${{ matrix.py-project }}
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
-        if: always()
+        if: always() && env.HAS_CODECOV_TOKEN == 'true'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           fail_ci_if_error: true
@@ -187,6 +189,9 @@ jobs:
       fail-fast: false
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
+    env:
+      # The secrets context is unavailable in a step `if`, so gate on this instead.
+      HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-env
@@ -246,7 +251,7 @@ jobs:
             **/build/reports/tests/
 
       - name: Upload coverage to Codecov
-        if: always()
+        if: always() && env.HAS_CODECOV_TOKEN == 'true'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           fail_ci_if_error: true
@@ -276,6 +281,9 @@ jobs:
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
           - ./orchestrationSpecs
+    env:
+      # The secrets context is unavailable in a step `if`, so gate on this instead.
+      HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
@@ -290,7 +298,7 @@ jobs:
         if: matrix.npm-project == './orchestrationSpecs'
         run: npm run test:integ:crds
       - name: Upload coverage to Codecov
-        if: always()
+        if: always() && env.HAS_CODECOV_TOKEN == 'true'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           fail_ci_if_error: true
@@ -371,11 +379,11 @@ jobs:
         - language: python
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+    - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
       with:
         languages: ${{ matrix.language }}
         build-mode: none
-    - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+    - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
       with:
         category: "/language:${{matrix.language}}"
 

@@ -232,6 +232,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
+                    "solrContextPath": {
+                      "type": "string",
+                      "default": "/solr"
+                    },
                     "snapshotInfo": {
                       "anyOf": [
                         {
@@ -465,6 +469,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                         "default": [],
                                         "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                                       },
+                                      "topology": {
+                                        "type": "string",
+                                        "enum": [
+                                          "cloud",
+                                          "standalone"
+                                        ],
+                                        "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                                      },
                                       "otelTraceCollectorEndpoint": {
                                         "anyOf": [
                                           {
@@ -533,6 +545,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             },
                                             "default": [],
                                             "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                          },
+                                          "topology": {
+                                            "type": "string",
+                                            "enum": [
+                                              "cloud",
+                                              "standalone"
+                                            ],
+                                            "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                           },
                                           "otelTraceCollectorEndpoint": {
                                             "anyOf": [
@@ -645,6 +665,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -669,6 +692,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -1569,6 +1593,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "allowInsecure": {
                             "type": "boolean"
                           },
+                          "solrContextPath": {
+                            "type": "string"
+                          },
                           "authType": {
                             "type": "string"
                           },
@@ -1593,6 +1620,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "version",
                           "endpoint",
                           "allowInsecure",
+                          "solrContextPath",
                           "authType",
                           "authBasicSecretName",
                           "authSigv4Region",
@@ -1674,6 +1702,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string"
                             },
                             "default": []
+                          },
+                          "solrTopology": {
+                            "type": "string",
+                            "enum": [
+                              "cloud",
+                              "standalone"
+                            ],
+                            "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source.",
+                            "changeRestriction": "impossible"
                           }
                         }
                       },
@@ -1863,6 +1900,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+                    },
+                    "solrContextPath": {
+                      "type": "string",
+                      "default": "/solr"
                     },
                     "label": {
                       "type": "string"
@@ -2528,6 +2569,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -2552,6 +2596,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -2575,6 +2620,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -2599,6 +2647,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -3422,6 +3471,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "allowInsecure": {
                       "type": "boolean"
                     },
+                    "solrContextPath": {
+                      "type": "string"
+                    },
                     "authType": {
                       "type": "string"
                     },
@@ -3446,6 +3498,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version",
                     "endpoint",
                     "allowInsecure",
+                    "solrContextPath",
                     "authType",
                     "authBasicSecretName",
                     "authSigv4Region",
@@ -3755,6 +3808,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
             "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
           },
+          "solrContextPath": {
+            "type": "string",
+            "default": "/solr",
+            "description": "The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the host. Only valid on Solr sources."
+          },
           "snapshotInfo": {
             "anyOf": [
               {
@@ -3988,6 +4046,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "default": [],
                               "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
                             },
+                            "topology": {
+                              "type": "string",
+                              "enum": [
+                                "cloud",
+                                "standalone"
+                              ],
+                              "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
+                            },
                             "otelTraceCollectorEndpoint": {
                               "anyOf": [
                                 {
@@ -4056,6 +4122,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   },
                                   "default": [],
                                   "description": "Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores."
+                                },
+                                "topology": {
+                                  "type": "string",
+                                  "enum": [
+                                    "cloud",
+                                    "standalone"
+                                  ],
+                                  "description": "Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an externally-managed backup whose layout identifies neither, which is the common case since the schema is staged into the backup while preparing it. Supplying it also skips inference on a restricted source."
                                 },
                                 "otelTraceCollectorEndpoint": {
                                   "anyOf": [

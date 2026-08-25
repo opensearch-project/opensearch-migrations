@@ -15,6 +15,8 @@ function snapshotMigrationConfig(opts: {
     externalSolrBackupName?: string;
     externalElasticsearchSnapshotName?: string;
     collectionAllowlist?: string[];
+    topology?: "cloud" | "standalone";
+    solrContextPath?: string;
     snapshotPrefix?: string;
     withDocumentBackfill?: boolean;
 }): Record<string, unknown> {
@@ -31,6 +33,7 @@ function snapshotMigrationConfig(opts: {
                     repoName: "default",
                     externalBackupName: opts.externalSolrBackupName ?? "preexisting-solr-backup",
                     collectionAllowlist: opts.collectionAllowlist ?? [],
+                    ...(opts.topology ? {topology: opts.topology} : {}),
                 },
             },
         }
@@ -48,6 +51,7 @@ function snapshotMigrationConfig(opts: {
                         createBackupConfig: {
                             ...(opts.snapshotPrefix !== undefined ? {snapshotPrefix: opts.snapshotPrefix} : {}),
                             collectionAllowlist: opts.collectionAllowlist ?? [],
+                            ...(opts.topology ? {topology: opts.topology} : {}),
                         },
                     },
                 },
@@ -77,6 +81,7 @@ function snapshotMigrationConfig(opts: {
                 endpoint: "https://solr.example.com:8983",
                 allowInsecure: true,
                 version: opts.version ?? "SOLR 9.7.0",
+                ...(opts.solrContextPath !== undefined ? {solrContextPath: opts.solrContextPath} : {}),
                 snapshotInfo,
             },
         },
@@ -100,6 +105,44 @@ function snapshotMigrationConfig(opts: {
 }
 
 describe("Solr backup snapshotInfo paths", () => {
+    it("folds user-facing topology into solrTopology on the import prepare config", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrExternalBackups",
+                topology: "standalone",
+            }));
+
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.config.mode).toBe("import");
+        // Reaches CreateSnapshot as --solr-topology, which import needs when the backup's own
+        // layout identifies neither kind.
+        expect(item.config.solrTopology).toBe("standalone");
+    });
+
+    it("folds user-facing topology into solrTopology on the create-backup config", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                topology: "cloud",
+            }));
+
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.config.mode).toBe("create");
+        expect(item.config.solrTopology).toBe("cloud");
+    });
+
+    it("omits solrTopology entirely when the user does not set it", async () => {
+        for (const shape of ["solrExternalBackups", "solrCreateBackups"] as const) {
+            const workflowConfig = await new MigrationConfigTransformer()
+                .processFromObject(snapshotMigrationConfig({shape}));
+
+            const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+            // Absent rather than empty: an empty value would still be inference, but emitting the
+            // key invites a bare --solr-topology on the command line.
+            expect(item.config).not.toHaveProperty("solrTopology");
+        }
+    });
+
     it("routes a Solr backup through the create path with mode=import", async () => {
         const workflowConfig = await new MigrationConfigTransformer()
             .processFromObject(snapshotMigrationConfig({shape: "solrExternalBackups"}));
@@ -357,5 +400,63 @@ describe("Solr backup snapshotInfo paths", () => {
         expect(threw).toBeInstanceOf(Error);
         expect(String((threw as Error).message ?? threw))
             .toMatch(/Unrecognized keys.*mode/);
+    });
+});
+
+describe("Solr context path", () => {
+    it("defaults to /solr when unset", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({shape: "solrCreateBackups"}));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("/solr");
+    });
+
+    it("reaches the source config from an external backup", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrExternalBackups",
+                solrContextPath: "/tenant-a/solr",
+            }));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("/tenant-a/solr");
+    });
+
+    it("reaches the source config from a created backup", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                solrContextPath: "/tenant-a/solr",
+            }));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("/tenant-a/solr");
+    });
+
+    it("carries an empty context path through for root-mounted Solr", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                solrContextPath: "",
+            }));
+
+        expect(workflowConfig.snapshots[0].sourceConfig.solrContextPath).toBe("");
+    });
+
+    it("is rejected on a non-Solr source", async () => {
+        await expect(new MigrationConfigTransformer().processFromObject(snapshotMigrationConfig({
+            shape: "elasticsearchSnapshots",
+            version: "ES 7.10.2",
+            solrContextPath: "/tenant-a/solr",
+        }))).rejects.toThrow(/solrContextPath is only supported for Solr sources/);
+    });
+
+    it.each([
+        "https://solr.example.com:8983/solr",
+        "/solr?wt=json",
+        "/solr#fragment",
+    ])("rejects %s, matching the Java and console normalizers", async (bad) => {
+        await expect(new MigrationConfigTransformer().processFromObject(snapshotMigrationConfig({
+            shape: "solrCreateBackups",
+            solrContextPath: bad,
+        }))).rejects.toThrow(/not a URL or query string/);
     });
 });

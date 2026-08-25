@@ -2,22 +2,28 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrContextPath;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -51,7 +57,15 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private final SolrHttpClient httpClient;
     private final SnapshotMode mode;
     private final RepoUri repoUri;
-    private final boolean isCloud;
+    /** The prefix Solr's APIs are served under; configurable and often rewritten by proxies. */
+    private final String contextPath;
+
+    /**
+     * SolrCloud vs standalone, resolved from the cheapest source that can answer (see
+     * {@link #resolveTopologyAndCollections}). Null until resolved — never read directly, use
+     * {@link #isCloud()}.
+     */
+    private Boolean cloudTopology;
 
     public SolrBackupStrategy(CreateSnapshot.Args args) {
         this.args = args;
@@ -60,7 +74,14 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         this.connectionContext = args.sourceArgs.toConnectionContext();
         this.httpClient = new SolrHttpClient(connectionContext);
         this.mode = CreateSnapshot.getSnapshotMode(args);
-        this.isCloud = isSolrCloud(connectionContext.getUri().toString(), httpClient);
+        this.contextPath = SolrContextPath.normalize(args.solrContextPath);
+    }
+
+    private boolean isCloud() {
+        if (cloudTopology == null) {
+            throw new IllegalStateException("Solr topology read before it was resolved");
+        }
+        return cloudTopology;
     }
 
     private static final String COLLECTION_LABEL = "collection";
@@ -74,8 +95,15 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         "managed-schema.xml"
     );
 
+    /** Timeout for the SolrCloud-vs-standalone probe. */
+    private static final Duration DETECTION_TIMEOUT = Duration.ofSeconds(10);
+
+    /** Log/message wording; tolerates topology not being resolved yet (CREATE infers it later). */
     private String topologyLabel() {
-        return isCloud ? COLLECTION_LABEL : CORE_LABEL;
+        if (cloudTopology == null) {
+            return COLLECTION_LABEL + "/" + CORE_LABEL;
+        }
+        return cloudTopology ? COLLECTION_LABEL : CORE_LABEL;
     }
 
     /**
@@ -95,6 +123,17 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         public SolrImportSchemaUnavailable(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** Thrown when the Solr topology can't be determined (unreachable, timeout, or auth-blocked). */
+    public static class SolrTopologyDetectionException extends RuntimeException {
+        public SolrTopologyDetectionException(String message) {
+            super(message);
+        }
+
+        public SolrTopologyDetectionException(String message, Throwable cause) {
             super(message, cause);
         }
     }
@@ -140,31 +179,48 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         // re-derives the key from the raw URI itself.
         var backupLocation = parsedUri instanceof RepoUri.FileRepoUri f ? f.path() : parsedUri.rawUri();
         var solrUrl = connectionContext.getUri().toString();
-        log.info("Running SolrBackupStrategy: mode={}, topology={}", mode, isCloud ? "SolrCloud" : "standalone");
 
-        // ── Shared steps (both modes) ──────────────────────────────────────────
+        cloudTopology = parseTopologyOption(args.solrTopology);
+
+        if (mode == SnapshotMode.IMPORT) {
+            // Before anything writes: schema staging puts files under the snapshot location, so a
+            // later check could not tell a real backup from one this run had just created.
+            validateSnapshotAccessible(parsedUri);
+            if (cloudTopology == null) {
+                cloudTopology = inferTopologyFromArtifact(parsedUri);
+            }
+        }
         resolveCollections(solrUrl);
 
-        // Synthetic config upload runs only for standalone Solr, in BOTH modes.
-        // Standalone replication backups write only Lucene index data (no ZooKeeper
-        // configs), so we must fetch the schema from the live source and place it in the
-        // synthetic zk_backup_0/configs/ structure the downstream RFS reader expects.
-        //
-        // SolrCloud is skipped in BOTH CREATE and IMPORT modes: the Collections API
-        // BACKUP writes zk_backup_0/configs/ from ZooKeeper itself, two levels deep
-        // (<snapshot>/<collection>/<collection>/zk_backup_0/...). Pre-uploading a
-        // synthetic schema at the shallow <snapshot>/<collection>/zk_backup_0/ path
-        // would shadow that real layout: SolrBackupLayout.resolveCollectionDataPrefix
-        // matches the shallow zk_backup first and never descends to the real data, so
-        // the RFS worker finds the schema but no shard_backup_metadata/index and fails
-        // with "No Lucene segments found in backup directory".
-        if (!isCloud) {
-            ensureConfigFilesInS3(solrUrl, parsedUri);
-            ensureConfigFilesOnFilesystem(solrUrl, parsedUri);
+        if (mode == SnapshotMode.CREATE) {
+            // Topology stays unresolved: the backup request reveals it (see runCreateMode).
+            runCreateMode(solrUrl, backupLocation, parsedUri);
+            return;
         }
 
-        // ── Mode-specific branching ────────────────────────────────────────────
-        executeModeSpecificOperation(solrUrl, backupLocation, parsedUri);
+        if (cloudTopology == null) {
+            // Rather than spend a Collections API request purely to detect — the one thing that
+            // would drag 'collection-admin-read' back in — ask for the answer.
+            throw new ParameterException(
+                "Could not determine whether the backup at " + parsedUri.rawUri()
+                    + " came from SolrCloud or standalone Solr: it contains none of the layout markers"
+                    + " that identify either. Specify --solr-topology cloud|standalone.");
+        }
+        logResolvedTopology();
+        if (!isCloud()) {
+            ensureStandaloneConfigFiles(solrUrl, parsedUri);
+        }
+        runImportMode(solrUrl, parsedUri);
+    }
+
+    /**
+     * Stages the schema into the synthetic {@code zk_backup_0/configs/} the RFS reader expects,
+     * since standalone backups carry only index data. Never run for SolrCloud: its BACKUP writes
+     * the real zk_backup two levels down, which a shallow synthetic one would shadow.
+     */
+    private void ensureStandaloneConfigFiles(String solrUrl, RepoUri parsedUri) {
+        ensureConfigFilesInS3(solrUrl, parsedUri);
+        ensureConfigFilesOnFilesystem(solrUrl, parsedUri);
     }
 
     private static void validateSolrRepoSupported(RepoUri parsedUri) {
@@ -175,24 +231,6 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         if (parsedUri instanceof RepoUri.GcsRepoUri) {
             throw new ParameterException(
                 "Solr backup to gs:// is not supported in this release; use --repo-uri with a file:// or s3:// scheme.");
-        }
-    }
-
-    /**
-     * Dispatches to the appropriate mode-specific operation after shared config
-     * validation has completed. This is the single divergence point between
-     * CREATE and IMPORT workflows.
-     */
-    private void executeModeSpecificOperation(String solrUrl, String backupLocation, RepoUri parsedUri) {
-        switch (mode) {
-            case CREATE:
-                runCreateMode(solrUrl, backupLocation, parsedUri);
-                break;
-            case IMPORT:
-                runImportMode(solrUrl, parsedUri);
-                break;
-            default:
-                throw new IllegalStateException("Unsupported snapshot mode: " + mode);
         }
     }
 
@@ -286,7 +324,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         if (!(parsedUri instanceof RepoUri.FileRepoUri fileRepoUri)) {
             return; // S3 mode handled by ensureConfigFilesInS3
         }
-        if (isCloud) {
+        if (isCloud()) {
             return; // SolrCloud BACKUP includes zk_backup automatically
         }
 
@@ -356,7 +394,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
 
         // Strategy 2: Schema API fallback (standalone cores where file handler may be disabled)
-        if (!isCloud && configFile.contains("schema")) {
+        if (!isCloud() && configFile.contains("schema")) {
             return fetchViaSchemaApi(solrUrl, collection);
         }
 
@@ -369,7 +407,8 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             : List.of(configFile);
 
         for (var fileName : variants) {
-            var url = solrUrl + "/solr/" + collection + "/admin/file?file=" + fileName + "&contentType=text/xml";
+            var url = solrUrl + contextPath + "/" + collection
+                + "/admin/file?file=" + fileName + "&contentType=text/xml";
             try {
                 var body = httpClient.getString(url, Duration.ofSeconds(30));
                 if (body != null && !body.isBlank()) {
@@ -386,7 +425,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     private String fetchViaSchemaApi(String solrUrl, String collection) {
-        var schemaUrl = solrUrl + "/solr/" + collection + "/schema?wt=schema.xml";
+        var schemaUrl = solrUrl + contextPath + "/" + collection + "/schema?wt=schema.xml";
         try {
             var body = httpClient.getString(schemaUrl, Duration.ofSeconds(30));
             if (body != null && !body.isBlank()) {
@@ -416,13 +455,43 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      * </ul>
      */
     private void runCreateMode(String solrUrl, String backupLocation, RepoUri parsedUri) {
-        log.info("CREATE mode: backing up {} collection(s) to {}", args.solrCollections.size(), backupLocation);
+        log.info("CREATE mode: backing up {} collection/core(s) to {}",
+            args.solrCollections.size(), backupLocation);
 
-        if (isCloud) {
-            runCloudBackup(solrUrl, backupLocation, parsedUri);
-        } else {
-            runStandaloneBackup(solrUrl, backupLocation, parsedUri);
+        // No detection request: attempt the Collections API BACKUP we'd have to issue anyway. A
+        // standalone Solr rejects it with "not running in SolrCloud mode", and that rejection is
+        // the signal to switch. Nothing is written before the rejection, so the fallback is clean.
+        if (cloudTopology == null || isCloud()) {
+            var explicitlyCloud = cloudTopology != null;
+            try {
+                runCloudBackup(solrUrl, backupLocation, parsedUri);
+                cloudTopology = Boolean.TRUE;
+                logResolvedTopology();
+                return;
+            } catch (SolrSnapshotCreator.SolrBackupFailed | SolrHttpClient.SolrRequestException e) {
+                // Standalone's rejection arrives as HTTP 400, so it lands on either type.
+                // Only a positive match redirects; auth and repo errors surface as-is.
+                if (explicitlyCloud || !isNotSolrCloudRejection(e.getMessage())) {
+                    throw e;
+                }
+                log.info("Source is not running in SolrCloud mode — using the standalone replication handler");
+            }
         }
+
+        cloudTopology = Boolean.FALSE;
+        logResolvedTopology();
+        ensureStandaloneConfigFiles(solrUrl, parsedUri);
+        runStandaloneBackup(solrUrl, backupLocation, parsedUri);
+    }
+
+    private void logResolvedTopology() {
+        log.info("Running SolrBackupStrategy: mode={}, topology={}",
+            mode, isCloud() ? "SolrCloud" : "standalone");
+    }
+
+    /** Solr's standalone rejection of the Collections API — the signal to use the replication handler. */
+    static boolean isNotSolrCloudRejection(String message) {
+        return message != null && message.toLowerCase(Locale.ROOT).contains("not running in solrcloud");
     }
 
     /**
@@ -442,17 +511,19 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      */
     @SuppressWarnings("java:S1172") // solrUrl reserved for future import validation against live cluster
     private void runImportMode(String solrUrl, RepoUri parsedUri) {
-        var backupLocation = parsedUri.rawUri();
         log.info("IMPORT mode: verifying snapshot location accessibility for {} collection(s) at {}",
-            args.solrCollections.size(), backupLocation);
+            args.solrCollections.size(), parsedUri.rawUri());
+        log.info("IMPORT mode complete: config files ensured, snapshot location verified at {}",
+            parsedUri.rawUri());
+    }
 
+    /** Fails fatally if the snapshot location is missing, empty, or unlistable. */
+    private void validateSnapshotAccessible(RepoUri parsedUri) {
         if (parsedUri instanceof RepoUri.S3RepoUri s3RepoUri) {
             validateS3SnapshotAccessible(s3RepoUri.s3Uri());
         } else if (parsedUri instanceof RepoUri.FileRepoUri fileRepoUri) {
             validateFileSystemSnapshotAccessible(fileRepoUri.path());
         }
-
-        log.info("IMPORT mode complete: config files ensured, snapshot location verified at {}", backupLocation);
     }
 
     /** Fails fatally in IMPORT mode if the S3 snapshot location is empty or cannot be listed. */
@@ -511,65 +582,322 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Collection resolution (shared across modes) ----
 
+    /**
+     * Resolves the collection/core list. {@code --solr-collections} skips this entirely; discovery
+     * is the only step needing an admin-read permission, as Solr offers no lighter way to enumerate.
+     */
     private void resolveCollections(String solrUrl) {
-        if (args.solrCollections.isEmpty()) {
-            try {
-                args.solrCollections = discoverCollections(solrUrl, httpClient);
-                log.info("Auto-discovered {} Solr {}: {}",
-                    args.solrCollections.size(),
-                    isCloud ? "collection(s)" : "core(s)",
-                    args.solrCollections);
-            } catch (Exception e) {
-                throw new ParameterException("Failed to discover Solr collections/cores: " + e.getMessage());
+        if (!args.solrCollections.isEmpty()) {
+            return;
+        }
+        try {
+            var discovered = discoverCollections(solrUrl, httpClient, cloudTopology, contextPath);
+            args.solrCollections = discovered.names();
+            if (cloudTopology == null && discovered.topology() != SolrTopology.UNKNOWN) {
+                cloudTopology = discovered.topology() == SolrTopology.SOLR_CLOUD;
             }
+        } catch (SolrTopologyDetectionException | ParameterException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ParameterException("Failed to discover Solr collections/cores: " + e.getMessage());
         }
 
         if (args.solrCollections.isEmpty()) {
-            throw new ParameterException(
-                isCloud
-                    ? "No Solr collections found. Specify --solr-collections explicitly."
-                    : "No Solr cores found. Specify --solr-collections with core names explicitly.");
+            throw new ParameterException("No Solr collections or cores found at " + solrUrl
+                + ". Specify --solr-collections explicitly.");
+        }
+        log.info("Auto-discovered {} Solr {}(s): {}",
+            args.solrCollections.size(), topologyLabel(), args.solrCollections);
+    }
+
+    /** Parses {@code --solr-topology}; null when unset, so inference proceeds. */
+    static Boolean parseTopologyOption(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        switch (value.trim().toLowerCase(Locale.ROOT)) {
+            case "cloud":
+                return Boolean.TRUE;
+            case "standalone":
+                return Boolean.FALSE;
+            default:
+                throw new ParameterException(
+                    "Invalid --solr-topology '" + value + "'. Valid values are 'cloud' and 'standalone'.");
+        }
+    }
+
+    /**
+     * Classifies an existing backup from its own layout, with no request to Solr — the same
+     * SolrCloud-only markers {@code SolrBackupLayout} uses when the snapshot is later read.
+     *
+     * @return TRUE for SolrCloud, FALSE for standalone, or null if the repo could not be inspected.
+     */
+    private Boolean inferTopologyFromArtifact(RepoUri parsedUri) {
+        try {
+            var names = parsedUri instanceof RepoUri.S3RepoUri s3RepoUri
+                ? listS3SnapshotEntryNames(s3RepoUri.s3Uri())
+                : listFilesystemSnapshotEntryNames(
+                    Paths.get(((RepoUri.FileRepoUri) parsedUri).path(), args.snapshotName));
+            if (names.stream().anyMatch(SolrBackupStrategy::hasCloudBackupMarker)) {
+                log.info("Inferred SolrCloud topology from the backup layout — no Solr request needed");
+                return Boolean.TRUE;
+            }
+            if (names.stream().anyMatch(SolrBackupStrategy::hasStandaloneBackupMarker)
+                || hasSiblingStandaloneIndex(parsedUri)) {
+                log.info("Inferred standalone topology from the backup layout — no Solr request needed");
+                return Boolean.FALSE;
+            }
+            // Neither marker present. The listing is capped and its order is unspecified, so this
+            // is "couldn't tell", not "not cloud"; the caller asks for --solr-topology.
+            log.info("Backup layout identified neither topology; --solr-topology is required");
+            return null;
+        } catch (Exception e) {
+            log.info("Could not read the backup layout to infer topology ({}); --solr-topology is required",
+                e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Markers sit one or two levels below the snapshot root, so every segment is checked.
+     * Excludes {@code zk_backup*}, which {@link #ensureStandaloneConfigFiles} also synthesizes.
+     */
+    static boolean hasCloudBackupMarker(String relativePath) {
+        for (var segment : relativePath.split("/")) {
+            if (segment.equals("shard_backup_metadata")
+                || (segment.startsWith("backup") && segment.endsWith(".properties"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** SolrCloud names its shard directories {@code snapshot.shard<N>}; standalone uses the backup name. */
+    private static final Pattern CLOUD_SHARD_SNAPSHOT = Pattern.compile("snapshot\\.shard\\d+");
+
+    /**
+     * Positive evidence of a standalone replication backup: a {@code snapshot.<backupName>/} index
+     * whose suffix is not one of SolrCloud's {@code snapshot.shard<N>} directories. A backup named
+     * "shardN" matches neither test and stays unknown, which is the safe outcome.
+     */
+    static boolean hasStandaloneBackupMarker(String relativePath) {
+        for (var segment : relativePath.split("/")) {
+            if (segment.startsWith("snapshot.") && !CLOUD_SHARD_SNAPSHOT.matcher(segment).matches()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The replication handler writes {@code snapshot.<name>/} beside the snapshot dir, not inside
+     * it. Probed by exact name so a sibling backup can't decide this snapshot's topology.
+     */
+    private boolean hasSiblingStandaloneIndex(RepoUri parsedUri) {
+        var sibling = "snapshot." + args.snapshotName;
+        if (parsedUri instanceof RepoUri.S3RepoUri s3RepoUri) {
+            var repoUri = s3RepoUri.s3Uri();
+            var prefix = computeParentPrefix(repoUri.key) + sibling + "/";
+            try (var s3Client = buildS3Client(args.s3Region, args.endpoint)) {
+                return !s3Client.listObjectsV2(
+                    software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+                        .bucket(repoUri.bucketName).prefix(prefix).maxKeys(1).build())
+                    .contents().isEmpty();
+            }
+        }
+        return Files.isDirectory(Paths.get(((RepoUri.FileRepoUri) parsedUri).path(), sibling));
+    }
+
+    /** Caps how much of the snapshot is listed when classifying it; markers appear near the top. */
+    private static final int TOPOLOGY_SCAN_LIMIT = 1000;
+
+    /** Snapshot-relative key paths under the S3 snapshot prefix, bounded by {@link #TOPOLOGY_SCAN_LIMIT}. */
+    private List<String> listS3SnapshotEntryNames(S3Uri repoUri) {
+        var snapshotPrefix = computeParentPrefix(repoUri.key) + args.snapshotName + "/";
+        try (var s3Client = buildS3Client(args.s3Region, args.endpoint)) {
+            var response = s3Client.listObjectsV2(
+                software.amazon.awssdk.services.s3.model.ListObjectsV2Request.builder()
+                    .bucket(repoUri.bucketName)
+                    .prefix(snapshotPrefix)
+                    .maxKeys(TOPOLOGY_SCAN_LIMIT)
+                    .build());
+            return response.contents().stream()
+                .map(o -> o.key().substring(snapshotPrefix.length()))
+                .collect(Collectors.toList());
+        }
+    }
+
+    /** Snapshot-relative paths under a filesystem snapshot dir, bounded by {@link #TOPOLOGY_SCAN_LIMIT}. */
+    private static List<String> listFilesystemSnapshotEntryNames(Path snapshotDir) throws IOException {
+        try (var paths = Files.walk(snapshotDir, 4)) {
+            return paths.filter(p -> !p.equals(snapshotDir))
+                .limit(TOPOLOGY_SCAN_LIMIT)
+                .map(p -> snapshotDir.relativize(p).toString())
+                .collect(Collectors.toList());
         }
     }
 
     // ---- Cloud vs standalone detection ----
 
-    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
+    public enum SolrTopology {
+        SOLR_CLOUD,
+        STANDALONE,
+        /** Reachable, but the response does not identify either topology. */
+        UNKNOWN
+    }
+
+    /** Appended to the context path; {@code /solr} is only the stock default. */
+    private static final String COLLECTIONS_ENDPOINT = "/admin/collections";
+    private static final String CORES_ENDPOINT = "/admin/cores";
+    /** Solr's predefined permission guarding {@link #COLLECTIONS_ENDPOINT}; collection discovery needs it too. */
+    private static final String COLLECTIONS_PERMISSION = "collection-admin-read";
+    /** Standalone's rejection reason, verbatim across Solr 6.6–9.8: "not running in SolrCloud mode". */
+    private static final String NOT_CLOUD_MARKER = "not running in solrcloud";
+    private static final int HTTP_OK = 200;
+    /** The status Solr returns when rejecting the Collections API on a standalone instance. */
+    private static final int HTTP_STANDALONE_REJECTION = 400;
+
+    /**
+     * Detect topology from the Collections API's response body. Uses the same endpoint as collection
+     * discovery so detection never needs a permission the migration doesn't already require.
+     */
+    static SolrTopology detectTopology(String solrUrl, SolrHttpClient httpClient, String contextPath) {
+        return classifyCollectionsResponse(fetchCollectionsList(solrUrl, httpClient, contextPath),
+            solrUrl, contextPath);
+    }
+
+    /** GETs {@code <contextPath>/admin/collections?action=LIST}; no response at all is fatal, not a guess. */
+    private static HttpResponse<String> fetchCollectionsList(String solrUrl, SolrHttpClient httpClient,
+            String contextPath) {
+        var listUrl = solrUrl + contextPath + COLLECTIONS_ENDPOINT + "?action=LIST&wt=json";
         try {
-            var response = httpClient.getRaw(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
-            return response.statusCode() == 200;
+            return httpClient.getRaw(listUrl, DETECTION_TIMEOUT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.info("SolrCloud detection interrupted, assuming standalone");
-            return false;
-        } catch (Exception e) {
-            log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
-            return false;
+            throw new SolrTopologyDetectionException(
+                "Interrupted while detecting Solr topology at " + solrUrl, e);
+        } catch (IOException e) {
+            throw new SolrTopologyDetectionException(
+                "Could not reach Solr at " + solrUrl + " to detect SolrCloud vs standalone topology: "
+                    + e.getMessage(), e);
         }
+    }
+
+    /** Classifies a Collections API LIST response. Auth failures throw — they say nothing about topology. */
+    private static SolrTopology classifyCollectionsResponse(HttpResponse<String> response, String solrUrl,
+            String contextPath) {
+        int status = response.statusCode();
+        if (status == 401) {
+            throw new SolrTopologyDetectionException(
+                "Solr authentication failed (HTTP 401) while detecting topology at " + solrUrl
+                    + "; cannot determine SolrCloud vs standalone. Check the source credentials.");
+        }
+        if (status == 403) {
+            // Authenticated but not permitted: name the permission so the failure is self-diagnosing.
+            throw new SolrTopologyDetectionException(
+                "Solr authorization failed (HTTP 403) while detecting topology at " + solrUrl
+                    + "; cannot determine SolrCloud vs standalone. Reading " + contextPath + COLLECTIONS_ENDPOINT
+                    + " requires the '" + COLLECTIONS_PERMISSION + "' permission — grant it to the source user.");
+        }
+
+        var body = parseOrNull(response.body());
+        if (body != null) {
+            // Status and body must agree. A collections array inside a 5xx (cached, proxied, or
+            // wrapped response) is not SolrCloud answering LIST, and must not be read as one.
+            if (status == HTTP_OK && body.path("collections").isArray()) {
+                return SolrTopology.SOLR_CLOUD;
+            }
+            if (status == HTTP_STANDALONE_REJECTION
+                && body.path("error").path("msg").asText("").toLowerCase(Locale.ROOT).contains(NOT_CLOUD_MARKER)) {
+                return SolrTopology.STANDALONE;
+            }
+        }
+        // Reachable but uninformative (proxy error page, 5xx, unrecognized body): do not assume standalone.
+        log.atInfo().setMessage("Solr topology detection: HTTP {} from {} did not identify a topology")
+            .addArgument(status).addArgument(solrUrl).log();
+        return SolrTopology.UNKNOWN;
+    }
+
+    private static JsonNode parseOrNull(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            return MAPPER.readTree(body);
+        } catch (JsonProcessingException e) {
+            log.atInfo().setMessage("Could not parse Solr Collections API response: {}")
+                .addArgument(e.getMessage()).log();
+            return null;
+        }
+    }
+
+    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient, String contextPath) {
+        var topology = detectTopology(solrUrl, httpClient, contextPath);
+        if (topology == SolrTopology.UNKNOWN) {
+            throw new SolrTopologyDetectionException(
+                "Could not determine SolrCloud vs standalone topology at " + solrUrl
+                    + "; the Collections API response identified neither SolrCloud nor standalone");
+        }
+        return topology == SolrTopology.SOLR_CLOUD;
     }
 
     // ---- Collection / core discovery ----
 
-    static List<String> discoverCollections(String solrUrl, SolrHttpClient httpClient) throws IOException {
-        // Try SolrCloud Collections API first
-        try {
-            var json = httpClient.getString(
-                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(10));
-            var node = MAPPER.readTree(json).path("collections");
-            var collections = new ArrayList<String>();
-            if (node.isArray()) {
-                node.forEach(n -> collections.add(n.asText()));
-            }
-            if (!collections.isEmpty()) return collections;
-        } catch (Exception e) {
-            log.debug("Collections API failed, trying Core Admin: {}", e.getMessage());
+    /** Discovered names plus whatever the request revealed about topology. */
+    record Discovery(List<String> names, SolrTopology topology) {}
+
+    /**
+     * Discovers collections/cores and classifies the topology from the same request.
+     *
+     * @param knownTopology established topology, or null. Standalone skips the Collections API.
+     */
+    static Discovery discoverCollections(String solrUrl, SolrHttpClient httpClient, Boolean knownTopology,
+            String contextPath) throws IOException {
+        if (Boolean.FALSE.equals(knownTopology)) {
+            return discoverFromCores(solrUrl, httpClient, SolrTopology.STANDALONE, contextPath);
         }
-        // Fall back to Core Admin API (standalone)
-        var json = httpClient.getString(
-            solrUrl + "/solr/admin/cores?action=STATUS&wt=json", Duration.ofSeconds(10));
-        return objectFieldKeys(MAPPER.readTree(json), "status");
+
+        var response = fetchCollectionsList(solrUrl, httpClient, contextPath);
+        var topology = classifyCollectionsResponse(response, solrUrl, contextPath);
+
+        if (topology == SolrTopology.SOLR_CLOUD) {
+            return new Discovery(collectionNames(response.body()), SolrTopology.SOLR_CLOUD);
+        }
+        if (Boolean.TRUE.equals(knownTopology)) {
+            throw new ParameterException("Could not list SolrCloud collections at " + solrUrl
+                + ". Specify --solr-collections explicitly.");
+        }
+        if (topology != SolrTopology.STANDALONE) {
+            // Ambiguous. A SolrCloud node answers Core Admin STATUS with replica core names, so
+            // mining it here would migrate those as if they were collections.
+            throw new SolrTopologyDetectionException(
+                "Could not determine SolrCloud vs standalone topology at " + solrUrl
+                    + "; the Collections API response identified neither SolrCloud nor standalone");
+        }
+        return discoverFromCores(solrUrl, httpClient, SolrTopology.STANDALONE, contextPath);
     }
+
+    /**
+     * Discovers core names. Only reached when the topology is already known to be standalone, so a
+     * denied Collections API never redirects a SolrCloud source here — that misclassification is
+     * what silently corrupts a snapshot.
+     */
+    private static Discovery discoverFromCores(String solrUrl, SolrHttpClient httpClient,
+            SolrTopology topology, String contextPath) throws IOException {
+        var json = httpClient.getString(
+            solrUrl + contextPath + CORES_ENDPOINT + "?action=STATUS&wt=json", Duration.ofSeconds(10));
+        return new Discovery(objectFieldKeys(MAPPER.readTree(json), "status"), topology);
+    }
+
+    private static List<String> collectionNames(String body) {
+        var names = new ArrayList<String>();
+        var node = parseOrNull(body);
+        if (node != null && node.path("collections").isArray()) {
+            node.path("collections").forEach(n -> names.add(n.asText()));
+        }
+        return names;
+    }
+
 
     private static List<String> objectFieldKeys(JsonNode root, String fieldName) {
         var result = new ArrayList<String>();
@@ -601,7 +929,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, connectionContext, args.snapshotRepoName
+            args.solrCollections, connectionContext, args.snapshotRepoName, contextPath
         );
         creator.registerRepo();
         creator.createSnapshot();
@@ -629,7 +957,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, connectionContext, repositoryName
+            args.solrCollections, connectionContext, repositoryName, contextPath
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);

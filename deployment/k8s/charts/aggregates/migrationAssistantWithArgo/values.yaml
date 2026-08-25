@@ -170,7 +170,7 @@ extraOtelConfiguration:
       - xray
 
 # Shared OTEL collector image used by the metrics and trace collectors.
-otelCollectorImage: "public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
+otelCollectorImage: "public.ecr.aws/aws-observability/aws-otel-collector:v0.49.0"
 
 # For OTEL Operator
 otelConfiguration:
@@ -435,7 +435,7 @@ charts:
           enabled: false # default
         collectorImage:
           repository: "public.ecr.aws/aws-observability/aws-otel-collector"
-          tag: "0.43.2"
+          tag: "v0.49.0"
 
 
   strimzi-kafka-operator:

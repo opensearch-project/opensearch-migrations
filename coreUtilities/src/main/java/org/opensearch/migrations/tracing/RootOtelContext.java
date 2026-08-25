@@ -22,7 +22,7 @@ import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
-import io.opentelemetry.semconv.ResourceAttributes;
+import io.opentelemetry.semconv.ServiceAttributes;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -55,8 +55,8 @@ public class RootOtelContext implements IRootOtelContext {
                 SdkTracerProvider.builder()
                     .setResource(Resource.getDefault()
                         .toBuilder()
-                        .put(ResourceAttributes.SERVICE_NAME, serviceName)
-                        .put(ResourceAttributes.SERVICE_INSTANCE_ID, nodeName)
+                        .put(ServiceAttributes.SERVICE_NAME, serviceName)
+                        .put(ServiceAttributes.SERVICE_INSTANCE_ID, nodeName)
                         .build())
                     .addSpanProcessor(spanProcessor)
                     .build()
@@ -79,7 +79,7 @@ public class RootOtelContext implements IRootOtelContext {
                 SdkMeterProvider.builder()
                     .setResource(Resource.getDefault()
                         .toBuilder()
-                        .put(ResourceAttributes.SERVICE_NAME, serviceName)
+                        .put(ServiceAttributes.SERVICE_NAME, serviceName)
                         .build())
                     .registerMetricReader(metricReader).build()
             );

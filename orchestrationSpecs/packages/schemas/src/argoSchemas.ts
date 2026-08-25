@@ -10,6 +10,7 @@ import {
     REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
     SOLR_COLLECTIONS_OPTION,
+    SOLR_TOPOLOGY_OPTION,
     SOURCE_CLUSTER_CONFIG,
     TARGET_CLUSTER_CONFIG,
     USER_CREATE_SNAPSHOT_OPTIONS,
@@ -159,6 +160,8 @@ export const CLUSTER_CONNECTION_IDENTITY = z.object({
     version: z.string(),
     endpoint: z.string(),
     allowInsecure: z.boolean(),
+    // Solr sources only; "" elsewhere.
+    solrContextPath: z.string(),
     authType: z.string(),
     authBasicSecretName: z.string(),
     authSigv4Region: z.string(),
@@ -185,6 +188,8 @@ export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
         // than in USER_CREATE_SNAPSHOT_OPTIONS so the user-facing ES/OS snapshot schema does not
         // expose a Solr-only field (ES/OS users use indexAllowlist; Solr users use collectionAllowlist).
         solrCollections: SOLR_COLLECTIONS_OPTION.changeRestriction('impossible'),
+        // Solr-only, folded in by the config transformer from the user-facing `topology`.
+        solrTopology: SOLR_TOPOLOGY_OPTION.changeRestriction('impossible'),
     })
 );
 export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = [

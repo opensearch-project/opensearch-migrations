@@ -33,6 +33,7 @@ type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
+    topology?: "cloud" | "standalone";
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;
@@ -619,6 +620,7 @@ function normalizeSnapshotInfo(
                     } = backup;
                     const {
                         collectionAllowlist,
+                        topology,
                         ...createBackupOptions
                     } = createBackupConfig;
                     const normalizedCollectionAllowlist = collectionAllowlist ?? [];
@@ -630,10 +632,12 @@ function normalizeSnapshotInfo(
                                 createSnapshotConfig: {
                                     ...createBackupOptions,
                                     solrCollections: normalizedCollectionAllowlist,
+                                    ...(topology ? {solrTopology: topology} : {}),
                                 },
                             },
                             solrBackupConfig: {
                                 collectionAllowlist: normalizedCollectionAllowlist,
+                                ...(topology ? {topology} : {}),
                             },
                         },
                     ];
@@ -797,11 +801,13 @@ function solrCreateSnapshotConfigForBackup(snapshotDef: NormalizedSnapshotDefini
     const {
         externalBackupName: _externalBackupName,
         collectionAllowlist,
+        topology,
         ...runtimeOptions
     } = snapshotDef.solrBackupConfig;
     return {
         ...runtimeOptions,
         solrCollections: collectionAllowlist,
+        ...(topology ? {solrTopology: topology} : {}),
     };
 }
 
@@ -892,17 +898,19 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const proxiesWithChecksums = proxies.map(p => {
             const kafkaChecksum = kafkaChecksums.get(p.kafkaConfig.label) ?? '';
             const kafkaIdentity = MigrationConfigTransformer.kafkaClientIdentity(p.kafkaConfig as Record<string, unknown>);
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(p.sourceConnectionIdentity);
             const topicConfigChecksum = cs(
                 kafkaIdentity,
                 p.kafkaConfig.kafkaTopic,
                 p.kafkaConfig.topicSpecOverrides,
                 kafkaChecksum
             );
-            const sourceConnectionIdentityChecksum = cs(p.sourceConnectionIdentity);
+            const sourceConnectionIdentityChecksum = cs(sourceConnectionIdentityWithoutAuth);
             return {
                 ...p,
                 kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksum },
-                configChecksum: cs(p.sourceConnectionIdentity, p.proxyConfig, topicConfigChecksum),
+                configChecksum: cs(sourceConnectionIdentityWithoutAuth, p.proxyConfig, topicConfigChecksum),
                 topicConfigChecksum,
                 checksumForSnapshot: csDep(
                     PROXY_SCHEMA,
@@ -981,7 +989,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
             const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
-            const sourceConnectionIdentity = m.sourceConnectionIdentity;
+            const sourceConnectionIdentityWithoutAuth =
+                MigrationConfigTransformer.clusterConnectionIdentityWithoutAuth(m.sourceConnectionIdentity);
             const targetConnectionIdentity = m.targetConnectionIdentity;
             const snapshotRepoIdentity = MigrationConfigTransformer.repoIdentity(
                 (m.snapshotConfig.repoConfig ?? {}) as Record<string, unknown>
@@ -1001,7 +1010,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 snapshotConfigChecksum,
                 resourceName: crdName(m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel),
                 configChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     m.metadataMigrationConfig,
                     m.documentBackfillConfig,
                     targetConnectionIdentity,
@@ -1011,7 +1020,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 ),
                 checksumForReplayer: cs(targetConnectionIdentity, replayerMaterialPart),
                 workloadIdentityChecksum: cs(
-                    sourceConnectionIdentity,
+                    sourceConnectionIdentityWithoutAuth,
                     targetConnectionIdentity,
                     m.snapshotNameResolution,
                     snapshotRepoIdentity,
@@ -1547,7 +1556,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             version: clusterConfig.version ?? "",
             endpoint: clusterConfig.endpoint ?? "",
             allowInsecure: clusterConfig.allowInsecure ?? false,
+            solrContextPath: clusterConfig.solrContextPath ?? "",
             ...authIdentity,
+        };
+    }
+
+    static clusterConnectionIdentityWithoutAuth(
+        connectionIdentity: Record<string, unknown>
+    ): Record<string, unknown> {
+        // Preserve the legacy no-auth hash shape so existing proxies do not redeploy
+        // once when source auth is removed from their deployment contract.
+        return {
+            label: connectionIdentity.label ?? "",
+            version: connectionIdentity.version ?? "",
+            endpoint: connectionIdentity.endpoint ?? "",
+            allowInsecure: connectionIdentity.allowInsecure ?? false,
+            solrContextPath: connectionIdentity.solrContextPath ?? "",
+            authType: "none",
+            authBasicSecretName: "",
+            authSigv4Region: "",
+            authSigv4Service: "",
+            authMtlsClientSecretName: "",
+            authMtlsCaCertHash: "",
         };
     }
 

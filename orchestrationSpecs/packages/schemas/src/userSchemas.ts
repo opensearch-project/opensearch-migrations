@@ -793,8 +793,26 @@ export const SOLR_COLLECTIONS_OPTION = z.array(z.string()).default([]).optional(
         "transformer from the user-facing collectionAllowlist. When empty, CreateSnapshot auto-discovers all " +
         "live Solr collections/cores. Not user-configurable.");
 
+// A source-connection property, like endpoint — not a per-backup option.
+// The refinement mirrors SolrContextPath.normalize (Java) and normalize_solr_context_path (console),
+// so a value any of the three would reject is caught here first.
+export const SOLR_CONTEXT_PATH_OPTION = z.string()
+    .refine(v => !v.includes("://") && !v.includes("?") && !v.includes("#"),
+        "solrContextPath must be a path such as '/solr' (or empty when Solr is served at the root), " +
+        "not a URL or query string")
+    .default("/solr").optional()
+    .describe("The path Solr's APIs are served under, appended to this cluster's endpoint when building Solr " +
+        "URLs. Defaults to '/solr'. Set this when Solr runs with a custom solr.contextPath or sits behind a " +
+        "reverse proxy that rewrites the prefix; use an empty string when Solr is served at the root of the " +
+        "host. Only valid on Solr sources.");
+
 const SOLR_COLLECTION_ALLOWLIST = z.array(z.string()).default([]).optional()
     .describe("Solr collection/core names included in this backup. When omitted, the workflow discovers and validates all available Solr collections/cores.");
+
+export const SOLR_TOPOLOGY_OPTION = z.enum(["cloud", "standalone"]).optional()
+    .describe("Whether the source Solr runs as SolrCloud or standalone. Usually inferred, but required for an " +
+        "externally-managed backup whose layout identifies neither, which is the common case since the schema is " +
+        "staged into the backup while preparing it. Supplying it also skips inference on a restricted source.");
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
@@ -1384,6 +1402,7 @@ export const ELASTICSEARCH_SNAPSHOT_INFO = z.object({
 
 const SOLR_BACKUP_PROCESS_OPTIONS = {
     collectionAllowlist: SOLR_COLLECTION_ALLOWLIST,
+    topology: SOLR_TOPOLOGY_OPTION,
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     jvmArgs: z.string().default("").optional()
@@ -1503,6 +1522,7 @@ const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
+    solrContextPath: SOLR_CONTEXT_PATH_OPTION,
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Source-specific snapshot or backup configuration for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
@@ -1510,6 +1530,16 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     const repos = snapshotInfoRepoNames(data.snapshotInfo);
     const snapshots = snapshotInfoEntries(data.snapshotInfo);
     const snapshotInfoItemKey = snapshotVariant?.itemKey ?? "snapshots";
+
+    // Compared against the default, not checked for presence: the field is defaulted, so an unset
+    // ES/OS source is indistinguishable here from one that set "/solr".
+    if (data.solrContextPath !== undefined && data.solrContextPath !== "/solr" && !isSolrVersion(data.version)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `solrContextPath is only supported for Solr sources, but source version is '${data.version ?? "<unset>"}'`,
+            path: ['solrContextPath']
+        });
+    }
     if (data.snapshotInfo && snapshotVariant && !snapshotVariant.matchesSourceVersion(data.version)) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,

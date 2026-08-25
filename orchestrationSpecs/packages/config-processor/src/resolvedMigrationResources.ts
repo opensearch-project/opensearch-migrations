@@ -160,19 +160,21 @@ function prefixedKey(prefix: string, field: string): string {
 function connectionIdentityParameters(
     prefix: string,
     identity: Record<string, unknown>,
-    options: {includeVersion?: boolean} = {},
+    options: {includeVersion?: boolean; includeAuth?: boolean} = {},
 ): Record<string, unknown> {
     return {
         [prefixedKey(prefix, "label")]: identity.label,
         ...(options.includeVersion === false ? {} : {[prefixedKey(prefix, "version")]: identity.version}),
         [prefixedKey(prefix, "endpoint")]: identity.endpoint,
         [prefixedKey(prefix, "allowInsecure")]: identity.allowInsecure,
-        [prefixedKey(prefix, "authType")]: identity.authType,
-        [prefixedKey(prefix, "authBasicSecretName")]: identity.authBasicSecretName,
-        [prefixedKey(prefix, "authSigv4Region")]: identity.authSigv4Region,
-        [prefixedKey(prefix, "authSigv4Service")]: identity.authSigv4Service,
-        [prefixedKey(prefix, "authMtlsClientSecretName")]: identity.authMtlsClientSecretName,
-        [prefixedKey(prefix, "authMtlsCaCertHash")]: identity.authMtlsCaCertHash,
+        ...(options.includeAuth === false ? {} : {
+            [prefixedKey(prefix, "authType")]: identity.authType,
+            [prefixedKey(prefix, "authBasicSecretName")]: identity.authBasicSecretName,
+            [prefixedKey(prefix, "authSigv4Region")]: identity.authSigv4Region,
+            [prefixedKey(prefix, "authSigv4Service")]: identity.authSigv4Service,
+            [prefixedKey(prefix, "authMtlsClientSecretName")]: identity.authMtlsClientSecretName,
+            [prefixedKey(prefix, "authMtlsCaCertHash")]: identity.authMtlsCaCertHash,
+        }),
     };
 }
 
@@ -358,7 +360,7 @@ function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
         ...connectionIdentityParameters(
             "source",
             proxy.sourceConnectionIdentity as Record<string, unknown>,
-            {includeVersion: true}
+            {includeVersion: true, includeAuth: false}
         ),
         serviceType: proxy.proxyConfig.serviceType,
         ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
@@ -380,6 +382,7 @@ function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknow
     const repo = item.repo;
     return {
         ...connectionIdentityParameters("source", sourceIdentity, {includeVersion: true}),
+        sourceSolrContextPath: sourceIdentity.solrContextPath ?? "",
         snapshotLabel: item.label,
         repoName: repo.repoName,
         repoPathUri: repo.repoPathUri,
@@ -418,7 +421,7 @@ function snapshotMigrationParameters(migration: SnapshotMigrationConfig): Record
         ...connectionIdentityParameters(
             "source",
             migration.sourceConnectionIdentity as Record<string, unknown>,
-            {includeVersion: true}
+            {includeVersion: true, includeAuth: false}
         ),
         ...connectionIdentityParameters(
             "target",

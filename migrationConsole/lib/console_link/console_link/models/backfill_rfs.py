@@ -465,6 +465,8 @@ def get_detailed_status_obj(target_cluster: Cluster,
 
 def compute_dervived_values(target_cluster, index_to_check, total, completed, started_epoch, active_workers: bool,
                             has_failed_documents: Optional[bool] = None):
+    """``has_failed_documents`` is None only when the stream was not configured, so never
+    consulted; an unreadable stream raises upstream rather than arriving here as None."""
     # Consider it completed if there's nothing to do (total = 0) or we've completed all shards
     if total == 0 or (total > 0 and completed >= total):
         max_completed_epoch = _get_max_completed_epoch(target_cluster, index_to_check)
@@ -475,8 +477,8 @@ def compute_dervived_values(target_cluster, index_to_check, total, completed, st
         )
         percentage_completed = 100.0
         eta_ms = None
-        # Failed documents -> CompletedWithErrors.
-        status = (StepStateWithPause.COMPLETED_WITH_ERRORS if has_failed_documents
+        # Only a definite True downgrades to CompletedWithErrors; None means not consulted.
+        status = (StepStateWithPause.COMPLETED_WITH_ERRORS if has_failed_documents is True
                   else StepStateWithPause.COMPLETED)
     else:
         finished_iso = None
