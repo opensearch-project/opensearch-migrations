@@ -10,6 +10,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   ChevronsDown,
@@ -53,8 +54,10 @@ import {
 
 interface ConfigEditorProps {
   initialTargetId?: string | null;
+  navigationBackLabel?: string | null;
   onClose: () => void;
   onExitReady: (handler: (() => void) | null) => void;
+  onNavigateBack?: () => void;
   onResourceAddStarted: (addition: PendingResourceAddition) => void;
   onResourceAddSettled: (
     addition: PendingResourceAddition,
@@ -1426,8 +1429,10 @@ function ConfigPropertyRow({
 
 export function ConfigEditor({
   initialTargetId,
+  navigationBackLabel,
   onClose,
   onExitReady,
+  onNavigateBack,
   onResourceAddStarted,
   onResourceAddSettled,
   onResourceRenameStarted,
@@ -2355,6 +2360,17 @@ export function ConfigEditor({
       className="workspace config-editor"
     >
       <header className="config-toolbar">
+        {navigationBackLabel && onNavigateBack ? (
+          <button
+            aria-label={`Back to ${navigationBackLabel}`}
+            className="navigation-back-button"
+            onClick={onNavigateBack}
+            title={`Back to ${navigationBackLabel}`}
+            type="button"
+          >
+            <ArrowLeft aria-hidden="true" />
+          </button>
+        ) : null}
         <div className="config-toolbar-title">
           <span>Editing configuration</span>
           <h2>Edit {resourceLabel}</h2>

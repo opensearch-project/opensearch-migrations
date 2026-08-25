@@ -1341,8 +1341,28 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.fromCapturedTraffic")?.inputHint).toMatchObject({
             kind: "reference",
             sourcePaths: [["traffic", "proxies"], ["traffic", "s3Sources"]],
-            options: [{label: "archive", value: "archive"}, {label: "capture", value: "capture"}],
+            options: [
+                {
+                    label: "archive",
+                    value: "archive",
+                    editTargetId: "edit:traffic.s3Sources.archive",
+                },
+                {
+                    label: "capture",
+                    value: "capture",
+                    editTargetId: "edit:traffic.proxies.capture",
+                },
+            ],
         });
+        const capturedTrafficHint = findNode(
+            state.nodes,
+            "edit:traffic.replayers.replay.fromCapturedTraffic",
+        )?.inputHint;
+        expect(capturedTrafficHint?.kind).toBe("reference");
+        if (capturedTrafficHint?.kind !== "reference") {
+            throw new Error("Expected a captured-traffic reference hint");
+        }
+        expect(capturedTrafficHint.allowCustom).not.toBe(true);
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.toTarget")?.inputHint).toMatchObject({
             kind: "reference",
             sourcePath: ["targetClusters"],
@@ -2538,6 +2558,46 @@ describe("editConfig state", () => {
         expect(traffic?.status).toBe("ok");
         expect(replayGroup?.status).toBe("ok");
         expect(addReplay?.status).toBe("ok");
+    });
+
+    it("renders schema-backed settings after adding a named replayer", () => {
+        const result = applyEditOperationToObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            traffic: {
+                proxies: {
+                    capture: {source: "source", proxyConfig: {}},
+                },
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "add",
+            path: ["traffic", "replayers"],
+            value: {name: "replay"},
+        });
+        const config = parse(result.yaml);
+
+        expect(config.traffic.replayers.replay).toEqual({
+            fromCapturedTraffic: "",
+            toTarget: "",
+        });
+        expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay.fromCapturedTraffic"))
+            .toMatchObject({status: "required"});
+        expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay.toTarget"))
+            .toMatchObject({status: "required"});
+        expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay.replayerConfig.speedupFactor"))
+            .toMatchObject({
+                valueKind: "scalar",
+                valueDefaulted: true,
+            });
     });
 
     it("renders proxy TLS existingSecret with an external Secret reference", () => {

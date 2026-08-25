@@ -1577,6 +1577,37 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+.workspace-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.navigation-back-button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.navigation-back-button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+}
+
+.navigation-back-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .resource-kind {
   color: var(--accent);
   font-size: 10px;

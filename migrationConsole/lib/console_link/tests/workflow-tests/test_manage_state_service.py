@@ -339,6 +339,51 @@ def test_edit_capability_targets_the_config_processor_branch_from_provenance():
     )
 
 
+def test_capture_proxy_nested_provenance_still_targets_the_owning_config():
+    snapshots = {
+        "pending": {
+            "resources": [{
+                "kind": "CaptureProxy",
+                "name": "p2",
+                "parameters": {
+                    "listenPort": 9201,
+                    "serviceType": "ClusterIP",
+                },
+                "parameterProvenance": {
+                    "listenPort": {
+                        "presence": "authored",
+                        "sourcePath": [
+                            "traffic",
+                            "proxies",
+                            "p2",
+                            "proxyConfig",
+                            "listenPort",
+                        ],
+                    },
+                    "serviceType": {
+                        "presence": "authored",
+                        "sourcePath": [
+                            "traffic",
+                            "proxies",
+                            "p2",
+                            "proxyConfig",
+                            "serviceType",
+                        ],
+                    },
+                },
+            }],
+        },
+        "pending_console": {},
+    }
+
+    snapshot = _service({}, snapshots=snapshots).observe()
+
+    resource = _node(snapshot, "captureproxies:p2")
+    assert _capabilities(resource)["edit"].target_id == (
+        "edit:traffic.proxies.p2"
+    )
+
+
 def test_incomplete_capture_proxy_uses_its_config_collection_as_edit_fallback():
     snapshots = {
         "pending": {

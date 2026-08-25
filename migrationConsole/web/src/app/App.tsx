@@ -71,6 +71,12 @@ interface EditContext {
 }
 
 
+interface LinkedNavigationEntry {
+  nodeId: string;
+  editTargetId: string | null;
+}
+
+
 interface SubmissionSignals {
   pendingConfiguration: boolean;
   missingResourceCount: number;
@@ -227,6 +233,8 @@ export function App() {
     ),
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [linkedNavigation, setLinkedNavigation] =
+    useState<LinkedNavigationEntry[]>([]);
   const [treeOpen, setTreeOpen] = useState(false);
   const [resourceViewMode, setResourceViewMode] =
     useState<ResourceViewMode>("all");
@@ -373,9 +381,11 @@ export function App() {
     setSelectedId((current) => (
       current && displayedState.nodes[current]
         ? current
-        : firstSelectableId(displayedState)
+        : editContext
+          ? null
+          : firstSelectableId(displayedState)
     ));
-  }, [displayedState]);
+  }, [displayedState, editContext]);
 
   const selectedNode = useMemo(
     () => (
@@ -501,6 +511,7 @@ export function App() {
   const resourceAddStarted = useCallback((
     addition: PendingResourceAddition,
   ) => {
+    setLinkedNavigation([]);
     setPendingResourceAdditions((current) => [
       ...current.filter((candidate) => candidate.id !== addition.id),
       addition,
@@ -546,6 +557,7 @@ export function App() {
   const resourceRenameStarted = useCallback((
     rename: PendingResourceRename,
   ) => {
+    setLinkedNavigation([]);
     setPendingResourceRenames((current) => [
       ...current.filter((candidate) => candidate.oldId !== rename.oldId),
       rename,
@@ -627,17 +639,19 @@ export function App() {
     );
     const node = resourceId ? state.data.nodes[resourceId] : null;
     const targetId = node ? editTarget(node) : null;
+    setLinkedNavigation([]);
+    setSelectedId(targetId && node ? node.id : null);
     setEditContext({
       resourceId: targetId && node ? node.id : "",
       targetId: targetId ?? "edit:workflowConfiguration",
     });
   };
-  const selectNode = (nodeId: string) => {
+  const applyNodeSelection = (nodeId: string) => {
     const node = displayedState?.nodes[nodeId];
-    if (!node) return;
+    if (!node) return false;
     if (editContext) {
       const targetId = editTarget(node);
-      if (!targetId) return;
+      if (!targetId) return false;
       setEditContext({
         resourceId: nodeId,
         targetId,
@@ -645,18 +659,78 @@ export function App() {
     }
     setSelectedId(nodeId);
     setTreeOpen(false);
+    return true;
+  };
+  const selectNode = (nodeId: string) => {
+    if (nodeId === selectedId) return;
+    setLinkedNavigation([]);
+    applyNodeSelection(nodeId);
+  };
+  const rememberLinkedOrigin = () => {
+    if (!selectedId || !displayedState?.nodes[selectedId]) return;
+    const entry: LinkedNavigationEntry = {
+      nodeId: selectedId,
+      editTargetId: editContext?.targetId ?? null,
+    };
+    setLinkedNavigation((current) => {
+      const previous = current.at(-1);
+      return (
+        previous?.nodeId === entry.nodeId
+        && previous.editTargetId === entry.editTargetId
+      )
+        ? current
+        : [...current, entry];
+    });
+  };
+  const navigateLinkedNode = (nodeId: string) => {
+    if (nodeId === selectedId || !displayedState?.nodes[nodeId]) return;
+    rememberLinkedOrigin();
+    applyNodeSelection(nodeId);
   };
   const navigateEditTarget = (targetId: string) => {
     const navigation = resourceNavigationState ?? displayedState;
     const node = Object.values(navigation?.nodes ?? {}).find(
       (candidate) => editTarget(candidate) === targetId,
     );
-    if (!node) return;
+    if (!node || node.id === selectedId) return;
+    rememberLinkedOrigin();
     setSelectedId(node.id);
     setEditContext({
       resourceId: node.id,
       targetId,
     });
+    setTreeOpen(false);
+  };
+  let linkedBackIndex = -1;
+  for (let index = linkedNavigation.length - 1; index >= 0; index -= 1) {
+    const entry = linkedNavigation[index];
+    const node = displayedState?.nodes[entry.nodeId];
+    if (
+      node
+      && Boolean(entry.editTargetId) === Boolean(editContext)
+    ) {
+      linkedBackIndex = index;
+      break;
+    }
+  }
+  const linkedBackEntry = linkedBackIndex >= 0
+    ? linkedNavigation[linkedBackIndex]
+    : null;
+  const linkedBackLabel = linkedBackEntry
+    ? displayedState?.nodes[linkedBackEntry.nodeId]?.label ?? null
+    : null;
+  const navigateLinkedBack = () => {
+    if (!linkedBackEntry) return;
+    const node = displayedState?.nodes[linkedBackEntry.nodeId];
+    if (!node) return;
+    setLinkedNavigation(linkedNavigation.slice(0, linkedBackIndex));
+    setSelectedId(node.id);
+    if (linkedBackEntry.editTargetId) {
+      setEditContext({
+        resourceId: node.id,
+        targetId: linkedBackEntry.editTargetId,
+      });
+    }
     setTreeOpen(false);
   };
   const editApprovalResource = (candidate: ApprovalCandidate) => {
@@ -665,6 +739,7 @@ export function App() {
       node ? editTarget(node) : null
     );
     if (!node || !targetId) return;
+    setLinkedNavigation([]);
     setApprovalDialogTargetId(null);
     setSelectedId(node.id);
     setEditContext({
@@ -756,7 +831,10 @@ export function App() {
             onClick={() => {
               if (editContext) {
                 if (editExitRef.current) editExitRef.current();
-                else setEditContext(null);
+                else {
+                  setLinkedNavigation([]);
+                  setEditContext(null);
+                }
               } else {
                 startEditing();
               }
@@ -1008,8 +1086,13 @@ export function App() {
               {editContext ? (
                 <ConfigEditor
                   initialTargetId={editContext.targetId}
-                  onClose={() => setEditContext(null)}
+                  navigationBackLabel={linkedBackLabel}
+                  onClose={() => {
+                    setLinkedNavigation([]);
+                    setEditContext(null);
+                  }}
                   onExitReady={registerEditExit}
+                  onNavigateBack={navigateLinkedBack}
                   onResourceAddSettled={resourceAddSettled}
                   onResourceAddStarted={resourceAddStarted}
                   onResourceRenameSettled={resourceRenameSettled}
@@ -1017,6 +1100,7 @@ export function App() {
                   onResourceAddsReady={registerResourceAdds}
                   onNavigateEditTarget={navigateEditTarget}
                   onSubmitted={() => {
+                    setLinkedNavigation([]);
                     setEditContext(null);
                     void queryClient.invalidateQueries({
                       queryKey: ["operations"],
@@ -1038,10 +1122,12 @@ export function App() {
                 />
               ) : selectedNode ? (
                 <ResourceWorkspace
+                  navigationBackLabel={linkedBackLabel}
                   node={selectedNode}
                   onEdit={startEditing}
+                  onNavigateBack={navigateLinkedBack}
                   onRequestApproval={setApprovalDialogTargetId}
-                  onSelect={selectNode}
+                  onSelect={navigateLinkedNode}
                   resetInProgress={resetTargetIds.has(selectedNode.id)}
                 />
               ) : (

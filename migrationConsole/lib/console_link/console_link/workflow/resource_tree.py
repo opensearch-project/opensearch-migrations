@@ -336,6 +336,7 @@ def _config_edit_target_id(
     *resources: Optional[Dict[str, Any]],
 ) -> Optional[str]:
     """Find the owning edit branch from config-processor parameter provenance."""
+    fallback = _resource_config_path(plural, resource_name)
     for resource in resources:
         provenance = (resource or {}).get("parameterProvenance") or {}
         paths = [
@@ -358,8 +359,9 @@ def _config_edit_target_id(
         else:
             prefix = _common_path_prefix(ranked[0])
         if prefix:
+            if fallback and prefix[:len(fallback)] == fallback:
+                prefix = fallback
             return f"edit:{'.'.join(prefix)}"
-    fallback = _resource_config_path(plural, resource_name)
     return f"edit:{'.'.join(fallback)}" if fallback else None
 
 

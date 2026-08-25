@@ -707,6 +707,22 @@ test("shows navigable upstream and downstream runtime dependencies", async () =>
   expect(screen.getByRole("button", {
     name: "Open prerequisite capture, Ready",
   })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Open prerequisite capture, Ready",
+  }));
+  expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Back to replay" }))
+    .toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Back to replay" }));
+  expect(screen.getByRole("heading", { name: "replay" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Back to capture" }))
+    .toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Back to capture" }));
+  expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
 });
 
 
@@ -1909,6 +1925,35 @@ test("keeps resource context while scoping edit mode to the selected resource", 
 });
 
 
+test("clears a selected runtime group when entering workflow-level editing", async () => {
+  renderApp();
+
+  const runtimeTree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(within(runtimeTree).getByRole("treeitem", {
+    name: /^Replay, running$/,
+  }));
+  expect(within(runtimeTree).getByRole("treeitem", {
+    name: /^Replay, running$/,
+  })).toHaveAttribute("aria-selected", "true");
+
+  await enterEditMode();
+
+  const configTree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  expect(await screen.findByText("Workflow configuration"))
+    .toBeInTheDocument();
+  expect(screen.getByRole("table", {
+    name: "Configuration fields",
+  })).toHaveTextContent("Source clusters");
+  expect(within(configTree).queryByRole("treeitem", {
+    selected: true,
+  })).toBeNull();
+});
+
+
 test("opens nested definitions from navigation and referenced fields", async () => {
   const draft = addLegacySourceNavigation(structuredClone(configDraft));
   const source = draft.editState.nodes[0]?.children?.[0];
@@ -2076,6 +2121,19 @@ test("opens nested definitions from navigation and referenced fields", async () 
     .toBeInTheDocument();
   expect(within(tree).getByRole("treeitem", { name: /^repo1/ }))
     .toHaveAttribute("aria-selected", "true");
+
+  expect(screen.getByRole("button", { name: "Back to nightly" }))
+    .toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Back to nightly" }));
+  expect(await screen.findByRole("heading", { name: "Edit nightly" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Back to legacy" }))
+    .toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Back to legacy" }));
+  expect(await screen.findByRole("heading", { name: "Edit legacy" }))
+    .toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
 });
 
 

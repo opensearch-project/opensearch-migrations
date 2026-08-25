@@ -2249,7 +2249,6 @@ export const REPLAYER_CONFIG = z.object({
                 ['traffic', 'proxies'],
                 ['traffic', 's3Sources'],
             ],
-            allowCustom: true,
             message: "Choose one captured-traffic source from traffic.proxies or traffic.s3Sources.",
         }),
     toTarget: z.string()

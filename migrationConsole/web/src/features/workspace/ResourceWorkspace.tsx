@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   FileOutput,
@@ -415,14 +416,18 @@ function Relationships({
 
 export function ResourceWorkspace({
   node,
+  navigationBackLabel,
   onSelect,
   onEdit,
+  onNavigateBack,
   onRequestApproval,
   resetInProgress = false,
 }: Readonly<{
   node: ManageNode;
+  navigationBackLabel?: string | null;
   onSelect: (nodeId: string) => void;
   onEdit?: () => void;
+  onNavigateBack?: () => void;
   onRequestApproval?: (targetId: string) => void;
   resetInProgress?: boolean;
 }>) {
@@ -441,10 +446,23 @@ export function ResourceWorkspace({
   return (
     <article className="workspace">
       <header className="workspace-header">
-        <div>
-          <span className="resource-kind">{node.kind.replace("-", " ")}</span>
-          <h2>{node.label}</h2>
-          <p>{node.description ?? node.id}</p>
+        <div className="workspace-heading">
+          {navigationBackLabel && onNavigateBack ? (
+            <button
+              aria-label={`Back to ${navigationBackLabel}`}
+              className="navigation-back-button"
+              onClick={onNavigateBack}
+              title={`Back to ${navigationBackLabel}`}
+              type="button"
+            >
+              <ArrowLeft aria-hidden="true" />
+            </button>
+          ) : null}
+          <div>
+            <span className="resource-kind">{node.kind.replace("-", " ")}</span>
+            <h2>{node.label}</h2>
+            <p>{node.description ?? node.id}</p>
+          </div>
         </div>
         <div className="workspace-states">
           <span className={`phase-badge status-${String(
