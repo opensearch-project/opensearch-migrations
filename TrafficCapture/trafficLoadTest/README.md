@@ -729,6 +729,12 @@ cadence, and on a PR labelled `run-eks-tests`. It reuses `eksCdcIntegPipeline`, 
 every other MA image is referenced on EKS, and the ECR registry is created per run
 (`migration-ecr-<stage>-<region>`), so there is no second writer to race with.
 
+The scripts image is **not** part of the standard image set. `buildImagesToRegistry` does not build
+it; `buildKitLoadTestAll` does. When a selected test ID starts with `008`, the pipeline adds
+`--with-load-test-images` to the bootstrap, which appends that aggregate to the build. Because the
+image is built from source only, such a run needs `BUILD=true` and `USE_RELEASE_BOOTSTRAP=false`;
+the pipeline stops early and says so if either is wrong.
+
 For any run **outside** this test harness, install the chart yourself first (see
 [Install the load-test chart](#install-the-load-test-chart-opt-in)) — there is no equivalent
 auto-install on `aws-bootstrap.sh` or the `loadtest` / `k6-run.sh` commands.
