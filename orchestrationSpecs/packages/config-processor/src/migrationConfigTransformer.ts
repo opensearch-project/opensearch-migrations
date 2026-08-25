@@ -33,6 +33,7 @@ type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type SolrBackupNormalizedConfig = {
     externalBackupName?: string;
     collectionAllowlist: string[];
+    topology?: "cloud" | "standalone";
     otelTraceCollectorEndpoint?: string;
     otelMetricsCollectorEndpoint?: string;
     jvmArgs?: string;
@@ -619,6 +620,7 @@ function normalizeSnapshotInfo(
                     } = backup;
                     const {
                         collectionAllowlist,
+                        topology,
                         ...createBackupOptions
                     } = createBackupConfig;
                     const normalizedCollectionAllowlist = collectionAllowlist ?? [];
@@ -630,10 +632,12 @@ function normalizeSnapshotInfo(
                                 createSnapshotConfig: {
                                     ...createBackupOptions,
                                     solrCollections: normalizedCollectionAllowlist,
+                                    ...(topology ? {solrTopology: topology} : {}),
                                 },
                             },
                             solrBackupConfig: {
                                 collectionAllowlist: normalizedCollectionAllowlist,
+                                ...(topology ? {topology} : {}),
                             },
                         },
                     ];
@@ -797,11 +801,13 @@ function solrCreateSnapshotConfigForBackup(snapshotDef: NormalizedSnapshotDefini
     const {
         externalBackupName: _externalBackupName,
         collectionAllowlist,
+        topology,
         ...runtimeOptions
     } = snapshotDef.solrBackupConfig;
     return {
         ...runtimeOptions,
         solrCollections: collectionAllowlist,
+        ...(topology ? {solrTopology: topology} : {}),
     };
 }
 
