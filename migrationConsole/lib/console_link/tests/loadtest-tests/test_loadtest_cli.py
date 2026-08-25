@@ -9,6 +9,7 @@ Two patch targets, matching the two modules: cluster logic lives in `runs`, and 
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -930,15 +931,39 @@ class TestRenderedChartMatchesTheValues:
     """
 
     @staticmethod
+    def _chart_copy_without_dependencies(chart, dest):
+        """Copy the chart, minus its dependency declaration, so helm can render it offline.
+
+        `helm template` refuses to render a chart whose Chart.yaml names a dependency that is not
+        vendored under charts/. k6-operator is fetched at install time by installK6Chart.sh and
+        the fetched copy is gitignored (deployment/k8s/.gitignore), so a fresh checkout — every CI
+        run — has no charts/ directory and the render fails before it starts.
+
+        The subchart contributes nothing to templates/k6-workflowtemplates.yaml, the only file
+        these tests read, so dropping the declaration renders exactly the same output and needs no
+        network.
+        """
+        copy = dest / chart.name
+        shutil.copytree(chart, copy, ignore=shutil.ignore_patterns("charts", "Chart.lock"))
+        manifest = copy / "Chart.yaml"
+        spec = yaml.safe_load(manifest.read_text())
+        spec.pop("dependencies", None)
+        manifest.write_text(yaml.safe_dump(spec))
+        return copy
+
+    @staticmethod
     def _rendered():
         helm = shutil.which("helm")
         if helm is None:
             pytest.skip("helm is not installed")
         chart = _repo_dir("deployment/k8s/charts/components/k6LoadTest")
-        out = subprocess.run(
-            [helm, "template", "t", str(chart), "--namespace", "ma",
-             "--show-only", "templates/k6-workflowtemplates.yaml"],
-            capture_output=True, text=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            renderable = TestRenderedChartMatchesTheValues._chart_copy_without_dependencies(
+                chart, Path(tmp))
+            out = subprocess.run(
+                [helm, "template", "t", str(renderable), "--namespace", "ma",
+                 "--show-only", "templates/k6-workflowtemplates.yaml"],
+                capture_output=True, text=True)
         if out.returncode != 0:
             pytest.fail(f"helm template failed:\n{out.stderr}")
         return {d["metadata"]["name"]: d
