@@ -29,7 +29,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  * <p>Picks the snapshot file finder for the source version, opens the {@link SourceRepo} matching
  * the repo URI scheme, and wires the optional delta and sourceless reads.
  */
-public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapshotSpec> {
+public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapshotSourceSpec> {
 
     public static final String KIND = "es-snapshot";
 
@@ -39,12 +39,12 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
     }
 
     @Override
-    public EsSnapshotSpec parseSpec(JsonNode config) {
-        return EsSnapshotSpec.fromJson(config);
+    public EsSnapshotSourceSpec parseSpec(JsonNode config) {
+        return EsSnapshotSourceSpec.fromJson(config);
     }
 
     @Override
-    public void validate(EsSnapshotSpec spec, SourceRuntime runtime) {
+    public void validate(EsSnapshotSourceSpec spec, SourceRuntime runtime) {
         if (spec.previousSnapshotName() != null && spec.deltaMode() == null) {
             throw new IllegalArgumentException(
                 "A previous snapshot was given without a delta mode; a delta read needs both.");
@@ -56,7 +56,7 @@ public class EsSnapshotSourceProvider implements DocumentSourceProvider<EsSnapsh
     }
 
     @Override
-    public DocumentSource create(EsSnapshotSpec spec, SourceRuntime runtime) throws IOException {
+    public DocumentSource create(EsSnapshotSourceSpec spec, SourceRuntime runtime) throws IOException {
         var finder = SnapshotReaderRegistry.getSnapshotFileFinder(
             spec.version(), spec.allowLooseVersionMatches());
 

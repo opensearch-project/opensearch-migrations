@@ -33,9 +33,9 @@ import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
-import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
-import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
@@ -852,7 +852,7 @@ public class RfsMigrateDocuments {
             return new SourceSelection(arguments.sourceKind, readSourceConfig(arguments.sourceConfig));
         }
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
-            return new SourceSelection(SolrBackupSourceProvider.KIND, new SolrBackupSpec(
+            return new SourceSelection(SolrBackupSourceProvider.KIND, new SolrBackupSourceSpec(
                 arguments.repoUri,
                 arguments.snapshotName,
                 arguments.sourceVersion.getMajor(),
@@ -861,7 +861,7 @@ public class RfsMigrateDocuments {
                 arguments.endpoint
             ).toJson());
         }
-        return new SourceSelection(EsSnapshotSourceProvider.KIND, new EsSnapshotSpec(
+        return new SourceSelection(EsSnapshotSourceProvider.KIND, new EsSnapshotSourceSpec(
             arguments.repoUri,
             arguments.snapshotName,
             arguments.sourceVersion,

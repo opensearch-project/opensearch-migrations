@@ -4,9 +4,9 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
-import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
-import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
 
 import org.junit.jupiter.api.Test;
@@ -47,7 +47,7 @@ class DocumentSourceDiscoveryTest {
 
         assertThat(selection.kind(), equalTo(SolrBackupSourceProvider.KIND));
         var spec = new SolrBackupSourceProvider().parseSpec(selection.config());
-        assertThat(spec, equalTo(new SolrBackupSpec(
+        assertThat(spec, equalTo(new SolrBackupSourceSpec(
             "s3://bucket/backups", "nightly", 8, List.of("catalog"), "us-east-2", null)));
     }
 
@@ -66,7 +66,7 @@ class DocumentSourceDiscoveryTest {
 
         assertThat(selection.kind(), equalTo(EsSnapshotSourceProvider.KIND));
         var spec = new EsSnapshotSourceProvider().parseSpec(selection.config());
-        assertThat(spec, equalTo(new EsSnapshotSpec(
+        assertThat(spec, equalTo(new EsSnapshotSourceSpec(
             "file:///snapshots", "nightly", Version.fromString("ES 7.10.2"), List.of(),
             null, null, false, 1234L, true, true, "previous", DeltaMode.UPDATES_ONLY, false)));
     }

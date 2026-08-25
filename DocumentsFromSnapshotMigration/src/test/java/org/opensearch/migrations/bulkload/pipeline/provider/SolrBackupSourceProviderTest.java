@@ -41,12 +41,12 @@ class SolrBackupSourceProviderTest {
             () -> mock(IRfsContexts.IDeltaStreamContext.class));
     }
 
-    private static SolrBackupSpec spec(String repoUri) {
+    private static SolrBackupSourceSpec spec(String repoUri) {
         return spec(repoUri, 8);
     }
 
-    private static SolrBackupSpec spec(String repoUri, int solrMajor) {
-        return new SolrBackupSpec(repoUri, BACKUP, solrMajor, List.of("an-index"),
+    private static SolrBackupSourceSpec spec(String repoUri, int solrMajor) {
+        return new SolrBackupSourceSpec(repoUri, BACKUP, solrMajor, List.of("an-index"),
             "us-east-1", "http://endpoint:4566");
     }
 
@@ -94,7 +94,7 @@ class SolrBackupSourceProviderTest {
     void create_s3UriWithoutEndpoint_passesNoEndpointOverride() throws Exception {
         var s3Repo = mock(S3Repo.class);
         when(s3Repo.getRepoRootDir()).thenReturn(Path.of("/tmp/scratch/solr"));
-        var noEndpoint = new SolrBackupSpec("s3://bucket/backups", BACKUP, 8, List.of(), "us-east-1", null);
+        var noEndpoint = new SolrBackupSourceSpec("s3://bucket/backups", BACKUP, 8, List.of(), "us-east-1", null);
 
         try (var discovery = stubDiscovery(false); var s3 = mockStatic(S3Repo.class)) {
             s3.when(() -> S3Repo.createRaw(any(), any(), any(), any())).thenReturn(s3Repo);

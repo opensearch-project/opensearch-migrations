@@ -28,7 +28,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param deltaMode                  which delta changes to emit, else null
  * @param enableSourcelessMigrations reconstruct {@code _source} for indices that disabled it
  */
-public record EsSnapshotSpec(
+public record EsSnapshotSourceSpec(
     String repoUri,
     String snapshotName,
     Version version,
@@ -58,7 +58,7 @@ public record EsSnapshotSpec(
     static final String FIELD_DELTA_MODE = "deltaMode";
     static final String FIELD_ENABLE_SOURCELESS_MIGRATIONS = "enableSourcelessMigrations";
 
-    public EsSnapshotSpec {
+    public EsSnapshotSourceSpec {
         Objects.requireNonNull(repoUri, "repoUri must not be null");
         Objects.requireNonNull(snapshotName, "snapshotName must not be null");
         indexAllowlist = indexAllowlist == null ? List.of() : List.copyOf(indexAllowlist);
@@ -97,10 +97,10 @@ public record EsSnapshotSpec(
         return node;
     }
 
-    static EsSnapshotSpec fromJson(JsonNode config) {
+    static EsSnapshotSourceSpec fromJson(JsonNode config) {
         var rawVersion = SpecJson.optionalString(config, FIELD_VERSION);
         var rawDeltaMode = SpecJson.optionalString(config, FIELD_DELTA_MODE);
-        return new EsSnapshotSpec(
+        return new EsSnapshotSourceSpec(
             SpecJson.requiredString(config, FIELD_REPO_URI),
             SpecJson.requiredString(config, FIELD_SNAPSHOT_NAME),
             rawVersion == null ? null : Version.fromString(rawVersion),

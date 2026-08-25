@@ -27,7 +27,7 @@ import lombok.extern.slf4j.Slf4j;
  * {@link #deferUntilWorkAvailable()}: a restarted pod shouldn't redo that to find no work left.
  */
 @Slf4j
-public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBackupSpec> {
+public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBackupSourceSpec> {
 
     public static final String KIND = "solr-backup";
 
@@ -40,12 +40,12 @@ public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBack
     }
 
     @Override
-    public SolrBackupSpec parseSpec(JsonNode config) {
-        return SolrBackupSpec.fromJson(config);
+    public SolrBackupSourceSpec parseSpec(JsonNode config) {
+        return SolrBackupSourceSpec.fromJson(config);
     }
 
     @Override
-    public void validate(SolrBackupSpec spec, SourceRuntime runtime) {
+    public void validate(SolrBackupSourceSpec spec, SourceRuntime runtime) {
         var parsed = RepoUri.parse(spec.repoUri());
         if (!(parsed instanceof RepoUri.FileRepoUri) && !(parsed instanceof RepoUri.S3RepoUri)) {
             throw new IllegalArgumentException(
@@ -63,7 +63,7 @@ public class SolrBackupSourceProvider implements DocumentSourceProvider<SolrBack
     }
 
     @Override
-    public DocumentSource create(SolrBackupSpec spec, SourceRuntime runtime) throws IOException {
+    public DocumentSource create(SolrBackupSourceSpec spec, SourceRuntime runtime) throws IOException {
         Path backupDir;
         S3Repo s3Repo = null;
         switch (RepoUri.parse(spec.repoUri())) {

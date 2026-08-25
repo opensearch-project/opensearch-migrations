@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
-import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 
@@ -37,8 +37,8 @@ class RfsSolrDocumentSourceTest {
         return new SourceRuntime(scratchDir, scratchDir, () -> null);
     }
 
-    private SolrBackupSpec solr7Spec() {
-        return new SolrBackupSpec("file://" + backupDir, null, 7, List.of(), null, null);
+    private SolrBackupSourceSpec solr7Spec() {
+        return new SolrBackupSourceSpec("file://" + backupDir, null, 7, List.of(), null, null);
     }
 
     @Test
@@ -68,14 +68,14 @@ class RfsSolrDocumentSourceTest {
 
     @Test
     void validate_rejectsUnsupportedSolrMajorVersion() {
-        var spec = new SolrBackupSpec("file://" + backupDir, null, 5, List.of(), null, null);
+        var spec = new SolrBackupSourceSpec("file://" + backupDir, null, 5, List.of(), null, null);
 
         assertThrows(IllegalArgumentException.class, () -> provider.validate(spec, runtime()));
     }
 
     @Test
     void validate_rejectsNonFileOrS3Uri() {
-        var spec = new SolrBackupSpec("gs://bucket/backup", null, 8, List.of(), null, null);
+        var spec = new SolrBackupSourceSpec("gs://bucket/backup", null, 8, List.of(), null, null);
 
         assertThrows(IllegalArgumentException.class, () -> provider.validate(spec, runtime()));
     }

@@ -58,13 +58,13 @@ class EsSnapshotSourceProviderTest {
             () -> mock(IRfsContexts.IDeltaStreamContext.class));
     }
 
-    private static EsSnapshotSpec spec(String repoUri) {
+    private static EsSnapshotSourceSpec spec(String repoUri) {
         return spec(repoUri, null, null, false);
     }
 
-    private static EsSnapshotSpec spec(String repoUri, String previousSnapshot, DeltaMode deltaMode,
+    private static EsSnapshotSourceSpec spec(String repoUri, String previousSnapshot, DeltaMode deltaMode,
                                        boolean sourceless) {
-        return new EsSnapshotSpec(repoUri, SNAPSHOT, VERSION, List.of(), "us-east-1",
+        return new EsSnapshotSourceSpec(repoUri, SNAPSHOT, VERSION, List.of(), "us-east-1",
             "http://endpoint:9200", true, 1024L, false, true, previousSnapshot, deltaMode, sourceless);
     }
 

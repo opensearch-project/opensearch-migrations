@@ -19,7 +19,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * @param s3Region         region for an {@code s3://} repo, else null
  * @param endpoint         custom S3 endpoint, else null
  */
-public record SolrBackupSpec(
+public record SolrBackupSourceSpec(
     String repoUri,
     String backupName,
     int solrMajorVersion,
@@ -35,7 +35,7 @@ public record SolrBackupSpec(
     static final String FIELD_S3_REGION = "s3Region";
     static final String FIELD_ENDPOINT = "endpoint";
 
-    public SolrBackupSpec {
+    public SolrBackupSourceSpec {
         Objects.requireNonNull(repoUri, "repoUri must not be null");
         indexAllowlist = indexAllowlist == null ? List.of() : List.copyOf(indexAllowlist);
     }
@@ -45,7 +45,7 @@ public record SolrBackupSpec(
         return SolrBackupSourceProvider.KIND;
     }
 
-    /** Serializes back to the config {@link #fromJson} parses; see {@code EsSnapshotSpec#toJson}. */
+    /** Serializes back to the config {@link #fromJson} parses; see {@code EsSnapshotSourceSpec#toJson}. */
     public ObjectNode toJson() {
         var node = JsonNodeFactory.instance.objectNode();
         node.put(FIELD_REPO_URI, repoUri);
@@ -58,8 +58,8 @@ public record SolrBackupSpec(
         return node;
     }
 
-    static SolrBackupSpec fromJson(JsonNode config) {
-        return new SolrBackupSpec(
+    static SolrBackupSourceSpec fromJson(JsonNode config) {
+        return new SolrBackupSourceSpec(
             SpecJson.requiredString(config, FIELD_REPO_URI),
             SpecJson.optionalString(config, FIELD_BACKUP_NAME),
             (int) SpecJson.longOr(config, FIELD_SOLR_MAJOR_VERSION, 0),

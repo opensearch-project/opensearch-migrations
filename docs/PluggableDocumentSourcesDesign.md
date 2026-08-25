@@ -162,8 +162,8 @@ grow a shadow of the RFS tracing hierarchy.
 /** Only `kind` is shared. Each provider defines its own spec type. */
 public interface DocumentSourceSpec { String kind(); }
 
-public record EsSnapshotSpec(String repoUri, String snapshotName, Version version,
-                             List<String> indexAllowlist) implements DocumentSourceSpec { }
+public record EsSnapshotSourceSpec(String repoUri, String snapshotName, Version version,
+                                   List<String> indexAllowlist) implements DocumentSourceSpec { }
 public record FailedDocumentStreamSpec(String sessionUri, String sessionId) implements DocumentSourceSpec { }
 
 /** Framework services a provider is handed. User config lives in the spec, not here. */

@@ -25,8 +25,8 @@ class ProviderSpecRoundTripTest {
     private final SolrBackupSourceProvider solrProvider = new SolrBackupSourceProvider();
 
     @Test
-    void esSnapshotSpec_roundTripsEveryFieldWhenAllAreSet() {
-        var original = new EsSnapshotSpec(
+    void esSnapshotSourceSpec_roundTripsEveryFieldWhenAllAreSet() {
+        var original = new EsSnapshotSourceSpec(
             "s3://bucket/snapshots", "nightly", Version.fromString("ES 7.10.2"),
             List.of("logs", "metrics"), "us-east-2", "http://localhost:4566",
             true, 4242L, true, true, "previous", DeltaMode.UPDATES_AND_DELETES, true);
@@ -36,8 +36,8 @@ class ProviderSpecRoundTripTest {
 
     /** Every optional field absent must survive as absent, not as the string "null". */
     @Test
-    void esSnapshotSpec_roundTripsWithEveryOptionalFieldAbsent() {
-        var original = new EsSnapshotSpec(
+    void esSnapshotSourceSpec_roundTripsWithEveryOptionalFieldAbsent() {
+        var original = new EsSnapshotSourceSpec(
             "file:///snapshots", "nightly", null,
             List.of(), null, null,
             false, 0L, false, false, null, null, false);
@@ -54,10 +54,10 @@ class ProviderSpecRoundTripTest {
     }
 
     @Test
-    void esSnapshotSpec_reportsWhetherItIsADeltaRead() {
-        var delta = new EsSnapshotSpec("file:///s", "n", null, List.of(), null, null,
+    void esSnapshotSourceSpec_reportsWhetherItIsADeltaRead() {
+        var delta = new EsSnapshotSourceSpec("file:///s", "n", null, List.of(), null, null,
             false, 0L, false, false, "previous", DeltaMode.UPDATES_ONLY, false);
-        var regular = new EsSnapshotSpec("file:///s", "n", null, List.of(), null, null,
+        var regular = new EsSnapshotSourceSpec("file:///s", "n", null, List.of(), null, null,
             false, 0L, false, false, null, null, false);
 
         assertThat(delta.isDeltaRead(), is(true));
@@ -66,7 +66,7 @@ class ProviderSpecRoundTripTest {
     }
 
     @Test
-    void esSnapshotSpec_rejectsMissingRequiredFields() {
+    void esSnapshotSourceSpec_rejectsMissingRequiredFields() {
         var noRepo = JsonNodeFactory.instance.objectNode().put("snapshotName", "nightly");
         var noSnapshot = JsonNodeFactory.instance.objectNode().put("repoUri", "file:///s");
 
@@ -77,9 +77,9 @@ class ProviderSpecRoundTripTest {
     /** A lone delta input is a user error the provider must catch before construction. */
     @Test
     void esSnapshotProvider_rejectsHalfConfiguredDeltaReads() {
-        var previousOnly = new EsSnapshotSpec("file:///s", "n", null, List.of(), null, null,
+        var previousOnly = new EsSnapshotSourceSpec("file:///s", "n", null, List.of(), null, null,
             false, 0L, false, false, "previous", null, false);
-        var modeOnly = new EsSnapshotSpec("file:///s", "n", null, List.of(), null, null,
+        var modeOnly = new EsSnapshotSourceSpec("file:///s", "n", null, List.of(), null, null,
             false, 0L, false, false, null, DeltaMode.UPDATES_ONLY, false);
 
         assertThrows(IllegalArgumentException.class, () -> esProvider.validate(previousOnly, null));
@@ -93,16 +93,16 @@ class ProviderSpecRoundTripTest {
     }
 
     @Test
-    void solrBackupSpec_roundTripsEveryFieldWhenAllAreSet() {
-        var original = new SolrBackupSpec(
+    void solrBackupSourceSpec_roundTripsEveryFieldWhenAllAreSet() {
+        var original = new SolrBackupSourceSpec(
             "s3://bucket/backups", "nightly", 8, List.of("catalog"), "us-east-2", "http://localhost:4566");
 
         assertThat(solrProvider.parseSpec(original.toJson()), equalTo(original));
     }
 
     @Test
-    void solrBackupSpec_roundTripsWithEveryOptionalFieldAbsent() {
-        var original = new SolrBackupSpec("file:///backups", null, 9, List.of(), null, null);
+    void solrBackupSourceSpec_roundTripsWithEveryOptionalFieldAbsent() {
+        var original = new SolrBackupSourceSpec("file:///backups", null, 9, List.of(), null, null);
 
         var parsed = solrProvider.parseSpec(original.toJson());
 
@@ -115,7 +115,7 @@ class ProviderSpecRoundTripTest {
     }
 
     @Test
-    void solrBackupSpec_rejectsMissingRepoUri() {
+    void solrBackupSourceSpec_rejectsMissingRepoUri() {
         var noRepo = JsonNodeFactory.instance.objectNode().put("solrMajorVersion", 8);
 
         assertThrows(IllegalArgumentException.class, () -> solrProvider.parseSpec(noRepo));
@@ -124,9 +124,9 @@ class ProviderSpecRoundTripTest {
     /** A null allowlist is normalized to empty so callers never have to null-check it. */
     @Test
     void specs_normalizeANullAllowlistToEmpty() {
-        var es = new EsSnapshotSpec("file:///s", "n", null, null, null, null,
+        var es = new EsSnapshotSourceSpec("file:///s", "n", null, null, null, null,
             false, 0L, false, false, null, null, false);
-        var solr = new SolrBackupSpec("file:///b", null, 9, null, null, null);
+        var solr = new SolrBackupSourceSpec("file:///b", null, 9, null, null, null);
 
         assertThat(es.indexAllowlist(), empty());
         assertThat(solr.indexAllowlist(), empty());
