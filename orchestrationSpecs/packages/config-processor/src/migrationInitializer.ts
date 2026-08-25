@@ -397,6 +397,8 @@ export class MigrationInitializer {
     static readonly APPROVAL_GATE_LABEL_KEY = 'migrations.opensearch.org/workflow';
     static readonly GATE_LABEL_RESOURCE_KIND = 'migrations.opensearch.org/resource-kind';
     static readonly GATE_LABEL_RESOURCE_NAME = 'migrations.opensearch.org/resource-name';
+    static readonly GATE_LABEL_APPROVAL_CLASS = 'migrations.opensearch.org/approval-class';
+    static readonly GATE_LABEL_PREAPPROVAL_ENABLED = 'migrations.opensearch.org/preapproval-enabled';
     static readonly GATE_LABEL_SOURCE = 'migrations.opensearch.org/source';
     static readonly GATE_LABEL_TARGET = 'migrations.opensearch.org/target';
     static readonly GATE_LABEL_SNAPSHOT = 'migrations.opensearch.org/snapshot';
@@ -491,13 +493,27 @@ export class MigrationInitializer {
         };
     }
 
-    private makeApprovalGateResource(nameParts: string[], labels?: Record<string, string>) {
+    private makeApprovalGateResource(
+        nameParts: string[],
+        labels?: Record<string, string>,
+        preapprovalEnabled = false,
+    ) {
+        const name = nameParts.join('.').toLowerCase();
+        const approvalClass = name.endsWith('.vapretry')
+            ? 'recovery'
+            : 'checkpoint';
         return {
             apiVersion: MigrationInitializer.CRD_API_VERSION,
             kind: 'ApprovalGate',
             metadata: {
-                name: nameParts.join('.').toLowerCase(),
-                ...(labels && Object.keys(labels).length > 0 && { labels }),
+                name,
+                labels: {
+                    ...(labels ?? {}),
+                    [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: approvalClass,
+                    [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: String(
+                        approvalClass === 'checkpoint' && preapprovalEnabled
+                    ),
+                },
             },
             spec: {},
             status: { phase: 'Created' }
@@ -537,7 +553,8 @@ export class MigrationInitializer {
                 gateLabels({
                     [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'MigrationRun',
                     [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: migrationRun.name,
-                })
+                }),
+                true,
             ));
         }
 
@@ -659,7 +676,8 @@ export class MigrationInitializer {
                     [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CaptureProxy',
                     [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: proxy.name,
                     [MigrationInitializer.GATE_LABEL_SOURCE]: proxySource,
-                })
+                }),
+                !proxy.skipApproval,
             ));
             // Step approval gate: fires after reconcile, before actual proxy deployment
             items.push(this.makeApprovalGateResource(
@@ -780,11 +798,23 @@ export class MigrationInitializer {
             const resourcePath = this.makeCrdName(...approvalNameParts);
             // Step approval gates: ordered by workflow execution sequence (all inside migrateFromSnapshot)
             items.push(this.makeApprovalGateResource(
-                ['evaluatemetadata', resourcePath], migLabels));
+                ['evaluatemetadata', resourcePath],
+                migLabels,
+                Boolean(migration.metadataMigrationConfig)
+                    && !migration.metadataMigrationConfig?.skipEvaluateApproval,
+            ));
             items.push(this.makeApprovalGateResource(
-                ['migratemetadata', resourcePath], migLabels));
+                ['migratemetadata', resourcePath],
+                migLabels,
+                Boolean(migration.metadataMigrationConfig)
+                    && !migration.metadataMigrationConfig?.skipMigrateApproval,
+            ));
             items.push(this.makeApprovalGateResource(
-                ['documentbackfill', resourcePath], migLabels));
+                ['documentbackfill', resourcePath],
+                migLabels,
+                Boolean(migration.documentBackfillConfig)
+                    && !migration.documentBackfillConfig?.skipApproval,
+            ));
         }
 
         // TrafficReplay resources from trafficReplays

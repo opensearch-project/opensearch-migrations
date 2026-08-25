@@ -24,7 +24,11 @@ from ..application.config_drafts import (
     ExternalResourceMutation,
 )
 from ..application.operations import Operation
-from ..application.actions import ApprovalReview
+from ..application.actions import (
+    ApprovalGateInventory,
+    ApprovalGateSummary,
+    ApprovalReview,
+)
 from ..application.resets import ResetPlan, ResetTarget
 from ..services.admission_preflight import (
     AdmissionDeploymentAction,
@@ -706,6 +710,71 @@ class ApprovalReviewV1(WebModel):
 class ApproveRequestV1(WebModel):
     target_id: str
     expected_gate_revision: str
+
+
+class ApprovalGateSummaryV1(WebModel):
+    name: str
+    gate_revision: str
+    category: Literal["checkpoint", "recovery"]
+    state: Literal[
+        "upcoming",
+        "preapproved",
+        "blocking",
+        "accepted",
+        "passed",
+        "not-required",
+        "not-reached",
+        "recovery-standby",
+        "error",
+    ]
+    phase: str
+    resource_id: Optional[str] = None
+    resource_kind: Optional[str] = None
+    resource_name: Optional[str] = None
+    stage: str
+    effect: str
+    reason: Optional[str] = None
+    enabled: bool
+    approved: bool
+    toggleable: bool
+    disabled_reason: Optional[str] = None
+    approval_target_id: Optional[str] = None
+    output_target_id: Optional[str] = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        gate: ApprovalGateSummary,
+    ) -> "ApprovalGateSummaryV1":
+        return cls.model_validate(gate.__dict__)
+
+
+class ApprovalGateInventoryV1(WebModel):
+    workflow_name: str
+    gates: List[ApprovalGateSummaryV1]
+
+    @classmethod
+    def from_domain(
+        cls,
+        inventory: ApprovalGateInventory,
+    ) -> "ApprovalGateInventoryV1":
+        return cls(
+            workflow_name=inventory.workflow_name,
+            gates=[
+                ApprovalGateSummaryV1.from_domain(gate)
+                for gate in inventory.gates
+            ],
+        )
+
+
+class SetPreapprovalRequestV1(WebModel):
+    expected_gate_revision: str
+    preapproved: bool
+
+
+class SetPreapprovalResponseV1(WebModel):
+    gate_name: str
+    preapproved: bool
 
 
 class ResetPlanRequestV1(WebModel):

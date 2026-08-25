@@ -15,6 +15,10 @@ export type AdmissionPreflight =
   components["schemas"]["AdmissionPreflightV1"];
 export type Operation = components["schemas"]["OperationV1"];
 export type ApprovalReview = components["schemas"]["ApprovalReviewV1"];
+export type ApprovalGateInventory =
+  components["schemas"]["ApprovalGateInventoryV1"];
+export type ApprovalGateSummary =
+  components["schemas"]["ApprovalGateSummaryV1"];
 export type ResetPlan = components["schemas"]["ResetPlanV1"];
 export type OutputInventory = components["schemas"]["OutputInventoryV1"];
 export type OutputDescriptor = components["schemas"]["OutputDescriptorV1"];
@@ -318,6 +322,43 @@ export async function getApprovalReview(
     );
   }
   return data;
+}
+
+
+export async function getApprovalGates(): Promise<ApprovalGateInventory> {
+  const { data, error, response } = await client.GET(
+    "/api/v1/approval-gates",
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Approval checkpoints are unavailable",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function setGatePreapproval(
+  gateName: string,
+  expectedGateRevision: string,
+  preapproved: boolean,
+): Promise<void> {
+  const { error, response } = await client.PATCH(
+    "/api/v1/approval-gates/{gate_name}",
+    {
+      params: { path: { gate_name: gateName } },
+      body: { expectedGateRevision, preapproved },
+    },
+  );
+  if (!response.ok || error) {
+    throw new ConfigApiError(
+      response.status,
+      "The preapproval could not be changed",
+      error,
+    );
+  }
 }
 
 

@@ -334,12 +334,28 @@ describe('migration initializer CRD resource generation', () => {
             [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: 'my-workflow',
             [MigrationInitializer.WORKFLOW_NAME_LABEL]: 'my-workflow',
             [MigrationInitializer.RUN_NUMBER_LABEL]: '52',
+            [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: 'recovery',
+            [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: 'false',
             [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'SnapshotMigration',
             [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: 'source-target-snap1-migration-0',
             [MigrationInitializer.GATE_LABEL_SOURCE]: 'source',
             [MigrationInitializer.GATE_LABEL_TARGET]: 'target',
             [MigrationInitializer.GATE_LABEL_SNAPSHOT]: 'snap1',
             [MigrationInitializer.GATE_LABEL_MIGRATION]: 'migration-0',
+        });
+        const evaluateGate = gates.find(
+            (g: any) => g.metadata.name === 'evaluatemetadata.source-target-snap1-migration-0'
+        );
+        expect(evaluateGate.metadata.labels).toMatchObject({
+            [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: 'checkpoint',
+            [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: 'false',
+        });
+        const backfillGate = gates.find(
+            (g: any) => g.metadata.name === 'documentbackfill.source-target-snap1-migration-0'
+        );
+        expect(backfillGate.metadata.labels).toMatchObject({
+            [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: 'checkpoint',
+            [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: 'false',
         });
 
         const migrationRun = bundle.customMigrationResources.items.find((item: any) => item.kind === 'MigrationRun');

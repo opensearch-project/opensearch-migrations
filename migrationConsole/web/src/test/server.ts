@@ -16,6 +16,12 @@ export const server = setupServer(
   http.get("*/api/v1/operations", () =>
     HttpResponse.json({ operations: [] }),
   ),
+  http.get("*/api/v1/approval-gates", () =>
+    HttpResponse.json({
+      workflowName: "migration",
+      gates: [],
+    }),
+  ),
   http.get("*/api/v1/approvals/review", ({ request }) => {
     const targetId = new URL(request.url).searchParams.get("targetId") ?? "";
     return HttpResponse.json({

@@ -38,6 +38,7 @@ from .contracts import (
     AdmissionPreflightV1,
     ApplyEditOperationRequestV1,
     ApproveRequestV1,
+    ApprovalGateInventoryV1,
     ApprovalReviewV1,
     ConfigDraftV1,
     ConfigRemovalImpactRequestV1,
@@ -64,6 +65,8 @@ from .contracts import (
     ResetPlanV1,
     SaveExternalResourceRequestV1,
     SelectExternalResourceRequestV1,
+    SetPreapprovalRequestV1,
+    SetPreapprovalResponseV1,
     StartLogStreamRequestV1,
 )
 
@@ -741,6 +744,51 @@ def create_app(
                 OperationV1.from_domain(operation)
                 for operation in operation_service().list()
             ],
+        )
+
+    @app.get(
+        "/api/v1/approval-gates",
+        response_model=ApprovalGateInventoryV1,
+        response_model_exclude_none=True,
+        tags=["approvals"],
+    )
+    def list_approval_gates() -> ApprovalGateInventoryV1:
+        return ApprovalGateInventoryV1.from_domain(
+            approval_service().inventory()
+        )
+
+    @app.patch(
+        "/api/v1/approval-gates/{gate_name}",
+        response_model=SetPreapprovalResponseV1,
+        tags=["approvals"],
+    )
+    def set_preapproval(
+        gate_name: str,
+        request_body: SetPreapprovalRequestV1,
+    ) -> SetPreapprovalResponseV1:
+        try:
+            approval_service().set_preapproval(
+                gate_name,
+                expected_gate_revision=(
+                    request_body.expected_gate_revision
+                ),
+                preapproved=request_body.preapproved,
+            )
+        except ApprovalUnavailable as error:
+            raise _action_error(
+                409,
+                "preapproval_unavailable",
+                error,
+            ) from error
+        except ApprovalStale as error:
+            raise _action_error(
+                409,
+                "approval_stale",
+                error,
+            ) from error
+        return SetPreapprovalResponseV1(
+            gate_name=gate_name,
+            preapproved=request_body.preapproved,
         )
 
     @app.get(

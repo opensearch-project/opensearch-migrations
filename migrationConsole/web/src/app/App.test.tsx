@@ -1410,6 +1410,248 @@ test("reviews exact approval and reset targets before starting operations", asyn
 });
 
 
+test("preapproves upcoming resource checkpoints and inventories all gates", async () => {
+  const gates = {
+    workflowName: "migration",
+    gates: [{
+      name: "captureproxysetup.capture",
+      gateRevision: "21",
+      category: "checkpoint",
+      state: "upcoming",
+      phase: "Created",
+      resourceId: "resource:captureproxies:capture",
+      resourceKind: "CaptureProxy",
+      resourceName: "capture",
+      stage: "Capture proxy setup",
+      effect: "Approving allows capture proxy deployment to begin.",
+      reason: null,
+      enabled: true,
+      approved: false,
+      toggleable: true,
+      disabledReason: null,
+      approvalTargetId: null,
+      outputTargetId: null,
+    }, {
+      name: "evaluatemetadata.migration-0",
+      gateRevision: "22",
+      category: "checkpoint",
+      state: "passed",
+      phase: "Approved",
+      resourceId: "resource:snapshotmigrations:migration-0",
+      resourceKind: "SnapshotMigration",
+      resourceName: "migration-0",
+      stage: "Metadata evaluation",
+      effect: "Metadata evaluation was approved.",
+      reason: null,
+      enabled: true,
+      approved: true,
+      toggleable: false,
+      disabledReason: "The workflow already passed this approval checkpoint.",
+      approvalTargetId: null,
+      outputTargetId: null,
+    }, {
+      name: "documentbackfill.migration-0",
+      gateRevision: "23",
+      category: "checkpoint",
+      state: "not-required",
+      phase: "Created",
+      resourceId: "resource:snapshotmigrations:migration-0",
+      resourceKind: "SnapshotMigration",
+      resourceName: "migration-0",
+      stage: "Document backfill",
+      effect: "Approving starts document backfill.",
+      reason: null,
+      enabled: false,
+      approved: false,
+      toggleable: false,
+      disabledReason: (
+        "The submitted configuration does not use this approval checkpoint."
+      ),
+      approvalTargetId: null,
+      outputTargetId: null,
+    }],
+  };
+  let preapprovalRequest: unknown;
+  server.use(
+    http.get(
+      "*/api/v1/approval-gates",
+      () => HttpResponse.json(gates),
+    ),
+    http.patch(
+      "*/api/v1/approval-gates/:gateName",
+      async ({ request }) => {
+        preapprovalRequest = await request.json();
+        return HttpResponse.json({
+          gateName: "captureproxysetup.capture",
+          preapproved: true,
+        });
+      },
+    ),
+  );
+  renderApp();
+
+  const resourceToggle = await screen.findByRole("switch", {
+    name: "Preapprove upcoming checkpoints",
+  });
+  expect(resourceToggle).toHaveAttribute("aria-checked", "false");
+  await userEvent.click(resourceToggle);
+  await waitFor(() => expect(preapprovalRequest).toEqual({
+    expectedGateRevision: "21",
+    preapproved: true,
+  }));
+
+  await userEvent.click(screen.getByRole("button", { name: "Approvals" }));
+  const center = await screen.findByRole("dialog", { name: "Approvals" });
+  expect(within(center).getByRole("heading", { name: "Upcoming" }))
+    .toBeInTheDocument();
+  expect(within(center).getByRole("heading", { name: "Passed" }))
+    .toBeInTheDocument();
+  expect(within(center).getByText("Not required")).toBeInTheDocument();
+  expect(within(center).getByRole("switch", {
+    name: "Preapprove Document backfill",
+  })).toBeDisabled();
+  expect(within(center).getByRole("switch", {
+    name: "Preapprove Document backfill",
+  })).toHaveAttribute(
+    "title",
+    "The submitted configuration does not use this approval checkpoint.",
+  );
+});
+
+
+test("approves blockers inline and preapproves all upcoming checkpoints", async () => {
+  const gate = (
+    name: string,
+    revision: string,
+    stage: string,
+    overrides: Record<string, unknown> = {},
+  ) => ({
+    name,
+    gateRevision: revision,
+    category: "checkpoint",
+    state: "upcoming",
+    phase: "Created",
+    resourceId: "resource:snapshotmigrations:migration-0",
+    resourceKind: "SnapshotMigration",
+    resourceName: "migration-0",
+    stage,
+    effect: `Approving advances ${stage}.`,
+    reason: null,
+    enabled: true,
+    approved: false,
+    toggleable: true,
+    disabledReason: null,
+    approvalTargetId: null,
+    outputTargetId: null,
+    ...overrides,
+  });
+  const gates = {
+    workflowName: "migration",
+    gates: [
+      gate("evaluatemetadata.migration-0", "31", "Metadata evaluation", {
+        state: "blocking",
+        toggleable: false,
+        disabledReason: (
+          "This checkpoint is blocking now. Review and approve it directly."
+        ),
+        approvalTargetId: "approval:evaluate-node",
+      }),
+      gate("migratemetadata.migration-0", "32", "Metadata migration"),
+      gate("documentbackfill.migration-0", "33", "Document backfill"),
+      gate("unused.migration-0", "34", "Unused checkpoint", {
+        state: "not-required",
+        enabled: false,
+        toggleable: false,
+        disabledReason: (
+          "The submitted configuration does not use this approval checkpoint."
+        ),
+      }),
+    ],
+  };
+  let approvalRequest: unknown;
+  const preapprovalRequests: Array<{
+    gateName: string;
+    body: unknown;
+  }> = [];
+  server.use(
+    http.get(
+      "*/api/v1/approval-gates",
+      () => HttpResponse.json(gates),
+    ),
+    http.post("*/api/v1/approvals", async ({ request }) => {
+      approvalRequest = await request.json();
+      return HttpResponse.json({
+        id: "operation-inline-approval",
+        kind: "approve",
+        label: "Approve Metadata evaluation",
+        status: "queued",
+        targetIds: ["resource:snapshotmigrations:migration-0"],
+        createdAt: "2026-08-13T13:00:00Z",
+        updatedAt: "2026-08-13T13:00:00Z",
+        message: "Queued",
+        detail: null,
+        result: {},
+      }, { status: 202 });
+    }),
+    http.patch(
+      "*/api/v1/approval-gates/:gateName",
+      async ({ params, request }) => {
+        const body = await request.json();
+        preapprovalRequests.push({
+          gateName: String(params.gateName),
+          body,
+        });
+        return HttpResponse.json({
+          gateName: String(params.gateName),
+          preapproved: true,
+        });
+      },
+    ),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Approvals",
+  }));
+  const center = await screen.findByRole("dialog", { name: "Approvals" });
+  await userEvent.click(within(center).getByRole("button", {
+    name: "Approve Metadata evaluation",
+  }));
+  await waitFor(() => expect(approvalRequest).toEqual({
+    targetId: "approval:evaluate-node",
+    expectedGateRevision: "31",
+  }));
+  expect(screen.queryByRole("dialog", {
+    name: "Review required actions",
+  })).not.toBeInTheDocument();
+
+  const allUpcoming = within(center).getByRole("switch", {
+    name: "Preapprove all upcoming checkpoints",
+  });
+  expect(allUpcoming).toHaveAttribute("aria-checked", "false");
+  await userEvent.click(allUpcoming);
+  await waitFor(() => expect(preapprovalRequests).toEqual(
+    expect.arrayContaining([
+      {
+        gateName: "migratemetadata.migration-0",
+        body: {
+          expectedGateRevision: "32",
+          preapproved: true,
+        },
+      },
+      {
+        gateName: "documentbackfill.migration-0",
+        body: {
+          expectedGateRevision: "33",
+          preapproved: true,
+        },
+      },
+    ]),
+  ));
+  expect(preapprovalRequests).toHaveLength(2);
+});
+
+
 test("keeps a dismissed approval visible without repeatedly opening it", async () => {
   const actionState = structuredClone(manageSnapshot);
   actionState.nodes["resource:captureproxies:capture"].capabilities.push({

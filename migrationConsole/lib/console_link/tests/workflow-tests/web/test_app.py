@@ -40,7 +40,11 @@ from console_link.workflow.application.operations import (
     Operation,
     OperationEvent,
 )
-from console_link.workflow.application.actions import ApprovalReview
+from console_link.workflow.application.actions import (
+    ApprovalGateInventory,
+    ApprovalGateSummary,
+    ApprovalReview,
+)
 from console_link.workflow.services.admission_preflight import (
     AdmissionDeploymentAction,
     AdmissionPreflightIssue,
@@ -583,6 +587,7 @@ def test_log_targets_require_a_capability_on_the_observed_node(tmp_path):
 class _Approvals:
     def __init__(self):
         self.approved = False
+        self.preapproval = None
         self.review_result = ApprovalReview(
             target_id="approval:node-1",
             node_id="node-1",
@@ -600,6 +605,32 @@ class _Approvals:
             reason=None,
             snapshot_revision="snapshot-revision",
         )
+        self.inventory_result = ApprovalGateInventory(
+            workflow_name="migration",
+            gates=(
+                ApprovalGateSummary(
+                    name="migratemetadata.migration-0",
+                    gate_revision="12",
+                    category="checkpoint",
+                    state="upcoming",
+                    phase="Created",
+                    resource_id=(
+                        "resource:snapshotmigrations:migration-0"
+                    ),
+                    resource_kind="SnapshotMigration",
+                    resource_name="migration-0",
+                    stage="Metadata migration",
+                    effect="Approving advances metadata migration.",
+                    reason=None,
+                    enabled=True,
+                    approved=False,
+                    toggleable=True,
+                    disabled_reason=None,
+                    approval_target_id=None,
+                    output_target_id=None,
+                ),
+            ),
+        )
 
     def review(self, target_id, snapshot_revision=None):
         assert target_id == self.review_result.target_id
@@ -613,6 +644,20 @@ class _Approvals:
     def approve(self, target_id, expected_gate_revision):
         self.approved = True
         return self.validate(target_id, expected_gate_revision)
+
+    def inventory(self):
+        return self.inventory_result
+
+    def set_preapproval(
+        self,
+        gate_name,
+        expected_gate_revision,
+        preapproved,
+    ):
+        assert gate_name == self.inventory_result.gates[0].name
+        assert expected_gate_revision == "12"
+        self.preapproval = preapproved
+        return self.inventory_result.gates[0]
 
 
 class _Resets:
@@ -675,6 +720,14 @@ def test_approval_and_reset_routes_review_exact_targets_then_track_work(
     )
 
     with TestClient(app) as client:
+        approval_gates = client.get("/api/v1/approval-gates")
+        preapproval = client.patch(
+            "/api/v1/approval-gates/migratemetadata.migration-0",
+            json={
+                "expectedGateRevision": "12",
+                "preapproved": True,
+            },
+        )
         approval_review = client.get(
             "/api/v1/approvals/review",
             params={"targetId": "approval:node-1"},
@@ -711,6 +764,14 @@ def test_approval_and_reset_routes_review_exact_targets_then_track_work(
             json={"planToken": "stale-token"},
         )
 
+    assert approval_gates.status_code == 200
+    assert approval_gates.json()["gates"][0]["state"] == "upcoming"
+    assert preapproval.status_code == 200
+    assert preapproval.json() == {
+        "gateName": "migratemetadata.migration-0",
+        "preapproved": True,
+    }
+    assert approvals.preapproval is True
     assert approval_review.status_code == 200
     assert approval_review.json()["stage"] == "Metadata evaluation"
     assert approval.status_code == 202

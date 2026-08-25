@@ -338,6 +338,196 @@ button {
   width: min(900px, calc(100vw - 28px));
 }
 
+.confirmation-dialog.approval-center-dialog {
+  width: min(980px, calc(100vw - 28px));
+}
+
+.confirmation-dialog.approval-center-dialog > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.confirmation-dialog.approval-center-dialog > header > svg {
+  color: var(--accent);
+}
+
+.confirmation-dialog.approval-center-dialog > header small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.approval-center-sections {
+  padding-bottom: 12px;
+}
+
+.approval-center-section > header {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: #f3f5f6;
+}
+
+.approval-center-section:first-child > header {
+  border-top: 0;
+}
+
+.approval-center-section h3 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.approval-center-section > header span {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: #e2e7e9;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.approval-center-bulk-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.approval-center-bulk-toggle > strong {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.approval-center-row {
+  display: grid;
+  min-height: 68px;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(118px, auto);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.approval-center-row > svg {
+  width: 16px;
+  color: var(--text-muted);
+}
+
+.approval-center-row.state-blocking {
+  background: #fff9e9;
+}
+
+.approval-center-row.state-blocking > svg,
+.approval-center-row.state-error > svg {
+  color: #a66a11;
+}
+
+.approval-center-row.state-passed > svg {
+  color: var(--success);
+}
+
+.approval-center-row-content {
+  min-width: 0;
+}
+
+.approval-center-row-content > header {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(180px, 1fr);
+  gap: 12px;
+}
+
+.approval-center-row-content strong,
+.approval-center-row-content b,
+.approval-center-row-content span,
+.approval-center-row-content small {
+  display: block;
+}
+
+.approval-center-row-content strong,
+.approval-center-row-content b {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-center-row-content span,
+.approval-center-row-content small {
+  margin-top: 1px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.approval-center-row-content p {
+  margin: 5px 0 0;
+  color: #465861;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.approval-center-row-content .approval-center-reason {
+  color: var(--danger);
+}
+
+.approval-center-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.approval-center-row-actions > button:not(.approval-toggle) {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 10px;
+}
+
+.approval-center-row-actions > button:not(.approval-toggle) svg {
+  width: 13px;
+}
+
+.approval-center-row-actions > button.primary-button {
+  min-width: 76px;
+  justify-content: center;
+  border-color: #155d68;
+  color: #fff;
+  background: var(--accent);
+}
+
+.approval-center-state {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.approval-center-state svg {
+  width: 17px;
+}
+
+.approval-center-state.error {
+  color: var(--danger);
+}
+
 .approval-list-dialog > header small {
   display: block;
   margin-top: 2px;
@@ -686,6 +876,22 @@ button {
 .submit-mode-button:hover:not(:disabled) {
   border-color: #16465a;
   background: #e7f5f8;
+}
+
+.approvals-mode-button {
+  position: relative;
+  width: 126px;
+}
+
+.approvals-mode-button b {
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 9px;
+  color: #fff;
+  background: #a66a11;
+  font-size: 9px;
 }
 
 .health-state {
@@ -1726,6 +1932,96 @@ button {
   border-bottom-color: #b8cde0;
   color: #315979;
   background: #f1f6fa;
+}
+
+.resource-preapproval {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 22px;
+  border-bottom: 1px solid var(--border);
+  background: #f8fafb;
+}
+
+.resource-preapproval > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.resource-preapproval > div > svg {
+  width: 17px;
+  flex: 0 0 17px;
+  color: var(--accent);
+}
+
+.resource-preapproval strong,
+.resource-preapproval small {
+  display: block;
+}
+
+.resource-preapproval strong {
+  font-size: 11px;
+}
+
+.resource-preapproval small {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-toggle {
+  display: inline-grid;
+  width: 58px;
+  min-width: 58px;
+  min-height: 28px;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border: 1px solid #9ba9b2;
+  border-radius: 15px;
+  color: #51616c;
+  background: #edf0f2;
+  font-size: 9px;
+}
+
+.approval-toggle > span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(25 39 48 / 20%);
+}
+
+.approval-toggle > span svg {
+  width: 11px;
+}
+
+.approval-toggle.active {
+  border-color: #2e7a65;
+  color: #fff;
+  background: #2e7a65;
+}
+
+.approval-toggle.mixed {
+  border-color: #a66a11;
+  color: #fff;
+  background: #a66a11;
+}
+
+.approval-toggle:disabled {
+  color: #7b8790;
+  background: #f0f2f3;
+  opacity: 0.68;
 }
 
 .output-panel {

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import type {
+  ApprovalGateSummary,
   ManageNode,
   ManageRelationship,
   Operation,
@@ -307,6 +308,83 @@ function RecentOperationFailure({
 }
 
 
+function ResourcePreapproval({
+  gates,
+  loading,
+  onToggle,
+  pendingNames,
+}: Readonly<{
+  gates: ApprovalGateSummary[];
+  loading: boolean;
+  onToggle: (
+    gates: ApprovalGateSummary[],
+    preapproved: boolean,
+  ) => void;
+  pendingNames: Set<string>;
+}>) {
+  const upcoming = gates.filter((gate) => (
+    gate.state === "upcoming" || gate.state === "preapproved"
+  ));
+  const approvedCount = upcoming.filter((gate) => gate.approved).length;
+  const checked = upcoming.length > 0 && approvedCount === upcoming.length;
+  const mixed = approvedCount > 0 && !checked;
+  const pending = gates.some((gate) => pendingNames.has(gate.name));
+  const disabledReason = loading
+    ? "Approval checkpoints are still loading."
+    : gates.length === 0
+      ? (
+        "The submitted configuration does not define a manual approval "
+        + "checkpoint for this resource."
+      )
+      : upcoming.length === 0
+        ? (
+          gates.find((gate) => gate.disabledReason)?.disabledReason
+          ?? "This resource has no upcoming approval checkpoints."
+        )
+        : null;
+  const disabled = Boolean(disabledReason) || pending;
+  return (
+    <section
+      aria-label="Resource preapproval"
+      className="resource-preapproval"
+    >
+      <div>
+        <ShieldCheck aria-hidden="true" />
+        <span>
+          <strong>Preapprove upcoming checkpoints</strong>
+          <small>
+            {upcoming.length > 0
+              ? `${approvedCount} of ${upcoming.length} upcoming ${
+                upcoming.length === 1 ? "checkpoint" : "checkpoints"
+              } preapproved`
+              : disabledReason}
+          </small>
+        </span>
+      </div>
+      <button
+        aria-checked={mixed ? "mixed" : checked}
+        aria-label="Preapprove upcoming checkpoints"
+        className={[
+          "approval-toggle",
+          checked ? "active" : "",
+          mixed ? "mixed" : "",
+        ].filter(Boolean).join(" ")}
+        disabled={disabled}
+        onClick={() => onToggle(upcoming, !checked)}
+        role="switch"
+        title={disabledReason ?? "Preapprove all upcoming checkpoints"}
+        type="button"
+      >
+        <span aria-hidden="true">
+          {pending ? <LoaderCircle className="spin" /> : null}
+        </span>
+        <b>{mixed ? "Some" : checked ? "On" : "Off"}</b>
+      </button>
+    </section>
+  );
+}
+
+
 function Diagnostics({
   node,
   suppressEmpty = false,
@@ -480,8 +558,12 @@ export function ResourceWorkspace({
   onEdit,
   onNavigateBack,
   onRequestApproval,
+  approvalGates = [],
+  approvalGatesLoading = false,
   approvals = [],
+  onTogglePreapprovals,
   operations = [],
+  pendingPreapprovalNames = new Set<string>(),
   resetInProgress = false,
 }: Readonly<{
   node: ManageNode;
@@ -490,8 +572,15 @@ export function ResourceWorkspace({
   onEdit?: () => void;
   onNavigateBack?: () => void;
   onRequestApproval?: (targetId: string) => void;
+  approvalGates?: ApprovalGateSummary[];
+  approvalGatesLoading?: boolean;
   approvals?: ApprovalCandidate[];
+  onTogglePreapprovals?: (
+    gates: ApprovalGateSummary[],
+    preapproved: boolean,
+  ) => void;
   operations?: Operation[];
+  pendingPreapprovalNames?: Set<string>;
   resetInProgress?: boolean;
 }>) {
   const [outputTarget, setOutputTarget] = useState<string | null>(null);
@@ -566,6 +655,17 @@ export function ResourceWorkspace({
         })}
         resetInProgress={resetInProgress}
       />
+      {onTogglePreapprovals ? (
+        <ResourcePreapproval
+          gates={approvalGates.filter((gate) => (
+            gate.category === "checkpoint"
+            && gate.resourceId === node.id
+          ))}
+          loading={approvalGatesLoading}
+          onToggle={onTogglePreapprovals}
+          pendingNames={pendingPreapprovalNames}
+        />
+      ) : null}
       {cleanupRequired || resetInProgress ? (
         <section
           aria-label={resetInProgress ? "Removal in progress" : "Cleanup required"}

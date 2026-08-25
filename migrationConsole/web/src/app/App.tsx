@@ -14,12 +14,16 @@ import {
 } from "lucide-react";
 
 import {
+  approveTarget,
+  getApprovalGates,
   getApprovalReview,
   getConfigDraft,
   getHealth,
   getManageState,
   getOperations,
   reconcileManageState,
+  setGatePreapproval,
+  type ApprovalGateSummary,
   type ConfigDraft,
   type ManageSnapshot,
 } from "../api/client";
@@ -27,6 +31,7 @@ import { useManageEvents } from "../api/useManageEvents";
 import { useOperationEvents } from "../api/useOperationEvents";
 import { ActivityPanel } from "../features/activity/ActivityPanel";
 import { ApprovalDialog } from "../features/actions/ResourceActionDialogs";
+import { ApprovalCenterDialog } from "../features/actions/ApprovalCenterDialog";
 import {
   approvalCandidates,
   type ApprovalCandidate,
@@ -233,6 +238,12 @@ export function App() {
         : false
     ),
   });
+  const approvalGates = useQuery({
+    queryKey: ["approval-gates"],
+    queryFn: getApprovalGates,
+    refetchInterval: 10_000,
+    retry: false,
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkedNavigation, setLinkedNavigation] =
     useState<LinkedNavigationEntry[]>([]);
@@ -243,8 +254,12 @@ export function App() {
   const [submitOpen, setSubmitOpen] = useState(false);
   const [approvalDialogTargetId, setApprovalDialogTargetId] =
     useState<string | null>(null);
+  const [approvalCenterOpen, setApprovalCenterOpen] = useState(false);
   const [approvalOutput, setApprovalOutput] =
     useState<ApprovalCandidate | null>(null);
+  const [pendingApprovalNames, setPendingApprovalNames] =
+    useState<Set<string>>(new Set());
+  const [approvalCenterProblem, setApprovalCenterProblem] = useState("");
   const [promptedApprovals] = useState(promptedApprovalKeys);
   const [resourceAdds, setResourceAdds] =
     useState<ResourceAddController | null>(null);
@@ -751,6 +766,76 @@ export function App() {
     });
     setTreeOpen(false);
   };
+  const setPreapprovals = async (
+    gates: ApprovalGateSummary[],
+    preapproved: boolean,
+  ) => {
+    const changed = gates.filter((gate) => (
+      gate.toggleable && gate.approved !== preapproved
+    ));
+    if (changed.length === 0) return;
+    setApprovalCenterProblem("");
+    setPendingApprovalNames((current) => new Set([
+      ...current,
+      ...changed.map((gate) => gate.name),
+    ]));
+    try {
+      await Promise.all(changed.map((gate) => setGatePreapproval(
+        gate.name,
+        gate.gateRevision,
+        preapproved,
+      )));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["approval-gates"] }),
+        queryClient.invalidateQueries({ queryKey: ["manage-state"] }),
+      ]);
+    } catch (error) {
+      setApprovalCenterProblem(
+        error instanceof Error ? error.message : String(error),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["approval-gates"] });
+    } finally {
+      const names = new Set(changed.map((gate) => gate.name));
+      setPendingApprovalNames((current) => new Set(
+        [...current].filter((name) => !names.has(name)),
+      ));
+    }
+  };
+  const approveBlockingGate = async (gate: ApprovalGateSummary) => {
+    if (!gate.approvalTargetId) return;
+    setApprovalCenterProblem("");
+    setPendingApprovalNames((current) => new Set([
+      ...current,
+      gate.name,
+    ]));
+    try {
+      await approveTarget(
+        gate.approvalTargetId,
+        gate.gateRevision,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["approval-gates"] }),
+        queryClient.invalidateQueries({ queryKey: ["manage-state"] }),
+        queryClient.invalidateQueries({ queryKey: ["operations"] }),
+      ]);
+    } catch (error) {
+      setApprovalCenterProblem(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setPendingApprovalNames((current) => {
+        const next = new Set(current);
+        next.delete(gate.name);
+        return next;
+      });
+    }
+  };
+  const viewGateOutput = (gate: ApprovalGateSummary) => {
+    const candidate = approvals.find((approval) => (
+      approval.targetId === gate.approvalTargetId
+    ));
+    if (candidate) setApprovalOutput(candidate);
+  };
   const persistPromptedApprovals = useCallback(() => {
     try {
       globalThis.sessionStorage.setItem(
@@ -853,6 +938,28 @@ export function App() {
             <span>{editContext ? "Exit editing" : "Edit configuration"}</span>
           </button>
           {!editContext ? (
+            <button
+              aria-label="Approvals"
+              className="edit-mode-button approvals-mode-button"
+              disabled={!state.data}
+              onClick={() => setApprovalCenterOpen(true)}
+              title="Review all workflow approval checkpoints"
+              type="button"
+            >
+              <ShieldCheck aria-hidden="true" />
+              <span>Approvals</span>
+              {(approvalGates.data?.gates ?? []).some((gate) => (
+                gate.state === "blocking"
+              )) ? (
+                <b>
+                  {approvalGates.data?.gates.filter((gate) => (
+                    gate.state === "blocking"
+                  )).length}
+                </b>
+              ) : null}
+            </button>
+          ) : null}
+          {!editContext ? (
             <>
               <button
                 aria-describedby="submit-status-reason"
@@ -924,6 +1031,35 @@ export function App() {
           reason={resubmissionOnly ? submitSignalText : undefined}
         />
       ) : null}
+      {
+        approvalCenterOpen
+        && !approvalDialogTargetId
+        && !approvalOutput
+          ? (
+            <ApprovalCenterDialog
+              error={
+                approvalGates.isError
+                  ? approvalGates.error.message
+                  : approvalCenterProblem || null
+              }
+              inventory={approvalGates.data}
+              loading={approvalGates.isPending}
+              onClose={() => setApprovalCenterOpen(false)}
+              onApprove={(gate) => {
+                void approveBlockingGate(gate);
+              }}
+              onToggle={(gate, preapproved) => {
+                void setPreapprovals([gate], preapproved);
+              }}
+              onToggleAll={(gates, preapproved) => {
+                void setPreapprovals(gates, preapproved);
+              }}
+              onViewOutput={viewGateOutput}
+              pendingNames={pendingApprovalNames}
+            />
+            )
+          : null
+      }
       {approvalOutput ? (
         <ApprovalOutputDialog
           approval={approvalOutput}
@@ -931,7 +1067,10 @@ export function App() {
         />
       ) : null}
       {
-        approvalDialogTargetId && approvals.length > 0 && !approvalOutput ? (
+        approvalDialogTargetId
+        && approvals.length > 0
+        && !approvalOutput
+          ? (
         <ApprovalDialog
           candidates={approvals}
           initialTargetId={approvalDialogTargetId}
@@ -942,7 +1081,9 @@ export function App() {
           onEdit={editApprovalResource}
           onViewOutput={setApprovalOutput}
         />
-        ) : null}
+            )
+          : null
+      }
       {state.isPending ? (
         <main className="shell-loading">
           <LoaderCircle className="spin" aria-hidden="true" />
@@ -997,6 +1138,13 @@ export function App() {
               <span>{problem.message}</span>
             </output>
           ))}
+          {approvalCenterProblem && !approvalCenterOpen ? (
+            <output className="state-banner problem-banner">
+              <CircleAlert aria-hidden="true" />
+              <strong>Approval update failed</strong>
+              <span>{approvalCenterProblem}</span>
+            </output>
+          ) : null}
           {firstApproval ? (
             <section
               aria-label="Approval required"
@@ -1133,6 +1281,8 @@ export function App() {
                 />
               ) : selectedNode ? (
                 <ResourceWorkspace
+                  approvalGates={approvalGates.data?.gates ?? []}
+                  approvalGatesLoading={approvalGates.isPending}
                   approvals={approvals}
                   navigationBackLabel={linkedBackLabel}
                   node={selectedNode}
@@ -1140,7 +1290,11 @@ export function App() {
                   onNavigateBack={navigateLinkedBack}
                   onRequestApproval={setApprovalDialogTargetId}
                   onSelect={navigateLinkedNode}
+                  onTogglePreapprovals={(gates, preapproved) => {
+                    void setPreapprovals(gates, preapproved);
+                  }}
                   operations={operations.data ?? []}
+                  pendingPreapprovalNames={pendingApprovalNames}
                   resetInProgress={resetTargetIds.has(selectedNode.id)}
                 />
               ) : (

@@ -446,6 +446,15 @@ async function mockManageApi(page: Page) {
       }),
     });
   });
+  await page.route("**/api/v1/approval-gates", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        workflowName: "migration",
+        gates: [],
+      }),
+    });
+  });
   await page.route("**/api/v1/approvals/review?*", async (route) => {
     await route.fulfill({
       contentType: "application/json",
