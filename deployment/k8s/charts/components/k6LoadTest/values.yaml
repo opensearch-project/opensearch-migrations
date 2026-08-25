@@ -24,9 +24,10 @@ image:
 # Scripts image — migrations/k6_scripts, a `FROM scratch` data image built from
 # TrafficCapture/trafficLoadTest, mounted read-only at /scripts on the initializer and every runner
 # via a Kubernetes `image:` volume (the same mechanism as the migration's mountable transforms; it
-# is why this chart requires k8s >= 1.35). It holds the scenarios, libs, document schemas and the
-# k6-config presets — the ONLY place that content lives, so editing a scenario or preset means
-# rebuilding and pushing this image, not a helm upgrade.
+# is why this chart requires k8s >= 1.35). It holds the scenarios, libs and document schemas — the
+# ONLY place that content lives, so editing a scenario means rebuilding and pushing this image, not a
+# helm upgrade. The load PROFILES are not in it: they are the `profiles` map below, so changing a
+# load shape is a helm upgrade. (It also carries k6-config/*.env, which only a local `k6 run` uses.)
 #
 # It is NOT a released artifact (load testing is a dev/test capability, so it is not published
 # publicly, not mirrored by aws-bootstrap.sh, and not built by :buildImages:buildImagesToRegistry)
@@ -70,8 +71,8 @@ k6-operator:
   namespace:
     create: false
 
-# TestRun distribution defaults, rendered as parameter defaults on every k6-<scenario>
-# WorkflowTemplate. `parallelism` splits each scenario's load across that many runner pods (the
+# TestRun distribution defaults, rendered as parameter defaults on every k6-<profile>
+# WorkflowTemplate. `parallelism` splits each run's load across that many runner pods (the
 # operator shards the script's executors). `separate: true` is the operator's shorthand for REQUIRED
 # node anti-affinity — it forces the runner pods onto distinct nodes. Only meaningful when
 # parallelism > 1, and it needs at least `parallelism` schedulable nodes or the surplus pods stay
@@ -89,10 +90,217 @@ testRun:
 # describe only the shape of the load. Keeping it here means pointing runs at a differently named
 # proxy is a `helm install` flag instead of a rebuild of the migrations/k6_scripts image.
 #
-# Precedence: `loadtest run --target` / `-e CAPTURE_PROXY_URL=` beats this per run, and this beats
-# the scenarios' own fallback (which still covers k6-run.sh and plain kubectl runs, where no chart
-# supplies the value).
+# Precedence: `loadtest run --target` / `-p CAPTURE_PROXY_URL=` beats this per run, and this is the
+# default of the CAPTURE_PROXY_URL parameter on every rendered WorkflowTemplate.
 captureProxyUrl: https://capture-proxy:9201
+
+# ---------------------------------------------------------------------------
+# Scenario knobs and load profiles.
+# ---------------------------------------------------------------------------
+# Together these render the WorkflowTemplates: one per profile, each stating EVERY setting its
+# scenario reads as a named Argo parameter with a value. There is no defaults layer under it and
+# none over it — what the template says is what the run gets:
+#
+#   kubectl get workflowtemplate k6-ingest-burst -o yaml     # the whole configuration of that run
+#   argo submit --from workflowtemplate/k6-ingest-burst -p INGEST_RATE=80
+#
+# A parameter that a submission does not pass keeps the value below. `K6_PRESET` is NOT set on this
+# path: lib/config.js still reads k6-config/*.env, but only for a local `k6 run`, never in-cluster.
+#
+# `scenarios.<name>.env` states every key that scenario (and the libs it imports) reads, at the same
+# value as the script's own `CFG.X || 'default'` fallback. A unit test fails if the two disagree, or
+# if a scenario reads a key that is not listed here.
+#
+# `profiles.<name>.env` then lists ONLY what that profile changes, which keeps the load shape
+# readable. The rendered template is fully resolved either way. Each profile mirrors the
+# k6-config/<name>.env file of the same name; a unit test fails if they drift.
+#
+# A profile ADDS to its scenario block; it can never blank a value out. `EXECUTOR` decides which
+# timing knob exists, so neither `DURATION` nor a stage list is scenario-wide — each profile states
+# the one it uses. That is not only tidier: a knob the profile does not state cannot be overridden,
+# so `--duration 30s` on a ramping profile is refused instead of silently changing nothing.
+# (It is also the only shape that renders correctly. Helm's `merge` fills in an empty destination
+# value from the source, so a profile stating `DURATION: ""` would get the scenario's value written
+# back over it, silently. A unit test fails if any profile blanks a value its scenario states.)
+#
+# Values are always strings. A value must not contain a single quote — the templates substitute
+# parameters into single-quoted YAML scalars, so one would break the manifest. Helm fails the render
+# with a named key if it finds one.
+scenarios:
+  ingest:
+    env:
+      SCHEMA: nyc_taxis                  # document set: nyc_taxis | logs_data
+      INDEX_NAME: ""                     # blank = same as SCHEMA
+      INGEST_RATE: "50"                  # arrival rate (req/s), constant-arrival-rate only
+      INGEST_VUS: "20"                   # pre-allocated VUs; each holds one keep-alive connection
+      INGEST_MAX_VUS: "100"
+      EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
+      BULK_BATCH_SIZE: "20"              # documents per _bulk call
+      BULK_FRACTION: "0.70"              # share of iterations that send _bulk
+      SEQUENCE_FRACTION: "0.15"          # share that run create→update→query→delete
+      CONNECTION_MODE: pinned            # pinned (keep-alive) | spread (Connection: close)
+      NO_CONNECTION_REUSE: "false"
+      CONTROL_ENABLED: "false"           # chaos control bus (needs registry.enabled=true)
+      CONTROL_CMD_KEY: control_cmd
+      WEBDIS_URL: http://webdis:7379     # read by the control bus only
+      AUTH_MODE: ""                      # blank = basic when AUTH_USERNAME is set, else none
+      AUTH_USERNAME: ""                  # per-run input — never give these a value here
+      AUTH_PASSWORD: ""
+  search:
+    env:
+      SCHEMA: nyc_taxis
+      INDEX_NAME: ""
+      SEARCH_RATE: "50"
+      SEARCH_VUS: "30"
+      SEARCH_MAX_VUS: "150"
+      EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
+      SEARCH_FLAT_FRACTION: "0.60"       # the query mix; the remainder runs deep paging
+      SEARCH_AGG_FRACTION: "0.20"
+      SEARCH_UPDATE_FRACTION: "0.10"
+      SEARCH_WRITE_FRACTION: "0.05"
+      DEEP_PAGING_ENABLED: "false"
+      PAGING_MODE: scroll                # scroll | search_after
+      SCROLL_PAGES: "3"
+      SEARCH_AFTER_PAGES: "3"
+      CONNECTION_MODE: pinned
+      NO_CONNECTION_REUSE: "false"
+      AUTH_MODE: ""
+      AUTH_USERNAME: ""
+      AUTH_PASSWORD: ""
+  mixed:
+    env:
+      SCHEMA: nyc_taxis
+      INDEX_NAME: ""
+      INGEST_RATE: "30"                  # the two streams have independent rates and VU pools
+      INGEST_VUS: "15"
+      INGEST_MAX_VUS: "75"
+      SEARCH_RATE: "20"
+      SEARCH_VUS: "15"
+      SEARCH_MAX_VUS: "75"
+      EXECUTOR: constant-arrival-rate    # decides the timing knob: DURATION, or a stage list
+      BULK_BATCH_SIZE: "20"
+      BULK_FRACTION: "0.70"
+      SEQUENCE_FRACTION: "0.15"
+      SEARCH_FLAT_FRACTION: "0.60"
+      SEARCH_AGG_FRACTION: "0.20"
+      SEARCH_UPDATE_FRACTION: "0.10"
+      CONSISTENCY_FRACTION: "0.10"       # share of searches that read back a just-written doc ID
+      CONNECTION_MODE: pinned            # pinned (keep-alive) | spread (Connection: close)
+      NO_CONNECTION_REUSE: "false"
+      REGISTRY_ENABLED: "false"          # the Redis ID ring that connects the two streams
+      REGISTRY_KEY: recent_ids
+      REGISTRY_CAP: "1000"
+      MIN_RING_FILL: "0"                 # delay the search stream until the ring holds this many IDs
+      WEBDIS_URL: http://webdis:7379
+      CONTROL_ENABLED: "false"
+      CONTROL_CMD_KEY: control_cmd
+      AUTH_MODE: ""
+      AUTH_USERNAME: ""
+      AUTH_PASSWORD: ""
+
+profiles:
+  # ── ingest ────────────────────────────────────────────────────────────────
+  ingest-steady:
+    scenario: ingest
+    description: Steady ingest — holds 50 req/s at the proxy for 5m.
+    env:
+      DURATION: 5m
+  ingest-ramp:
+    scenario: ingest
+    description: Ingest 0→150 req/s over 2m, hold 3m, down 1m (6m total).
+    env:
+      EXECUTOR: ramping-arrival-rate
+      RAMP_STAGES: '[{"duration":"2m","target":150},{"duration":"3m","target":150},{"duration":"1m","target":0}]'
+      # A ramp needs more VU headroom than a constant rate: k6 must start VUs ahead of the curve
+      # or it drops iterations.
+      INGEST_VUS: "50"
+      INGEST_MAX_VUS: "200"
+  ingest-burst:
+    scenario: ingest
+    description: Ingest baseline 20 req/s, spike to 200 for 1m, recover (4m30s total).
+    env:
+      EXECUTOR: ramping-arrival-rate
+      RAMP_STAGES: '[{"duration":"1m","target":20},{"duration":"30s","target":200},{"duration":"30s","target":200},{"duration":"30s","target":20},{"duration":"2m","target":20}]'
+      INGEST_VUS: "60"
+      INGEST_MAX_VUS: "250"
+
+  # ── search ────────────────────────────────────────────────────────────────
+  search-steady:
+    scenario: search
+    description: Steady search — holds 50 req/s at the proxy for 5m.
+    env:
+      DURATION: 5m
+  search-deep-paging:
+    scenario: search
+    description: Search with scroll/search_after sequences on; lower rate, costlier iterations.
+    env:
+      DURATION: 5m
+      SEARCH_RATE: "20"
+      SEARCH_VUS: "20"
+      SEARCH_MAX_VUS: "80"
+      DEEP_PAGING_ENABLED: "true"
+      SCROLL_PAGES: "5"
+      SEARCH_AFTER_PAGES: "5"
+  search-ramp:
+    scenario: search
+    description: Search 0→150 req/s over 2m, hold 3m, down 1m (6m total).
+    env:
+      EXECUTOR: ramping-arrival-rate
+      RAMP_STAGES: '[{"duration":"2m","target":150},{"duration":"3m","target":150},{"duration":"1m","target":0}]'
+      SEARCH_VUS: "50"
+      SEARCH_MAX_VUS: "200"
+  search-burst:
+    scenario: search
+    description: Search baseline 20 req/s, spike to 150 for 1m, recover (4m30s total).
+    env:
+      EXECUTOR: ramping-arrival-rate
+      RAMP_STAGES: '[{"duration":"1m","target":20},{"duration":"30s","target":150},{"duration":"30s","target":150},{"duration":"30s","target":20},{"duration":"2m","target":20}]'
+      SEARCH_VUS: "60"
+      SEARCH_MAX_VUS: "200"
+
+  # ── mixed ─────────────────────────────────────────────────────────────────
+  # Every mixed profile turns the ID ring on, so it needs registry.enabled=true (redis + webdis).
+  mixed-steady:
+    scenario: mixed
+    description: Concurrent ingest (30 req/s) and search (20 req/s) for 5m, with consistency reads.
+    env:
+      DURATION: 5m
+      REGISTRY_ENABLED: "true"
+  mixed-ramp:
+    scenario: mixed
+    description: Ingest 0→80 and search 0→50 req/s over 2m, hold 3m, down 1m (6m total).
+    env:
+      EXECUTOR: ramping-arrival-rate
+      INGEST_RAMP_STAGES: '[{"duration":"2m","target":80},{"duration":"3m","target":80},{"duration":"1m","target":0}]'
+      SEARCH_RAMP_STAGES: '[{"duration":"2m","target":50},{"duration":"3m","target":50},{"duration":"1m","target":0}]'
+      INGEST_VUS: "30"
+      INGEST_MAX_VUS: "150"
+      SEARCH_VUS: "20"
+      SEARCH_MAX_VUS: "100"
+      REGISTRY_ENABLED: "true"
+      # The ring fills during the ingest ramp-up. Hold the search stream back until it has ~50 IDs,
+      # or the consistency reads miss for the first seconds of the run.
+      MIN_RING_FILL: "50"
+  mixed-burst:
+    scenario: mixed
+    description: Both streams spike together — ingest 20→150, search 15→100 (4m30s total).
+    env:
+      EXECUTOR: ramping-arrival-rate
+      INGEST_RAMP_STAGES: '[{"duration":"1m","target":20},{"duration":"30s","target":150},{"duration":"30s","target":150},{"duration":"30s","target":20},{"duration":"2m","target":20}]'
+      SEARCH_RAMP_STAGES: '[{"duration":"1m","target":15},{"duration":"30s","target":100},{"duration":"30s","target":100},{"duration":"30s","target":15},{"duration":"2m","target":15}]'
+      INGEST_VUS: "60"
+      INGEST_MAX_VUS: "250"
+      SEARCH_VUS: "40"
+      SEARCH_MAX_VUS: "150"
+      REGISTRY_ENABLED: "true"
+      MIN_RING_FILL: "50"
+
+# k6's own output knobs, stated as parameters on every template so a run can turn metrics off or
+# aim them elsewhere. These are k6 flags, not scenario configuration.
+k6Output:
+  K6_OUT: opentelemetry
+  K6_OTEL_GRPC_EXPORTER_ENDPOINT: otel-collector:4317
+  K6_OTEL_GRPC_EXPORTER_INSECURE: "true"
 
 # Redis + Webdis sidecars, required only by the mixed (write-then-read) and chaos scenarios.
 # Off by default; those scenarios degrade gracefully to flat searches when absent.

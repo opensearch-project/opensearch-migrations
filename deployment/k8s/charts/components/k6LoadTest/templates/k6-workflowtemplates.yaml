@@ -1,16 +1,32 @@
-# One Argo WorkflowTemplate per scenario. A WorkflowTemplate is inert until something instantiates
-# it, which is why the run definition can live here as a real cluster object instead of as a JSON
-# string inside a ConfigMap: creating a TestRun starts a load test, but creating a WorkflowTemplate
-# does not. Submitting a run is then a ~10-line Workflow that names the template and its parameters:
+# One Argo WorkflowTemplate per load profile — `k6-<profile>`, e.g. k6-ingest-burst. A
+# WorkflowTemplate is inert until something instantiates it, which is why the run definition can
+# live here as a real cluster object instead of as a JSON string inside a ConfigMap: creating a
+# TestRun starts a load test, but creating a WorkflowTemplate does not.
+#
+# Every setting the scenario reads is a named parameter with a value, so the template IS the
+# specification of the run — there is no defaults layer under it and none over it:
+#
+#   kubectl get workflowtemplate k6-ingest-burst -o yaml    # the whole configuration of that run
+#   argo submit --from workflowtemplate/k6-ingest-burst -p INGEST_RATE=80
+#
+# or, with kubectl only, a ~12-line Workflow naming the template and what it changes:
 #
 #   kubectl create -n ma -f - <<'EOF'
 #   apiVersion: argoproj.io/v1alpha1
 #   kind: Workflow
-#   metadata: {generateName: k6-ingest-}
+#   metadata: {generateName: k6-ingest-burst-}
 #   spec:
-#     workflowTemplateRef: {name: k6-ingest}
-#     arguments: {parameters: [{name: parallelism, value: "2"}]}
+#     workflowTemplateRef: {name: k6-ingest-burst}
+#     arguments:
+#       parameters:
+#         - {name: INGEST_RATE, value: "80"}
+#         - {name: parallelism, value: "2"}
 #   EOF
+#
+# A parameter the submission omits keeps the default below, so a caller states only what it changes
+# and never has to read the template first. `K6_PRESET` is deliberately NOT set: lib/config.js still
+# resolves k6-config/*.env for a local `k6 run`, but in-cluster the parameters are the only input,
+# which is what lets a profile state a key that another profile of the same scenario must not have.
 #
 # The workflow's single task creates the TestRun and blocks until the k6-operator reports a terminal
 # stage, so the operator keeps doing the hard part (splitting the load into execution segments across
@@ -19,6 +35,9 @@
 # The TestRun takes the workflow's own name, so a run has ONE identifier: `kubectl logs -l
 # k6_cr=<name>` reaches the k6 pods, and deleting the workflow cascades to the TestRun through the
 # owner reference.
+#
+# Parameter naming carries meaning and clients rely on it: an ALL_CAPS parameter is a runner
+# environment variable, anything camelCase configures the run around it (images, parallelism).
 {{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
 {{- $starter := printf "%s:%s" .Values.starterImage.repository .Values.starterImage.tag }}
 {{- $scripts := .Values.scriptsImage }}
@@ -27,62 +46,46 @@
       (printf "%s@%s" $scripts.repository $scripts.digest)
       (printf "%s:%s" $scripts.repository ($scripts.tag | default .Chart.AppVersion))
       (ne (toString $scripts.digest) "") }}
+{{- range $profile, $p := .Values.profiles }}
+{{- $s := index $.Values.scenarios $p.scenario | required (printf "profile %q names unknown scenario %q" $profile $p.scenario) }}
 {{- /*
-  Runner env entries that are safe to state here, with the value each scenario would otherwise fall
-  back to in JS (`CFG.X || 'default'`).
-
-  Only keys that NO preset in k6-config/*.env sets may appear here. runnerEnv is not a defaults
-  layer: lib/config.js resolves a run as `{...preset, ...__ENV}`, so an entry here BEATS the
-  selected preset and cannot be overridden by it. Listing a preset-owned key (DURATION, INGEST_RATE,
-  EXECUTOR, RAMP_STAGES, VUs, BULK_BATCH_SIZE, SEED_DOC_COUNT, REGISTRY_ENABLED, …) would force one
-  value on every preset — the ramp and burst profiles deliberately omit DURATION, for instance,
-  because RAMP_STAGES carries their timing.
+  The env of one run, fully resolved: what the profile changes wins over the scenario-wide value,
+  and the two chart-owned groups (where traffic is aimed, where metrics go) fill in the rest. Keys
+  are rendered in sorted order, so the output does not churn between renders.
 */ -}}
-{{- $envDefaults := dict
-      "ingest" (list
-        (dict "name" "SCHEMA" "value" "nyc_taxis")
-        (dict "name" "NO_CONNECTION_REUSE" "value" "false")
-        (dict "name" "CONTROL_ENABLED" "value" "false")
-        (dict "name" "CONTROL_CMD_KEY" "value" "control_cmd")
-        (dict "name" "BULK_FRACTION" "value" "0.70"))
-      "search" (list
-        (dict "name" "SCHEMA" "value" "nyc_taxis")
-        (dict "name" "NO_CONNECTION_REUSE" "value" "false")
-        (dict "name" "SEARCH_FLAT_FRACTION" "value" "0.60")
-        (dict "name" "SEARCH_AGG_FRACTION" "value" "0.20")
-        (dict "name" "SEARCH_UPDATE_FRACTION" "value" "0.10")
-        (dict "name" "SEARCH_WRITE_FRACTION" "value" "0.05"))
-      "mixed" (list
-        (dict "name" "SCHEMA" "value" "nyc_taxis")
-        (dict "name" "NO_CONNECTION_REUSE" "value" "false")
-        (dict "name" "CONTROL_ENABLED" "value" "false")
-        (dict "name" "CONTROL_CMD_KEY" "value" "control_cmd")
-        (dict "name" "REGISTRY_CAP" "value" "1000")
-        (dict "name" "REGISTRY_KEY" "value" "recent_ids")
-        (dict "name" "BULK_FRACTION" "value" "0.70")
-        (dict "name" "SEARCH_FLAT_FRACTION" "value" "0.60")
-        (dict "name" "SEARCH_AGG_FRACTION" "value" "0.20")
-        (dict "name" "SEARCH_UPDATE_FRACTION" "value" "0.10")) }}
-{{- range $scenario := (list "ingest" "search" "mixed") }}
+{{- $env := merge (deepCopy ($p.env | default dict)) $s.env
+      (dict "CAPTURE_PROXY_URL" $.Values.captureProxyUrl) $.Values.k6Output }}
+{{- range $k, $v := $env }}
+{{- /*
+  Values are substituted into single-quoted YAML scalars in the TestRun manifest below (they have to
+  be: RAMP_STAGES carries JSON, which double quotes cannot hold). A single quote in a value would
+  end that scalar early and produce a manifest that fails to parse at submit time, far from here.
+*/ -}}
+{{- if contains "'" (toString $v) }}
+{{- fail (printf "profile %s: value of %s contains a single quote, which the TestRun manifest cannot carry" $profile $k) }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  name: k6-{{ $scenario }}
+  name: k6-{{ $profile }}
   namespace: {{ $.Release.Namespace }}
   labels:
     app: k6-load-test
-    k6-scenario: {{ $scenario }}
+    k6-scenario: {{ $p.scenario }}
+    k6-profile: {{ $profile }}
+{{- with $p.description }}
+  annotations:
+    workflows.argoproj.io/description: {{ . | quote }}
+{{- end }}
 spec:
   serviceAccountName: {{ $.Values.workflow.serviceAccountName }}
   entrypoint: run
-  # Every per-run knob is a parameter with a default supplied here, so a caller overrides only what
-  # it cares about and never has to know the images. `runnerEnv` carries the WHOLE runner env as a
-  # one-line JSON array (JSON is valid YAML, so it splices into the manifest below): the console
-  # reads this default and replaces entries by name, which keeps one definition of the static vars
-  # and avoids two env entries of the same name.
   arguments:
     parameters:
+      # How the run is distributed and which images carry it. A caller overrides these only to
+      # depart from the installed chart.
       - name: parallelism
         value: {{ $.Values.testRun.parallelism | int | quote }}
       - name: separate
@@ -97,14 +100,12 @@ spec:
         value: {{ $scriptsRef | quote }}
       - name: scriptsPullPolicy
         value: {{ $scripts.pullPolicy | quote }}
-      - name: runnerEnv
-        value: {{ toJson (concat (list
-              (dict "name" "K6_PRESET" "value" (printf "%s-steady" $scenario))
-              (dict "name" "K6_OUT" "value" "opentelemetry")
-              (dict "name" "K6_OTEL_GRPC_EXPORTER_ENDPOINT" "value" "otel-collector:4317")
-              (dict "name" "K6_OTEL_GRPC_EXPORTER_INSECURE" "value" "true")
-              (dict "name" "CAPTURE_PROXY_URL" "value" $.Values.captureProxyUrl))
-              (index $envDefaults $scenario)) | quote }}
+      # The load itself. Every one of these reaches the runner as the environment variable of the
+      # same name; see values.yaml for what each does.
+{{- range $k, $v := $env }}
+      - name: {{ $k }}
+        value: {{ $v | quote }}
+{{- end }}
   templates:
     - name: run
       # A TestRun that never reaches a terminal stage (for example runner pods that cannot pull an
@@ -124,21 +125,22 @@ spec:
             name: "{{`{{workflow.name}}`}}"
             labels:
               app: k6-load-test
-              k6-scenario: {{ $scenario }}
+              k6-scenario: {{ $p.scenario }}
+              k6-profile: {{ $profile }}
           spec:
             parallelism: {{`{{workflow.parameters.parallelism}}`}}
             separate: {{`{{workflow.parameters.separate}}`}}
             arguments: "{{`{{workflow.parameters.arguments}}`}}"
             script:
-              localFile: /scripts/scenarios/{{ $scenario }}.js
+              localFile: /scripts/scenarios/{{ $p.scenario }}.js
             # Pinned to the controller's version — the operator would otherwise pull a floating
             # `latest-starter`. It carries no scripts: it only signals the runners to begin.
             starter:
               image: "{{`{{workflow.parameters.starterImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
             # The initializer runs `k6 archive`, so it needs the same scenarios at the same path as
-            # the runners. It gets no env: K6_PRESET is resolved at run time, and an unknown preset
-            # should fail in the runner with the list the image actually ships.
+            # the runners. It gets no env: it only has to parse the script, and giving it the load
+            # configuration would make a typo in a parameter fail in the wrong pod.
             initializer:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
@@ -153,7 +155,14 @@ spec:
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
-              env: {{`{{workflow.parameters.runnerEnv}}`}}
+              # One entry per parameter, so the container env is a fixed list with no name stated
+              # twice — which of two same-named entries wins is not something a load test should
+              # depend on.
+              env:
+{{- range $k, $v := $env }}
+                - name: {{ $k }}
+                  value: '{{ printf "{{workflow.parameters.%s}}" $k }}'
+{{- end }}
               volumes:
                 - name: scripts
                   image:

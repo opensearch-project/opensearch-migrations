@@ -25,7 +25,6 @@ except (AttributeError, ValueError):
 from .utils import ExitCode, load_k8s_config, get_current_namespace          # noqa: E402
 from . import runs                                                          # noqa: E402
 from .runs import (                                                         # noqa: E402
-    CONFIG_PRESETS,
     SUCCESS_PHASE,
     build_k6_parameters,
     chart_missing_hint,
@@ -35,7 +34,7 @@ from .runs import (                                                         # no
     submit_k6_run,
     wait_for_run,
 )
-from .testrun_utils import delete_workflow, list_scenarios                   # noqa: E402
+from .testrun_utils import delete_workflow, list_profiles, list_scenarios    # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +60,8 @@ def _complete_scenarios(ctx, param, incomplete):
     return [v for v in _cluster_values(list_scenarios, runs.SCENARIOS) if v.startswith(incomplete)]
 
 
-def _complete_presets(ctx, param, incomplete):
-    return [v for v in CONFIG_PRESETS if v.startswith(incomplete)]
+def _complete_profiles(ctx, param, incomplete):
+    return [v for v in _cluster_values(list_profiles, runs.PROFILES) if v.startswith(incomplete)]
 
 
 # ---------------------------------------------------------------------------
@@ -101,15 +100,6 @@ def _echo_hint_best_effort(namespace):
         logging.disable(previous)
     if hint:
         click.echo(hint, err=True)
-
-
-def _warn_if_unknown_preset(config_name):
-    """Warn (but never block) when the preset isn't one of the presets the scripts image ships.
-    A custom image may ship others, so this never fails the run — and if the preset really is
-    missing, the scenario stops at init with the list the image actually has."""
-    if config_name not in CONFIG_PRESETS:
-        click.echo(f"Note: config preset '{config_name}' is not one of the stock presets "
-                   f"({', '.join(CONFIG_PRESETS)}); running anyway.", err=True)
 
 
 # ---------------------------------------------------------------------------
@@ -158,10 +148,11 @@ def loadtest_cli(ctx, verbose, namespace, refresh_interval):
 
 
 @loadtest_cli.command(name="run")
-@click.option('--scenario', default="ingest", show_default=True, shell_complete=_complete_scenarios,
-              help="Scenario to run — any scenario present in the cluster, including custom ones.")
-@click.option('--config', 'config_name', default=None, shell_complete=_complete_presets,
-              help="k6-config preset name (default: <scenario>-steady).")
+@click.option('--scenario', default=None, shell_complete=_complete_scenarios,
+              help="Scenario to run, which selects its steady profile (default: ingest). "
+                   "Redundant with --config, which names the scenario itself.")
+@click.option('--config', 'config_name', default=None, shell_complete=_complete_profiles,
+              help="Load profile to run — a WorkflowTemplate (default: <scenario>-steady).")
 @click.option('--parallelism', default=1, type=int, show_default=True,
               help="Number of runner pods. k6 splits the load across them via execution segments, "
                    "so --rate/--vus are GLOBAL totals divided among runners.")
@@ -172,11 +163,12 @@ def loadtest_cli(ctx, verbose, namespace, refresh_interval):
 @click.option('--duration', default=None, help="Override DURATION (e.g. 5m, 30s).")
 @click.option('--vus', default=None, help="Override pre-allocated VUs.")
 @click.option('--registry-enabled/--no-registry-enabled', 'registry_enabled', default=None,
-              help="Force the mixed/consistency ring buffer on/off (default: keep preset).")
+              help="Force the mixed/consistency ring buffer on/off (default: keep the profile's).")
 @click.option('--control-enabled/--no-control-enabled', 'control_enabled', default=None,
-              help="Force the chaos control bus on/off (default: keep preset).")
+              help="Force the chaos control bus on/off (default: keep the profile's).")
 @click.option('--override', '-e', 'overrides', multiple=True, metavar='KEY=VALUE',
-              help="Extra env override, applied after the preset (matches k6-run.sh's -e). Repeatable.")
+              help="Override any other setting of the profile by name (matches k6-run.sh's -e). "
+                   "Repeatable. A name the profile does not have is an error, not a no-op.")
 @click.option('--extra-args', default=None, help="Extra flags for `k6 run` (e.g. --no-thresholds).")
 @click.option('--namespace', **_NAMESPACE_OPTION)
 @click.option('--wait', is_flag=True, default=False, help="Wait for the run to complete.")
@@ -186,11 +178,15 @@ def loadtest_cli(ctx, verbose, namespace, refresh_interval):
 def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
     """Submit a k6 run.
 
+    A run is one load profile, with any of its settings overridden by name. `loadtest status` lists
+    the profiles the installed chart offers; `kubectl get workflowtemplate k6-<profile> -o yaml`
+    shows every setting one has, and its value.
+
     \b
     Examples:
       loadtest run --scenario ingest --target https://my-proxy:9200
-      loadtest run --scenario search --config search-deep-paging --rate 100 --duration 10m
-      loadtest run --scenario mixed --parallelism 4 --registry-enabled -e INGEST_RATE=80
+      loadtest run --config search-deep-paging --rate 100 --duration 10m
+      loadtest run --config mixed-burst --parallelism 4 -e BULK_BATCH_SIZE=50
     """
     # Every remaining option names a build_k6_parameters keyword (that's why the click options
     # above spell out `config_name`/`target_url`), so the run spec is assembled by forwarding the
@@ -204,17 +200,15 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
         click.echo(f"Error: --override {e}", err=True)
         ctx.exit(ExitCode.INVALID_INPUT.value)
         return
-    scenario = params["scenario"]
     target_url = params["targetUrl"]
     config_name = params["configName"]
 
     try:
         load_k8s_config()
-        _warn_if_unknown_preset(config_name)
         name = submit_k6_run(namespace, params)
     except ValueError as e:
-        # A missing WorkflowTemplate is an unmet precondition, not bad input: the message already
-        # names the scenarios that do exist and the chart that supplies them.
+        # A missing WorkflowTemplate or a setting the profile does not have is an unmet
+        # precondition, not bad input: the message already names what the cluster does offer.
         click.echo(f"Error: {e}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
         return
@@ -225,7 +219,7 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
 
     click.echo(f"Submitted k6 run: {name}")
     target_note = f" target={target_url}" if target_url else ""
-    click.echo(f"  scenario={scenario} config={config_name} parallelism={params['parallelism']}{target_note}")
+    click.echo(f"  profile={config_name} parallelism={params['parallelism']}{target_note}")
     click.echo(f"\nWatch:  loadtest list\n        loadtest logs {name} -f")
 
     if wait:
@@ -260,9 +254,9 @@ def k6_list(ctx, scenario, namespace):
         _exit_if_chart_missing(ctx, namespace)
         return
 
-    rows = [(r["name"], r["scenario"], r["phase"], r["parallelism"], r["age"]) for r in found]
+    rows = [(r["name"], r["profile"], r["phase"], r["parallelism"], r["age"]) for r in found]
 
-    header = ("NAME", "SCENARIO", "STAGE", "PARALLEL", "AGE")
+    header = ("NAME", "PROFILE", "STAGE", "PARALLEL", "AGE")
     widths = [max(len(str(r[i])) for r in (header, *rows)) for i in range(len(header))]
     click.echo("  ".join(str(c).ljust(widths[i]) for i, c in enumerate(header)))
     for r in rows:
@@ -352,11 +346,11 @@ def k6_logs(ctx, name, follow, namespace):
 @click.option('--namespace', **_NAMESPACE_OPTION)
 @click.pass_context
 def k6_status(ctx, namespace):
-    """Report whether load testing is available here, and which scenarios are launchable."""
+    """Report whether load testing is available here, and which profiles are launchable."""
     try:
         load_k8s_config()
         _exit_if_chart_missing(ctx, namespace)
-        scenarios = list_scenarios(namespace)
+        catalog = runs.profile_catalog(namespace)
     except click.exceptions.Exit:
         raise
     except Exception as e:
@@ -365,7 +359,14 @@ def k6_status(ctx, namespace):
         return
 
     click.echo(f"k6LoadTest chart: installed in namespace '{namespace}'")
-    click.echo(f"Scenarios: {', '.join(scenarios) or 'none'}")
+    if not catalog:
+        click.echo("Profiles: none")
+        return
+    width = max(len(p) for p in catalog)
+    click.echo("Profiles:")
+    for profile in sorted(catalog):
+        entry = catalog[profile]
+        click.echo(f"  {profile.ljust(width)}  {entry['description'] or entry['scenario']}")
 
 
 @loadtest_cli.group(name="util", context_settings=HELP_CONTEXT)

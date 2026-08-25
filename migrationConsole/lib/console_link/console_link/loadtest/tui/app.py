@@ -20,7 +20,7 @@ from .launch_modal import LoadTestLaunchModal
 logger = logging.getLogger(__name__)
 
 TABLE_ANCHOR = "runs"
-COLUMNS = ("NAME", "SCENARIO", "STAGE", "PARALLEL", "AGE")
+COLUMNS = ("NAME", "PROFILE", "STAGE", "PARALLEL", "AGE")
 # Actions that act on the highlighted run, and so are advertised only when a run is highlighted.
 ROW_ACTIONS = ("stop_run", "view_logs", "follow_logs")
 
@@ -101,7 +101,7 @@ class LoadTestApp(App):
         table = self.table
         table.clear()
         for run in self._runs:
-            table.add_row(run["name"], run["scenario"], run["phase"], run["parallelism"], run["age"])
+            table.add_row(run["name"], run["profile"], run["phase"], run["parallelism"], run["age"])
         if selected:
             for i, run in enumerate(self._runs):
                 if run["name"] == selected:
@@ -138,16 +138,15 @@ class LoadTestApp(App):
     # --- Launch ---
 
     def action_new_run(self) -> None:
-        from ..runs import CONFIG_PRESETS
-        from ..testrun_utils import list_scenarios
-        # Presets ship inside the scripts image, so there is nothing to look up in the cluster.
+        from ..runs import profile_catalog
+        # One list call gives every launchable profile AND the settings each one carries, so the
+        # form can show real values. An empty catalog still opens the form on its fallback list.
         try:
-            scenarios = list_scenarios(self._namespace)
+            catalog = profile_catalog(self._namespace)
         except Exception as e:
-            self.notify(f"Could not list k6 scenarios: {e}", severity="error")
-            scenarios = []
-        self.push_screen(LoadTestLaunchModal(presets=CONFIG_PRESETS, scenarios=scenarios),
-                         self._on_launch)
+            self.notify(f"Could not list k6 profiles: {e}", severity="error")
+            catalog = {}
+        self.push_screen(LoadTestLaunchModal(catalog=catalog), self._on_launch)
 
     def _on_launch(self, fields: Optional[Dict]) -> None:
         """Submit the form's run. Dismissal (None) is a cancel, not a command."""
@@ -158,7 +157,7 @@ class LoadTestApp(App):
             name = submit_k6_run(self._namespace, build_k6_parameters(**fields))
             self.notify(f"✅ Submitted k6 run: {name}")
         except ValueError as e:
-            self.notify(f"Invalid override: {e}", severity="error")
+            self.notify(f"Cannot submit: {e}", severity="error")
         except Exception as e:
             self.notify(f"k6 action failed: {e}", severity="error")
         self.action_refresh()

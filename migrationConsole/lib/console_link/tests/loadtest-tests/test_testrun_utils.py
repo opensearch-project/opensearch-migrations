@@ -21,6 +21,7 @@ from console_link.loadtest.testrun_utils import (
     get_workflow,
     get_workflow_template,
     list_k6_workflow_templates,
+    list_profiles,
     list_scenarios,
     list_workflows,
     workflow_template_name,
@@ -39,19 +40,24 @@ def _custom_api(**behavior):
     return patch.object(testrun_utils.client, "CustomObjectsApi", return_value=fake), fake
 
 
-def _templates(*scenarios):
-    return {"items": [{"metadata": {"name": f"k6-{s}", "labels": {"k6-scenario": s}}}
-                      for s in scenarios]}
+def _templates(*profiles):
+    """The chart's templates as the API returns them: one per profile, labelled with both the
+    profile and the scenario it runs."""
+    return {"items": [{"metadata": {"name": f"k6-{p}",
+                                    "labels": {"k6-scenario": p.split("-")[0],
+                                               "k6-profile": p}}}
+                      for p in profiles]}
 
 
 def test_workflow_template_name():
-    assert workflow_template_name("ingest") == "k6-ingest"
+    assert workflow_template_name("ingest-burst") == "k6-ingest-burst"
 
 
 class TestListScenarios:
     def test_from_the_charts_workflow_templates(self):
         patcher, fake = _custom_api(
-            list_namespaced_custom_object=_templates("ingest", "search", "mixed"))
+            list_namespaced_custom_object=_templates("ingest-steady", "search-steady",
+                                                     "mixed-steady"))
         with patcher:
             assert list_scenarios("ma") == ["ingest", "mixed", "search"]
         kwargs = fake.list_namespaced_custom_object.call_args.kwargs
@@ -77,6 +83,36 @@ class TestListScenarios:
                       {"metadata": {"name": "stray", "labels": {}}}]})
         with patcher:
             assert list_scenarios("ma") == ["ingest"]
+
+    def test_several_profiles_of_one_scenario_list_it_once(self):
+        patcher, _ = _custom_api(
+            list_namespaced_custom_object=_templates("ingest-steady", "ingest-burst"))
+        with patcher:
+            assert list_scenarios("ma") == ["ingest"]
+
+
+class TestListProfiles:
+    """A profile is a whole WorkflowTemplate now, so what can be run is discovered rather than
+    mirrored from a list in the client."""
+
+    def test_lists_every_profile(self):
+        patcher, _ = _custom_api(
+            list_namespaced_custom_object=_templates("ingest-burst", "ingest-steady",
+                                                     "mixed-steady"))
+        with patcher:
+            assert list_profiles("ma") == ["ingest-burst", "ingest-steady", "mixed-steady"]
+
+    def test_narrows_to_one_scenario(self):
+        patcher, _ = _custom_api(
+            list_namespaced_custom_object=_templates("ingest-burst", "mixed-steady"))
+        with patcher:
+            assert list_profiles("ma", scenario="mixed") == ["mixed-steady"]
+
+    def test_empty_on_api_error(self):
+        # Same reason as list_scenarios: completion and the launch form fall back rather than fail.
+        patcher, _ = _custom_api(list_namespaced_custom_object=ApiException(status=404))
+        with patcher:
+            assert list_profiles("ma") == []
 
 
 class TestCreateWorkflow:

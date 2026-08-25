@@ -72,7 +72,6 @@ class Test0080CdcK6LoadTest(MATestBase):
         params = build_k6_parameters(
             scenario="ingest", parallelism=self.K6_PARALLELISM, target_url=target_url,
             duration=self.K6_DURATION, rate=self.K6_RATE,
-            overrides_text="SEED_DOC_COUNT=0",   # skip the seed-count wait
             extra_args="--no-thresholds",        # loaded test cluster may breach latency thresholds
         )
         name = submit_k6_run(namespace, params)

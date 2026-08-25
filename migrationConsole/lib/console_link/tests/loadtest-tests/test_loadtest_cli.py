@@ -1,4 +1,4 @@
-"""Tests for the standalone `loadtest` CLI (submits a Workflow against the chart's per-scenario
+"""Tests for the standalone `loadtest` CLI (submits a Workflow against the chart's per-profile
 WorkflowTemplate, overriding only what the run asks for).
 
 Two patch targets, matching the two modules: cluster logic lives in `runs`, and the Click layer in
@@ -6,11 +6,11 @@ Two patch targets, matching the two modules: cluster logic lives in `runs`, and 
 `cli` and anything reached through runs.py is patched on `runs`.
 """
 
-import json
 import re
 from pathlib import Path
 
 import pytest
+import yaml
 from unittest.mock import patch
 from click.testing import CliRunner
 
@@ -28,16 +28,34 @@ RUNS = "console_link.loadtest.runs"
 CLI = "console_link.loadtest.cli"
 ENV = {"LOADTEST_NAMESPACE": "ma"}
 
+# The settings each stand-in profile has, keyed by scenario. Short, but with the property the real
+# chart has and that the client depends on: a scenario states only the settings it reads, so
+# REGISTRY_ENABLED exists on mixed and nowhere else.
+_SCENARIO_ENV = {
+    "ingest": {"INGEST_RATE": "50", "INGEST_VUS": "20", "DURATION": "5m",
+               "CONTROL_ENABLED": "false", "K6_OUT": "opentelemetry",
+               "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
+    "search": {"SEARCH_RATE": "50", "SEARCH_VUS": "30", "DURATION": "5m",
+               "K6_OUT": "opentelemetry", "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
+    "mixed": {"INGEST_RATE": "30", "SEARCH_RATE": "20", "INGEST_VUS": "15", "SEARCH_VUS": "15",
+              "DURATION": "5m", "REGISTRY_ENABLED": "true", "CONTROL_ENABLED": "false",
+              "WEBDIS_URL": "http://webdis:7379", "K6_OUT": "opentelemetry",
+              "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
+}
 
-def _template(scenario):
-    """A minimal stand-in for the WorkflowTemplate the chart renders per scenario: the run's static
-    values live in its parameter defaults, so the client overrides only what a run changes."""
-    env = [{"name": "K6_PRESET", "value": f"{scenario}-steady"},
-           {"name": "K6_OUT", "value": "opentelemetry"}]
+
+def _template(profile, scenario=None, env=None):
+    """A stand-in for the WorkflowTemplate the chart renders per profile: the whole run lives in its
+    parameter defaults — the plumbing in camelCase, every load setting in ALL_CAPS — so the client
+    submits only what a run changes."""
+    scenario = scenario or profile.split("-")[0]
+    env = _SCENARIO_ENV.get(scenario, {}) if env is None else env
     return {
         "apiVersion": "argoproj.io/v1alpha1", "kind": "WorkflowTemplate",
-        "metadata": {"name": f"k6-{scenario}",
-                     "labels": {"app": "k6-load-test", "k6-scenario": scenario}},
+        "metadata": {"name": f"k6-{profile}",
+                     "labels": {"app": "k6-load-test", "k6-scenario": scenario,
+                                "k6-profile": profile},
+                     "annotations": {"workflows.argoproj.io/description": f"{profile} profile"}},
         "spec": {
             "entrypoint": "run",
             "arguments": {"parameters": [
@@ -46,15 +64,18 @@ def _template(scenario):
                 {"name": "arguments", "value": ""},
                 {"name": "runnerImage", "value": "grafana/k6:2.2.0"},
                 {"name": "scriptsRef", "value": "migrations/k6_scripts:latest"},
-                {"name": "runnerEnv", "value": json.dumps(env)},
-            ]},
+            ] + [{"name": k, "value": v} for k, v in sorted(env.items())]},
         },
     }
 
 
+_PROFILES = [f"{s}-{shape}" for s in ("ingest", "search", "mixed")
+             for shape in ("steady", "burst")]
+
+
 def _fake_get_workflow_template(namespace, name):
-    scenario = name[len("k6-"):] if name.startswith("k6-") else None
-    return _template(scenario) if scenario in ("ingest", "search", "mixed") else None
+    profile = name[len("k6-"):] if name.startswith("k6-") else None
+    return _template(profile) if profile in _PROFILES else None
 
 
 def _runner():
@@ -66,7 +87,7 @@ def chart_installed(monkeypatch):
     """The chart is present unless a test says otherwise. This is what the dead-end paths ask about,
     so leaving it unpatched would make every "nothing found" assertion depend on a real cluster."""
     monkeypatch.setattr(runs_mod, "list_k6_workflow_templates",
-                        lambda ns: [_template("ingest")])
+                        lambda ns: [_template(p) for p in _PROFILES])
     yield
 
 
@@ -89,9 +110,10 @@ def _submitted_parameters(body):
 
 
 def _env_map(body):
-    """The runner env the submission carries, as name → value."""
-    return {e["name"]: e["value"]
-            for e in json.loads(_submitted_parameters(body)["runnerEnv"])}
+    """The load settings the submission overrides, as name → value. Everything it does NOT carry is
+    the profile's own value, which stays in the template."""
+    return {k: v for k, v in _submitted_parameters(body).items()
+            if runs_mod.ENV_PARAM.fullmatch(k)}
 
 
 class TestChartMissingDiagnosis:
@@ -138,12 +160,13 @@ class TestChartMissingDiagnosis:
         assert "Forbidden" in str(result.output) + str(result.exception)
 
     @patch(f"{CLI}.load_k8s_config")
-    def test_status_reports_installed_and_scenarios(self, _cfg, monkeypatch):
-        monkeypatch.setattr(cli_mod, "list_scenarios", lambda ns: ["ingest", "mixed"])
+    def test_status_reports_installed_and_profiles(self, _cfg, chart_installed):
         result = _runner().invoke(loadtest_cli, ["status"], env=ENV)
         assert result.exit_code == 0
         assert "installed in namespace 'ma'" in result.output
-        assert "ingest, mixed" in result.output
+        # Each launchable profile, with what it does — the answer to "what can I run here".
+        assert "mixed-burst" in result.output
+        assert "mixed-burst profile" in result.output
 
     @patch(f"{CLI}.load_k8s_config")
     def test_status_reports_missing_chart(self, _cfg, no_chart):
@@ -205,7 +228,7 @@ class TestLoadTestHelp:
 
 
 class TestLoadTestRun:
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-steady-xy")
     def test_submits_against_the_template(self, mock_create, cluster):
         result = _runner().invoke(loadtest_cli, [
             "run", "--scenario", "ingest", "--target", "https://p:9200",
@@ -213,51 +236,97 @@ class TestLoadTestRun:
         ], env=ENV)
         assert result.exit_code == 0, result.output
         body = mock_create.call_args.args[1]
-        # A submission is a Workflow naming the scenario's template — the run spec itself (images,
-        # script path, the scripts mount on both pods) stays in the template.
+        # A submission is a Workflow naming the profile's template — the run spec itself (images,
+        # script path, the scripts mount, and every setting not overridden) stays in the template.
         assert body["kind"] == "Workflow"
-        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-ingest"
-        assert body["metadata"]["generateName"] == "k6-ingest-"
-        assert body["metadata"]["labels"] == {"app": "k6-load-test", "k6-scenario": "ingest"}
+        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-ingest-steady"
+        assert body["metadata"]["generateName"] == "k6-ingest-steady-"
+        assert body["metadata"]["labels"] == {"app": "k6-load-test", "k6-scenario": "ingest",
+                                              "k6-profile": "ingest-steady"}
         params = _submitted_parameters(body)
         assert params["parallelism"] == "3"
         env = _env_map(body)
-        assert env["K6_PRESET"] == "ingest-steady"
-        assert env["K6_OUT"] == "opentelemetry"          # carried over from the template default
-        assert env["CAPTURE_PROXY_URL"] == "https://p:9200"  # override wins over the preset
-        assert env["INGEST_RATE"] == "80" and env["SEARCH_RATE"] == "80"  # --rate fans out
+        assert env["CAPTURE_PROXY_URL"] == "https://p:9200"
+        assert env["INGEST_RATE"] == "80"
         assert "arguments" not in params
 
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-steady-xy")
     def test_only_overridden_parameters_are_submitted(self, mock_create, cluster):
         """Anything the run does not change stays with the template, so its defaults remain the one
-        definition — a submission never restates the images or the pull policies."""
+        definition — a submission never restates the images, the pull policies, or the load."""
         _runner().invoke(loadtest_cli, ["run", "--scenario", "ingest"], env=ENV)
         params = _submitted_parameters(mock_create.call_args.args[1])
-        assert set(params) == {"runnerEnv", "parallelism"}
+        assert set(params) == {"parallelism"}
 
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
-    def test_config_swaps_preset(self, mock_create, cluster):
-        _runner().invoke(loadtest_cli, ["run", "--scenario", "ingest",
-                                        "--config", "ingest-burst"], env=ENV)
-        env = json.loads(_submitted_parameters(mock_create.call_args.args[1])["runnerEnv"])
-        # replaced, not appended: exactly one K6_PRESET entry, carrying the chosen preset
-        presets = [e for e in env if e["name"] == "K6_PRESET"]
-        assert presets == [{"name": "K6_PRESET", "value": "ingest-burst"}]
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-burst-xy")
+    def test_config_selects_the_profiles_template(self, mock_create, cluster):
+        """The profile IS the template, so choosing one is not an override of anything: nothing
+        about the load is restated in the submission."""
+        result = _runner().invoke(loadtest_cli, ["run", "--config", "ingest-burst"], env=ENV)
+        assert result.exit_code == 0, result.output
+        body = mock_create.call_args.args[1]
+        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-ingest-burst"
+        assert body["metadata"]["labels"]["k6-profile"] == "ingest-burst"
+        assert _env_map(body) == {}
 
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
-    def test_default_config_is_scenario_steady(self, mock_create, cluster):
+    @patch(f"{RUNS}.create_workflow", return_value="k6-search-steady-xy")
+    def test_default_profile_is_scenario_steady(self, mock_create, cluster):
         _runner().invoke(loadtest_cli, ["run", "--scenario", "search"], env=ENV)
         body = mock_create.call_args.args[1]
-        assert _env_map(body)["K6_PRESET"] == "search-steady"
+        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-search-steady"
 
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
-    def test_override_replaces_template_env(self, mock_create, cluster):
-        """A -e override of a var the template already sets must replace it, not duplicate it —
-        two entries of the same name would leave the winner to the container runtime."""
-        _runner().invoke(loadtest_cli, ["run", "-e", "K6_OUT=json"], env=ENV)
-        env = json.loads(_submitted_parameters(mock_create.call_args.args[1])["runnerEnv"])
-        assert [e for e in env if e["name"] == "K6_OUT"] == [{"name": "K6_OUT", "value": "json"}]
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-steady-xy")
+    def test_scenario_comes_from_the_template_not_the_caller(self, mock_create, cluster):
+        """A profile knows its own scenario, so a caller cannot file a run under the wrong one."""
+        result = _runner().invoke(loadtest_cli, [
+            "run", "--scenario", "ingest", "--config", "mixed-steady"], env=ENV)
+        assert result.exit_code == 1
+        assert "runs scenario 'mixed', not 'ingest'" in result.output
+        mock_create.assert_not_called()
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-steady-xy")
+    def test_override_is_one_named_parameter(self, mock_create, cluster):
+        """An override names the parameter it replaces, so the runner env cannot end up with the
+        same variable twice — which of two same-named entries wins is not the load test's to
+        decide."""
+        _runner().invoke(loadtest_cli, ["run", "-e", "DURATION=30s"], env=ENV)
+        params = _submitted_parameters(mock_create.call_args.args[1])
+        assert params["DURATION"] == "30s"
+
+    @patch(f"{RUNS}.create_workflow")
+    def test_override_of_a_setting_the_profile_lacks_is_refused(self, mock_create, cluster):
+        """Argo accepts a parameter no template uses and then ignores it, so a name that does not
+        belong to the profile has to fail here — otherwise it looks like it took effect."""
+        result = _runner().invoke(loadtest_cli, [
+            "run", "--config", "ingest-steady", "-e", "SEARCH_RATE=5"], env=ENV)
+        assert result.exit_code == 1
+        assert "has no 'SEARCH_RATE' setting" in result.output
+        assert "INGEST_RATE" in result.output          # names what it does have
+        mock_create.assert_not_called()
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-mixed-steady-xy")
+    def test_rate_fans_out_to_the_streams_the_profile_has(self, mock_create, cluster):
+        """--rate names both stream variables; it applies to whichever the profile declares. On
+        mixed that is both, on ingest only INGEST_RATE (asserted above)."""
+        _runner().invoke(loadtest_cli, ["run", "--config", "mixed-steady", "--rate", "9"], env=ENV)
+        env = _env_map(mock_create.call_args.args[1])
+        assert env["INGEST_RATE"] == "9" and env["SEARCH_RATE"] == "9"
+
+    @patch(f"{RUNS}.create_workflow")
+    def test_toggle_the_profile_lacks_is_refused(self, mock_create, cluster):
+        result = _runner().invoke(loadtest_cli, [
+            "run", "--config", "search-steady", "--registry-enabled"], env=ENV)
+        assert result.exit_code == 1
+        assert "no REGISTRY_ENABLED setting" in result.output
+        mock_create.assert_not_called()
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-mixed-steady-xy")
+    def test_toggle_off_overrides_a_profile_that_has_it_on(self, mock_create, cluster):
+        """The mixed profiles turn the ring on, so turning it off must emit an override — leaving
+        it out would silently keep the profile's value."""
+        _runner().invoke(loadtest_cli, [
+            "run", "--config", "mixed-steady", "--no-registry-enabled"], env=ENV)
+        assert _env_map(mock_create.call_args.args[1])["REGISTRY_ENABLED"] == "false"
 
     @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
     def test_extra_args_set_arguments(self, mock_create, cluster):
@@ -283,41 +352,38 @@ class TestLoadTestRun:
         missing chart is an unmet precondition, so this is a failure (1), not bad input (2)."""
         monkeypatch.setattr(cli_mod, "load_k8s_config", lambda: None)
         monkeypatch.setattr(runs_mod, "get_workflow_template", lambda ns, name: None)
-        monkeypatch.setattr(runs_mod, "list_scenarios", lambda ns: [])
+        monkeypatch.setattr(runs_mod, "list_profiles", lambda ns: [])
         result = _runner().invoke(loadtest_cli, ["run", "--scenario", "ingest"], env=ENV)
         assert result.exit_code == 1
-        assert "no WorkflowTemplate 'k6-ingest'" in result.output
+        assert "no WorkflowTemplate 'k6-ingest-steady'" in result.output
         assert "k6LoadTest" in result.output
         mock_create.assert_not_called()
 
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
-    def test_unknown_preset_warns_but_runs(self, mock_create, cluster):
-        # A custom runner image may ship its own presets, so an unrecognised name only warns.
-        result = _runner().invoke(loadtest_cli, [
-            "run", "--scenario", "ingest", "--config", "home-brewed"], env=ENV)
-        assert result.exit_code == 0, result.output
-        assert "not one of the stock presets" in result.output  # warned
-        mock_create.assert_called_once()                        # but ran anyway
-        assert _env_map(mock_create.call_args.args[1])["K6_PRESET"] == "home-brewed"
-
-    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
-    def test_known_preset_no_warning(self, mock_create, cluster):
-        result = _runner().invoke(loadtest_cli, [
-            "run", "--scenario", "ingest", "--config", "ingest-burst"], env=ENV)
-        assert result.exit_code == 0, result.output
-        assert "not one of the stock presets" not in result.output
+    @patch(f"{RUNS}.create_workflow")
+    def test_unknown_profile_names_the_ones_that_exist(self, mock_create, cluster, monkeypatch):
+        """A profile is a cluster object now, so an unknown name is answerable exactly — no warning
+        that runs anyway and fails later in a pod."""
+        monkeypatch.setattr(runs_mod, "list_profiles", lambda ns: _PROFILES)
+        result = _runner().invoke(loadtest_cli, ["run", "--config", "home-brewed"], env=ENV)
+        assert result.exit_code == 1
+        assert "no WorkflowTemplate 'k6-home-brewed'" in result.output
+        assert "ingest-burst" in result.output
+        mock_create.assert_not_called()
 
     @patch(f"{RUNS}.create_workflow", return_value="k6-custom-xy")
-    def test_custom_scenario_accepted(self, mock_create, monkeypatch):
-        # --scenario is no longer a fixed Choice: any scenario present in the cluster is launchable.
+    def test_custom_profile_accepted(self, mock_create, monkeypatch):
+        # Neither flag is a fixed Choice: a chart installed with different values renders whatever
+        # profiles it was given, and those are launchable.
         monkeypatch.setattr(cli_mod, "load_k8s_config", lambda: None)
-        monkeypatch.setattr(runs_mod, "get_workflow_template",
-                            lambda ns, name: _template("my-custom") if name == "k6-my-custom" else None)
-        result = _runner().invoke(loadtest_cli, ["run", "--scenario", "my-custom"], env=ENV)
+        monkeypatch.setattr(
+            runs_mod, "get_workflow_template",
+            lambda ns, name: _template("house-mix", scenario="my-custom",
+                                       env={"INGEST_RATE": "1"}) if name == "k6-house-mix" else None)
+        result = _runner().invoke(loadtest_cli, ["run", "--config", "house-mix"], env=ENV)
         assert result.exit_code == 0, result.output
         body = mock_create.call_args.args[1]
         assert body["metadata"]["labels"]["k6-scenario"] == "my-custom"
-        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-my-custom"
+        assert body["spec"]["workflowTemplateRef"]["name"] == "k6-house-mix"
 
 
 class TestLoadTestRunWait:
@@ -392,23 +458,47 @@ class TestLoadTestRunWait:
 class TestLoadTemplateDefaults:
     def test_missing_template_raises(self, monkeypatch):
         monkeypatch.setattr(runs_mod, "get_workflow_template", lambda ns, name: None)
-        monkeypatch.setattr(runs_mod, "list_scenarios", lambda ns: [])
+        monkeypatch.setattr(runs_mod, "list_profiles", lambda ns: [])
         with pytest.raises(ValueError):
-            load_template_defaults("ma", "ingest")
+            load_template_defaults("ma", "ingest-steady")
 
     def test_missing_template_lists_available(self, monkeypatch):
         monkeypatch.setattr(runs_mod, "get_workflow_template", _fake_get_workflow_template)
-        monkeypatch.setattr(runs_mod, "list_scenarios", lambda ns: ["ingest", "mixed", "search"])
+        monkeypatch.setattr(runs_mod, "list_profiles", lambda ns: _PROFILES)
         with pytest.raises(ValueError) as e:
             load_template_defaults("ma", "nope")
         msg = str(e.value)
-        assert "available:" in msg and "ingest" in msg and "mixed" in msg
+        assert "available:" in msg and "ingest-steady" in msg and "mixed-burst" in msg
 
     def test_defaults_are_read_from_the_template(self, monkeypatch):
         monkeypatch.setattr(runs_mod, "get_workflow_template", _fake_get_workflow_template)
-        defaults = load_template_defaults("ma", "ingest")
+        defaults = load_template_defaults("ma", "ingest-steady")
         assert defaults["runnerImage"] == "grafana/k6:2.2.0"
         assert defaults["scriptsRef"] == "migrations/k6_scripts:latest"
+        assert defaults["INGEST_RATE"] == "50"      # the load is in the template too
+
+
+class TestProfileCatalog:
+    """One list call must answer both "what can I run" and "what does each one set", so the launch
+    form never has to guess a profile's settings from its name."""
+
+    def test_catalog_carries_scenario_description_and_env(self, chart_installed):
+        catalog = runs_mod.profile_catalog("ma")
+        assert set(catalog) == set(_PROFILES)
+        entry = catalog["mixed-steady"]
+        assert entry["scenario"] == "mixed"
+        assert entry["description"] == "mixed-steady profile"
+        assert entry["env"]["REGISTRY_ENABLED"] == "true"
+
+    def test_catalog_holds_only_the_load_settings(self, chart_installed):
+        """The plumbing (images, parallelism) is not something the launch form offers, and the
+        ALL_CAPS convention is what separates the two."""
+        env = runs_mod.profile_catalog("ma")["ingest-steady"]["env"]
+        assert "runnerImage" not in env and "parallelism" not in env
+        assert "INGEST_RATE" in env
+
+    def test_catalog_is_empty_without_a_chart(self, no_chart):
+        assert runs_mod.profile_catalog("ma") == {}
 
 
 class TestCompletion:
@@ -418,43 +508,48 @@ class TestCompletion:
         monkeypatch.setattr(cli_mod, "list_scenarios", lambda ns: ["ingest", "mixed", "search"])
         assert cli_mod._complete_scenarios(None, None, "mi") == ["mixed"]
 
-    def test_preset_completion_is_the_images_presets(self):
-        # Presets ship in the runner image, so completion needs no cluster at all.
-        assert cli_mod._complete_presets(None, None, "ingest-") == [
-            p for p in runs_mod.CONFIG_PRESETS if p.startswith("ingest-")]
+    def test_profile_completion_from_cluster(self, monkeypatch):
+        # Profiles are cluster objects now, so completion offers what is actually installed.
+        monkeypatch.setattr(cli_mod, "load_k8s_config", lambda: None)
+        monkeypatch.setattr(cli_mod, "get_current_namespace", lambda: "ma")
+        monkeypatch.setattr(cli_mod, "list_profiles", lambda ns: ["mixed-steady", "house-mix"])
+        assert cli_mod._complete_profiles(None, None, "house") == ["house-mix"]
 
     def test_completion_falls_back_when_offline(self, monkeypatch):
         def boom():
             raise RuntimeError("no kubeconfig")
         monkeypatch.setattr(cli_mod, "load_k8s_config", boom)
         # falls back to the static hint lists rather than raising during shell completion
-        assert "ingest-steady" in cli_mod._complete_presets(None, None, "ingest-")
+        assert "ingest-steady" in cli_mod._complete_profiles(None, None, "ingest-")
         assert cli_mod._complete_scenarios(None, None, "sea") == ["search"]
 
     def test_registry_and_bag_overrides(self, monkeypatch):
         monkeypatch.setattr(runs_mod, "get_workflow_template", _fake_get_workflow_template)
-        p = build_k6_parameters(scenario="mixed", registry_enabled=True,
-                                overrides_text="INGEST_RATE=7\nFOO=bar")
+        p = build_k6_parameters(config_name="mixed-steady", registry_enabled=True,
+                                overrides_text="INGEST_RATE=7\nDURATION=1m")
         body = build_workflow_submission("ma", p)
         env = _env_map(body)
         assert env["REGISTRY_ENABLED"] == "true"
-        assert env["INGEST_RATE"] == "7" and env["FOO"] == "bar"
+        assert env["INGEST_RATE"] == "7" and env["DURATION"] == "1m"
 
 
-def _fake_run(name, scenario, phase, parallelism):
+def _fake_run(name, profile, phase, parallelism):
     """A run as the API returns it: the Workflow, with parallelism among its submitted parameters."""
+    scenario = profile.split("-")[0]
     return {
-        "metadata": {"name": name, "labels": {"app": "k6-load-test", "k6-scenario": scenario},
+        "metadata": {"name": name,
+                     "labels": {"app": "k6-load-test", "k6-scenario": scenario,
+                                "k6-profile": profile},
                      "creationTimestamp": "2026-07-27T00:00:00Z"},
-        "spec": {"workflowTemplateRef": {"name": f"k6-{scenario}"},
+        "spec": {"workflowTemplateRef": {"name": f"k6-{profile}"},
                  "arguments": {"parameters": [{"name": "parallelism", "value": str(parallelism)}]}},
         "status": {"phase": phase},
     }
 
 
 FAKE_RUNS = [
-    _fake_run("k6-ingest-a", "ingest", "Running", 2),
-    _fake_run("k6-mixed-b", "mixed", "Succeeded", 1),
+    _fake_run("k6-ingest-a", "ingest-burst", "Running", 2),
+    _fake_run("k6-mixed-b", "mixed-steady", "Succeeded", 1),
 ]
 
 
@@ -558,7 +653,7 @@ class TestIsolation:
         monkeypatch.setattr(runs_mod, "get_workflow_template", _fake_get_workflow_template)
         body = build_workflow_submission("ma", build_k6_parameters(scenario="ingest"))
         assert "ownerReferences" not in body["metadata"]
-        assert body["metadata"]["generateName"] == "k6-ingest-"
+        assert body["metadata"]["generateName"] == "k6-ingest-steady-"
         assert body["kind"] == "Workflow"
 
 
@@ -607,95 +702,210 @@ class TestLoadTestLogs:
         assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-class TestPresetAndScenarioListsMatchTheImage:
-    """The scenarios and presets live in the runner image, not in the cluster, so nothing here can
-    discover them at runtime — these lists are hand-maintained hints for completion, the TUI
-    dropdown and the unknown-preset warning. Keep them honest against the sources the image is
-    built from (TrafficCapture/trafficLoadTest), which is the only thing that can drift."""
-
-    @staticmethod
-    def _load_test_dir():
-        d = Path(__file__).resolve().parents[5] / "TrafficCapture" / "trafficLoadTest"
-        if not d.is_dir():
-            pytest.skip("running outside a repo checkout (e.g. inside the console image)")
-        return d
-
-    def test_config_presets_match_the_env_files(self):
-        on_disk = sorted(p.stem for p in (self._load_test_dir() / "k6-config").glob("*.env"))
-        assert sorted(runs_mod.CONFIG_PRESETS) == on_disk
-
-    def test_scenarios_match_the_scenario_scripts(self):
-        on_disk = sorted(p.stem for p in (self._load_test_dir() / "scenarios").glob("*.js"))
-        assert sorted(runs_mod.SCENARIOS) == on_disk
-
-    def test_tui_fallback_presets_match(self):
-        from console_link.loadtest.tui.launch_modal import _FALLBACK_PRESETS
-        assert sorted(_FALLBACK_PRESETS) == sorted(runs_mod.CONFIG_PRESETS)
+# ---------------------------------------------------------------------------
+# The chart IS the run specification now, so these guard it against the sources
+# it has to agree with: the scenario scripts, and the presets a local run uses.
+# ---------------------------------------------------------------------------
+_REPO = Path(__file__).resolve().parents[5]
+# Supplied by the template from .Values.captureProxyUrl (deployment topology, not a load setting),
+# so it is the one key a scenario reads that its `scenarios.<name>.env` block must NOT restate.
+_CHART_SUPPLIED = {"CAPTURE_PROXY_URL"}
+_CREDENTIALS = {"AUTH_MODE", "AUTH_USERNAME", "AUTH_PASSWORD"}
+# EXECUTOR decides which timing knob a profile has, so these are stated per profile rather than
+# scenario-wide: a constant-rate profile has DURATION, a ramping one has its stage list. Stating the
+# other would advertise a knob that does nothing — and would let `--duration 30s` be accepted on a
+# ramping profile, changing nothing.
+_STAGE_KEYS = {"RAMP_STAGES", "INGEST_RAMP_STAGES", "SEARCH_RAMP_STAGES"}
+_TIMING = _STAGE_KEYS | {"DURATION"}
 
 
-class TestChartRunnerEnvDefaults:
-    """The k6LoadTest chart states some runner env vars explicitly, so a reader of the template can
-    see what a run is tuned with. `runnerEnv` is the highest-priority layer, not a defaults layer:
-    lib/config.js resolves a run as `{...preset, ...__ENV}`. Two things therefore have to hold, and
-    both are invisible until a run silently uses the wrong profile."""
+def _repo_dir(rel):
+    d = _REPO / rel
+    if not d.exists():
+        pytest.skip("running outside a repo checkout (e.g. inside the console image)")
+    return d
 
-    @staticmethod
-    def _load_test_dir():
-        d = Path(__file__).resolve().parents[5] / "TrafficCapture" / "trafficLoadTest"
-        if not d.is_dir():
-            pytest.skip("running outside a repo checkout (e.g. inside the console image)")
-        return d
 
-    @staticmethod
-    def _template():
-        chart = Path(__file__).resolve().parents[5] / "deployment/k8s/charts/components/k6LoadTest"
-        p = chart / "templates/k6-workflowtemplates.yaml"
-        if not p.is_file():
-            pytest.skip("running outside a repo checkout")
-        return p.read_text()
+def _chart_values():
+    return yaml.safe_load(
+        (_repo_dir("deployment/k8s/charts/components/k6LoadTest") / "values.yaml").read_text())
 
-    def _chart_env(self):
-        """The (name, value) pairs the chart puts in runnerEnv, read from the Helm source so the
-        test needs no helm binary. K6_* are k6's own knobs, not scenario config.
 
-        `value` is None when the entry takes a Helm value rather than a literal (e.g.
-        `"value" $.Values.captureProxyUrl`). Those keys still count for every check that cares about
-        the key alone — matching only literals would let a Helm-valued entry smuggle in a
-        preset-owned key unnoticed.
-        """
-        pairs = re.findall(r'dict "name" "([A-Z0-9_]+)" "value" (?:"([^"]*)"|(\S+?)\)?\n)',
-                           self._template())
-        return [(k, lit if lit else None) for k, lit, dyn in pairs if not k.startswith("K6_")]
+def _resolved(values, profile):
+    """A profile's settings as the rendered template states them: the scenario-wide values with the
+    profile's own on top. This mirrors the `merge` in k6-workflowtemplates.yaml."""
+    p = values["profiles"][profile]
+    env = dict(values["scenarios"][p["scenario"]]["env"])
+    env.update(p.get("env") or {})
+    return {k: str(v) for k, v in env.items()}
 
-    def _preset_keys(self):
-        keys = set()
-        for f in (self._load_test_dir() / "k6-config").glob("*.env"):
-            for line in f.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    keys.add(line.split("=", 1)[0].strip())
-        return keys
 
-    def test_no_preset_owned_key_is_stated_in_the_chart(self):
-        """A key any preset sets must NOT be in runnerEnv: the entry would beat the preset for every
-        run, so `--config ingest-burst` would silently keep the value stated here. The ramp and burst
-        presets omit DURATION on purpose, because RAMP_STAGES carries their timing."""
-        clashes = sorted({k for k, _ in self._chart_env()} & self._preset_keys())
-        assert clashes == [], (
-            f"chart runnerEnv states preset-owned key(s) {clashes}; they would override "
-            f"every k6-config/*.env preset")
+def _scenario_source(scenario):
+    """The scenario script and every lib it reaches, concatenated.
 
-    def test_stated_values_match_the_script_fallbacks(self):
-        """Each stated value duplicates a `CFG.X || 'default'` fallback in the scripts. Where they
-        disagree the chart wins silently, so the script's default would become dead code."""
-        src = "\n".join(p.read_text() for d in ("scenarios", "lib")
-                        for p in (self._load_test_dir() / d).glob("*.js"))
-        fallbacks = dict(re.findall(r"CFG\.([A-Z0-9_]+)\s*\|\|\s*'([^']*)'", src))
-        mismatched = {k: (v, fallbacks.get(k)) for k, v in self._chart_env()
-                      if v is not None and k in fallbacks and fallbacks[k] != v}
+    lib/config.js is skipped: it defines CFG rather than reading any setting from it, so the `CFG.X`
+    in its own docstring is not a key anything looks up.
+    """
+    d = _repo_dir("TrafficCapture/trafficLoadTest")
+    start = d / "scenarios" / f"{scenario}.js"
+    seen, queue, out = set(), [start], []
+    while queue:
+        path = queue.pop().resolve()
+        if path in seen or not path.is_file() or path.name == "config.js":
+            continue
+        seen.add(path)
+        text = path.read_text()
+        out.append(text)
+        for rel in re.findall(r"from '(\.[^']+\.js)'", text):
+            queue.append(path.parent / rel)
+    return "\n".join(out)
+
+
+def _script_fallbacks(scenario):
+    """The `CFG.KEY || 'value'` defaults the scenario's own code applies."""
+    return dict(re.findall(r"CFG\.([A-Z][A-Z0-9_]*)\s*\|\|\s*'([^']*)'",
+                           _scenario_source(scenario)))
+
+
+def _keys_read(scenario):
+    return set(re.findall(r"CFG\.([A-Z][A-Z0-9_]*)", _scenario_source(scenario)))
+
+
+def _preset_file(profile):
+    path = _repo_dir("TrafficCapture/trafficLoadTest") / "k6-config" / f"{profile}.env"
+    out = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            out[key.strip()] = value.strip()
+    return out
+
+
+class TestChartStatesTheWholeRun:
+    """A run gets exactly what its WorkflowTemplate says, with no layer under it. That is only
+    trustworthy while the chart states every setting the scenario reads — a key left out would fall
+    back to a value in JavaScript that nothing in the cluster shows."""
+
+    @pytest.mark.parametrize("scenario", ("ingest", "search", "mixed"))
+    def test_every_setting_a_scenario_reads_is_stated(self, scenario):
+        stated = set(_chart_values()["scenarios"][scenario]["env"])
+        missing = _keys_read(scenario) - stated - _CHART_SUPPLIED - _TIMING
+        assert missing == set(), (
+            f"scenario '{scenario}' reads {sorted(missing)}, which no profile states; add them to "
+            f"scenarios.{scenario}.env in the k6LoadTest values.yaml")
+
+    def test_each_profile_states_exactly_one_timing_knob(self):
+        """The timing setting is the one thing EXECUTOR decides, so it belongs to the profile. A
+        profile that stated both would show a reader a duration its run does not follow."""
+        values = _chart_values()
+        for profile, p in sorted(values["profiles"].items()):
+            env = _resolved(values, profile)
+            read = _keys_read(p["scenario"])
+            stages = {k for k in _STAGE_KEYS & read if k in env}
+            if env["EXECUTOR"].startswith("ramping"):
+                assert stages, f"{profile} ramps but states no stage list"
+                assert "DURATION" not in env, f"{profile} ramps yet states DURATION"
+            else:
+                assert env.get("DURATION"), f"{profile} holds a rate but states no DURATION"
+                assert not stages, f"{profile} holds a rate yet states {sorted(stages)}"
+
+    def test_no_profile_blanks_a_value_its_scenario_states(self):
+        """Helm's `merge` is not a precedence operator: it fills an EMPTY destination value from the
+        source, so a profile blanking an inherited setting would silently get it back. Values are
+        additive for that reason — state a setting where it applies instead of unsetting it."""
+        values = _chart_values()
+        for profile, p in sorted(values["profiles"].items()):
+            scenario_env = values["scenarios"][p["scenario"]]["env"]
+            for key, value in (p.get("env") or {}).items():
+                if str(value) == "" and str(scenario_env.get(key, "")) != "":
+                    raise AssertionError(
+                        f"profile '{profile}' blanks {key}, which scenario '{p['scenario']}' sets to "
+                        f"'{scenario_env[key]}'. Helm's merge writes the scenario value back over it.")
+
+    @pytest.mark.parametrize("scenario", ("ingest", "search", "mixed"))
+    def test_nothing_unread_is_stated(self, scenario):
+        """The other direction: a setting no scenario reads is dead weight that reads as live
+        configuration. SEED_DOC_COUNT sat in six presets like that until it was removed."""
+        stated = set(_chart_values()["scenarios"][scenario]["env"])
+        assert stated - _keys_read(scenario) == set()
+
+    @pytest.mark.parametrize("scenario", ("ingest", "search", "mixed"))
+    def test_stated_values_match_the_script_fallbacks(self, scenario):
+        """A scenario-wide value duplicates a `CFG.X || 'default'` fallback in the script. Where the
+        two disagree the chart wins silently, so the script's default becomes dead code."""
+        env = {k: str(v) for k, v in _chart_values()["scenarios"][scenario]["env"].items()}
+        fallbacks = _script_fallbacks(scenario)
+        mismatched = {k: (v, fallbacks[k]) for k, v in env.items()
+                      if k in fallbacks and fallbacks[k] != v}
         assert mismatched == {}, f"chart value != script fallback for {mismatched}"
 
-    def test_credentials_are_never_stated_in_the_chart(self):
-        """Credentials are per-run inputs. A default here would ship in every rendered template."""
-        stated = {k for k, _ in self._chart_env()}
-        assert not (stated & {"AUTH_USERNAME", "AUTH_PASSWORD", "AUTH_MODE"})
+    def test_capture_proxy_url_matches_the_script_fallback(self):
+        """This one comes from .Values.captureProxyUrl rather than from a scenario block, so it
+        needs the same check by itself."""
+        values = _chart_values()
+        for scenario in ("ingest", "search", "mixed"):
+            assert "CAPTURE_PROXY_URL" not in values["scenarios"][scenario]["env"]
+            assert values["captureProxyUrl"] == _script_fallbacks(scenario)["CAPTURE_PROXY_URL"]
+
+    def test_credentials_have_no_value(self):
+        """Credentials are per-run inputs. A value here would ship in every rendered template. The
+        keys are still stated, so a run can pass them by name."""
+        for scenario, block in _chart_values()["scenarios"].items():
+            for key in _CREDENTIALS & set(block["env"]):
+                assert block["env"][key] == "", f"{scenario}.{key} carries a value"
+
+    def test_a_profile_only_changes_settings_of_its_scenario(self):
+        """A profile may state anything its scenario reads — including a timing knob the scenario
+        block leaves out — but nothing else. A key the scenario never reads would ride into the
+        runner env as configuration that does nothing."""
+        values = _chart_values()
+        for profile, p in sorted(values["profiles"].items()):
+            allowed = set(values["scenarios"][p["scenario"]]["env"]) | _keys_read(p["scenario"])
+            unknown = set(p.get("env") or {}) - allowed
+            assert unknown == set(), f"profile '{profile}' sets {sorted(unknown)}, which " \
+                                     f"scenario '{p['scenario']}' does not read"
+
+    def test_no_value_holds_a_single_quote(self):
+        """The templates substitute parameters into single-quoted YAML scalars, so one of these
+        would produce a TestRun manifest that fails to parse at submit time. Helm fails the render
+        too; this says so before a render is ever attempted."""
+        values = _chart_values()
+        for profile in values["profiles"]:
+            for key, value in _resolved(values, profile).items():
+                assert "'" not in value, f"{profile}.{key} holds a single quote"
+
+
+class TestChartProfilesMatchTheLocalPresets:
+    """k6-config/*.env now serves only a local `k6 run`; the chart profiles serve the cluster. They
+    describe the same load, so they must stay equal — a drift would make a local reproduction of a
+    cluster run quietly different."""
+
+    def test_profile_names_match_the_env_files(self):
+        on_disk = sorted(p.stem for p in
+                         (_repo_dir("TrafficCapture/trafficLoadTest") / "k6-config").glob("*.env"))
+        assert sorted(_chart_values()["profiles"]) == on_disk
+
+    def test_each_preset_value_matches_the_profile(self):
+        values = _chart_values()
+        for profile in sorted(values["profiles"]):
+            resolved = _resolved(values, profile)
+            for key, value in _preset_file(profile).items():
+                assert key in resolved, f"{profile}.env sets {key}, which the chart does not state"
+                assert resolved[key] == value, (
+                    f"{profile}: preset has {key}={value}, chart has {resolved[key]}")
+
+
+class TestFallbackListsMatchTheChart:
+    """The client's hardcoded lists are only used when the cluster cannot be reached, so nothing
+    fails when they drift — which is exactly why they need a test."""
+
+    def test_profiles_fallback_matches(self):
+        assert sorted(runs_mod.PROFILES) == sorted(_chart_values()["profiles"])
+
+    def test_scenarios_fallback_matches(self):
+        assert sorted(runs_mod.SCENARIOS) == sorted(_chart_values()["scenarios"])
+
+    def test_tui_fallback_profiles_match(self):
+        from console_link.loadtest.tui.launch_modal import _FALLBACK_PROFILES
+        assert sorted(_FALLBACK_PROFILES) == sorted(runs_mod.PROFILES)

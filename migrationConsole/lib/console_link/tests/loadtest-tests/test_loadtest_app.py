@@ -16,15 +16,17 @@ LT = "console_link.loadtest.runs"
 TESTRUN_UTILS = "console_link.loadtest.testrun_utils"
 
 RUNS = [
-    {"name": "k6-run-a", "scenario": "ingest", "phase": "started",
+    {"name": "k6-run-a", "scenario": "ingest", "profile": "ingest-burst", "phase": "started",
      "parallelism": "4", "age": "1m"},
-    {"name": "k6-run-b", "scenario": "mixed", "phase": "finished",
+    {"name": "k6-run-b", "scenario": "mixed", "profile": "mixed-steady", "phase": "finished",
      "parallelism": "1", "age": "12m"},
 ]
 
+# What the launch form returns: a profile plus overrides. There is no scenario field — the
+# profile's WorkflowTemplate says which scenario it runs.
 LAUNCH_FIELDS = {
-    "scenario": "ingest", "config_name": None, "parallelism": 1, "target_url": None,
-    "rate": None, "duration": None, "vus": None, "registry_enabled": False,
+    "config_name": "ingest-steady", "parallelism": 1, "target_url": None,
+    "rate": None, "duration": None, "vus": None, "registry_enabled": None,
     "control_enabled": False, "overrides_text": None,
 }
 
@@ -95,7 +97,7 @@ async def test_list_failure_notifies_and_keeps_last_table():
 async def test_n_opens_the_launch_form():
     app = _app()
     with patch(f"{LT}.list_runs", return_value=RUNS), \
-            patch(f"{TESTRUN_UTILS}.list_scenarios", return_value=["ingest"]):
+            patch(f"{LT}.profile_catalog", return_value={}):
         async with app.run_test() as pilot:
             assert await wait_until(pilot, lambda: app.table.row_count == 2)
             await pilot.press("n")
@@ -115,8 +117,7 @@ async def test_launch_submits_run():
     submit.assert_called_once()
     namespace, params = submit.call_args.args
     assert namespace == "ma"
-    # The form's fields go through build_k6_parameters, so the preset default is applied here.
-    assert params["scenario"] == "ingest"
+    # The form's fields go through build_k6_parameters, which carries the profile through.
     assert params["configName"] == "ingest-steady"
     assert "k6-run-z" in _notifications(notify)[0]
 
@@ -135,7 +136,7 @@ async def test_launch_reports_invalid_override():
                 await pilot.pause()
 
     submit.assert_not_called()
-    assert "Invalid override" in _notifications(notify)[0]
+    assert "Cannot submit" in _notifications(notify)[0]
 
 
 @pytest.mark.asyncio

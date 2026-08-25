@@ -6,28 +6,47 @@ The form returns the build_k6_parameters kwargs directly, or None when cancelled
 import asyncio
 
 from textual.app import App
-from textual.widgets import Input, Checkbox, TextArea, Select
+from textual.widgets import Input, Checkbox, TextArea, Select, Static
 
 from console_link.loadtest.tui.launch_modal import LoadTestLaunchModal
 
+# What runs.profile_catalog() hands the form: every launchable profile, with the settings it
+# carries. The form reads these instead of inferring anything from a profile's name.
+CATALOG = {
+    "ingest-steady": {
+        "scenario": "ingest", "description": "Steady ingest.",
+        "env": {"INGEST_RATE": "50", "INGEST_VUS": "20", "DURATION": "5m",
+                "CONTROL_ENABLED": "false", "EXECUTOR": "constant-arrival-rate"},
+    },
+    "ingest-burst": {
+        "scenario": "ingest", "description": "Bursty ingest.",
+        "env": {"INGEST_VUS": "60", "CONTROL_ENABLED": "false",
+                "EXECUTOR": "ramping-arrival-rate"},
+    },
+    "mixed-steady": {
+        "scenario": "mixed", "description": "Both streams.",
+        "env": {"INGEST_RATE": "30", "SEARCH_RATE": "20", "INGEST_VUS": "15",
+                "SEARCH_VUS": "15", "DURATION": "5m", "REGISTRY_ENABLED": "true",
+                "CONTROL_ENABLED": "false", "EXECUTOR": "constant-arrival-rate"},
+    },
+}
+
 
 class _Host(App):
-    def __init__(self, presets=None, scenarios=None):
+    def __init__(self, catalog=CATALOG):
         super().__init__()
-        self._presets = presets
-        self._scenarios = scenarios
+        self._catalog = catalog
         self.result = "UNSET"
 
     def on_mount(self) -> None:
         self.push_screen(
-            LoadTestLaunchModal(default_target="http://t:9200",
-                                presets=self._presets, scenarios=self._scenarios),
+            LoadTestLaunchModal(default_target="http://t:9200", catalog=self._catalog),
             lambda v: setattr(self, "result", v))
 
 
-def _drive(steps, key=None, click=None, presets=None, scenarios=None):
+def _drive(steps, key=None, click=None, catalog=CATALOG):
     async def _run():
-        app = _Host(presets=presets, scenarios=scenarios)
+        app = _Host(catalog=catalog)
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
             steps(app.screen)
@@ -43,55 +62,49 @@ def _drive(steps, key=None, click=None, presets=None, scenarios=None):
 
 def test_launch_via_ctrl_s():
     def steps(m):
-        m.query_one("#config", Select).value = "ingest-burst"
+        m.query_one("#profile", Select).value = "mixed-steady"
         m.query_one("#rate", Input).value = "100"
         m.query_one("#parallelism", Input).value = "4"
-        m.query_one("#registry", Checkbox).value = True
-        m.query_one("#overrides", TextArea).load_text("FOO=bar")
+        m.query_one("#overrides", TextArea).load_text("BULK_BATCH_SIZE=5")
     f = _drive(steps, key="ctrl+s")
-    assert f["scenario"] == "ingest" and f["config_name"] == "ingest-burst"
-    assert f["rate"] == "100" and f["registry_enabled"] is True
-    assert f["parallelism"] == "4"
-    assert f["overrides_text"] == "FOO=bar"
-    # Unchecked toggles are authoritative False now (not None), so they can force a preset's
-    # default off rather than silently inheriting it.
-    assert f["duration"] is None and f["control_enabled"] is False
+    assert f["config_name"] == "mixed-steady"
+    assert f["rate"] == "100" and f["parallelism"] == "4"
+    assert f["overrides_text"] == "BULK_BATCH_SIZE=5"
+    assert f["duration"] is None
+    # There is no scenario field any more: the profile's template says which scenario it runs.
+    assert "scenario" not in f
 
 
 def test_launch_via_button():
     f = _drive(lambda m: None, click="#launch")
-    assert f["scenario"] == "ingest"
+    assert f["config_name"] == "ingest-steady"
 
 
-def test_toggles_default_false_for_ingest():
-    # ingest-steady preset ships both toggles off -> unchecked boxes -> explicit False
+def test_toggles_are_seeded_from_the_profile():
+    """The form reads the profile's own values, so leaving the boxes alone reproduces it. This used
+    to be guessed from the profile name starting with "mixed-"."""
     f = _drive(lambda m: None, key="ctrl+s")
-    assert f["registry_enabled"] is False and f["control_enabled"] is False
-    # blank config Select -> None (build_k6_parameters resolves it to <scenario>-steady)
-    assert f["config_name"] is None
+    assert f["control_enabled"] is False        # ingest-steady states CONTROL_ENABLED=false
+    assert f["registry_enabled"] is None        # ingest has no such setting at all
 
 
-def test_mixed_scenario_seeds_registry_on():
-    # Selecting the mixed scenario pre-checks registry (mixed-* presets set REGISTRY_ENABLED=true),
-    # so leaving it alone reproduces the preset default.
+def test_mixed_profile_seeds_registry_on():
     def steps(m):
-        m.query_one("#scenario", Select).value = "mixed"
+        m.query_one("#profile", Select).value = "mixed-steady"
     f = _drive(steps, key="ctrl+s")
-    assert f["scenario"] == "mixed"
     assert f["registry_enabled"] is True
 
 
 def test_mixed_registry_can_be_unchecked_to_false():
-    # The whole point: after mixed seeds registry on, the user can uncheck it and get False,
-    # which forces REGISTRY_ENABLED=false over the preset's true. The pause between selecting
-    # the scenario and unchecking mirrors real use — the auto-seed (an async Select.Changed)
-    # lands first, then the user unchecks.
+    # The whole point: after mixed seeds registry on, the user can uncheck it and get False, which
+    # overrides the profile's true. The pause between selecting the profile and unchecking mirrors
+    # real use — the auto-seed (an async Select.Changed) lands first, then the user unchecks.
     async def _run():
         app = _Host()
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
-            app.screen.query_one("#scenario", Select).value = "mixed"
-            await pilot.pause()  # let the scenario-change re-seed registry -> True
+            app.screen.query_one("#profile", Select).value = "mixed-steady"
+            await pilot.pause()  # let the profile change re-seed registry -> True
             assert app.screen.query_one("#registry", Checkbox).value is True
             app.screen.query_one("#registry", Checkbox).value = False
             await pilot.pause()
@@ -101,22 +114,53 @@ def test_mixed_registry_can_be_unchecked_to_false():
     assert asyncio.run(_run())["registry_enabled"] is False
 
 
-def test_scenario_options_come_from_passed_scenarios():
-    # Scenarios discovered in-cluster are passed in; the scenario select offers exactly those.
+def test_a_toggle_the_profile_lacks_is_disabled():
+    """A setting the profile does not have cannot be sent — the submission would refuse it, so the
+    form must not offer it."""
     def steps(m):
-        m.query_one("#scenario", Select).value = "other-scn"
-    f = _drive(steps, key="ctrl+s", scenarios=["custom-scn", "other-scn"])
-    assert f["scenario"] == "other-scn"
+        assert m.query_one("#registry", Checkbox).disabled is True   # ingest has no ring
+        assert m.query_one("#control", Checkbox).disabled is False
+    _drive(steps, key="escape")
 
 
-def test_config_options_come_from_passed_presets():
-    # Presets discovered in-cluster are passed in; the config dropdown offers exactly those.
-    # Setting the Select to a passed preset only works if it became an option (Textual rejects
+def test_fields_show_what_the_profile_currently_sets():
+    def steps(m):
+        assert "50" in m.query_one("#rate", Input).placeholder
+        assert "5m" in m.query_one("#duration", Input).placeholder
+        assert "Steady ingest." in str(m.query_one("#about", Static).content)
+    _drive(steps, key="escape")
+
+
+def test_a_ramping_profile_does_not_claim_a_rate():
+    """A ramping profile takes its rate and timing from the stage list, so showing the constant-rate
+    values would describe a run that does not happen."""
+    async def _run():
+        app = _Host()
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            app.screen.query_one("#profile", Select).value = "ingest-burst"
+            await pilot.pause()
+            return app.screen.query_one("#rate", Input).placeholder
+    assert "set by stages" in asyncio.run(_run())
+
+
+def test_profile_options_come_from_the_catalog():
+    # Setting the Select to a catalog profile only works if it became an option (Textual rejects
     # values outside the option list), so a successful launch with it proves the wiring.
+    catalog = {"alpha-steady": {"scenario": "a", "description": "", "env": {}},
+               "beta-burst": {"scenario": "b", "description": "", "env": {}}}
+
     def steps(m):
-        m.query_one("#config", Select).value = "beta-burst"
-    f = _drive(steps, key="ctrl+s", presets=["alpha-steady", "beta-burst"])
+        m.query_one("#profile", Select).value = "beta-burst"
+    f = _drive(steps, key="ctrl+s", catalog=catalog)
     assert f["config_name"] == "beta-burst"
+
+
+def test_unknown_settings_override_nothing_on_their_own():
+    """With no catalog (an API error, or a cluster the form could not reach) the form still opens,
+    but it must not send toggles it cannot vouch for."""
+    f = _drive(lambda m: None, key="ctrl+s", catalog=None)
+    assert f["registry_enabled"] is None and f["control_enabled"] is None
 
 
 def test_parallelism_defaults_to_one():

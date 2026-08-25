@@ -17,7 +17,6 @@
  *   SEARCH_VUS            — pre-allocated VUs
  *   SEARCH_MAX_VUS        — max VUs k6 may spin up to meet the rate
  *   DURATION              — test duration (e.g. "5m")
- *   SEED_DOC_COUNT        — expected document count (informational; used for setup sampling)
  *   DEEP_PAGING_ENABLED   — "true" to activate scroll / search_after steps (default false)
  *   PAGING_MODE           — "scroll" or "search_after" (default "scroll")
  *   SCROLL_PAGES          — max pages per scroll sequence (default 3)

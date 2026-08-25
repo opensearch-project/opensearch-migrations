@@ -8,19 +8,22 @@ any migration; the scenarios and presets themselves ride in a data image (migrat
 built from TrafficCapture/trafficLoadTest) that the templates mount at /scripts on stock grafana/k6
 pods.
 
-A run is specified by a `scenario` (which names a WorkflowTemplate, and a script path under /scripts)
-and a `config` (a k6-config/*.env preset from the same mount, selected with the K6_PRESET env var);
-every preset value is overridable per run via named options or the repeatable `-e KEY=VALUE` bag,
-since real environment variables win over the preset file. Load is spread across `--parallelism`
-runner pods by k6 execution segments, which is the operator's job, not Argo's.
+A run is specified by a load `profile` — one WorkflowTemplate, e.g. `k6-ingest-burst` — which states
+every setting of that run as a named Argo parameter with a value. Submitting overrides only the
+parameters the run changes, by name; anything left out keeps the template's value. There is no
+preset layer beneath (`K6_PRESET` is not set in-cluster), so what the template says is what the run
+gets. Load is spread across `--parallelism` runner pods by k6 execution segments, which is the
+operator's job, not Argo's.
 
 See TrafficCapture/trafficLoadTest/README.md for the deployment side.
 """
 
 import calendar
-import json
 import logging
+import re
 import time
+
+from kubernetes.client.rest import ApiException
 
 from .testrun_utils import (
     K6_APP_LABEL,
@@ -30,23 +33,22 @@ from .testrun_utils import (
     get_workflow_template,
     workflow_template_name,
     list_k6_workflow_templates,
-    list_scenarios,
+    list_profiles,
 )
 
 logger = logging.getLogger(__name__)
 
-# Env var the scenarios read to pick a load-profile preset from the ones in the mounted scripts
-# image (see TrafficCapture/trafficLoadTest/lib/config.js).
-PRESET_ENV = "K6_PRESET"
+# An ALL_CAPS parameter on a WorkflowTemplate is a runner environment variable; a camelCase one
+# configures the run around it (parallelism, images). The chart renders them to this convention on
+# purpose, so a client can tell load settings from plumbing without a second list to maintain.
+ENV_PARAM = re.compile(r"[A-Z][A-Z0-9_]*")
 
-# Launchable scenarios are discovered from the cluster (list_scenarios, from the chart's
-# WorkflowTemplates); SCENARIOS is only the completion fallback used when the cluster is unreachable.
+# Launchable scenarios and profiles are discovered from the cluster (list_scenarios / list_profiles,
+# from the chart's WorkflowTemplates). These two lists are only the completion fallbacks used when
+# the cluster is unreachable; neither restricts what may be run, since a chart with different values
+# renders whatever profiles it was given.
 SCENARIOS = ["ingest", "search", "mixed"]
-# Presets live in the scripts image, so there is nothing in the cluster to enumerate: this list
-# mirrors TrafficCapture/trafficLoadTest/k6-config/*.env (kept honest by a unit test). Neither
-# --scenario nor --config is restricted to these — a custom scripts image may ship others, and an
-# unknown preset fails fast in the pod with the list the image actually has.
-CONFIG_PRESETS = [
+PROFILES = [
     "ingest-steady", "ingest-ramp", "ingest-burst",
     "search-steady", "search-deep-paging", "search-ramp", "search-burst",
     "mixed-steady", "mixed-ramp", "mixed-burst",
@@ -111,27 +113,65 @@ def k6_workflows(namespace, scenario=None):
 # ---------------------------------------------------------------------------
 # Run assembly.
 # ---------------------------------------------------------------------------
-def load_template_defaults(namespace, scenario):
-    """The parameter defaults of the scenario's WorkflowTemplate, as a name → value dict.
+def load_template(namespace, profile):
+    """The WorkflowTemplate of a load profile, or a ValueError naming the profiles that do exist.
 
-    Helm is the single source of the run spec (images, script path, K6_OUT, default preset); the
-    client reads those defaults and overrides only what the run asks for, so the static values are
-    never restated here.
+    Helm is the single source of the run spec — images, script path, and every load setting as a
+    named parameter with a value — so nothing here restates any of it. The client reads this to
+    learn what a run can be given, and submits only the parameters it changes.
     """
-    name = workflow_template_name(scenario)
+    name = workflow_template_name(profile)
     template = get_workflow_template(namespace, name)
     if template is None:
-        available = ", ".join(list_scenarios(namespace)) or "none"
-        raise ValueError(f"no WorkflowTemplate '{name}' for scenario '{scenario}' "
+        available = ", ".join(list_profiles(namespace)) or "none"
+        raise ValueError(f"no WorkflowTemplate '{name}' for profile '{profile}' "
                          f"(available: {available}). Install the k6LoadTest chart from "
                          f"{CHART_PATH} to enable load testing.")
+    return template
+
+
+def _template_parameters(template):
+    """A template's parameter defaults as a name → value dict."""
     params = template.get("spec", {}).get("arguments", {}).get("parameters", [])
     return {p["name"]: p.get("value", "") for p in params if "name" in p}
 
 
-# Named run options → the scenario env vars each one sets. A value-carrying option is applied only
-# when it's non-empty, so leaving it off keeps whatever the preset file supplies. --rate and --vus
-# fan out to both the ingest and search vars because a scenario reads only its own pair.
+def load_template_defaults(namespace, profile):
+    """The parameter defaults of a profile's WorkflowTemplate, as a name → value dict."""
+    return _template_parameters(load_template(namespace, profile))
+
+
+def profile_catalog(namespace):
+    """Every launchable profile as {profile: {scenario, description, env}}, from ONE list call.
+
+    `env` holds only the ALL_CAPS parameters — the load settings, with the values the run would use
+    if nothing were overridden. The launch form uses this to show real defaults and to offer only
+    the settings a given profile actually has, instead of guessing from the profile's name.
+    """
+    try:
+        templates = list_k6_workflow_templates(namespace)
+    except ApiException:
+        return {}
+    catalog = {}
+    for t in templates:
+        meta = t.get("metadata", {})
+        profile = meta.get("labels", {}).get("k6-profile")
+        if not profile:
+            continue
+        params = _template_parameters(t)
+        catalog[profile] = {
+            "scenario": meta.get("labels", {}).get("k6-scenario", "?"),
+            "description": meta.get("annotations", {}).get(
+                "workflows.argoproj.io/description", ""),
+            "env": {k: v for k, v in params.items() if ENV_PARAM.fullmatch(k)},
+        }
+    return catalog
+
+
+# Named run options → the parameters each one sets. --rate and --vus name both the ingest and the
+# search variable because a scenario reads only its own pair: the option applies to whichever the
+# profile declares. A value-carrying option is applied only when it's non-empty, so leaving it off
+# keeps the template's value.
 _VALUE_ENV_VARS = (
     ("duration", ("DURATION",)),
     ("rate", ("INGEST_RATE", "SEARCH_RATE")),
@@ -139,8 +179,9 @@ _VALUE_ENV_VARS = (
     ("targetUrl", ("CAPTURE_PROXY_URL",)),
     ("webdisUrl", ("WEBDIS_URL",)),
 )
-# The toggles are three-state: None means "keep the preset's value", so they can't use the
-# truthiness test above — an explicit False still has to emit an override to turn the preset off.
+# The toggles are three-state: None means "keep the template's value", so they can't use the
+# truthiness test above — an explicit False still has to emit an override to turn a profile's
+# setting off.
 _TOGGLE_ENV_VARS = (
     ("registryEnabled", "REGISTRY_ENABLED"),
     ("controlEnabled", "CONTROL_ENABLED"),
@@ -161,32 +202,56 @@ def _parse_overrides(text):
     return env
 
 
-def _override_env(params):
-    """Per-run env overrides (these win over the preset file). Named flags fan out to the vars the
-    scenarios read; the -e bag is applied last, so it wins over the named flags."""
+def _override_env(params, declared, profile):
+    """Per-run parameter overrides as a name → value dict, checked against what the profile has.
+
+    `declared` is the profile's ALL_CAPS parameter names. A setting the profile does not have is
+    rejected rather than dropped: Argo accepts a parameter no template references and then ignores
+    it, so an unchecked `-e SEARCH_RATE=…` on an ingest run would look like it took effect and
+    quietly change nothing. The one thing that is NOT an error is a fan-out option naming a variable
+    this scenario has no use for (--rate on search sets SEARCH_RATE only); it fails only when the
+    profile has neither.
+    """
     env = {}
     for key, names in _VALUE_ENV_VARS:
-        if params.get(key):
-            env.update(dict.fromkeys(names, params[key]))
+        if not params.get(key):
+            continue
+        applicable = [n for n in names if n in declared]
+        if not applicable:
+            raise ValueError(f"profile '{profile}' has no {' or '.join(names)} setting")
+        env.update(dict.fromkeys(applicable, params[key]))
     for key, name in _TOGGLE_ENV_VARS:
-        if params.get(key) is not None:
-            env[name] = str(params[key]).lower()
-    env.update(_parse_overrides(params.get("overrides")))
-    return [{"name": k, "value": str(v)} for k, v in env.items()]
+        if params.get(key) is None:
+            continue
+        if name not in declared:
+            raise ValueError(f"profile '{profile}' has no {name} setting")
+        env[name] = str(params[key]).lower()
+    for key, value in _parse_overrides(params.get("overrides")).items():
+        if key not in declared:
+            raise ValueError(f"profile '{profile}' has no '{key}' setting "
+                             f"(it has: {', '.join(sorted(declared))})")
+        env[key] = value
+    return env
 
 
-def build_k6_parameters(scenario, config_name=None, parallelism=1, target_url=None, rate=None,
+def build_k6_parameters(scenario=None, config_name=None, parallelism=1, target_url=None, rate=None,
                         duration=None, vus=None, registry_enabled=None, control_enabled=None,
                         webdis_url=None, overrides_text=None, extra_args=None):
     """Normalize run inputs into a params dict (shared by the CLI and the TUI).
 
-    Validates the `overrides_text` bag eagerly so bad input is rejected before any API call.
+    A run needs a profile. Naming a scenario alone means its steady profile; naming a profile alone
+    is enough, since the profile's own WorkflowTemplate says which scenario it belongs to.
+
+    Validates the `overrides_text` bag eagerly so bad input is rejected before any API call. Names
+    are checked later, against the profile that is actually installed.
     """
     if overrides_text:
         for line in overrides_text.splitlines():
             line = line.strip()
             if line and "=" not in line:
                 raise ValueError(f"override must be KEY=VALUE, got '{line}'")
+    if not scenario and not config_name:
+        scenario = SCENARIOS[0]
     return {
         "scenario": scenario,
         "configName": config_name or f"{scenario}-steady",
@@ -203,40 +268,29 @@ def build_k6_parameters(scenario, config_name=None, parallelism=1, target_url=No
     }
 
 
-def _set_env(env, name, value):
-    """Return the env list with `name` set to `value`, replacing any existing entry of that name.
-
-    The template's default already carries K6_PRESET (and the K6_OUT trio), so appending would leave
-    the container with two entries of the same name and make the run depend on how the runtime
-    resolves that — replacing keeps the spec unambiguous.
-    """
-    out = [e for e in env if e.get("name") != name]
-    out.append({"name": name, "value": str(value)})
-    return out
-
-
 def build_workflow_submission(namespace, params):
-    """Build the Workflow that runs a scenario: name its WorkflowTemplate and pass only the
-    parameters that differ from the template's defaults.
+    """Build the Workflow that runs a profile: name its WorkflowTemplate and pass ONLY the
+    parameters the run changes.
 
-    The runner env is carried whole in one `runnerEnv` parameter. We start from the template's
-    default so the static vars (K6_OUT and the OTel endpoint) have exactly one definition, then point
-    K6_PRESET at the chosen preset and apply the overrides — which win over the preset file, since
-    the scenarios read real env vars over it. Everything else the run needs (the images, the scripts
-    mount, the script path under it, labels) is already in the template.
+    Everything else — the images, the scripts mount, the script path under it, and every load
+    setting — is already in the template with a value, so an omitted parameter is not an unknown:
+    it is the profile's own setting. The scenario label is taken from the template rather than from
+    the caller, so a run cannot be filed under a scenario it did not run.
     """
-    scenario = params["scenario"]
-    defaults = load_template_defaults(namespace, scenario)
+    profile = params["configName"]
+    template = load_template(namespace, profile)
+    defaults = _template_parameters(template)
+    scenario = template.get("metadata", {}).get("labels", {}).get("k6-scenario", "?")
 
-    env = json.loads(defaults.get("runnerEnv") or "[]")
-    env = _set_env(env, PRESET_ENV, params["configName"])
-    for entry in _override_env(params):
-        env = _set_env(env, entry["name"], entry["value"])
+    asked = params.get("scenario")
+    if asked and asked != scenario:
+        raise ValueError(f"profile '{profile}' runs scenario '{scenario}', not '{asked}'")
 
-    parameters = [
-        {"name": "runnerEnv", "value": json.dumps(env)},
-        {"name": "parallelism", "value": str(int(params.get("parallelism", 1)))},
-    ]
+    declared = {k for k in defaults if ENV_PARAM.fullmatch(k)}
+    overrides = _override_env(params, declared, profile)
+
+    parameters = [{"name": k, "value": str(v)} for k, v in sorted(overrides.items())]
+    parameters.append({"name": "parallelism", "value": str(int(params.get("parallelism", 1)))})
     if params.get("extraArgs"):
         parameters.append({"name": "arguments", "value": params["extraArgs"]})
 
@@ -244,11 +298,11 @@ def build_workflow_submission(namespace, params):
         "apiVersion": "argoproj.io/v1alpha1",
         "kind": "Workflow",
         "metadata": {
-            "generateName": f"{workflow_template_name(scenario)}-",
-            "labels": {"app": K6_APP_LABEL, "k6-scenario": scenario},
+            "generateName": f"{workflow_template_name(profile)}-",
+            "labels": {"app": K6_APP_LABEL, "k6-scenario": scenario, "k6-profile": profile},
         },
         "spec": {
-            "workflowTemplateRef": {"name": workflow_template_name(scenario)},
+            "workflowTemplateRef": {"name": workflow_template_name(profile)},
             "arguments": {"parameters": parameters},
         },
     }
@@ -284,9 +338,11 @@ def list_runs(namespace, scenario=None, active_only=False):
         if active_only and phase in DONE_PHASES:
             continue
         meta = wf.get("metadata", {})
+        labels = meta.get("labels", {})
         out.append({
             "name": meta.get("name", ""),
-            "scenario": meta.get("labels", {}).get("k6-scenario", "?"),
+            "scenario": labels.get("k6-scenario", "?"),
+            "profile": labels.get("k6-profile", "?"),
             "phase": phase or "unknown",
             "parallelism": _workflow_parameter(wf, "parallelism"),
             "age": _age(meta.get("creationTimestamp")),

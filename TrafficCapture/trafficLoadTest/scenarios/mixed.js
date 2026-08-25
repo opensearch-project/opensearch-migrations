@@ -34,7 +34,6 @@
  *   NO_CONNECTION_REUSE     — "true" to disable keep-alive at the k6 transport level for all VUs
  *                             (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
  *                             guaranteed per-request TCP teardown independent of server behaviour
- *   SEED_DOC_COUNT          — expected document count (informs seed sampling in setup)
  *   WEBDIS_URL              — Webdis HTTP-to-Redis proxy URL (default: http://webdis:7379)
  *   EXECUTOR                — "constant-arrival-rate" (default) or "ramping-arrival-rate"
  *   INGEST_RAMP_STAGES      — JSON stage array for the ingest stream when EXECUTOR=ramping-arrival-rate

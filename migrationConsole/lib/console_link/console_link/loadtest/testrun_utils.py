@@ -40,9 +40,9 @@ def _custom():
     return client.CustomObjectsApi()
 
 
-def workflow_template_name(scenario):
-    """The WorkflowTemplate the chart renders for a scenario."""
-    return f"k6-{scenario}"
+def workflow_template_name(profile):
+    """The WorkflowTemplate the chart renders for a load profile (e.g. 'ingest-burst')."""
+    return f"k6-{profile}"
 
 
 def create_workflow(namespace, body):
@@ -136,3 +136,24 @@ def list_scenarios(namespace):
         return []
     names = {t.get("metadata", {}).get("labels", {}).get("k6-scenario") for t in templates}
     return sorted(n for n in names if n)
+
+
+def list_profiles(namespace, scenario=None):
+    """Launchable load-profile names (the k6-profile label), optionally for one scenario.
+
+    A profile is a whole WorkflowTemplate, so unlike the old preset list this is discovered rather
+    than mirrored from the image — whatever the installed chart renders is what can be run.
+    Degrades to [] on an ApiException for the same reason as list_scenarios.
+    """
+    try:
+        templates = list_k6_workflow_templates(namespace)
+    except ApiException:
+        return []
+    names = set()
+    for t in templates:
+        labels = t.get("metadata", {}).get("labels", {})
+        if scenario and labels.get("k6-scenario") != scenario:
+            continue
+        if labels.get("k6-profile"):
+            names.add(labels["k6-profile"])
+    return sorted(names)

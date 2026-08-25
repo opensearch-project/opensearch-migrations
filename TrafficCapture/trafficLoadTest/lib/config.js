@@ -2,6 +2,12 @@
  * Load-profile presets, read from the k6-config/*.env files baked into the image next to the
  * scenarios.
  *
+ * These serve a LOCAL run — `k6 run -e K6_PRESET=ingest-steady scenarios/ingest.js`. A run in
+ * Kubernetes does not use them and does not set K6_PRESET: the k6LoadTest chart renders one
+ * WorkflowTemplate per profile, each stating every setting as a parameter with a value, so the
+ * runner env is already complete when the pod starts. A unit test keeps each preset here equal to
+ * the chart profile of the same name, so both paths describe the same load.
+ *
  * A run picks one by name with K6_PRESET (e.g. K6_PRESET=ingest-steady). Every value it sets is
  * still overridable per run by a real environment variable (`k6 run -e KEY=VALUE`, or a TestRun's
  * runner.env), because __ENV is merged last. Scenarios therefore read CFG.X instead of __ENV.X;

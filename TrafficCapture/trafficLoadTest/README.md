@@ -4,15 +4,17 @@ Sends controlled HTTP traffic at the **Capture Proxy** to load-test the capture-
 A run is an **Argo Workflow** that creates a **k6-operator `TestRun`** and waits for it, driven from
 the migration console (`loadtest …`), a thin shell helper, or plain `kubectl`.
 
-The load test itself — the scenario scripts, their libs, the document schemas and the load-profile
-presets — lives **in this directory** and reaches the cluster as a ~25 KB **`FROM scratch` data
+The load test itself — the scenario scripts, their libs and the document schemas — lives **in this
+directory** and reaches the cluster as a ~25 KB **`FROM scratch` data
 image** (`migrations/k6_scripts`), mounted read-only at `/scripts` with a Kubernetes `image:` volume
 on pods running **stock `grafana/k6`**. That is the same mechanism as the migration's
 [mountable transforms](../../docs/MountableTransformsDesign.md), and it is why this chart requires
-**Kubernetes ≥ 1.35**. The cluster-side pieces (the operator, the per-scenario WorkflowTemplates,
+**Kubernetes ≥ 1.35**. The cluster-side pieces (the operator, the per-profile WorkflowTemplates,
 the RBAC) ship in one **standalone, opt-in** chart:
-`deployment/k8s/charts/components/k6LoadTest`. The chart holds no scenario content, so a run is
-specified by two names — a scenario (a script path under `/scripts`) and a preset (`K6_PRESET`).
+`deployment/k8s/charts/components/k6LoadTest`. The chart holds no scenario content, but it does hold
+the whole **configuration** of a run: one WorkflowTemplate per load profile, each stating every
+setting that profile uses as a named Argo parameter with a value. A run is therefore one name — the
+profile — plus whatever it overrides by parameter.
 
 > **Deliberately separate from the migration.** The chart is **not** a dependency of any migration
 > aggregate, so a normal migration deployment contains no operator, no run templates, no RBAC, and
@@ -26,7 +28,7 @@ specified by two names — a scenario (a script path under `/scripts`) and a pre
 
 - [How it fits together](#how-it-fits-together)
 - [Install the load-test chart (opt-in)](#install-the-load-test-chart-opt-in)
-- [Updating scenarios, presets & other resources](#updating-scenarios-presets--other-resources)
+- [Updating scenarios, profiles & other resources](#updating-scenarios-profiles--other-resources)
 - [Find the Capture Proxy endpoint](#find-the-capture-proxy-endpoint)
 - [Authentication](#authentication)
 - [Running a load test](#running-a-load-test)
@@ -54,19 +56,21 @@ INSTALL  (opt-in, separate from the migration)
 ──────────────────────────────────────────────────────────────
   deployment/k8s/charts/components/k6LoadTest [3]     (deployment resources only — no scenarios)
     ├── Chart dependency: grafana/k6-operator [4]  ──►  TestRun CRD + controller
-    ├── WorkflowTemplate/k6-<scenario> [5]  (one per scenario — the whole run definition)
+    ├── WorkflowTemplate/k6-<profile> [5]   (one per profile — the whole run definition)
+    │      arguments.parameters: INGEST_RATE=50 · DURATION=5m · … (every setting, with a value)
     └── Role/RoleBinding [6]                (console + Argo executor rights on testruns.k6.io)
 
 USAGE  (console optional — the WorkflowTemplate is the definition)
 ──────────────────────────────────────────────────────────────
   kubectl create (Workflow stub) │ ./k6-run.sh [7] │ loadtest run [8]         │ TUI [9]
         └──────────────────┬───────────────┴──────────────────┘
-                           ▼  name k6-<scenario>, pass only the parameters that differ
-   Workflow (argoproj.io/v1alpha1)   labels: app=k6-load-test
-     parameters ◄─ runnerEnv (K6_PRESET=<config> + overrides) · parallelism · arguments
+                           ▼  name k6-<profile>, pass only the parameters that differ
+   Workflow (argoproj.io/v1alpha1)   labels: app=k6-load-test, k6-profile=<profile>
+     parameters ◄─ any setting by name (e.g. INGEST_RATE) · parallelism · arguments
                            ▼  (one resource task: create + wait on the TestRun's stage)
    TestRun (k6.io/v1alpha1)   name = the workflow's, owned by it
      spec.parallelism · script.localFile=/scripts/scenarios/<scenario>.js
+     runner.env ◄─ one entry per parameter (no K6_PRESET: the parameters are the whole env)
      initializer+runner volumes ◄─ image: migrations/k6_scripts  →  mounted at /scripts
                            ▼  (operator: initializer → N runner pods)
      k6 runner pods  (stock grafana/k6 + the scripts image mounted at /scripts)
@@ -87,23 +91,27 @@ USAGE  (console optional — the WorkflowTemplate is the definition)
 | 2 | Scripts image (the data store) | `Dockerfile` here, built by `buildImages/build.gradle` as `migrations/k6_scripts` |
 | 3 | Standalone chart | `deployment/k8s/charts/components/k6LoadTest/` |
 | 4 | k6-operator subchart (TestRun CRD) | `Chart.yaml` dependency → `grafana/k6-operator` |
-| 5 | Per-scenario WorkflowTemplates (the run definition) | `templates/k6-workflowtemplates.yaml` |
+| 5 | Per-profile WorkflowTemplates (the run definition) | `templates/k6-workflowtemplates.yaml` + the `scenarios`/`profiles` maps in `values.yaml` |
 | 6 | Console RBAC on `testruns.k6.io` | `templates/rbac.yaml` |
 | 7 | `k6-run.sh` (console-independent submit) | `scripts/k6-run.sh` |
 | 8 | `loadtest` CLI (optional) | `migrationConsole/lib/console_link/console_link/loadtest/` (`cli.py` + `runs.py`) |
 | 9 | Load-test TUI (bare `loadtest`) | `.../console_link/loadtest/tui/app.py` + `.../tui/launch_modal.py` |
 | 10 | Grafana dashboard ConfigMap | `templates/grafanaDashboard.yaml` |
 
-A run is specified by a `scenario` (a script under `/scripts`) and a `config` (a `k6-config/*.env`
-preset from the same mount, passed as `K6_PRESET`). Every value is overridable per run — the scenarios read
-real environment variables over the preset file — and load is spread across `--parallelism` runner
-pods by k6 execution segments.
+A run is specified by a **profile** — one WorkflowTemplate, e.g. `k6-ingest-burst` — which states
+every setting of that run with a value. Overriding one is `-p NAME=VALUE` (or `-e NAME=VALUE`
+through the helpers): a parameter the submission omits keeps the template's value, and there is no
+layer beneath it, so the template alone answers "what will this run do". Load is spread across
+`--parallelism` runner pods by k6 execution segments.
+
+The `k6-config/*.env` presets still exist, but only for a **local** `k6 run` outside Kubernetes; a
+unit test keeps each one equal to the chart profile of the same name.
 
 ---
 
 ## Install the load-test chart (opt-in)
 
-Build and push the **scripts image** first — it is what carries the scenarios and presets into the
+Build and push the **scripts image** first — it is what carries the scenarios into the
 cluster (locally, `deployment/k8s/fillLocalRegistry.sh` puts it in the dev registry along with the
 other `migrations/*` images):
 
@@ -193,9 +201,9 @@ Verify:
 ```bash
 kubectl get crd testruns.k6.io
 kubectl -n ma get pods -l app.kubernetes.io/name=k6-operator
-kubectl -n ma get workflowtemplates -l app=k6-load-test    # one per launchable scenario
+kubectl -n ma get workflowtemplates -l app=k6-load-test    # one per launchable profile
 # both images the run will pull — the k6 runtime and the scenarios:
-kubectl -n ma get workflowtemplate k6-ingest \
+kubectl -n ma get workflowtemplate k6-ingest-steady \
   -o "jsonpath={range .spec.arguments.parameters[?(@.name=='runnerImage')]}{.value}{end} {range .spec.arguments.parameters[?(@.name=='scriptsRef')]}{.value}{end}"
 ```
 
@@ -208,26 +216,37 @@ build and push it, as above.
 
 ---
 
-## Updating scenarios, presets & other resources
+## Updating scenarios, profiles & other resources
 
-What k6 runs is **in the scripts image**; what Kubernetes needs to start a run is **in the chart**.
-Which side you edit decides whether you rebuild an image or run a `helm upgrade`.
+What k6 **runs** is in the scripts image; what a run is **configured with** is in the chart. Which
+side you edit decides whether you rebuild an image or run a `helm upgrade`. Changing a load shape is
+now a chart edit — no image rebuild.
 
 | Edit this | Source path | Lands in | How to apply |
 |---|---|---|---|
 | Scenario / lib / generator / schema JS | `scenarios/*.js`, `lib/**` | `migrations/k6_scripts`, mounted at `/scripts` | rebuild + push the image |
-| Preset load-shape/config | `k6-config/*.env` | `migrations/k6_scripts`, mounted at `/scripts/k6-config` | rebuild + push the image |
+| A load profile's settings | chart `values.yaml` (`profiles.<name>.env`) | that profile's WorkflowTemplate parameters | `helm upgrade` |
+| A scenario-wide default | chart `values.yaml` (`scenarios.<name>.env`) | every profile of that scenario | `helm upgrade` |
+| The same shape for a local `k6 run` | `k6-config/*.env` | `migrations/k6_scripts`, mounted at `/scripts/k6-config` | rebuild + push the image |
 | Grafana dashboard | chart `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `helm upgrade` |
-| Run distribution defaults (`parallelism`/`separate`) | chart `values.yaml` (`testRun.*`) | each `k6-<scenario>` WorkflowTemplate's parameter defaults | `helm upgrade` |
+| Run distribution defaults (`parallelism`/`separate`) | chart `values.yaml` (`testRun.*`) | each `k6-<profile>` WorkflowTemplate's parameter defaults | `helm upgrade` |
 | The TestRun manifest itself (mount shape, `K6_OUT` trio, labels) | chart `templates/k6-workflowtemplates.yaml` | the templates' `resource.manifest` | `helm upgrade` |
 | Runner image / tag | chart `values.yaml` (`image.*`) | the `runnerImage` parameter default | `helm upgrade` |
 | Scripts image / tag / digest | chart `values.yaml` (`scriptsImage.*`) | the `scriptsRef` parameter default | `helm upgrade` |
 
-**Apply a scenario or preset edit** — rebuild the image, then submit a fresh run:
+**Apply a scenario edit** — rebuild the image, then submit a fresh run:
 
 ```bash
 ./gradlew :buildImages:buildKitLoadTestAll             # rebuild + push migrations/k6_scripts
 ./scripts/k6-run.sh ingest --config ingest-steady      # the new run pulls the new image
+```
+
+**Change a load shape without touching the image** — it is a chart value now:
+
+```bash
+helm upgrade k6-load-test "$CHART" -n ma --reuse-values \
+  --set profiles.ingest-steady.env.INGEST_RATE=120
+kubectl -n ma get workflowtemplate k6-ingest-steady -o yaml   # the new value, stated
 ```
 
 **Apply a chart edit** — re-render into the same release (namespace `ma`):
@@ -245,16 +264,21 @@ Notes:
   iterating (what `deployCdcLoadTestConfig.sh` and the test runner set), or pin the exact content
   with `--set scriptsImage.digest=sha256:<hex>`, which wins over the tag.
 - **In-flight runs are not affected.** The image is pulled when the runner/initializer pods start, so
-  a run already going keeps the old scripts and presets. (This is also why editing is safe mid-test.)
-- **Adding a preset** means adding the `.env` file *and* registering it in `lib/config.js` — presets
-  are opened by literal path so `k6 archive` bundles all of them (see
-  [Design decisions](#design-decisions) §3). Also add the name to `CONFIG_PRESETS` in
-  `console_link/loadtest/runs.py`; a unit test fails if those two drift apart.
+  a run already going keeps the old scripts. A `helm upgrade` does not reach a running TestRun
+  either — its parameters were resolved at submit time. (This is why editing is safe mid-test.)
+- **Adding a profile** means one entry under `profiles:` in the chart's `values.yaml`, naming its
+  scenario and what it changes. For it to be reproducible locally, add the matching
+  `k6-config/<name>.env` *and* register it in `lib/config.js` (presets are opened by literal path so
+  `k6 archive` bundles all of them — see [Design decisions](#design-decisions) §3). Also add the name
+  to `PROFILES` in `console_link/loadtest/runs.py` and `_FALLBACK_PROFILES` in the launch modal;
+  unit tests fail if any of these drift apart.
+- **Adding a setting a scenario reads** means stating it under `scenarios.<name>.env` too. A unit
+  test fails when a scenario reads a `CFG.X` no profile states, or states one nothing reads.
 - **Re-supply the image values** on a `helm upgrade` (as shown). Do **not** use `--reuse-values` on
   this release — it predates the `testRun` block and errors with a nil-pointer; pass the `--set
   image.*` overrides explicitly instead.
 - **No `helm dependency build` needed** for file edits — that step only re-vendors the k6-operator
-  subchart, which is unchanged when you edit scenarios or presets.
+  subchart, which is unchanged when you edit scenarios or profiles.
 - **Grafana dashboard** edits are imported by the kube-prometheus-stack Grafana sidecar a few seconds
   after the ConfigMap updates — no pod restart required.
 
@@ -278,7 +302,7 @@ PROXY="https://$(kubectl -n ma get captureproxy capture-proxy \
 (k6 uses `insecureSkipTLSVerify`, matching the self-signed proxy cert.)
 
 If your proxy is not at the default `https://capture-proxy:9201`, set it once at install time
-instead of passing `--target` on every run — the endpoint is a chart value, not a preset value:
+instead of passing `--target` on every run — the endpoint is deployment topology, not a load shape:
 
 ```bash
 helm upgrade --install k6-load-test "$CHART" -n ma --set captureProxyUrl="$PROXY"
@@ -342,10 +366,16 @@ against either cluster configuration.
 ## Running a load test
 
 Three ways, all producing the same Workflow. **None requires the migration console** — it's
-optional convenience. The chart renders one `k6-<scenario>` WorkflowTemplate per scenario, carrying
-the runner image, the scripts image mounted at `/scripts`, `K6_OUT` metrics, and a default
-`K6_PRESET` as parameter defaults. A submission overrides only what it changes — the scenarios read
-**real environment variables over the preset file**.
+optional convenience. The chart renders one `k6-<profile>` WorkflowTemplate per load profile,
+carrying the runner image, the scripts image mounted at `/scripts`, and **every setting of that
+profile** as a named parameter with a value. A submission overrides only what it changes; anything
+it leaves out is the profile's own value.
+
+See what a profile is before you run it — this is the whole answer, with nothing resolved elsewhere:
+
+```bash
+kubectl -n ma get workflowtemplate k6-ingest-burst -o yaml     # or: loadtest status
+```
 
 ### Distributing the run: `parallelism` & `separate`
 
@@ -383,47 +413,52 @@ A submission names the template and overrides only what it changes — everythin
 template's defaults, so there is nothing to fetch and patch:
 
 ```bash
-# Defaults straight from the template:
+# The profile as it stands:
 kubectl -n ma create -f - <<'EOF'
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: k6-ingest-
-  labels: {app: k6-load-test, k6-scenario: ingest}
+  generateName: k6-ingest-steady-
+  labels: {app: k6-load-test, k6-scenario: ingest, k6-profile: ingest-steady}
 spec:
-  workflowTemplateRef: {name: k6-ingest}
+  workflowTemplateRef: {name: k6-ingest-steady}
 EOF
 
-# With overrides: more runner pods, a different preset, and an env override. `runnerEnv` carries the
-# WHOLE env list, so start from the template's default rather than restating K6_OUT and the OTel vars:
-env=$(kubectl -n ma get workflowtemplate k6-ingest \
-        -o "jsonpath={.spec.arguments.parameters[?(@.name=='runnerEnv')].value}" \
-      | jq -c 'map(select(.name != "K6_PRESET"))
-               + [{"name":"K6_PRESET","value":"ingest-burst"},
-                  {"name":"INGEST_RATE","value":"120"}]')
-kubectl -n ma create -f - <<EOF
+# With overrides: a different profile, more runner pods, and one setting changed by name. Nothing is
+# fetched and patched first — a parameter you do not pass keeps the profile's value.
+kubectl -n ma create -f - <<'EOF'
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  generateName: k6-ingest-
-  labels: {app: k6-load-test, k6-scenario: ingest}
+  generateName: k6-ingest-burst-
+  labels: {app: k6-load-test, k6-scenario: ingest, k6-profile: ingest-burst}
 spec:
-  workflowTemplateRef: {name: k6-ingest}
+  workflowTemplateRef: {name: k6-ingest-burst}
   arguments:
     parameters:
       - {name: parallelism, value: "4"}
-      - {name: runnerEnv, value: '${env}'}
+      - {name: BULK_BATCH_SIZE, value: "50"}
 EOF
 ```
 Use `kubectl create` (not `apply`) — submissions use `generateName`.
+
+With the Argo CLI the same run is one line:
+```bash
+argo submit -n ma --from workflowtemplate/k6-ingest-burst -p parallelism=4 -p BULK_BATCH_SIZE=50
+```
+
+> **A name that is not a parameter of the profile is silently ignored.** Argo accepts a parameter no
+> template references and then does nothing with it. `k6-run.sh` and `loadtest` check the name
+> against the template and refuse it; a raw `kubectl create` or `argo submit` does not.
 
 ### 2. `k6-run.sh` (thin helper, still no console)
 
 ```bash
 ./scripts/k6-run.sh ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
 ```
-Builds that Workflow for you: reads the template's `runnerEnv` default, applies `--config` /
-`--parallelism` / `--target` / `-e KEY=VAL`, creates it, prints the run name. `CONTEXT` / `NAMESPACE`
+Builds that Workflow for you: resolves `--config` to its template, applies `--parallelism` /
+`--target` / `-e KEY=VAL` as named parameters (refusing any name the profile does not have), creates
+it, prints the run name. `CONTEXT` / `NAMESPACE`
 env-overridable.
 
 ### 3. `loadtest` (console convenience, when it's up)
@@ -432,15 +467,16 @@ Nicer flags + `list`/`stop`/`logs` + the TUI. Its own binary, **not** a `workflo
 `console_link/loadtest/` shares no code with `console_link/workflow/` in either direction.
 ```bash
 loadtest                 # TUI: run table + launch / stop / logs
-loadtest run --scenario ingest --config ingest-burst --parallelism 4 -e INGEST_RATE=120
-loadtest run --scenario search --config search-deep-paging --rate 100 --duration 10m --wait
-loadtest list                 # NAME / SCENARIO / STAGE / PARALLEL / AGE
+loadtest run --config ingest-burst --parallelism 4 -e BULK_BATCH_SIZE=50
+loadtest run --config search-deep-paging --rate 100 --duration 10m --wait
+loadtest list                 # NAME / PROFILE / STAGE / PARALLEL / AGE
 loadtest logs <run-name> -f
 loadtest stop <run-name>   |  --scenario mixed  |  --all
-loadtest status               # is the chart installed here, and which scenarios are launchable
+loadtest status               # is the chart installed here, and which profiles are launchable
 ```
-`--config` sets `K6_PRESET`; `--rate`/`--vus` fan out to the ingest+search vars; `-e KEY=VAL` and
-`--target` add `runner.env` overrides. Bare **`loadtest`** opens the TUI: a live table of
+`--config` picks the profile's template; `--rate`/`--vus` apply to whichever stream variables that
+profile has; `-e KEY=VAL` and `--target` override any other setting **by name**, and a name the
+profile does not have is refused rather than silently dropped. Bare **`loadtest`** opens the TUI: a live table of
 runs, with `n` launch, `s`/`S` stop, `l`/`f` logs. k6 runs are standalone TestRuns, so one never
 affects a migration workflow — and the TUI is separate from `workflow manage` for the same reason.
 
@@ -453,20 +489,20 @@ that was already there.
 > **`--parallelism` splits the load.** `--rate`/`--vus` are **global totals** k6 divides across the
 > runner pods via execution segments — `--rate 100 --parallelism 4` ≈ 25 req/s per pod.
 
-### Variants (only the preset / env vars change)
+### Variants (a different profile, or a setting overridden)
 
 | Variant | How |
 |---|---|
-| steady / ramp / burst | preset `<scenario>-{steady,ramp,burst}` |
+| steady / ramp / burst | profile `<scenario>-{steady,ramp,burst}` |
 | document type | `-e SCHEMA=logs_data` (default `nyc_taxis`) |
-| search deep paging | preset `search-deep-paging` (or `-e DEEP_PAGING_ENABLED=true -e PAGING_MODE=search_after`) |
+| search deep paging | profile `search-deep-paging` (or `-e DEEP_PAGING_ENABLED=true -e PAGING_MODE=search_after`) |
 | stateful sequences | `-e SEQUENCE_FRACTION=0.15 -e CONNECTION_MODE=pinned` |
-| mixed consistency | `mixed` scenario + `REGISTRY_ENABLED=true` — **needs the chart installed with `registry.enabled=true`** (Redis+Webdis) |
-| chaos control | `-e CONTROL_ENABLED=true`, then drive via Webdis — also needs `registry.enabled=true` |
+| mixed consistency | any `mixed-*` profile — it sets `REGISTRY_ENABLED=true`, so it **needs the chart installed with `registry.enabled=true`** (Redis+Webdis) |
+| chaos control | `-e CONTROL_ENABLED=true`, then drive via Webdis — also needs `registry.enabled=true` (`ingest`/`mixed` only; `search` has no control bus) |
 | ignore thresholds | `--extra-args --no-thresholds` |
 
-The `k6-config/*.env` files are the source of truth: they are baked into the image and read at init
-time by `lib/config.js`, which merges the selected preset under the real environment variables.
+A shape that is not a one-off deserves a profile of its own: it is an entry in the chart's
+`values.yaml`, and then it is a cluster object anyone can read.
 (Metrics use `K6_OUT=opentelemetry`, not `--out` — see [Design decisions](#design-decisions).)
 
 ---
@@ -478,17 +514,17 @@ in the [Configuration reference](#configuration-reference)):
 
 | Input | Default | Meaning |
 |---|---|---|
-| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` (script at `/scripts/scenarios/<scenario>.js`) |
-| `--config` | `<scenario>-steady` | any `k6-config/*.env` preset name (without `.env`), passed as `K6_PRESET` |
+| `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` — shorthand for that scenario's steady profile. Redundant with `--config`, and an error if the two disagree |
+| `--config` | `<scenario>-steady` | the load profile to run — any `k6-<name>` WorkflowTemplate the chart rendered |
 | `--parallelism` | `1` (`loadtest`); example's `4` if omitted via kubectl/`k6-run.sh` | runner pods; k6 splits `--rate`/`--vus` across them. Node anti-affinity is a separate `spec.separate` knob (chart value `testRun.separate`, default off) |
 | `--target` | chart's `captureProxyUrl` | Capture Proxy endpoint |
-| `--rate` | keep preset | request rate (sets `INGEST_RATE`+`SEARCH_RATE`) |
-| `--duration` | keep preset | `DURATION` (e.g. `30s`, `10m`) |
-| `--vus` | keep preset | pre-allocated VUs (`INGEST_VUS`+`SEARCH_VUS`) |
-| `-e KEY=VALUE` | — | extra env override, applied last (wins over the preset); repeatable |
+| `--rate` | keep the profile's | request rate — sets whichever of `INGEST_RATE`/`SEARCH_RATE` the profile has |
+| `--duration` | keep the profile's | `DURATION` (e.g. `30s`, `10m`). A ramping profile has no `DURATION` — its stages carry the timing — so this is **refused** there rather than silently ignored |
+| `--vus` | keep the profile's | pre-allocated VUs (`INGEST_VUS`/`SEARCH_VUS`) |
+| `-e KEY=VALUE` | — | override any other setting **by name**; repeatable. A name the profile does not have is an error, not a no-op |
 | `--extra-args` | — | extra flags for `k6 run` (e.g. `--no-thresholds`) |
-| `--registry-enabled` | keep preset | mixed consistency ring buffer (needs `registry.enabled=true` on the chart) |
-| `--control-enabled` | keep preset | chaos pause/resume/set-rate control bus |
+| `--registry-enabled` | keep the profile's | consistency ring buffer (`mixed` only; needs `registry.enabled=true` on the chart) |
+| `--control-enabled` | keep the profile's | chaos pause/resume/set-rate control bus (`ingest`/`mixed` only) |
 
 **Document type** (`nyc_taxis` default, or `logs_data`) is a separate axis from `--scenario` (the
 script). Switch it via the overrides bag: `-e SCHEMA=logs_data`.
@@ -508,15 +544,16 @@ Three scenario scripts, selected with `--scenario`:
 | `search` | `scenarios/search.js` | flat `_search`, aggregations, partial updates, optional deep paging (scroll / search_after) |
 | `mixed` | `scenarios/mixed.js` | ingest + search streams concurrently, with a write-then-read consistency check via a Redis ring buffer (Webdis) |
 
-Each scenario reads its load shape from a `k6-config/*.env` **preset** (selected with `--config`,
-default `<scenario>-steady`). Presets describe load shape only — no document-schema settings — so
-any preset works with any scenario. Available presets: `ingest-steady`, `ingest-ramp`,
+Each scenario has one or more **profiles** — the WorkflowTemplates the chart renders, selected with
+`--config` (default `<scenario>-steady`). A profile belongs to exactly one scenario, because it
+states that scenario's settings and no others. Installed profiles: `ingest-steady`, `ingest-ramp`,
 `ingest-burst`, `search-steady`, `search-deep-paging`, `search-ramp`, `search-burst`,
-`mixed-steady`, `mixed-ramp`, `mixed-burst`.
+`mixed-steady`, `mixed-ramp`, `mixed-burst`. Ask the cluster with `loadtest status`, which lists
+what is actually there.
 
 ### Load shapes (ramp / burst)
 
-| Preset | Executor | Description |
+| Profile | Executor | Description |
 |---|---|---|
 | `*-steady` | `constant-arrival-rate` | hold a fixed rate for `DURATION` |
 | `*-ramp` | `ramping-arrival-rate` | 0→peak over minutes, hold, ramp down |
@@ -546,16 +583,18 @@ geo-point array format); the index is `dynamic: strict`, so any mismatch rejects
 
 ## Configuration reference
 
-Set via preset (default) or per-run override. `-e KEY=VALUE` is applied last and wins.
+Every one of these is a parameter of its scenario's profiles, with the value below as the default.
+`-e KEY=VALUE` (or `-p KEY=VALUE`) overrides one for a single run. A profile may state a different
+value — read the profile, not this table, for what a specific run will do.
 
 ### Common
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SCHEMA` | `nyc_taxis` | document schema (`nyc_taxis` or `logs_data`) |
-| `CAPTURE_PROXY_URL` | chart (`captureProxyUrl`) | proxy endpoint (also set by `--target`); deployment topology, so no preset sets it |
+| `CAPTURE_PROXY_URL` | chart (`captureProxyUrl`) | proxy endpoint (also set by `--target`); deployment topology, so no profile sets it |
 | `INDEX_NAME` | value of `SCHEMA` | target index |
-| `DURATION` | `5m` | scenario run time (`--duration`) |
+| `DURATION` | `5m` | run time (`--duration`). Stated only by constant-rate profiles; a ramping one states its stage list instead |
 | `EXECUTOR` | `constant-arrival-rate` | set to `ramping-arrival-rate` for ramp/burst |
 | `RAMP_STAGES` | single hold stage | JSON array of k6 stages, e.g. `[{"duration":"2m","target":150}]` |
 
@@ -570,8 +609,7 @@ Set via preset (default) or per-run override. `-e KEY=VALUE` is applied last and
 | `SEQUENCE_FRACTION` | `0.15` | share of iterations run as create→update→query→delete |
 | `BULK_FRACTION` | `0.70` | share of non-sequence iterations sent as `_bulk` |
 | `CONNECTION_MODE` | `pinned` | `pinned` = keep-alive; `spread` = `Connection: close` per request |
-| `NO_CONNECTION_REUSE` | _(unset)_ | `true` forces a new TCP connection per request client-side |
-| `SEED_DOC_COUNT` | `100000` | expected seed doc count (informational; set `0` to skip the wait) |
+| `NO_CONNECTION_REUSE` | `false` | `true` forces a new TCP connection per request client-side |
 
 ### Search
 
@@ -717,7 +755,7 @@ Why the current setup looks the way it does (decision → rationale → alternat
    no example runs, no RBAC, and the `loadtest` commands have nothing to submit against. This is
    deliberate safety: a user or an agent cannot accidentally fire a load test while running a
    migration. *Defense in depth:* three independent things are missing by default (the
-   `testruns.k6.io` CRD, the RBAC on it, and the `k6-<scenario>` WorkflowTemplates) — any one
+   `testruns.k6.io` CRD, the RBAC on it, and the `k6-<profile>` WorkflowTemplates) — any one
    blocks a run. The CLI does not probe for them first; it fails on the real call and then says
    the chart is missing, so a cluster error is never misreported as "not installed".
    Argo being present changes nothing: with no template to instantiate, there is no run to submit.
@@ -740,20 +778,32 @@ Why the current setup looks the way it does (decision → rationale → alternat
    *Costs:* editing a scenario is an image rebuild + push rather than a `helm upgrade`, and
    ImageVolume means the chart requires k8s ≥ 1.35 (declared in `Chart.yaml`'s `kubeVersion`).
 
-4. **Presets are files in the image, selected by `K6_PRESET`; overrides are `env`; metrics via
-   `K6_OUT`, not `--out`.** `lib/config.js` `open()`s every `k6-config/*.env` and exports `CFG`, the
-   selected preset merged **under** `__ENV` — so a real environment variable always wins over the
-   preset, and per-run overrides stay plain `runner.env` entries. Scenarios read `CFG.X`, never
-   `__ENV.X` directly. *Mechanism note:* the presets are opened by **literal path**. k6 resolves `open()` at init time and the operator's initializer bundles the result into
-   the archive the runner pods execute; a computed path would bake in whichever preset the
-   *initializer* saw and no runner could pick another. Metrics output is set with the `K6_OUT` env
-   var because the operator also feeds `spec.arguments` to that same `k6 archive`, which rejects the
+4. **One layer of configuration: the profile's parameters. No preset underneath.** Each
+   `k6-<profile>` WorkflowTemplate states every setting that profile uses as a named Argo parameter
+   with a value, and the TestRun manifest turns each one into a `runner.env` entry. A submission
+   overrides by name; an omitted parameter is the profile's own value. *What this replaced:* one
+   `runnerEnv` parameter carrying the whole env as JSON, with `K6_PRESET` selecting a file inside
+   the image *below* it. That layering meant the chart could only state keys **no** preset set —
+   naming `DURATION` would have forced it on `ingest-ramp` and `ingest-burst`, whose timing comes
+   from `RAMP_STAGES` — so the settings a reader could actually see were the ones nothing used.
+   It also made every override a read-modify-write of the JSON blob, since an Argo parameter is
+   replaced whole. Per-profile templates dissolve both problems: with one profile per template there
+   is no key a profile must avoid, and with one parameter per setting `-p INGEST_RATE=80` works
+   natively. *Costs:* ten templates instead of three, and `k6-config/*.env` now serves only a local
+   `k6 run` (a unit test keeps each preset equal to the profile of the same name).
+   *Mechanism notes:* values are substituted into **single-quoted** YAML scalars in the TestRun
+   manifest, because `RAMP_STAGES` carries JSON that double quotes cannot hold — Helm fails the
+   render if a value contains a single quote. `lib/config.js` still `open()`s every preset by
+   **literal path** for the local path: k6 resolves `open()` at init time and the operator's
+   initializer bundles the result into the archive the runner pods execute, so a computed path would
+   bake in whichever preset the *initializer* saw. Metrics output is set with the `K6_OUT` env var
+   because the operator also feeds `spec.arguments` to that same `k6 archive`, which rejects the
    run-only `--out` flag.
 
 5. **Helm-rendered WorkflowTemplates are the single definition; runs are kubectl-native; the console
-   is optional.** The chart renders one `k6-<scenario>` WorkflowTemplate per scenario (runner image,
-   the scripts image mounted at `/scripts`, the script path under it, `K6_OUT`, default `K6_PRESET`,
-   labels) whose single task creates the TestRun and waits on its stage. A run is `kubectl create` of
+   is optional.** The chart renders one `k6-<profile>` WorkflowTemplate per profile (runner image,
+   the scripts image mounted at `/scripts`, the script path under it, every load setting, labels)
+   whose single task creates the TestRun and waits on its stage. A run is `kubectl create` of
    a small Workflow naming that template, so it works with **no console and no console image** —
    `./k6-run.sh` is a thin helper over it, and `loadtest` is the same submission as
    convenience (nicer flags, `list`/`stop`/`logs`, TUI), guarded by the template-presence check. One
