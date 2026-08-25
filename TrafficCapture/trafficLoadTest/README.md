@@ -231,7 +231,7 @@ now a chart edit — no image rebuild.
 | A scenario-wide default | chart `values.yaml` (`scenarios.<name>.env`) | every profile of that scenario | `helm upgrade` |
 | The same shape for a local `k6 run` | `k6-config/*.env` | `migrations/k6_scripts`, mounted at `/scripts/k6-config` | rebuild + push the image |
 | Grafana dashboard | chart `files/grafana/load-test.json` | `k6-load-test-dashboard` ConfigMap (sidecar auto-import) | `helm upgrade` |
-| Run distribution defaults (`parallelism`/`separate`) | chart `values.yaml` (`testRun.*`) | each `k6-<profile>` WorkflowTemplate's parameter defaults | `helm upgrade` |
+| Run distribution defaults (`parallelism`/`useSeparatePodPerTestInstance`) | chart `values.yaml` (`testRun.*`) | each `k6-<profile>` WorkflowTemplate's parameter defaults | `helm upgrade` |
 | The TestRun manifest itself (mount shape, `K6_OUT` trio, labels) | chart `templates/k6-workflowtemplates.yaml` | the templates' `resource.manifest` | `helm upgrade` |
 | Runner image / tag | chart `values.yaml` (`image.*`) | the `runnerImage` parameter default | `helm upgrade` |
 | Scripts image / tag / digest | chart `values.yaml` (`scriptsImage.*`) | the `scriptsRef` parameter default | `helm upgrade` |
@@ -390,7 +390,7 @@ Both come from chart values as WorkflowTemplate parameter defaults
 | Chart value | Default | Workflow parameter → TestRun field | Effect |
 |---|---|---|---|
 | `testRun.parallelism` | `1` | `parallelism` → `spec.parallelism` | Runner pods the load is split across (k6 execution segments). `--rate`/`--vus` are **global totals** divided among them. |
-| `testRun.separate` | `false` | `separate` → `spec.separate` | Operator shorthand for **required** node anti-affinity — forces each runner pod onto a distinct node. |
+| `testRun.useSeparatePodPerTestInstance` | `false` | `separate` → `spec.separate` | Operator shorthand for **required** node anti-affinity — forces each runner pod onto a distinct node. The workflow parameter and the CR field keep the operator's own name; only the chart value is spelled out. |
 
 > **`separate: true` needs at least `parallelism` schedulable nodes.** It uses
 > `requiredDuringSchedulingIgnoredDuringExecution`, so if nodes < parallelism the surplus runner
@@ -398,7 +398,7 @@ Both come from chart values as WorkflowTemplate parameter defaults
 > it only on a real multi-node cluster to stop runners crowding one node:
 > ```bash
 > helm upgrade --install k6-load-test "$CHART" -n ma \
->   --set testRun.separate=true --set testRun.parallelism=<= node count>
+>   --set testRun.useSeparatePodPerTestInstance=true --set testRun.parallelism=<= node count>
 > ```
 > `separate` is valid on the vendored **k6-operator chart 4.5.0 / operator v1.5.0** TestRun CRD.
 
@@ -521,7 +521,7 @@ in the [Configuration reference](#configuration-reference)):
 |---|---|---|
 | `--scenario` | `ingest` | `ingest` \| `search` \| `mixed` — shorthand for that scenario's steady profile. Redundant with `--config`, and an error if the two disagree |
 | `--config` | `<scenario>-steady` | the load profile to run — any `k6-<name>` WorkflowTemplate the chart rendered |
-| `--parallelism` | `1` (`loadtest`); example's `4` if omitted via kubectl/`k6-run.sh` | runner pods; k6 splits `--rate`/`--vus` across them. Node anti-affinity is a separate `spec.separate` knob (chart value `testRun.separate`, default off) |
+| `--parallelism` | `1` (`loadtest`); example's `4` if omitted via kubectl/`k6-run.sh` | runner pods; k6 splits `--rate`/`--vus` across them. Node anti-affinity is a separate `spec.separate` knob (chart value `testRun.useSeparatePodPerTestInstance`, default off) |
 | `--target` | chart's `captureProxyUrl` | Capture Proxy endpoint |
 | `--rate` | keep the profile's | request rate — sets whichever of `INGEST_RATE`/`SEARCH_RATE` the profile has |
 | `--duration` | keep the profile's | `DURATION` (e.g. `30s`, `10m`). A ramping profile has no `DURATION` — its stages carry the timing — so this is **refused** there rather than silently ignored |
@@ -832,7 +832,7 @@ Why the current setup looks the way it does (decision → rationale → alternat
 6. **`--parallelism` splits global load; `separate` spreads pods across nodes.** `--rate` / `--vus`
    are totals divided across runner pods by k6 execution segments — surfaced explicitly so results
    aren't misread as per-pod. The defaults live in chart values (`testRun.parallelism`,
-   `testRun.separate`) and render as parameter defaults on every WorkflowTemplate. `separate: true` is the
+   `testRun.useSeparatePodPerTestInstance`) and render as parameter defaults on every WorkflowTemplate. `separate: true` is the
    operator's shorthand for **required** node anti-affinity; it defaults to `false` because it needs
    ≥ `parallelism` schedulable nodes (single-node minikube would otherwise wedge surplus pods in
    `Pending`). *Rejected:* hand-writing an `affinity` block per runner — `separate` is the

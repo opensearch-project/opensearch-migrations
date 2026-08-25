@@ -101,7 +101,7 @@ spec:
       - name: parallelism
         value: {{ $.Values.testRun.parallelism | int | quote }}
       - name: separate
-        value: {{ $.Values.testRun.separate | quote }}
+        value: {{ $.Values.testRun.useSeparatePodPerTestInstance | quote }}
       - name: arguments
         value: ""
       - name: runnerImage

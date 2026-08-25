@@ -73,8 +73,10 @@ k6-operator:
 
 # TestRun distribution defaults, rendered as parameter defaults on every k6-<profile>
 # WorkflowTemplate. `parallelism` splits each run's load across that many runner pods (the
-# operator shards the script's executors). `separate: true` is the operator's shorthand for REQUIRED
-# node anti-affinity — it forces the runner pods onto distinct nodes. Only meaningful when
+# operator shards the script's executors). `useSeparatePodPerTestInstance` is this chart's clearer
+# name for the operator's `separate` field, which the workflow parameter and the TestRun CR keep:
+# it is the shorthand for REQUIRED node anti-affinity — it forces the runner pods onto distinct
+# nodes when true. Only meaningful when
 # parallelism > 1, and it needs at least `parallelism` schedulable nodes or the surplus pods stay
 # Pending forever — so keep it false on single-node clusters (e.g. local minikube).
 #
@@ -83,7 +85,7 @@ k6-operator:
 # CR the instant it finishes, which would race the workflow's own wait on that same status.
 testRun:
   parallelism: 1
-  separate: false
+  useSeparatePodPerTestInstance: false
 
 # Where a run aims its traffic. This is deployment topology — the proxy's service name and namespace
 # — not a load profile, so it belongs to the chart rather than to the k6-config/*.env presets, which
