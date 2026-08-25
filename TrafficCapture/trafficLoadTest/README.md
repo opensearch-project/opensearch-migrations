@@ -195,7 +195,9 @@ All three end in the same `helm upgrade --install k6-load-test <chart-path>`; th
 general one and the reference for the others. The last two go through
 `deployment/k8s/installK6Chart.sh`, which is the single implementation of that install — it resolves
 the runner and scripts images (mirror repository, digest pins, the ECR flat-repo layout) and vendors
-the k6-operator subchart.
+the k6-operator subchart. The same script removes the chart again with
+`installK6Chart.sh uninstall`, which is what `deployCdcLoadTestConfig.sh down` calls, so the release
+name is resolved in one place for both directions.
 
 Verify:
 ```bash
@@ -244,7 +246,10 @@ now a chart edit — no image rebuild.
 **Change a load shape without touching the image** — it is a chart value now:
 
 ```bash
-helm upgrade k6-load-test "$CHART" -n ma --reuse-values \
+# Re-supply the image values — see the note below on --reuse-values, which this release rejects.
+helm upgrade k6-load-test "$CHART" -n ma \
+  --set image.repository=mirror.gcr.io/grafana/k6 \
+  --set scriptsImage.repository=<registry>/migrations/k6_scripts --set scriptsImage.pullPolicy=Always \
   --set profiles.ingest-steady.env.INGEST_RATE=120
 kubectl -n ma get workflowtemplate k6-ingest-steady -o yaml   # the new value, stated
 ```

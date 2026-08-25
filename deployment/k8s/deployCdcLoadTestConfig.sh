@@ -32,7 +32,8 @@
 #   CONTEXT=<kube-context>  NAMESPACE=ma  CONFIG_FILE=<path>
 #   CLUSTER_USERNAME=admin  CLUSTER_PASSWORD=admin   (for the secrets the config references)
 #   READY_TIMEOUT=1800  POLL_INTERVAL=10
-#   K6_IMAGE / K6_SCRIPTS_IMAGE                      (passed through to installK6Chart.sh)
+#   K6_IMAGE / K6_SCRIPTS_IMAGE / K6_RELEASE         (passed through to installK6Chart.sh, which
+#                                                     owns both the install and the uninstall)
 set -euo pipefail
 
 CONTEXT="${CONTEXT:-$(kubectl config current-context)}"
@@ -208,7 +209,7 @@ cmd_up() {
   wait_for_resources
 
   say "Install k6 load-test chart (operator + example TestRuns + RBAC)"
-  "$SCRIPT_DIR/installK6Chart.sh" --context "$CONTEXT" --namespace "$NAMESPACE"
+  "$SCRIPT_DIR/installK6Chart.sh" install --context "$CONTEXT" --namespace "$NAMESPACE"
 
   # Read the proxy name back from the cluster: the CaptureProxy CR is the thing that actually
   # published an endpoint.
@@ -255,9 +256,10 @@ cmd_status() {
 
 cmd_down() {
   say "Uninstall k6 load-test chart (operator + example TestRuns + RBAC)"
-  if command -v helm >/dev/null; then
-    helm --kube-context "$CONTEXT" uninstall k6-load-test -n "$NAMESPACE" 2>&1 | sed 's/^/  /' || true
-  fi
+  # Through the same script that installed it: it owns the release name, so the two directions
+  # cannot drift. A failure here (no helm, a stuck release) must not stop the teardown below.
+  "$SCRIPT_DIR/installK6Chart.sh" uninstall --context "$CONTEXT" --namespace "$NAMESPACE" \
+    || warn "k6 chart uninstall failed (continuing)"
 
   say "Delete the migration resources"
   # --include-proxies because capture proxies are protected by default: they carry live client

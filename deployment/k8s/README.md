@@ -22,7 +22,7 @@ welcome feedback and contributions to optimize costs.
 | fillLocalRegistry.sh              | Sets up local registry, builds and pushes images to that local registry                         |
 | forwardAllServicePorts.sh         | Port-forwards all services to localhost to make them accessible from the host machine           |
 | generateWorkflowSchemaArtifact.sh | Generates the workflow schema artifact                                                          |
-| installK6Chart.sh                 | Installs the standalone k6 load-test chart (operator + scenarios + RBAC)                        |
+| installK6Chart.sh                 | Installs or uninstalls the standalone k6 load-test chart (operator + scenarios + RBAC)          |
 | kindCleanup.sh                    | Cleanups the loal kind deployment                                                               |
 | kindTesting.sh                    | (Re)deploys a local kind cluster and installs the migration assistant with a source and target  |
 | localTestingCommon.sh             | Contains shared code for kindTesting.sh and kindCleanup.sh                                      |
