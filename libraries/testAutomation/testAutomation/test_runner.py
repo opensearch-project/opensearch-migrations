@@ -23,8 +23,9 @@ VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 # Release name of the standalone k6LoadTest chart. It matches the default in
-# deployment/k8s/installK6Chart.sh, and is passed to that script explicitly so the install and the
-# uninstall below cannot drift apart.
+# deployment/k8s/installK6Chart.sh, and is passed to that script explicitly for BOTH the install
+# and the uninstall, which is the contract that script states: a caller that names the release must
+# name the same one in both directions.
 K6_RELEASE_NAME = "k6-load-test"
 # ECR format: <account>.dkr.ecr.<region>.amazonaws.com/<repo>. An ECR registry flattens every image
 # into one repo (tag "migrations_<image>_latest"), while any other registry keeps the
@@ -371,9 +372,10 @@ class TestRunner:
 
         Test-scaffolding extras (steps 3b-7):
 
-          3b. helm uninstall k6-load-test — only for runs that installed it.
+          3b. installK6Chart.sh uninstall — only for runs that installed it.
              Removes the cluster-scoped k6-operator objects (CRDs, ClusterRoles)
-             that step 6 cannot reach.
+             that step 6 cannot reach. Through the same script as the install,
+             so the release name has one owner.
 
           4. cleanup_clusters — source/target test cluster helm releases.
           5. delete_all_pvcs — any non-Kafka residual PVCs (timeout governed
@@ -385,10 +387,13 @@ class TestRunner:
              aborted the Jenkins post block and left CFN stacks behind; the
              outer infra teardown (EKS/kind delete) finishes the job.
 
-        Re-raises HelmCommandFailed if step 3 fails. Namespace-delete
-        timeout is not treated as a hard failure.
+        Raises HelmCommandFailed if step 3 or step 3b fails, naming the
+        releases that failed. Namespace-delete timeout is not treated as a
+        hard failure.
         """
-        helm_uninstall_error = None
+        # (release, exception) per failed uninstall. Two releases come down here and they fail for
+        # different reasons, so the error raised at the end must name the one that actually failed.
+        helm_uninstall_errors: List[Tuple[str, Exception]] = []
 
         # 1. Dashboards (ACK controller alive).
         self.k8s_service.cleanup_ack_dashboard_crs()
@@ -408,16 +413,16 @@ class TestRunner:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
             logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
-            helm_uninstall_error = e
+            helm_uninstall_errors.append((MA_RELEASE_NAME, e))
 
-        # 3. helm uninstall for test-only k6 load-test release. It is a separate chart with its own release name, so
-        # step 3 cannot reach it.
+        # 3b. Teardown of the test-only k6 load-test release. It is a separate chart with its own
+        # release name, so step 3 cannot reach it.
         if self._load_test_requested():
             try:
-                self.k8s_service.helm_uninstall(release_name=K6_RELEASE_NAME)
+                self._uninstall_load_test_chart()
             except Exception as e:
                 logger.error(f"Helm uninstall of '{K6_RELEASE_NAME}' release failed: {e}")
-                helm_uninstall_error = e
+                helm_uninstall_errors.append((K6_RELEASE_NAME, e))
 
         # 4. Test-only source/target clusters.
         self.cleanup_clusters()
@@ -448,11 +453,12 @@ class TestRunner:
         ma_gone = self.k8s_service.wait_for_namespace_deleted(
             self.k8s_service.namespace, timeout_seconds=120)
 
-        if helm_uninstall_error:
+        if helm_uninstall_errors:
+            names = ", ".join(f"'{release}'" for release, _ in helm_uninstall_errors)
             raise HelmCommandFailed(
-                f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "
+                f"Helm uninstall failed for: {names}. "
                 f"This may indicate webhook or finalizer issues (e.g. Kyverno)."
-            ) from helm_uninstall_error
+            ) from helm_uninstall_errors[0][1]
 
         return ma_gone and kyverno_gone and not residual_pvcs
 
@@ -464,6 +470,16 @@ class TestRunner:
         chart. The selected IDs are the only trigger — there is no separate opt-in flag."""
         return any(tid.startswith(LOAD_TEST_ID_PREFIX) for tid in self.test_ids)
 
+    def _k6_chart_cmd(self, command: str) -> List[str]:
+        """Base argv for deployment/k8s/installK6Chart.sh. Context, namespace and release are the
+        only options that both commands accept; install adds the chart and image options on top."""
+        cmd = [self.k6_install_script, command,
+               "--namespace", self.k8s_service.namespace,
+               "--release", K6_RELEASE_NAME]
+        if self.k8s_service.kube_context:
+            cmd += ["--context", self.k8s_service.kube_context]
+        return cmd
+
     def _install_load_test_chart(self) -> None:
         """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC).
 
@@ -471,11 +487,7 @@ class TestRunner:
         deployCdcLoadTestConfig.sh, so subchart vendoring and image resolution (mirror repository,
         digest pins, the ECR flat-repo layout) have exactly one implementation.
         """
-        cmd = [self.k6_install_script, "--chart", self.k6_chart_path,
-               "--namespace", self.k8s_service.namespace,
-               "--release", K6_RELEASE_NAME]
-        if self.k8s_service.kube_context:
-            cmd += ["--context", self.k8s_service.kube_context]
+        cmd = self._k6_chart_cmd("install") + ["--chart", self.k6_chart_path]
         if self.registry_prefix:
             cmd += ["--registry-prefix", self.registry_prefix]
         if self.k6_scripts_image:
@@ -485,6 +497,18 @@ class TestRunner:
         logger.info("Installing k6 load-test chart: %s", " ".join(cmd))
         if subprocess.run(cmd).returncode != 0:
             raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
+
+    def _uninstall_load_test_chart(self) -> None:
+        """Remove the k6LoadTest release through the script that installed it.
+
+        Not a direct helm_uninstall: the script owns the release lifecycle, so the two directions
+        cannot drift. An absent release is success there, so this is safe on a run that never got
+        as far as the install. Raises HelmCommandFailed on a real helm failure.
+        """
+        cmd = self._k6_chart_cmd("uninstall")
+        logger.info("Uninstalling k6 load-test chart: %s", " ".join(cmd))
+        if subprocess.run(cmd).returncode != 0:
+            raise HelmCommandFailed(f"Helm uninstall of the '{K6_RELEASE_NAME}' release failed")
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
