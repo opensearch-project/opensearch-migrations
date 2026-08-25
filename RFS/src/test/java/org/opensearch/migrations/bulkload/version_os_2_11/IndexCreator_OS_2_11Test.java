@@ -268,6 +268,43 @@ class IndexCreator_OS_2_11Test {
             equalTo("standard"));
     }
 
+    @Test
+    void testCreate_preservesMappingTotalFieldsLimit() throws Exception {
+        // index.mapping.total_fields.limit is a user-configurable setting that must survive
+        // the internal-settings strip. Previously "mapping" was listed in INTERNAL_SETTINGS_EXACT
+        // which caused the entire index.mapping subtree to be dropped, resetting the limit to
+        // the OpenSearch default (1000) and failing index creation for wide schemas.
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any())).thenReturn(INDEX_CREATE_SUCCESS);
+
+        var rawJson = "{\n" +
+            "  \"aliases\": {},\n" +
+            "  \"mappings\": {},\n" +
+            "  \"settings\": {\n" +
+            "    \"index\": {\n" +
+            "      \"mapping\": {\n" +
+            "        \"total_fields\": { \"limit\": \"10000\" }\n" +
+            "      },\n" +
+            "      \"number_of_shards\": \"1\",\n" +
+            "      \"number_of_replicas\": \"0\",\n" +
+            "      \"uuid\": \"should-be-stripped\",\n" +
+            "      \"creation_date\": \"1234567890\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        var result = create(client, rawJson, "indexName");
+        assertThat(result.wasSuccessful(), equalTo(true));
+
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(1)).createIndex(any(), requestBodyCapture.capture(), any());
+
+        var finalBody = requestBodyCapture.getValue().toPrettyString();
+        assertThat("total_fields.limit must be preserved", finalBody, containsString("total_fields"));
+        assertThat("internal uuid must be stripped", finalBody, not(containsString("should-be-stripped")));
+        assertThat("internal creation_date must be stripped", finalBody, not(containsString("1234567890")));
+    }
+
     @SneakyThrows
     private CreationResult create(OpenSearchClient client, String rawJson, String indexName) {
         var node = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
