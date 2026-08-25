@@ -14,6 +14,37 @@ from console_link.workflow.models.config import WorkflowConfig
 class TestScriptRunner:
     """Test script runner service."""
 
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_config_processor_accepts_supported_nodejs(self, mock_run):
+        mock_run.return_value = Mock(stdout="v22.14.0\n")
+        runner = ScriptRunner(env={
+            "NODEJS": "/gradle/node-v22.14.0/bin/node",
+        })
+
+        assert runner.require_supported_nodejs() == (
+            "/gradle/node-v22.14.0/bin/node"
+        )
+        mock_run.assert_called_once_with(
+            ["/gradle/node-v22.14.0/bin/node", "--version"],
+            capture_output=True,
+            check=True,
+            env=runner.env,
+            text=True,
+        )
+
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    def test_config_processor_rejects_unsupported_nodejs(self, mock_run):
+        mock_run.return_value = Mock(stdout="v18.20.2\n")
+        runner = ScriptRunner(env={"NODEJS": "/mise/node-18/bin/node"})
+
+        with pytest.raises(RuntimeError) as error:
+            runner.require_supported_nodejs()
+
+        message = str(error.value)
+        assert "requires Node.js 22.14.0 or newer" in message
+        assert "/mise/node-18/bin/node resolved to v18.20.2" in message
+        assert "Set NODEJS" in message
+
     def test_script_runner_initialization(self):
         """Test script runner finds test scripts."""
         runner = ScriptRunner()

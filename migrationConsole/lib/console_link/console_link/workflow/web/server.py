@@ -38,6 +38,8 @@ def run_server(
     refresh_interval: float = 3.0,
 ) -> None:
     with pin_kubernetes_runtime() as k8s:
+        script_runner = ScriptRunner(env=k8s.subprocess_env)
+        script_runner.require_supported_nodejs()
         argo_service = make_argo_observation_service(
             argo_server,
             insecure,
@@ -49,7 +51,7 @@ def run_server(
                 namespace=namespace,
                 k8s_client=k8s.core_api,
             ),
-            runner=ScriptRunner(env=k8s.subprocess_env),
+            runner=script_runner,
             core_api=k8s.core_api,
             custom_api=k8s.custom_api,
             secret_store=SecretStore(

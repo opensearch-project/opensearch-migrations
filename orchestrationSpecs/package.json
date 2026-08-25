@@ -1,6 +1,9 @@
 {
   "name": "@opensearch-migrations/migrations-workflows",
   "private": true,
+  "engines": {
+    "node": ">=22.14"
+  },
   "workspaces": [
     "packages/*"
   ],

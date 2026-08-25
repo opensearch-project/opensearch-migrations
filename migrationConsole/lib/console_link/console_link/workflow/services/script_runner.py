@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ from typing import Optional, Dict, Any, Mapping
 
 logger = logging.getLogger(__name__)
 SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
+MINIMUM_NODEJS_VERSION = (22, 14, 0)
 
 
 def _format_subprocess_failure(label: str, error: subprocess.CalledProcessError) -> str:
@@ -82,11 +84,57 @@ class ScriptRunner:
             self.script_dir = Path(script_dir)
             self.config_processor_dir = str(self.script_dir)
             logger.debug(f"Using provided script_dir: {self.script_dir}")
+        self._validated_nodejs: set[str] = set()
 
         if not self.script_dir.exists():
             raise ValueError(f"Script directory not found: {self.script_dir}")
 
         logger.debug(f"ScriptRunner initialized with script_dir: {self.script_dir}")
+
+    def require_supported_nodejs(
+        self,
+        nodejs_location: Optional[str] = None,
+    ) -> str:
+        runtime_env = self.env if self.env is not None else os.environ
+        location = (
+            nodejs_location
+            or runtime_env.get("NODEJS")
+            or "node"
+        )
+        if location in self._validated_nodejs:
+            return location
+        try:
+            result = subprocess.run(
+                [location, "--version"],
+                capture_output=True,
+                check=True,
+                env=self.env,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise RuntimeError(
+                "The config processor requires Node.js 22.14.0 or newer, "
+                f"but '{location} --version' failed. Set NODEJS to the "
+                "Gradle-managed Node executable."
+            ) from error
+        raw_version = result.stdout.strip()
+        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", raw_version)
+        if not match:
+            raise RuntimeError(
+                "The config processor requires Node.js 22.14.0 or newer, "
+                f"but {location} returned an unrecognized version "
+                f"'{raw_version}'. Set NODEJS to the Gradle-managed Node "
+                "executable."
+            )
+        version = tuple(int(part) for part in match.groups())
+        if version < MINIMUM_NODEJS_VERSION:
+            raise RuntimeError(
+                "The config processor requires Node.js 22.14.0 or newer; "
+                f"{location} resolved to {raw_version}. Set NODEJS to the "
+                "Gradle-managed Node executable."
+            )
+        self._validated_nodejs.add(location)
+        return location
 
     def run(
             self,
@@ -184,12 +232,7 @@ class ScriptRunner:
         """
         Run a config processor command (aka script) through node
         """
-        if nodejs_location is None:
-            nodejs_location = os.environ.get('NODEJS', 'node')
-            if not nodejs_location:
-                raise ValueError(
-                    "nodejs_location environment variable must be set when nodejs_location is not provided"
-                )
+        nodejs_location = self.require_supported_nodejs(nodejs_location)
         script_entrypoint = os.path.join(self.config_processor_dir, "index.js")
         return self.run(nodejs_location, input_data, script_entrypoint, processor_name, *args)
 
