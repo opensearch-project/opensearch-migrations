@@ -21,12 +21,14 @@ set -eu
 : "${WORKFLOW_SCRIPTS_ROOT:?}"
 : "${RFS_MONITOR_WORKFLOW_UID_LABEL:?}"
 : "${RFS_MONITOR_SESSION_LABEL:?}"
+: "${MIGRATION_RESOURCE_UID_LABEL:?}"
 
 : "${STARTUP_GRACE_SECONDS:=600}"
 CLAIMED_AT="$(date -u +%s)"
 
 WORKFLOW_UID_LABEL="${RFS_MONITOR_WORKFLOW_UID_LABEL}"
 SESSION_LABEL="${RFS_MONITOR_SESSION_LABEL}"
+RESOURCE_UID_LABEL="${MIGRATION_RESOURCE_UID_LABEL}"
 
 
 render_cronjob_yaml() {
@@ -47,6 +49,7 @@ metadata:
     ${SESSION_LABEL}: "${SESSION_NAME}"
     workflows.argoproj.io/workflow: "${WORKFLOW_NAME}"
     migrations.opensearch.org/from-snapshot-migration: "${FROM_SNAPSHOT_MIGRATION_LABEL}"
+    ${RESOURCE_UID_LABEL}: "${SM_UID}"
 spec:
   schedule: "*/1 * * * *"
   concurrencyPolicy: Forbid
@@ -59,6 +62,7 @@ spec:
         ${SESSION_LABEL}: "${SESSION_NAME}"
         workflows.argoproj.io/workflow: "${WORKFLOW_NAME}"
         migrations.opensearch.org/from-snapshot-migration: "${FROM_SNAPSHOT_MIGRATION_LABEL}"
+        ${RESOURCE_UID_LABEL}: "${SM_UID}"
     spec:
       template:
         metadata:
@@ -67,6 +71,7 @@ spec:
             ${SESSION_LABEL}: "${SESSION_NAME}"
             workflows.argoproj.io/workflow: "${WORKFLOW_NAME}"
             migrations.opensearch.org/from-snapshot-migration: "${FROM_SNAPSHOT_MIGRATION_LABEL}"
+            ${RESOURCE_UID_LABEL}: "${SM_UID}"
         spec:
           serviceAccountName: argo-workflow-executor
           restartPolicy: Never
@@ -128,8 +133,12 @@ else
     patch_payload="$(render_cronjob_yaml \
         | kubectl create --dry-run=client -f - -o json \
         | jq -c --arg uidkey "$WORKFLOW_UID_LABEL" \
+            --arg resourceuidkey "$RESOURCE_UID_LABEL" \
             '{
-                metadata:{labels:{($uidkey):.metadata.labels[$uidkey]}},
+                metadata:{labels:{
+                    ($uidkey):.metadata.labels[$uidkey],
+                    ($resourceuidkey):.metadata.labels[$resourceuidkey]
+                }},
                 spec:{schedule:.spec.schedule,jobTemplate:.spec.jobTemplate}
             }')"
     kubectl patch cronjob "$CRONJOB_NAME" --type=merge -p "$patch_payload"
@@ -173,10 +182,16 @@ while :; do
             '.metadata.labels[$k] == $v' >/dev/null || ok=false
         echo "$cj" | jq -e --arg k "$SESSION_LABEL" --arg v "$SESSION_NAME" \
             '.metadata.labels[$k] == $v' >/dev/null || ok=false
+        echo "$cj" | jq -e --arg k "$RESOURCE_UID_LABEL" --arg v "$SM_UID" \
+            '.metadata.labels[$k] == $v' >/dev/null || ok=false
         echo "$cj" | jq -e --arg k "$WORKFLOW_UID_LABEL" --arg v "$WORKFLOW_UID" \
             '.spec.jobTemplate.metadata.labels[$k] == $v' >/dev/null || ok=false
         echo "$cj" | jq -e --arg k "$SESSION_LABEL" --arg v "$SESSION_NAME" \
             '.spec.jobTemplate.metadata.labels[$k] == $v' >/dev/null || ok=false
+        echo "$cj" | jq -e --arg k "$RESOURCE_UID_LABEL" --arg v "$SM_UID" \
+            '.spec.jobTemplate.metadata.labels[$k] == $v' >/dev/null || ok=false
+        echo "$cj" | jq -e --arg k "$RESOURCE_UID_LABEL" --arg v "$SM_UID" \
+            '.spec.jobTemplate.spec.template.metadata.labels[$k] == $v' >/dev/null || ok=false
         echo "$cj" | jq -e --arg cc "$CONFIG_CHECKSUM" \
             '[.spec.jobTemplate.spec.template.spec.containers[0].env[] | select(.name=="CONFIG_CHECKSUM")][0].value == $cc' \
             >/dev/null || ok=false

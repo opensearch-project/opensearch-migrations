@@ -4,7 +4,6 @@ import {
     DEFAULT_RESOURCES,
     ARGO_METADATA_OPTIONS,
     ARGO_METADATA_WORKFLOW_OPTION_KEYS,
-    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     REPO_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -28,9 +27,10 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
 const METADATA_TEST_CREDS_VOLUME_NAME = "test-creds";
@@ -171,10 +171,6 @@ const runMetadataInputs = {
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
     metadataMigrationConfig: defineRequiredParam<z.infer<typeof ARGO_METADATA_OPTIONS>>(),
-    sourceEndpoint: defineParam<string>({expression: expr.literal("")}),
-    sourceConfig: defineParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>({
-        expression: expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>()
-    }),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"]),
     sourceK8sLabel: defineRequiredParam<string>(),
     targetK8sLabel: defineRequiredParam<string>(),
@@ -242,7 +238,6 @@ function buildMetadataContainer<
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
-        .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(inputs.sourceConfig)))
         .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
@@ -268,7 +263,8 @@ function buildMetadataContainer<
                 'migrations.opensearch.org/target': inputs.targetK8sLabel,
                 'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                 'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
-                'migrations.opensearch.org/task': inputs.taskK8sLabel
+                'migrations.opensearch.org/task': inputs.taskK8sLabel,
+                [MIGRATION_RESOURCE_UID_LABEL]: inputs.crdUid,
             }
         }));
 }
@@ -300,9 +296,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
 
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
-        .addOptionalInput("sourceConfig", c =>
-            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
         .addOptionalInput("workflowCreationTimestamp", c => expr.getWorkflowValue("creationTimestamp"))
         .addOptionalInput("workflowUid", c => expr.getWorkflowValue("uid"))
@@ -324,7 +317,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "evaluate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
@@ -362,7 +354,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "migrate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),

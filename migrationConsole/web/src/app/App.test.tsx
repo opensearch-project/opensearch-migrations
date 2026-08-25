@@ -2189,8 +2189,8 @@ test("expands authored expert sections and supports animated collapse and expand
     within(config).queryByRole("row", { name: /^legacy/ }),
   ).toBeNull());
 
-  await userEvent.click(screen.getByRole("button", { name: "Expand all" }));
-  expect(await within(config).findByRole("row", { name: /^legacy/ }))
+  fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  expect(within(config).getByRole("row", { name: /^legacy/ }))
     .toHaveClass("inserted");
   expect(within(config).getByRole("row", { name: /Expert mode/ }))
     .toBeInTheDocument();

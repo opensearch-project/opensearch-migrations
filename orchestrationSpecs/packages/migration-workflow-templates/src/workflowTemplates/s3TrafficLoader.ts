@@ -17,6 +17,7 @@ import {SetupKafka} from "./setupKafka";
 import {ResourceManagement} from "./resourceManagement";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {BaseExpression} from "@opensearch-migrations/argo-workflow-builders";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 // Same shape used by setupCapture / fullMigration: skip a step if the CR's
 // current checksum already matches what we'd write. For the s3 loader path,
@@ -58,6 +59,7 @@ export const S3TrafficLoader = WorkflowBuilder.create({
         .addOptionalInput("endpoint", c => "")
         .addOptionalInput("kafkaAuthType", c => "none")
         .addRequiredInput("loadCompletionChecksum", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(b => b
@@ -135,6 +137,11 @@ kubectl patch capturedtraffic "$CT_NAME" \\
     }
   }'
 `])
+            .addPodMetadata(({inputs}) => ({
+                labels: {
+                    [MIGRATION_RESOURCE_UID_LABEL]: inputs.resourceUid,
+                },
+            }))
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
@@ -237,6 +244,7 @@ kubectl patch capturedtraffic "$CT_NAME" \\
                     endpoint: endpoint,
                     kafkaAuthType: kafkaAuthType,
                     loadCompletionChecksum: b.inputs.checksumForReplayer,
+                    resourceUid: expr.get(loaderCfg, "resourceUid"),
                 }),
                 { when: c => ({templateExp: checksumNotDone(
                     c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum,

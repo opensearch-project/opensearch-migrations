@@ -19,11 +19,9 @@ from kubernetes.client.rest import ApiException
 from ..commands.crd_utils import CRD_GROUP, CRD_VERSION
 
 
-RESOURCE_OUTPUT_LABELS = {"strimzi.io/cluster"}
-LABELS_NOT_PROPAGATED_TO_PODS = {
-    "migrations.opensearch.org/run-number",
-    "migrations.opensearch.org/workflow-name",
-}
+MIGRATION_RESOURCE_UID_LABEL = (
+    "migrations.opensearch.org/migration-resource-uid"
+)
 LOG_TARGET_PREFIX = "logs:"
 WORKFLOW_STEP_TARGET_PREFIX = "logs:workflow-step:"
 DEFAULT_TAIL_LINES = 1000
@@ -136,24 +134,14 @@ class LogStreamStatus:
     message: Optional[str] = None
 
 
-def resource_log_selector(
-    resource: Mapping[str, Any],
-    prefix: str = "migrations.opensearch.org/",
-) -> str:
-    """Return only labels known to propagate from migration CRs to pods."""
-    labels = ((resource.get("metadata") or {}).get("labels") or {})
-    parts = [
-        f"{key}={value}"
-        for key, value in sorted(labels.items())
-        if (
-            (key.startswith(prefix) or key in RESOURCE_OUTPUT_LABELS)
-            and key not in LABELS_NOT_PROPAGATED_TO_PODS
-            and value
+def resource_log_selector(resource: Mapping[str, Any]) -> str:
+    """Select only pods owned by this exact migration resource instance."""
+    resource_uid = ((resource.get("metadata") or {}).get("uid"))
+    if not resource_uid:
+        raise LogUnavailable(
+            "has no Kubernetes UID; resource logs cannot be selected safely."
         )
-    ]
-    if not parts:
-        raise LogUnavailable("Migration resource has no pod labels.")
-    return ",".join(parts)
+    return f"{MIGRATION_RESOURCE_UID_LABEL}={resource_uid}"
 
 
 class KubernetesLogSource:

@@ -8,6 +8,7 @@ from console_link.workflow.application.logs import (
     LogSelection,
     LogStreamService,
     LogUnavailable,
+    MIGRATION_RESOURCE_UID_LABEL,
     resource_log_selector,
 )
 
@@ -49,9 +50,10 @@ def _pod(
     }
 
 
-def test_resource_log_selector_preserves_cli_label_rules():
+def test_resource_log_selector_uses_exact_resource_ownership():
     selector = resource_log_selector({
         "metadata": {
+            "uid": "resource-uid",
             "labels": {
                 "migrations.opensearch.org/source": "source-a",
                 "migrations.opensearch.org/run-number": "4",
@@ -62,14 +64,11 @@ def test_resource_log_selector_preserves_cli_label_rules():
         },
     })
 
-    assert selector == (
-        "migrations.opensearch.org/source=source-a,"
-        "strimzi.io/cluster=capture-kafka"
-    )
+    assert selector == f"{MIGRATION_RESOURCE_UID_LABEL}=resource-uid"
 
 
-def test_resource_log_selector_requires_a_pod_propagated_label():
-    with pytest.raises(LogUnavailable, match="no pod labels"):
+def test_resource_log_selector_requires_a_resource_uid():
+    with pytest.raises(LogUnavailable, match="no Kubernetes UID"):
         resource_log_selector({"metadata": {"labels": {"unrelated": "x"}}})
 
 
@@ -104,6 +103,7 @@ class _Core:
 def test_kubernetes_source_lists_aggregate_current_and_previous_targets():
     custom = _CustomObjects({
         "metadata": {
+            "uid": "capture-resource-uid",
             "labels": {
                 "migrations.opensearch.org/capture": "p2",
             },
@@ -132,7 +132,9 @@ def test_kubernetes_source_lists_aggregate_current_and_previous_targets():
     assert selections[2].previous is True
     assert selections[2].restart_count == 1
     assert selections[3].container == "metrics"
-    assert core.selector == "migrations.opensearch.org/capture=p2"
+    assert core.selector == (
+        f"{MIGRATION_RESOURCE_UID_LABEL}=capture-resource-uid"
+    )
     assert custom.request["plural"] == "captureproxies"
     assert custom.request["name"] == "p2"
 
@@ -167,6 +169,7 @@ def test_kubernetes_history_decodes_stringified_bytes_from_client():
         core_api=core,
         custom_api=_CustomObjects({
             "metadata": {
+                "uid": "capture-resource-uid",
                 "labels": {
                     "migrations.opensearch.org/capture": "p2",
                 },

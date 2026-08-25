@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli
+from console_link.workflow.application.logs import MIGRATION_RESOURCE_UID_LABEL
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 
@@ -27,6 +28,13 @@ def _successful_submission_process(
     }
 
     def run(command, **_kwargs):
+        if command[-1:] == ["--version"]:
+            return Mock(
+                returncode=0,
+                stdout="v22.14.0\n",
+                stderr="",
+                args=command,
+            )
         if "editConfig" in command:
             return Mock(
                 returncode=0,
@@ -53,6 +61,14 @@ def _successful_submission_process(
         )
 
     return run
+
+
+def _submission_commands(mock_subprocess):
+    return [
+        call.args[0]
+        for call in mock_subprocess.call_args_list
+        if call.args[0][-1:] != ["--version"]
+    ]
 
 
 class TestWorkflowCLICommands:
@@ -289,14 +305,15 @@ class TestWorkflowCLICommands:
         assert 'NOT checking' not in result.output
         # Check for workflow name pattern from test scripts (test-workflow-<timestamp>)
         assert 'test-workflow-' in result.output
-        prepare_command = mock_subprocess.call_args_list[1][0][0]
+        commands = _submission_commands(mock_subprocess)
+        prepare_command = commands[1]
         assert "--workflow-name" in prepare_command
         assert "migration-workflow" in prepare_command
         assert "--quiet" in prepare_command
-        assert mock_subprocess.call_count == 3
-        assert "editConfig" in mock_subprocess.call_args_list[0][0][0]
-        assert "--prepare-only" in mock_subprocess.call_args_list[1][0][0]
-        assert "--commit-prepared" in mock_subprocess.call_args_list[2][0][0]
+        assert len(commands) == 3
+        assert "editConfig" in commands[0]
+        assert "--prepare-only" in commands[1]
+        assert "--commit-prepared" in commands[2]
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
         # The secret-existence check must be invoked before workflow submission.
@@ -346,8 +363,9 @@ class TestWorkflowCLICommands:
         assert "blocked by admission preflight" in result.output
         assert "sourceLabel cannot be changed" in result.output
         mock_exists.assert_not_called()
-        assert mock_subprocess.call_count == 2
-        assert "--prepare-only" in mock_subprocess.call_args_list[1][0][0]
+        commands = _submission_commands(mock_subprocess)
+        assert len(commands) == 2
+        assert "--prepare-only" in commands[1]
 
     @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
     @patch(
@@ -387,8 +405,9 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         assert json.loads(result.output)["checkedResources"] == 3
         mock_exists.assert_not_called()
-        assert mock_subprocess.call_count == 2
-        assert "--commit-prepared" not in str(mock_subprocess.call_args_list)
+        commands = _submission_commands(mock_subprocess)
+        assert len(commands) == 2
+        assert "--commit-prepared" not in str(commands)
 
     @patch("console_link.workflow.commands.submit.verify_configured_secrets_exist")
     @patch(
@@ -610,7 +629,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
-        assert mock_subprocess.call_count == 3
+        assert len(_submission_commands(mock_subprocess)) == 3
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -665,7 +684,7 @@ class TestWorkflowCLICommands:
         mock_stop.assert_called_once_with('ma', 'migration-workflow')
         mock_delete.assert_called_once_with('ma', 'migration-workflow')
         mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
-        assert mock_subprocess.call_count == 3
+        assert len(_submission_commands(mock_subprocess)) == 3
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
@@ -1277,6 +1296,31 @@ class TestWorkflowCLICommands:
         assert args[4] == []
 
     @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_show_pods_attributes_historical_logs_to_pods(self, mock_history):
+        runner = CliRunner()
+
+        result = runner.invoke(workflow_cli, ['log', 'all', '--show-pods'])
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[5] is True
+
+    def test_stream_merged_logs_prefixes_lines_with_pod_name(self, capsys):
+        from console_link.workflow.commands.log import _stream_merged_logs
+
+        merged_logs = [
+            ('2026-08-23T12:00:00.000000000Z snapshot started\n', 'snapshot-pod'),
+            ('2026-08-23T12:00:01.000000000Z migration started\n', 'migration-pod'),
+        ]
+
+        _stream_merged_logs(merged_logs, show_ts=False, show_pods=True)
+
+        assert capsys.readouterr().out.splitlines() == [
+            '[pod/snapshot-pod] snapshot started',
+            '[pod/migration-pod] migration started',
+        ]
+
+    @patch('console_link.workflow.commands.log._run_history_mode')
     def test_output_filter_combines_filter_options(self, mock_history):
         runner = CliRunner()
 
@@ -1297,12 +1341,13 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_uses_resource_labels(self, mock_history, mock_client, _mock_k8s):
+    def test_output_resource_uses_resource_uid(self, mock_history, mock_client, _mock_k8s):
         runner = CliRunner()
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
             'metadata': {
+                'uid': 'a9cc8399-1286-4d47-8bd0-d72c24acc1d3',
                 'labels': {
                     'migrations.opensearch.org/source': 'source1',
                     'migrations.opensearch.org/target': 'target1',
@@ -1324,15 +1369,14 @@ class TestWorkflowCLICommands:
         )
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/source=source1,'
-            'migrations.opensearch.org/target=target1,'
-            'strimzi.io/cluster=default'
+            f'{MIGRATION_RESOURCE_UID_LABEL}='
+            'a9cc8399-1286-4d47-8bd0-d72c24acc1d3'
         )
 
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_excludes_cr_only_labels(self, mock_history, mock_client, _mock_k8s):
+    def test_output_resource_requires_uid(self, mock_history, mock_client, _mock_k8s):
         runner = CliRunner()
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
@@ -1349,18 +1393,14 @@ class TestWorkflowCLICommands:
 
         result = runner.invoke(workflow_cli, ['log', 'resource', 'datasnapshot.source-backfill-snapshot'])
 
-        assert result.exit_code == 0
-        args, _ = mock_history.call_args
-        assert args[2] == (
-            'migrations.opensearch.org/snapshot=backfill-snapshot,'
-            'migrations.opensearch.org/source=source,'
-            'workflows.argoproj.io/workflow=migration-workflow'
-        )
+        assert result.exit_code == 1
+        assert 'has no Kubernetes UID' in result.output
+        mock_history.assert_not_called()
 
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
-    def test_output_resource_keeps_workflow_selector_for_workflow_pods(
+    def test_output_resource_does_not_add_workflow_selector(
         self, mock_history, mock_client, _mock_k8s
     ):
         runner = CliRunner()
@@ -1368,6 +1408,7 @@ class TestWorkflowCLICommands:
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
             'metadata': {
+                'uid': 'e4834eed-2f91-477c-a0dd-9e10479c1370',
                 'labels': {
                     'migrations.opensearch.org/source': 'source1',
                     'migrations.opensearch.org/task': 'captureProxy',
@@ -1380,9 +1421,8 @@ class TestWorkflowCLICommands:
         assert result.exit_code == 0
         args, _ = mock_history.call_args
         assert args[2] == (
-            'migrations.opensearch.org/source=source1,'
-            'migrations.opensearch.org/task=captureProxy,'
-            'workflows.argoproj.io/workflow=migration-workflow'
+            f'{MIGRATION_RESOURCE_UID_LABEL}='
+            'e4834eed-2f91-477c-a0dd-9e10479c1370'
         )
 
     @patch('console_link.workflow.commands.log._run_history_mode')
@@ -2053,7 +2093,7 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
-        assert mock_subprocess.call_count == 3
+        assert len(_submission_commands(mock_subprocess)) == 3
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 

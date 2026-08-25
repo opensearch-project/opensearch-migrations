@@ -52,6 +52,9 @@
               "name": "snapshotK8sLabel"
             },
             {
+              "name": "dataSnapshotUid"
+            },
+            {
               "name": "taskK8sLabel",
               "value": "snapshot"
             },
@@ -129,7 +132,8 @@
           "labels": {
             "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
-            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}",
+            "migrations.opensearch.org/migration-resource-uid": "{{inputs.parameters.dataSnapshotUid}}"
           },
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
@@ -261,6 +265,10 @@
               "value": "migrations.opensearch.org/snapshot-monitor-session"
             },
             {
+              "name": "MIGRATION_RESOURCE_UID_LABEL",
+              "value": "migrations.opensearch.org/migration-resource-uid"
+            },
+            {
               "name": "WORKFLOW_SCRIPTS_ROOT",
               "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
@@ -361,6 +369,10 @@
                   {
                     "name": "createSnapshotConfig",
                     "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "dataSnapshotUid",
+                    "value": "{{inputs.parameters.dataSnapshotUid}}"
                   },
                   {
                     "name": "sourceType",
@@ -472,6 +484,10 @@
                   {
                     "name": "createSnapshotConfig",
                     "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "dataSnapshotUid",
+                    "value": "{{inputs.parameters.dataSnapshotUid}}"
                   },
                   {
                     "name": "sourceType",
