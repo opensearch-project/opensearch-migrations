@@ -299,6 +299,11 @@ loadTestBuildKitProjects.each { cfg ->
 
 def testBuildKitServiceNames = testBuildKitProjects.collect { "buildKit_${it.serviceName}".toString() } as Set
 def loadTestBuildKitServiceNames = loadTestBuildKitProjects.collect { "buildKit_${it.serviceName}".toString() } as Set
+// Every BuildKit image. Used as the dependency-resolution pool for the bake
+// aggregates and as the imageName -> serviceName map for Jib base-image pinning.
+// It is a lookup set, not a build set — each bake task builds only its
+// selectedProjects plus their transitive buildKit_ prerequisites.
+def allBuildKitProjects = buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects
 
 gradle.projectsEvaluated {
     def imageHelper = new RegistryImageBuildUtils()
@@ -307,7 +312,7 @@ gradle.projectsEvaluated {
 
     imageHelper.applyBuildKitConfigurations(
             rootProject,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             publishedRegistry,
             intermediateRegistry
     )
@@ -315,7 +320,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeAll",
             buildKitProjects,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             "multi",
             publishedRegistry,
             intermediateRegistry
@@ -324,7 +329,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeAll_amd64",
             buildKitProjects,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             "amd64",
             publishedRegistry,
             intermediateRegistry
@@ -333,7 +338,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeAll_arm64",
             buildKitProjects,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             "arm64",
             publishedRegistry,
             intermediateRegistry
@@ -342,7 +347,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeTestAll",
             testBuildKitProjects,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             "multi",
             publishedRegistry,
             intermediateRegistry
@@ -351,7 +356,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeTestAll_amd64",
             testBuildKitProjects,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             "amd64",
             publishedRegistry,
             intermediateRegistry
@@ -360,7 +365,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeTestAll_arm64",
             testBuildKitProjects,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects,
+            allBuildKitProjects,
             "arm64",
             publishedRegistry,
             intermediateRegistry
@@ -370,7 +375,7 @@ gradle.projectsEvaluated {
             jibProjects,
             publishedRegistry,
             intermediateRegistry,
-            buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects
+            allBuildKitProjects
     )
 }
 
