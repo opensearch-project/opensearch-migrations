@@ -24,6 +24,7 @@ import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -73,8 +74,9 @@ class SolrBackupStrategyContextPathTest {
         }
         var suffix = path.substring(CONTEXT_PATH.length());
         if (suffix.equals("/admin/collections")) {
-            // Non-200 marks the source as standalone rather than SolrCloud.
-            return new StubResponse(404, "{\"error\":\"not solrcloud\"}");
+            // Standalone's verbatim rejection: the positive marker detection matches on.
+            return new StubResponse(400,
+                "{\"error\":{\"msg\":\"Solr instance is not running in SolrCloud mode.\"}}");
         }
         if (suffix.equals("/admin/cores")) {
             return new StubResponse(200, "{\"status\":{\"core1\":{}}}");
@@ -132,8 +134,8 @@ class SolrBackupStrategyContextPathTest {
     @Test
     void discoveryHelpersHonorContextPath() throws IOException {
         assertFalse(SolrBackupStrategy.isSolrCloud(baseUrl, httpClient(), CONTEXT_PATH),
-            "the stub answers LIST with 404, so the source must read as standalone");
-        assertThat(SolrBackupStrategy.discoverCollections(baseUrl, httpClient(), CONTEXT_PATH),
+            "the stub rejects LIST the way standalone Solr does, so the source must read as standalone");
+        assertThat(SolrBackupStrategy.discoverCollections(baseUrl, httpClient(), null, CONTEXT_PATH).names(),
             equalTo(List.of("core1")));
         assertThat(requestedPaths, everyItem(startsWith(CONTEXT_PATH + "/")));
     }
@@ -141,7 +143,10 @@ class SolrBackupStrategyContextPathTest {
     @Test
     void defaultContextPathDoesNotReachACustomPrefix() {
         // Guards the backward-compatibility claim: the stock default must not hit CONTEXT_PATH.
-        assertFalse(SolrBackupStrategy.isSolrCloud(baseUrl, httpClient(), SolrContextPath.DEFAULT));
+        // The prefix answers nothing, so topology is unidentifiable — that must fail loudly
+        // rather than fall through to standalone and back up the wrong thing.
+        assertThrows(SolrBackupStrategy.SolrTopologyDetectionException.class,
+            () -> SolrBackupStrategy.isSolrCloud(baseUrl, httpClient(), SolrContextPath.DEFAULT));
         assertThat(requestedPaths, hasItem("/solr/admin/collections"));
     }
 }

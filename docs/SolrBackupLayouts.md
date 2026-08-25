@@ -40,6 +40,94 @@ A standalone backup does **not** record the core name, so the target index name 
 `snapshot.<name>` directory (see
 [How the target index name is determined](#how-the-target-index-name-is-determined)).
 
+## Running against a secured Solr
+
+Naming what to migrate keeps the migration off Solr's admin-read APIs:
+
+```
+--solr-collections movies,reviews
+```
+
+Omitting it makes the migration enumerate the source, and Solr offers no way to list collections or
+cores below `collection-admin-read` / `core-admin-read`. Supplying it removes that step, leaving the
+SolrCloud backup mechanism as the only thing that still needs an admin permission.
+
+Solr is never queried just to work out the topology. Where that can't be established from the backup
+or from an operation which has to run anyway, the migration asks you instead:
+
+```
+--solr-topology cloud|standalone
+```
+
+**`--mode import` usually infers topology from the existing backup**, which it validates before
+anything else runs, so a backup Solr itself produced normally carries a marker. Supply
+`--solr-topology` when the layout has no definitive one — see the marker table below. For standalone
+imports the migration then stages the live source schema into the validated backup; SolrCloud
+imports skip that, since their backup already carries its own configs.
+
+In a migration workflow the same setting is `topology`, on the backup entry under the source
+cluster's `snapshotInfo.backups`:
+
+```yaml
+sourceClusters:
+  solrSource:
+    snapshotInfo:
+      backups:
+        solrBackup:
+          repoName: default
+          externalBackupName: preexisting-solr-backup
+          topology: standalone          # needed when the existing layout is ambiguous
+```
+
+It is accepted on a `createBackupConfig` entry too, where it is optional — creating a backup infers
+the topology, so set it there only to skip that inference (see the note under **Creating a backup**
+below). The migration console reads it from `snapshot.solr_topology` in `services.yaml`.
+
+### What each step needs
+
+Under Solr's `RuleBasedAuthorizationPlugin`:
+
+| Step | Permission |
+| --- | --- |
+| SolrCloud backup (`action=BACKUP`, `action=REQUESTSTATUS`) | `collection-admin-edit`, `collection-admin-read` |
+| Standalone backup (`replication?command=backup`) | `read` |
+| Standalone schema fetch (`admin/file`, or `schema` as fallback) | `config-read`, or `schema-read` |
+| Discovery, only without `--solr-collections` | `collection-admin-read` or `core-admin-read` |
+
+This applies only where authorization rules are configured. Solr allows any request that
+matches no rule, so an open Solr — or a user with `all` — needs nothing extra.
+
+### How SolrCloud vs standalone is determined
+
+No request to Solr is ever made purely to detect the topology. It comes from an operation the
+migration has to run anyway, or from reading the backup itself, and an ambiguous answer is always a
+hard failure rather than a guess. Passing `--solr-topology` skips inference altogether.
+
+**Creating a backup** — the SolrCloud `BACKUP` call is attempted directly. A standalone source
+rejects it with *"not running in SolrCloud mode"*, and the migration switches to the replication
+handler. Any other failure is reported as-is.
+
+> If your standalone Solr's `security.json` guards `collection-admin-edit`, that attempt comes back
+> as HTTP 403 rather than the rejection, so the switch never happens. Pass
+> `--solr-topology standalone` to skip the attempt.
+
+**Importing an existing backup** — `--solr-topology` is used when given. Otherwise the backup's own
+layout is read, which describes the snapshot rather than whatever cluster the source URL points at:
+
+| Found in the backup | Read as |
+| --- | --- |
+| `backup.properties` / `backup_N.properties`, or `shard_backup_metadata` | SolrCloud |
+| a `snapshot.<backupName>/` index (anything but `snapshot.shard<N>`) | standalone |
+| neither | fails, asking for `--solr-topology` |
+
+A backup Solr produced normally matches one of the first two rows. The last is reached by layouts
+that carry no definitive marker: a flat-root standalone backup (`segments_N` at the root, no
+`snapshot.<name>/` wrapper); a backup named `shard<N>`, which is excluded from the standalone test
+so SolrCloud's shard directories can't match it; an unusual externally-produced layout; or a very
+large backup whose inspection is capped before a marker is reached. Note that `zk_backup*` is not a
+signal either way — SolrCloud writes it, and so does this tool when staging a schema for a
+standalone backup.
+
 ## Pointing the migration at a backup
 
 Set the source version to your Solr version (e.g. `--source-version SOLR_7.7.3`) and provide the
@@ -53,14 +141,24 @@ backup location:
 
 ### What `--snapshot-name` means for Solr
 
-Unlike Elasticsearch/OpenSearch, where `--snapshot-name` is a **required** key looked up in the
-snapshot repository's metadata, Solr backups have no such registry. Here the flag is just a **path
-segment** appended to the repo URI (`s3://<bucket>/[<subpath>/]<snapshotName>`) to locate the
-backup — **optional**, and **S3-only** (ignored for local-disk backups, where the path you pass
-*is* the backup directory). For a flat-root standalone backup it also names the target index (the
-final path segment, `snapshot.` prefix stripped). Because it only composes a path, it can't rescue a
-backup sitting at the bare bucket root — that just reads an empty location; the backup must live
-under a prefix.
+For Elasticsearch/OpenSearch, `--snapshot-name` is a key looked up in the snapshot repository's
+metadata. Solr backups have no such registry, so here it is only a **path segment** — and whether
+it is required, or appended at all, depends on the stage and the backend.
+
+| Stage | Local disk | S3 |
+| --- | --- | --- |
+| Creating a snapshot | **required**; the path is the repository *root*, and the backup is written to `<root>/<snapshotName>/` | required; appended to the repo URI |
+| Metadata migration | optional; the path **is** the backup directory | appended when supplied |
+| Document migration | not required for Solr; the path **is** the backup directory | required; appended to the repo URI |
+
+The rule of thumb: on **local disk** only `CreateSnapshot` treats the path as a repository root and
+appends the name — the migration stages read the directory you hand them. On **S3** the name is
+appended to the repository URI at every stage, so the backup must live under
+`s3://<bucket>[/<subpath>]/<snapshotName>/`. Because it only composes a path, it can't rescue a
+backup sitting at the bare bucket root — that just reads an empty location.
+
+For a flat-root standalone backup the name also determines the target index (final path segment,
+`snapshot.` prefix stripped).
 
 ## How the target index name is determined
 

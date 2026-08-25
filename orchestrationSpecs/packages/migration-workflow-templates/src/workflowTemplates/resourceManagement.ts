@@ -660,6 +660,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                         solrCollections: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["solrCollections"], expr.literal([]))
                         ),
+                        solrTopology: makeStringTypeProxy(
+                            expr.dig(snapshotOptions, ["solrTopology"], expr.literal(""))
+                        ),
                         indexAllowlist: makeDirectTypeProxy(
                             expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([]))
                         ),
