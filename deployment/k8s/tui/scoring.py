@@ -21,6 +21,24 @@ def hit_doc_ids(body: Dict) -> Optional[Set[str]]:
     return ids if ids else None
 
 
+def hit_summaries(body: Dict, limit: int = 30) -> List[Dict]:
+    """Ordered (id, score) pairs for a search response's hits, capped so a TUI detail pane
+    stays a fixed size regardless of how many hits a query happened to return."""
+    hits = body.get('hits', {}).get('hits', [])
+    return [{'id': h['_id'], 'score': h.get('_score')} for h in hits[:limit] if '_id' in h]
+
+
+def hit_count(body: Dict) -> Optional[int]:
+    """hits.total.value when present — 0 is a real, valid count (a search that legitimately
+    matched nothing) and must be distinguished from "not a search response at all", so this
+    checks for the key rather than truthiness. Falls back to a plain count for non-search
+    responses like _count."""
+    total = body.get('hits', {}).get('total', {})
+    if isinstance(total, dict) and 'value' in total:
+        return total['value']
+    return body.get('count')
+
+
 def weighted_jaccard_aggs(src_aggs: Dict, tgt_aggs: Dict) -> Tuple[Optional[float], Optional[str]]:
     scores = []
     for name in set(src_aggs) | set(tgt_aggs):
@@ -71,8 +89,8 @@ def compute_jaccard(src_body: Dict, tgt_body: Dict) -> Tuple[Optional[float], Op
         src_body.get('aggregations', {}), tgt_body.get('aggregations', {}))
     if j is not None:
         return j, lbl
-    sv = src_body.get('hits', {}).get('total', {}).get('value') or src_body.get('count')
-    tv = tgt_body.get('hits', {}).get('total', {}).get('value') or tgt_body.get('count')
+    sv = hit_count(src_body)
+    tv = hit_count(tgt_body)
     if sv is not None and tv is not None:
         mx = max(sv, tv)
         return ((min(sv, tv) / mx) if mx > 0 else 1.0), 'hit count ratio'
@@ -103,19 +121,27 @@ def score_tuple(r: Dict) -> Dict:
     whether the request was actually replayed — used uniformly by both the summary sparkline and
     the per-tuple table.
     """
+    src_request = r.get('sourceRequest', {})
+    tgt_request = r.get('targetRequest', {})
     src_resp = r.get('sourceResponse', {})
     tgt_resps = r.get('targetResponses', [])
-    method = r.get('sourceRequest', {}).get('Method', '?')
-    uri = r.get('sourceRequest', {}).get('Request-URI', '?')
+    method = src_request.get('Method', '?')
+    uri = src_request.get('Request-URI', '?')
     src_status = src_resp.get('Status-Code', '?')
     if method == 'OPTIONS':
         return dict(method=method, uri=uri, src_status=src_status,
                     tgt_status=None, j=None, j_label='preflight',
-                    src_hits=None, tgt_hits=None, replayed=False)
+                    src_hits=None, tgt_hits=None,
+                    src_hit_list=[], tgt_hit_list=[],
+                    src_request=src_request, tgt_request=tgt_request,
+                    src_response=src_resp, tgt_response=None, replayed=False)
     if not tgt_resps:
         return dict(method=method, uri=uri, src_status=src_status,
                     tgt_status=None, j=None, j_label=None,
-                    src_hits=None, tgt_hits=None, replayed=False)
+                    src_hits=None, tgt_hits=None,
+                    src_hit_list=[], tgt_hit_list=[],
+                    src_request=src_request, tgt_request=tgt_request,
+                    src_response=src_resp, tgt_response=None, replayed=False)
     tgt = tgt_resps[0]
     tgt_status = tgt.get('Status-Code', '?')
     src_body = src_resp.get('payload', {}).get('inlinedJsonBody', {})
@@ -123,18 +149,27 @@ def score_tuple(r: Dict) -> Dict:
     is_msearch = ('_msearch' in uri or 'responses' in src_body)
     if is_msearch:
         j, lbl = score_msearch(src_body, tgt_body)
-        src_hits = sum(
-            (s.get('hits', {}).get('total', {}).get('value') or 0)
-            for s in src_body.get('responses', []) if isinstance(s, dict)) or None
-        tgt_hits = sum(
-            (s.get('hits', {}).get('total', {}).get('value') or 0)
-            for s in tgt_body.get('responses', []) if isinstance(s, dict)) or None
+        src_subs = [s for s in src_body.get('responses', []) if isinstance(s, dict)]
+        tgt_subs = [s for s in tgt_body.get('responses', []) if isinstance(s, dict)]
+        # sum(...) over an empty list is a real 0, which would misread as "matched nothing"
+        # rather than "not applicable" — only sum when there's at least one sub-response.
+        src_hits = sum((hit_count(s) or 0) for s in src_subs) if src_subs else None
+        tgt_hits = sum((hit_count(s) or 0) for s in tgt_subs) if tgt_subs else None
+        # Sub-queries are concatenated in order — the detail pane doesn't break an msearch out
+        # by sub-query, just shows every hit it returned across all of them.
+        src_hit_list = [h for s in src_subs for h in hit_summaries(s)]
+        tgt_hit_list = [h for s in tgt_subs for h in hit_summaries(s)]
     else:
         j, lbl = compute_jaccard(src_body, tgt_body)
-        src_hits = src_body.get('hits', {}).get('total', {}).get('value') or src_body.get('count')
-        tgt_hits = tgt_body.get('hits', {}).get('total', {}).get('value') or tgt_body.get('count')
+        src_hits = hit_count(src_body)
+        tgt_hits = hit_count(tgt_body)
+        src_hit_list = hit_summaries(src_body)
+        tgt_hit_list = hit_summaries(tgt_body)
     return dict(method=method, uri=uri,
                 src_status=src_status, tgt_status=tgt_status,
                 j=j, j_label=lbl,
                 src_hits=src_hits, tgt_hits=tgt_hits,
+                src_hit_list=src_hit_list, tgt_hit_list=tgt_hit_list,
+                src_request=src_request, tgt_request=tgt_request,
+                src_response=src_resp, tgt_response=tgt,
                 replayed=True)
