@@ -731,6 +731,33 @@ def test_cli_cluster_generate_data_proxy(runner, mocker, proxy_enabled_yaml_path
     assert result.exit_code == 0
 
 
+def test_cli_cluster_generate_data_with_tenants(runner, mocker, proxy_enabled_yaml_path):
+    module_mock = mocker.patch('importlib.util.module_from_spec')
+    mocker.patch('importlib.util.spec_from_file_location').return_value.loader.exec_module = mocker.Mock()
+    mocker.patch('os.path.exists', return_value=True)
+    bulk_insert_data = mocker.Mock(return_value={
+        'total_inserted': 10,
+        'total_errors': 0,
+        'elapsed_time': 1.0,
+        'docs_per_sec': 10.0,
+        'estimated_size_mb': 0.1
+    })
+    module_mock.return_value.bulk_insert_data = bulk_insert_data
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'generate-data',
+         '--cluster', 'proxy', '--index-name', 'test-index', '--num-docs', '10',
+         '--num-tenants', '2'],
+        catch_exceptions=True
+    )
+
+    bulk_insert_data.assert_called_once()
+    assert bulk_insert_data.call_args.args[-1] == 2
+    assert "Tenants: 2" in result.output
+    assert result.exit_code == 0
+
+
 def test_cli_cluster_generate_data_partial_insert_exits_nonzero(runner, mocker, proxy_enabled_yaml_path):
     # Regression test: when bulk_insert_data bails early after persistent failures (e.g.
     # sigv4-via-proxy 403s on the AOSS test pipeline), the CLI must exit non-zero so the

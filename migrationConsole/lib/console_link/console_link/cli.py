@@ -670,9 +670,12 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeo
 @click.option('--num-docs', type=int, help='Total number of documents to generate')
 @click.option('--target-size-mb', type=float, help='Target total size in MB (alternative to num-docs)')
 @click.option('--batch-size', type=int, default=100, help='Number of documents per batch request')
+@click.option('--num-tenants', type=click.IntRange(min=1),
+              help='Number of tenant_id values to distribute across generated documents')
 @click.pass_obj
 def generate_data_cmd(ctx, cluster, source_selector, target_selector, proxy_selector,
-                      index_name, doc_size_bytes, num_docs, target_size_mb, batch_size):
+                      index_name, doc_size_bytes, num_docs, target_size_mb, batch_size,
+                      num_tenants):
     """Generate bulk test data in the specified cluster and index"""
     
     # Validate arguments
@@ -693,6 +696,8 @@ def generate_data_cmd(ctx, cluster, source_selector, target_selector, proxy_sele
     
     click.echo(f"Generating {num_docs:,} documents in index '{index_name}' on {cluster}")
     click.echo(f"Document size: ~{doc_size_bytes} bytes, Batch size: {batch_size}")
+    if num_tenants:
+        click.echo(f"Tenants: {num_tenants}")
     
     # Import bulk generation function
     try:
@@ -716,7 +721,8 @@ def generate_data_cmd(ctx, cluster, source_selector, target_selector, proxy_sele
         bulk_insert_data = test_module.bulk_insert_data
         
         # Execute bulk data generation
-        result = bulk_insert_data(cluster_obj, index_name, num_docs, doc_size_bytes, batch_size)
+        result = bulk_insert_data(cluster_obj, index_name, num_docs, doc_size_bytes,
+                                  batch_size, num_tenants)
 
         # Display results
         click.echo("\nData generation completed:")

@@ -142,6 +142,14 @@ public class CreateSnapshot {
         public List<String> solrCollections = List.of();
 
         @Parameter(
+                names = {"--solr-topology"},
+                required = false,
+                description = "Solr topology: 'cloud' or 'standalone'. Normally inferred, so only needed when "
+                    + "importing a backup whose layout identifies neither. Supplying it skips inference entirely, "
+                    + "which also avoids the Collections API on a permission-restricted source.")
+        public String solrTopology;
+
+        @Parameter(
                 names = {"--solr-context-path"},
                 required = false,
                 description = "The path Solr's APIs are served under, appended to --source-host when building Solr "

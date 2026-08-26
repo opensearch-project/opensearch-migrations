@@ -444,8 +444,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addOptionalInput("sourceConfig", c =>
-            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
@@ -455,7 +453,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("workloadIdentityChecksum", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -587,15 +584,6 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
                         targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
-                        sourceConfig: expr.serialize(expr.makeDict({
-                            label: expr.get(snapshotMigrationConfig, "sourceLabel"),
-                            version: expr.get(snapshotMigrationConfig, "sourceVersion"),
-                            endpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
-                            allowInsecure: expr.dig(snapshotMigrationConfig, ["sourceAllowInsecure"], false),
-                            solrContextPath: expr.dig(
-                                snapshotMigrationConfig, ["sourceConnectionIdentity", "solrContextPath"], ""),
-                            authConfig: expr.dig(snapshotMigrationConfig, ["sourceAuth"], expr.makeDict({}))
-                        })),
                         snapshotConfig: expr.serialize(expr.makeDict({
                             snapshotName: resolvedSnapshotName,
                             label: expr.get(snapshotRepoConfig, "label"),
@@ -625,7 +613,6 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
                         workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });

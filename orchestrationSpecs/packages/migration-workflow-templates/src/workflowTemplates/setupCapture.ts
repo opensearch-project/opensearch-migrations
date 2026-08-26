@@ -40,6 +40,7 @@ import {
     SCALABLE_WORKLOAD_INPUTS,
     workflowParameterAsNumber,
 } from "./commonUtils/scalableWorkload";
+import {MIGRATION_RESOURCE_UID_LABEL} from "./commonUtils/resourceLabels";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -317,6 +318,7 @@ function makeProxyDeploymentManifest(args: {
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                 "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
             },
         },
         spec: {
@@ -332,6 +334,7 @@ function makeProxyDeploymentManifest(args: {
                     "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                     "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                     "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                    [MIGRATION_RESOURCE_UID_LABEL]: makeStringTypeProxy(args.ownerUid),
                 }},
                 spec: {
                     containers: [podConfig.container],
