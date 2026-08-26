@@ -116,7 +116,7 @@ public class ShardWorkPreparer {
             .forEach(indexName -> {
                 var partitions = documentSource.listPartitions(indexName);
                 log.atInfo()
-                    .setMessage("Index {} has {} partitions")
+                    .setMessage("Index {} has {} partitions (shards)")
                     .addArgument(indexName)
                     .addArgument(partitions.size())
                     .log();
