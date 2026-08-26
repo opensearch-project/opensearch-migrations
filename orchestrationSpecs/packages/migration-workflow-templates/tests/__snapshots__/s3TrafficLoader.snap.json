@@ -63,6 +63,9 @@
               "name": "loadCompletionChecksum"
             },
             {
+              "name": "resourceUid"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -141,6 +144,9 @@
           ]
         },
         "metadata": {
+          "labels": {
+            "migrations.opensearch.org/migration-resource-uid": "{{inputs.parameters.resourceUid}}"
+          },
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
           }
@@ -401,6 +407,10 @@
                   {
                     "name": "loadCompletionChecksum",
                     "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=fromJSON(inputs.parameters.loaderConfig)['resourceUid']}}"
                   }
                 ]
               },
