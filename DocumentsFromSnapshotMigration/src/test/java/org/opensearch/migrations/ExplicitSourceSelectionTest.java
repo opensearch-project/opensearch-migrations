@@ -12,9 +12,9 @@ import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 
+import com.beust.jcommander.ParameterException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
