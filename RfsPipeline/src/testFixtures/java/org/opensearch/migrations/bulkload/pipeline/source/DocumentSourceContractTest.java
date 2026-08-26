@@ -23,8 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The behaviour every {@link DocumentSource} must exhibit. Extend it from each implementation and
  * supply a source over known data; the suite asserts the contract, not the data.
  *
- * <p>Nothing here asserts partition order: partitions are addressed by name, so enumeration order
- * is free to differ between calls.
+ * <p>Nothing here asserts enumeration order: everything is addressed by name.
  */
 public abstract class DocumentSourceContractTest {
 
@@ -38,17 +37,27 @@ public abstract class DocumentSourceContractTest {
     protected abstract String collectionUnderTest();
 
     @Test
-    void listCollections_isDeterministic() throws Exception {
+    void listCollections_returnsTheSameSetAcrossCallsAndSources() throws Exception {
+        HashSet<String> first;
         try (var source = newSource()) {
-            var first = source.listCollections();
-            var second = source.listCollections();
+            first = new HashSet<>(source.listCollections());
+            var second = new HashSet<>(source.listCollections());
 
             assertThat(first, not(empty()));
-            assertThat("repeated listCollections must return the same list", second, equalTo(first));
+            assertThat("repeated listCollections must return the same set", second, equalTo(first));
         }
-        try (var fresh = newSource()) {
-            assertThat("a fresh source must list the same collections",
-                fresh.listCollections(), equalTo(collectionsFrom()));
+        assertThat("a fresh source must return the same set",
+            new HashSet<>(collectionsFrom()), equalTo(first));
+    }
+
+    @Test
+    void collectionNames_areUnique() throws Exception {
+        try (var source = newSource()) {
+            var names = source.listCollections();
+
+            assertThat(names, not(empty()));
+            assertThat("collection names must be unique",
+                new HashSet<>(names), hasSize(names.size()));
         }
     }
 

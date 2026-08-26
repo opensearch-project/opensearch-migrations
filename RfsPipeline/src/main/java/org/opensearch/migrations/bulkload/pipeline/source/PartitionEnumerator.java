@@ -8,12 +8,16 @@ import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 /**
  * Enumerates the collections and partitions a source can offer.
  *
- * <p>Partitions are addressed by name, not position: a work item records the name and resolves it
- * later, in another process. Enumeration order carries no meaning.
+ * <p>Partitions are addressed by name, not position, and enumeration order carries no meaning. A name
+ * returned during work preparation must stay resolvable by {@link #findPartition} when the same source
+ * data is reopened by another process.
  */
 public interface PartitionEnumerator {
 
-    /** All collection names available from this source. Deterministic. */
+    /**
+     * All collection names available from this source. Names are unique; order is unspecified.
+     * Unchanged data must yield the same set from every call and from a freshly built source.
+     */
     List<String> listCollections();
 
     /**
