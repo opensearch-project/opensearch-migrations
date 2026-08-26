@@ -31,6 +31,7 @@ from .testrun_utils import (
     list_workflows,
     get_workflow,
     get_workflow_template,
+    runner_selector,
     workflow_template_name,
     list_k6_workflow_templates,
     list_profiles,
@@ -364,13 +365,13 @@ def logs_command(namespace, name, follow=False):
     TestRun after the workflow, so the run's one name selects them.
     """
     cmd = ["kubectl", "logs", "-n", namespace,
-           "-l", f"k6_cr={name},runner=true", "-c", "k6", "--tail=-1", "--prefix"]
+           "-l", runner_selector(name), "-c", "k6", "--tail=-1", "--prefix"]
     if follow:
         cmd.append("-f")
     return cmd
 
 
-def wait_for_run(namespace, name, timeout, interval):
+def wait_for_run(namespace, name, timeout, interval, on_poll=None):
     """Poll a run Workflow until it reaches a terminal phase; return the phase, or None on timeout.
 
     The phase is Argo's `.status.phase` on the Workflow, NOT the k6-operator's `.status.stage` on
@@ -385,12 +386,25 @@ def wait_for_run(namespace, name, timeout, interval):
 
     `Failed` vs `Error` is worth reading as a hint about where to look: the former points at
     the load test, the latter at the setup around it.
+
+    None of those five say whether the load test WORKED — a run that failed every request still
+    ends `Succeeded` (see health.py). `on_poll(elapsed, phase)`, when given, is called once per
+    non-terminal poll so a caller can read that from k6 and report it as the wait goes on. It is
+    called only while the run is alive, since the k6 API dies with the runner pods.
     """
     deadline = time.time() + timeout
+    started = time.time()
     while time.time() < deadline:
         wf = get_workflow(namespace, name)
         phase = (wf or {}).get("status", {}).get("phase", "")
         if phase in DONE_PHASES:
             return phase
+        if on_poll:
+            # Progress reporting is an extra. It must never be the reason a wait ends early, so a
+            # broken callback costs its own line and nothing more.
+            try:
+                on_poll(time.time() - started, phase)
+            except Exception as e:
+                logger.debug("Progress callback failed during wait for %s: %s", name, e)
         time.sleep(interval)
     return None

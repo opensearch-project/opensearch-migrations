@@ -8,7 +8,8 @@ the non-interactive subcommands on the same code.
 """
 import logging
 import os
-from typing import Dict, List, Optional
+from functools import partial
+from typing import Dict, List, Optional, Tuple
 
 from textual.app import App, ComposeResult
 from textual.containers import Container
@@ -47,6 +48,10 @@ class LoadTestApp(App):
         self._refresh_interval = refresh_interval
         # Rows in display order, mirroring the DataTable — the cursor row index indexes into this.
         self._runs: List[Dict] = []
+        # The last health poll, with the run it belongs to: (run name, health). Health is polled
+        # for the HIGHLIGHTED run only — one poll costs an HTTP round trip per runner pod, so
+        # doing it for every row on every refresh would make the table pay for a line nobody reads.
+        self._health: Tuple[Optional[str], Optional[Dict]] = (None, None)
         self.is_exiting = False
 
     def compose(self) -> ComposeResult:
@@ -69,24 +74,46 @@ class LoadTestApp(App):
     # --- Refresh loop ---
 
     def action_refresh(self) -> None:
-        self.run_worker(self._refresh_worker, thread=True, name="refresh_runs")
+        self.run_worker(partial(self._refresh_worker, self._active_selected_run()),
+                        thread=True, name="refresh_runs")
 
-    def _refresh_worker(self) -> None:
-        """Worker: fetch the runs off the main thread, then route back to it."""
+    def _active_selected_run(self) -> Optional[str]:
+        """The highlighted run's name if it is still going, else None.
+
+        A finished run has no k6 API left to ask — the runner pods are gone — so polling one would
+        buy a guaranteed timeout on every refresh.
+        """
+        from ..runs import DONE_PHASES
+        name = self.selected_run_name
+        for run in self._runs:
+            if run["name"] == name:
+                return name if run["phase"] not in DONE_PHASES else None
+        return None
+
+    def _refresh_worker(self, health_for: Optional[str]) -> None:
+        """Worker: fetch the runs, and the highlighted run's health, off the main thread."""
         from ..runs import list_runs
         try:
             runs, error = list_runs(self._namespace), None
         except Exception as e:
             runs, error = None, str(e)
+        health = None
+        if health_for:
+            # run_health reports its own failures in the returned dict rather than raising, so a
+            # dead runner costs a "-" in the status line and nothing else.
+            from ..health import run_health
+            health = run_health(self._namespace, health_for)
         if not self.is_exiting:
-            self.call_from_thread(self._apply_runs, runs, error)
+            self.call_from_thread(self._apply_runs, runs, error, health_for, health)
 
-    def _apply_runs(self, runs: Optional[List[Dict]], error: Optional[str]) -> None:
+    def _apply_runs(self, runs: Optional[List[Dict]], error: Optional[str],
+                    health_for: Optional[str] = None, health: Optional[Dict] = None) -> None:
         """Main thread: repaint the table and re-arm the refresh timer.
 
         A failed fetch keeps the last good table rather than blanking it — the run list is the whole
         screen, and a transient API error should not look like "no runs".
         """
+        self._health = (health_for, health)
         if error is None:
             self._runs = runs or []
             self._rebuild_table()
@@ -114,10 +141,25 @@ class LoadTestApp(App):
         if not self._runs:
             status.update("[dim](no k6 runs — press `n` to launch one)[/]")
         elif name := self.selected_run_name:
-            status.update(f"Run: [bold green]{name}[/]")
+            status.update(f"Run: [bold green]{name}[/]{self._health_markup(name)}")
         else:
             status.update("")
         self.refresh_bindings()
+
+    def _health_markup(self, name: str) -> str:
+        """The highlighted run's k6 health, as markup to append to the status line.
+
+        Empty for a run the cached poll does not belong to: moving the cursor changes the selection
+        between refreshes, and showing one run's error rate under another run's name would be worse
+        than showing nothing. The next refresh polls the new selection.
+        """
+        from rich.markup import escape
+        from ..health import format_health
+        polled_run, health = self._health
+        if polled_run != name or not health:
+            return ""
+        text = escape(format_health(health))
+        return f"  [bold red]{text}[/]" if health["tainted"] else f"  [dim]{text}[/]"
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._update_status()

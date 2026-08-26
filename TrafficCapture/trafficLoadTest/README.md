@@ -476,9 +476,32 @@ loadtest run --config ingest-burst --parallelism 4 -e BULK_BATCH_SIZE=50
 loadtest run --config search-deep-paging --rate 100 --duration 10m --wait
 loadtest list                 # NAME / PROFILE / STAGE / PARALLEL / AGE
 loadtest logs <run-name> -f
+loadtest health <run-name>    # what k6 measures right now: requests, errors, p95, thresholds
 loadtest stop <run-name>   |  --scenario mixed  |  --all
 loadtest status               # is the chart installed here, and which profiles are launchable
 ```
+
+**`--wait` reports health, not just the phase.** The Argo phase says whether a run *completed*,
+never whether it *worked* — a run whose every request returned 401 also ends `Succeeded`, because
+k6 exits 99 on a crossed threshold and the operator still reports that TestRun as `finished`. So
+each poll prints what k6 itself measures, read from each runner pod's REST API on port 6565 (no
+Prometheus, Grafana or otel-collector in the path):
+
+```
+Waiting for completion (timeout 240s)...
+  [00:20] 2/2 runners  vus=0  reqs=0  ok=0  err=0 (0.0%)
+  [01:00] 2/2 runners  vus=0  reqs=1669 (72/s)  ok=1669  err=0 (0.0%)  p95=28ms
+  [02:40] 0/2 runners reporting
+Run k6-ingest-steady-4ggkv finished: Succeeded
+  Last seen: 7470 requests, 7470 ok, 0 failed (0.0%)
+```
+
+`ok` / `err` split on k6's own rule — a request counts as failed when its status is outside
+200-399. `! over threshold: <metric>` marks a threshold k6 is over **at that poll**; k6 clears it
+if the metric recovers, so only the closing line judges the run, and it does so from the k6
+container's exit code (99 = thresholds crossed). A breach is a **warning**: the exit code stays the
+workflow's. Use `--no-health` for phase-only output, and `loadtest health <run-name>` for a
+per-runner table of a run someone else started.
 `--config` picks the profile's template; `--rate`/`--vus` apply to whichever stream variables that
 profile has; `-e KEY=VAL` and `--target` override any other setting **by name**, and a name the
 profile does not have is refused rather than silently dropped. Bare **`loadtest`** opens the TUI: a live table of

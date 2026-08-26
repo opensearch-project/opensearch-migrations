@@ -23,7 +23,9 @@ from console_link.loadtest.testrun_utils import (
     list_k6_workflow_templates,
     list_profiles,
     list_scenarios,
+    list_runner_pods,
     list_workflows,
+    runner_selector,
     workflow_template_name,
 )
 
@@ -247,3 +249,84 @@ class TestListK6WorkflowTemplates:
         patcher, _ = _custom_api(list_namespaced_custom_object=RuntimeError("no kubeconfig"))
         with patcher, pytest.raises(RuntimeError):
             list_k6_workflow_templates("ma")
+
+
+class TestListRunnerPods:
+    """The runner pods of a run, flattened to what an HTTP caller needs. This is how health.py
+    finds a run's k6 API, and it uses the pod grant the chart already gives for `loadtest logs`."""
+
+    @staticmethod
+    def _pod(name, ip, phase="Running", exit_code=None):
+        """A runner pod. `exit_code` is the k6 container's, once it has terminated — that is what
+        a finished run is judged on, since the REST API dies with the process."""
+        pod = MagicMock()
+        pod.metadata.name = name
+        pod.status.pod_ip = ip
+        pod.status.phase = phase
+        k6 = MagicMock()
+        k6.name = "k6"
+        k6.state.terminated = None if exit_code is None else MagicMock(exit_code=exit_code)
+        pod.status.container_statuses = [k6]
+        return pod
+
+    def _core_api(self, *pods):
+        fake = MagicMock()
+        fake.list_namespaced_pod.return_value = MagicMock(items=list(pods))
+        return patch.object(testrun_utils.client, "CoreV1Api", return_value=fake), fake
+
+    def test_returns_addressable_runners(self):
+        patched, fake = self._core_api(self._pod("k6-run-1", "10.0.0.1"),
+                                       self._pod("k6-run-2", "10.0.0.2"))
+        with patched:
+            assert list_runner_pods("ma", "k6-run") == [
+                {"pod": "k6-run-1", "ip": "10.0.0.1", "phase": "Running", "exit_code": None},
+                {"pod": "k6-run-2", "ip": "10.0.0.2", "phase": "Running", "exit_code": None},
+            ]
+
+    def test_selects_the_runners_of_one_run(self):
+        """`runner=true` is what keeps the initializer and starter pods out — neither serves a k6
+        API, so including them would report the run as part-unreachable for its whole life."""
+        patched, fake = self._core_api()
+        with patched:
+            list_runner_pods("ma", "k6-run")
+        _, kwargs = fake.list_namespaced_pod.call_args
+        assert kwargs["namespace"] == "ma"
+        assert kwargs["label_selector"] == "k6_cr=k6-run,runner=true"
+
+    def test_pod_without_an_address_still_listed(self):
+        # An unscheduled pod is part of the run and has to be counted, or a partly-started run
+        # would look complete.
+        patched, _ = self._core_api(self._pod("k6-run-1", None, phase="Pending"))
+        with patched:
+            assert list_runner_pods("ma", "k6-run") == [
+                {"pod": "k6-run-1", "ip": None, "phase": "Pending", "exit_code": None}]
+
+    def test_no_pods(self):
+        patched, _ = self._core_api()
+        with patched:
+            assert list_runner_pods("ma", "k6-run") == []
+
+    def test_exit_code_appears_once_k6_has_finished(self):
+        """k6's own verdict on the run: 99 means it crossed a threshold. It outlives the REST API,
+        so it is the only reading available once a run ends."""
+        patched, _ = self._core_api(self._pod("k6-run-1", "10.0.0.1", "Succeeded", exit_code=99))
+        with patched:
+            assert list_runner_pods("ma", "k6-run")[0]["exit_code"] == 99
+
+    def test_other_containers_are_not_mistaken_for_k6(self):
+        # A sidecar's exit code would be a verdict on the wrong process.
+        pod = self._pod("k6-run-1", "10.0.0.1")
+        sidecar = MagicMock()
+        sidecar.name = "istio-proxy"
+        sidecar.state.terminated = MagicMock(exit_code=1)
+        pod.status.container_statuses = [sidecar]
+        patched, _ = self._core_api(pod)
+        with patched:
+            assert list_runner_pods("ma", "k6-run")[0]["exit_code"] is None
+
+
+def test_runner_selector_is_shared_by_logs_and_health():
+    """One selector, stated once: the log stream and the health poll must never look at different
+    pods for the same run."""
+    from console_link.loadtest.runs import logs_command
+    assert runner_selector("k6-run") in logs_command("ma", "k6-run")

@@ -35,6 +35,16 @@ WORKFLOW_TEMPLATE_PLURAL = "workflowtemplates"
 # Workflow it submits — the one selector that finds k6 objects without name-matching.
 K6_APP_LABEL = "k6-load-test"
 
+# The k6-operator's own labels on the pods it starts for a run. `k6_cr` is the TestRun name, which
+# the WorkflowTemplate makes equal to the Workflow name, so a run's one name selects its pods.
+# `runner=true` keeps the initializer and starter pods out. Stated once because three things need
+# exactly this set: the log stream, the health poll, and any test that fakes either.
+
+
+def runner_selector(name):
+    """The label selector for a run's k6 runner pods."""
+    return f"k6_cr={name},runner=true"
+
 
 def _custom():
     return client.CustomObjectsApi()
@@ -109,6 +119,36 @@ def get_workflow_template(namespace, name):
         if e.status == 404:
             return None
         raise
+
+
+# The container that runs k6 inside a runner pod. Its exit code is k6's own verdict on the run.
+K6_CONTAINER = "k6"
+
+
+def list_runner_pods(namespace, name):
+    """A run's k6 runner pods as {pod, ip, phase, exit_code} dicts.
+
+    Only the four fields a caller needs come back, so nothing outside this module handles a
+    kubernetes model object. `ip` is None until the pod is scheduled and has an address, and
+    `exit_code` is None until the k6 container has exited.
+
+    The pod read is the grant the k6LoadTest chart already gives the console for `loadtest logs`
+    (see the chart's rbac.yaml), so nothing new is needed to poll a run's health.
+    """
+    pods = client.CoreV1Api().list_namespaced_pod(
+        namespace=namespace, label_selector=runner_selector(name)).items
+    return [{"pod": p.metadata.name,
+             "ip": p.status.pod_ip,
+             "phase": p.status.phase,
+             "exit_code": _k6_exit_code(p)} for p in pods]
+
+
+def _k6_exit_code(pod):
+    """The k6 container's exit code, or None while it is still running (or has no status yet)."""
+    for status in (pod.status.container_statuses or []):
+        if status.name == K6_CONTAINER and status.state and status.state.terminated:
+            return status.state.terminated.exit_code
+    return None
 
 
 def list_k6_workflow_templates(namespace):

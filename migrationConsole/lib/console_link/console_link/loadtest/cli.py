@@ -24,6 +24,7 @@ except (AttributeError, ValueError):
 
 from .utils import ExitCode, load_k8s_config, get_current_namespace          # noqa: E402
 from . import runs                                                          # noqa: E402
+from .health import HealthWatcher, format_health, run_health, threshold_warning   # noqa: E402
 from .runs import (                                                         # noqa: E402
     SUCCESS_PHASE,
     build_k6_parameters,
@@ -174,8 +175,11 @@ def loadtest_cli(ctx, verbose, namespace, refresh_interval):
 @click.option('--wait', is_flag=True, default=False, help="Wait for the run to complete.")
 @click.option('--timeout', default=600, type=int, help="Seconds to wait with --wait (default 600).")
 @click.option('--wait-interval', default=5, type=int, help="Seconds between status checks with --wait.")
+@click.option('--health/--no-health', default=True, show_default=True,
+              help="While waiting, report each poll's request counts and error rate, read from "
+                   "the runners' own k6 API. Turn it off for phase-only output.")
 @click.pass_context
-def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
+def k6_run(ctx, namespace, wait, timeout, wait_interval, health, **run_opts):
     """Submit a k6 run.
 
     A run is one load profile, with any of its settings overridden by name. `loadtest status` lists
@@ -224,13 +228,48 @@ def k6_run(ctx, namespace, wait, timeout, wait_interval, **run_opts):
 
     if wait:
         click.echo(f"\nWaiting for completion (timeout {timeout}s)...")
-        phase = wait_for_run(namespace, name, timeout, wait_interval)
+        # The watcher is what makes the end of the wait readable: the k6 API dies with the runner
+        # pods, so the last poll to reach them, and every threshold crossed along the way, exist
+        # only in here by the time the phase turns terminal.
+        watcher = HealthWatcher(namespace, name) if health else None
+
+        def report(elapsed, _phase):
+            click.echo("  " + format_health(watcher.poll(elapsed)))
+
+        phase = wait_for_run(namespace, name, timeout, wait_interval,
+                             on_poll=report if watcher else None)
         if phase is None:
             click.echo(f"Timed out after {timeout}s waiting for {name}.", err=True)
+            _echo_run_health_verdict(watcher, name)
             ctx.exit(ExitCode.FAILURE.value)
         click.echo(f"Run {name} finished: {phase}")
+        _echo_run_health_verdict(watcher, name)
         if phase != SUCCESS_PHASE:
             ctx.exit(ExitCode.FAILURE.value)
+
+
+def _echo_run_health_verdict(watcher, name):
+    """Close a wait with what k6 measured: the last totals, then any threshold warning.
+
+    A crossed threshold does NOT change the exit code. The phase keeps deciding that, because the
+    thresholds are per-scenario limits rather than a definition of failure, and a script that must
+    fail on one can read the warning or the k6 summary in the logs.
+    """
+    if watcher is None:
+        return
+    if watcher.last:
+        last = watcher.last
+        click.echo(f"  Last seen: {last['requests']} requests, {last['ok']} ok, "
+                   f"{last['failed']} failed ({last['failed_pct']:.1f}%)")
+    # The verdict comes from the runner pods' exit codes, which outlive the k6 API the wait was
+    # polling. The last poll's taints only supply the metric names, since an exit code has none.
+    warning = threshold_warning(watcher.verdict(), name, watcher.last_tainted)
+    if warning:
+        # The warning goes to stderr, and stdout is block-buffered whenever this is not a terminal
+        # (`kubectl exec`, a CI log). Without the flush the two streams interleave and the warning
+        # lands ABOVE the phase line and the totals it is qualifying.
+        sys.stdout.flush()
+        click.echo(warning, err=True)
 
 
 @loadtest_cli.command(name="list")
@@ -340,6 +379,79 @@ def k6_logs(ctx, name, follow, namespace):
         # on the pod read, because that grant ships with the chart. Add the hint, keep kubectl's code.
         _echo_hint_best_effort(namespace)
         ctx.exit(code)
+
+
+@loadtest_cli.command(name="health")
+@click.argument('name')
+@click.option('--namespace', **_NAMESPACE_OPTION)
+@click.pass_context
+def k6_health(ctx, name, namespace):
+    """Show what k6 measures right now for a RUNNING run: requests, errors, p95, thresholds.
+
+    Read from each runner pod's own k6 REST API, so it needs no metrics stack. It works only while
+    the run is alive — the API goes with the runner process, and the full end-of-test summary is
+    then in `loadtest logs NAME`.
+
+    A crossed threshold is reported, not enforced: this exits 0 either way.
+
+    \b
+    Examples:
+      loadtest health k6-ingest-steady-abc12
+    """
+    try:
+        load_k8s_config()
+        health = run_health(namespace, name)
+    except Exception as e:
+        click.echo(f"Error reading k6 health: {e}", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+
+    if health["error"]:
+        click.echo(f"Error reading k6 health: {health['error']}", err=True)
+        _echo_hint_best_effort(namespace)
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+    if not health["expected"]:
+        click.echo(f"No runner pods for '{name}' — the run has not started, or has finished "
+                   f"and been torn down.")
+        ctx.exit(ExitCode.NOT_FOUND.value)
+        return
+
+    click.echo(f"Run {name} — {health['reachable']}/{health['expected']} runners reporting")
+    header = ("RUNNER", "VUS", "REQS", "OK", "ERR", "ERR%", "P95")
+    rows = [(r["pod"], *_health_row(r)) for r in health["runners"]]
+    if health["reachable"]:
+        # The totals a run is judged on. p95 is the worst runner's, not a mean: percentiles from
+        # separate pods do not combine, so the label says which pod's number this is.
+        rows.append(("TOTAL", str(health["vus"]), str(health["requests"]), str(health["ok"]),
+                     str(health["failed"]), f"{health['failed_pct']:.1f}%",
+                     _p95(health["worst_p95_ms"]) + " (worst runner)"))
+    widths = [max(len(str(r[i])) for r in (header, *rows)) for i in range(len(header))]
+    click.echo("  ".join(str(c).ljust(widths[i]) for i, c in enumerate(header)))
+    for row in rows:
+        click.echo("  ".join(str(c).ljust(widths[i]) for i, c in enumerate(row)))
+
+    if health["tainted"]:
+        # A snapshot of a live run, so this says where the metrics stand NOW. k6 clears the flag
+        # if they recover, and only its exit code at the end settles the run — see
+        # health.threshold_warning.
+        sys.stdout.flush()   # keep the warning below the table it refers to
+        click.echo(f"\nWARNING: over threshold right now: {', '.join(health['tainted'])}\n"
+                   f"         k6 clears this if the metric recovers; the run is judged on where\n"
+                   f"         it stands at the end.", err=True)
+
+
+def _health_row(runner):
+    """One runner's cells, or dashes when its k6 API could not be reached."""
+    if not runner.get("reachable"):
+        return ("-", "-", "-", "-", "-", "unreachable")
+    return (str(runner["vus"]), str(runner["requests"]), str(runner["ok"]), str(runner["failed"]),
+            f"{100.0 * runner['failed'] / runner['requests']:.1f}%" if runner["requests"] else "-",
+            _p95(runner["p95_ms"]))
+
+
+def _p95(value):
+    return f"{value:.0f}ms" if value is not None else "-"
 
 
 @loadtest_cli.command(name="status")

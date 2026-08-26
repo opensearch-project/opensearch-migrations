@@ -17,6 +17,7 @@ import yaml
 from unittest.mock import patch
 from click.testing import CliRunner
 
+from console_link.loadtest import health as health_mod
 from console_link.loadtest import runs as runs_mod
 from console_link.loadtest import cli as cli_mod
 from console_link.loadtest.cli import loadtest_cli
@@ -100,11 +101,47 @@ def no_chart(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def no_runner_pods(monkeypatch):
+    """No k6 runner pods unless a test provides some.
+
+    `--wait` polls a run's health by default, and health.py reads it from the pods over HTTP. Left
+    alone, a unit test would go to whatever cluster the developer's kubeconfig points at, so the
+    one call that reaches the cluster is stubbed for every test and re-stubbed by the few that
+    care what it returns."""
+    monkeypatch.setattr(health_mod, "list_runner_pods", lambda ns, name: [])
+    yield
+
+
 @pytest.fixture
 def cluster(monkeypatch):
     monkeypatch.setattr(cli_mod, "load_k8s_config", lambda: None)
     monkeypatch.setattr(runs_mod, "get_workflow_template", _fake_get_workflow_template)
     yield
+
+
+def _runner_pods(monkeypatch, *health_by_pod, exit_code=None):
+    """Give the health reader N runner pods, each answering with the given per-runner health.
+
+    A `None` entry is a runner whose k6 API does not answer — a pod that has not started serving
+    yet, or one whose run has just ended.
+
+    `exit_code` is what those pods' k6 containers exited with, which is what a finished run is
+    judged on: None while still running, 0 for a pass, 99 for a threshold breach.
+    """
+    pods = [{"pod": f"k6-run-{i}", "ip": f"10.0.0.{i}", "phase": "Running", "exit_code": exit_code}
+            for i, _ in enumerate(health_by_pod, start=1)]
+    by_ip = {p["ip"]: h for p, h in zip(pods, health_by_pod)}
+    monkeypatch.setattr(health_mod, "list_runner_pods", lambda ns, name: pods)
+    monkeypatch.setattr(health_mod, "runner_health",
+                        lambda base_url, timeout=None: by_ip[base_url.split("//")[1].split(":")[0]])
+
+
+def _health(requests_count=1000, failed=0, vus=4, p95=44.0, tainted=()):
+    """One runner's health, in the shape health.runner_health returns."""
+    return {"running": True, "paused": False, "vus": vus, "requests": requests_count,
+            "failed": failed, "ok": requests_count - failed, "p95_ms": p95,
+            "tainted": list(tainted)}
 
 
 def _submitted_parameters(body):
@@ -456,6 +493,183 @@ class TestLoadTestRunWait:
         result = _runner().invoke(loadtest_cli, ["run"], env=ENV)
         assert result.exit_code == 0, result.output
         assert polled == []
+
+
+class TestLoadTestRunWaitHealth:
+    """While it waits, `--wait` reports what k6 measures, because the phase alone cannot tell a
+    healthy run from one where every request is a 401 — that run ends `Succeeded` too."""
+
+    @staticmethod
+    def _phases(monkeypatch, *phases):
+        it = iter(phases)
+        monkeypatch.setattr(runs_mod, "get_workflow", lambda ns, name: {"status": {"phase": next(it)}})
+
+    @staticmethod
+    def _wait(args=()):
+        return _runner().invoke(
+            loadtest_cli, ["run", "--wait", "--wait-interval", "0", *args], env=ENV)
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_each_poll_reports_requests_and_errors(self, _create, cluster, monkeypatch):
+        self._phases(monkeypatch, "Running", "Succeeded")
+        _runner_pods(monkeypatch, _health(requests_count=1000, failed=25))
+        result = self._wait()
+        assert result.exit_code == 0, result.output
+        assert "1/1 runners" in result.output
+        assert "reqs=1000" in result.output
+        assert "ok=975" in result.output
+        assert "err=25 (2.5%)" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_runners_are_summed(self, _create, cluster, monkeypatch):
+        self._phases(monkeypatch, "Running", "Succeeded")
+        _runner_pods(monkeypatch, _health(requests_count=500, failed=10),
+                     _health(requests_count=700, failed=20))
+        result = self._wait()
+        assert "2/2 runners" in result.output
+        assert "reqs=1200" in result.output
+        assert "err=30 (2.5%)" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_a_crossed_threshold_warns_but_does_not_fail_the_run(self, _create, cluster,
+                                                                 monkeypatch):
+        """The exit code stays the workflow's. The thresholds are per-scenario limits, not a
+        definition of failure, so a breach is reported and left to the reader."""
+        self._phases(monkeypatch, "Running", "Succeeded")
+        _runner_pods(monkeypatch, _health(requests_count=6001, failed=6001,
+                                          tainted=("http_req_failed", "ingest_errors")),
+                     exit_code=99)
+        result = self._wait()
+        assert result.exit_code == 0, result.output
+        assert "finished: Succeeded" in result.output
+        assert "WARNING: k6 ended this run over its thresholds" in result.output
+        assert "http_req_failed, ingest_errors" in result.output
+        assert "loadtest logs k6-ingest-xy" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_no_warning_when_nothing_was_crossed(self, _create, cluster, monkeypatch):
+        self._phases(monkeypatch, "Running", "Succeeded")
+        _runner_pods(monkeypatch, _health(), exit_code=0)
+        result = self._wait()
+        assert "WARNING" not in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_a_metric_that_recovered_is_not_warned_about(self, _create, cluster, monkeypatch):
+        """Measured on kind-ma: a run went over `http_req_failed` while warming up, recovered, and
+        k6 exited 0. The taint is a current reading, so only the exit code may close the run —
+        warning here would train the reader to ignore the warning that matters."""
+        self._phases(monkeypatch, "Running", "Succeeded")
+        _runner_pods(monkeypatch, _health(requests_count=7370, failed=3,
+                                          tainted=("http_req_failed",)), exit_code=0)
+        result = self._wait()
+        assert result.exit_code == 0, result.output
+        assert "! over threshold: http_req_failed" in result.output   # said while it was going on
+        assert "WARNING" not in result.output                         # but not held against it
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_a_k6_error_is_reported_as_itself(self, _create, cluster, monkeypatch):
+        # Any non-99 failure is k6 not running the test, which is not a threshold problem.
+        self._phases(monkeypatch, "Running", "Failed")
+        _runner_pods(monkeypatch, _health(), exit_code=107)
+        result = self._wait()
+        assert result.exit_code == 1
+        assert "k6 exited with an error" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_final_totals_survive_the_runners(self, _create, cluster, monkeypatch):
+        """The k6 API dies with the runner pods, so the closing summary can only come from what
+        the wait kept. It must be the last real reading, not the zeros of a torn-down pod."""
+        self._phases(monkeypatch, "Running", "Running", "Succeeded")
+        pods = [{"pod": "k6-run-1", "ip": "10.0.0.1", "phase": "Running"}]
+        monkeypatch.setattr(health_mod, "list_runner_pods", lambda ns, name: pods)
+        answers = iter([_health(requests_count=4000, failed=100), None])
+        monkeypatch.setattr(health_mod, "runner_health",
+                            lambda base_url, timeout=None: next(answers))
+        result = self._wait()
+        assert "0/1 runners reporting" in result.output
+        assert "Last seen: 4000 requests, 3900 ok, 100 failed (2.5%)" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_health_failure_never_breaks_the_wait(self, _create, cluster, monkeypatch):
+        """A run must still be waited on, and still report its phase, when the health probe
+        cannot be answered at all."""
+        self._phases(monkeypatch, "Running", "Succeeded")
+        monkeypatch.setattr(health_mod, "list_runner_pods",
+                            lambda ns, name: (_ for _ in ()).throw(RuntimeError("Forbidden")))
+        result = self._wait()
+        assert result.exit_code == 0, result.output
+        assert "health unavailable: Forbidden" in result.output
+        assert "finished: Succeeded" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_timeout_still_reports_what_was_seen(self, _create, cluster, monkeypatch):
+        """A wait that gives up has no exit code to read — the run is still going. What it saw is
+        then all there is, and an unread verdict must not be reported as a pass."""
+        monkeypatch.setattr(runs_mod, "get_workflow", lambda ns, name: {"status": {"phase": "Running"}})
+        _runner_pods(monkeypatch, _health(requests_count=10, failed=10,
+                                          tainted=("http_req_failed",)))
+        result = _runner().invoke(
+            loadtest_cli, ["run", "--wait", "--wait-interval", "0", "--timeout", "1"], env=ENV)
+        assert result.exit_code == 1
+        assert "Timed out" in result.output
+        assert "WARNING: k6 was over its thresholds when last read" in result.output
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_no_health_polls_nothing(self, _create, cluster, monkeypatch):
+        self._phases(monkeypatch, "Running", "Succeeded")
+        listed = []
+        monkeypatch.setattr(health_mod, "list_runner_pods",
+                            lambda ns, name: listed.append(name) or [])
+        result = self._wait(["--no-health"])
+        assert result.exit_code == 0, result.output
+        assert listed == []
+        assert "runners" not in result.output
+        assert "finished: Succeeded" in result.output
+
+
+class TestLoadTestHealthCommand:
+    """`loadtest health NAME` — one poll of a running test, from k6's own API."""
+
+    def test_reports_each_runner_and_the_total(self, cluster, monkeypatch):
+        _runner_pods(monkeypatch, _health(requests_count=500, failed=10, vus=2, p95=40.0),
+                     _health(requests_count=700, failed=20, vus=3, p95=90.0))
+        result = _runner().invoke(loadtest_cli, ["health", "k6-ingest-xy"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "2/2 runners reporting" in result.output
+        assert "k6-run-1" in result.output and "k6-run-2" in result.output
+        assert "TOTAL" in result.output
+        assert "1200" in result.output
+        # The worst runner's p95, labelled — percentiles from separate pods do not average.
+        assert "90ms (worst runner)" in result.output
+
+    def test_unreachable_runner_shows_as_such(self, cluster, monkeypatch):
+        _runner_pods(monkeypatch, _health(requests_count=500), None)
+        result = _runner().invoke(loadtest_cli, ["health", "k6-ingest-xy"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "1/2 runners reporting" in result.output
+        assert "unreachable" in result.output
+
+    def test_crossed_threshold_is_reported_not_enforced(self, cluster, monkeypatch):
+        # A snapshot of a live run, so it reports where the metrics stand NOW — k6 clears the flag
+        # if they recover, and only its exit code at the end settles the run.
+        _runner_pods(monkeypatch, _health(requests_count=10, failed=10,
+                                          tainted=("http_req_failed",)))
+        result = _runner().invoke(loadtest_cli, ["health", "k6-ingest-xy"], env=ENV)
+        assert result.exit_code == 0, result.output
+        assert "WARNING: over threshold right now: http_req_failed" in result.output
+
+    def test_no_runner_pods_is_not_found(self, cluster, monkeypatch):
+        # A run that has finished has no API left to ask — the pods went with it.
+        result = _runner().invoke(loadtest_cli, ["health", "k6-gone"], env=ENV)
+        assert result.exit_code == 3
+        assert "No runner pods for 'k6-gone'" in result.output
+
+    def test_cluster_error_fails_the_command(self, cluster, monkeypatch):
+        monkeypatch.setattr(health_mod, "list_runner_pods",
+                            lambda ns, name: (_ for _ in ()).throw(RuntimeError("Forbidden")))
+        result = _runner().invoke(loadtest_cli, ["health", "k6-ingest-xy"], env=ENV)
+        assert result.exit_code == 1
+        assert "Forbidden" in result.output
 
 
 class TestLoadTemplateDefaults:

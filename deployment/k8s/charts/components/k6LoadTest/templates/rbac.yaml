@@ -14,7 +14,9 @@ rules:
   - apiGroups: ["k6.io"]
     resources: ["testruns"]
     verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  # Read runner pod status/logs for `loadtest list` / `logs`.
+  # Read runner pod status/logs for `loadtest list` / `logs` / `health`. The health poll needs no
+  # grant of its own: it reads the pods to find their addresses and exit codes, then calls k6's
+  # REST API on 6565 over plain HTTP, which is not a Kubernetes API call.
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]

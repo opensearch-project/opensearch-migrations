@@ -14,11 +14,23 @@ from console_link.loadtest.tui.launch_modal import LoadTestLaunchModal
 
 LT = "console_link.loadtest.runs"
 TESTRUN_UTILS = "console_link.loadtest.testrun_utils"
+HEALTH = "console_link.loadtest.health"
 
+
+@pytest.fixture(autouse=True)
+def no_health_probe():
+    """The refresh worker polls the highlighted run's health over HTTP. Stub it for every test, so
+    a unit test cannot reach whatever cluster the developer's kubeconfig points at; the tests that
+    care about the status line patch it again with what they want to see."""
+    with patch(f"{HEALTH}.run_health", return_value=None):
+        yield
+
+
+# The phases list_runs reports are Argo's Workflow phases, so one active run and one terminal one.
 RUNS = [
-    {"name": "k6-run-a", "scenario": "ingest", "profile": "ingest-burst", "phase": "started",
+    {"name": "k6-run-a", "scenario": "ingest", "profile": "ingest-burst", "phase": "Running",
      "parallelism": "4", "age": "1m"},
-    {"name": "k6-run-b", "scenario": "mixed", "profile": "mixed-steady", "phase": "finished",
+    {"name": "k6-run-b", "scenario": "mixed", "profile": "mixed-steady", "phase": "Succeeded",
      "parallelism": "1", "age": "12m"},
 ]
 
@@ -225,3 +237,75 @@ async def test_logs_pipe_the_shared_kubectl_command_to_the_pager():
     assert piped.startswith("kubectl logs -n ma")
     assert "k6_cr=k6-run-a,runner=true" in piped
     assert piped.endswith("| less -R +F")
+
+
+# --- Health in the status line -------------------------------------------------------------
+# The table's STAGE column says whether a run finished, never whether it worked. The status line
+# carries what k6 measures for the highlighted run, so a wall of 401s is visible without leaving
+# the TUI.
+
+def _health(requests_count=1200, failed=30, tainted=()):
+    """One poll of a run, in the shape health.run_health returns."""
+    return {"expected": 2, "reachable": 2, "running": True, "vus": 4,
+            "requests": requests_count, "failed": failed, "ok": requests_count - failed,
+            "failed_pct": 100.0 * failed / requests_count, "worst_p95_ms": 44.0,
+            "tainted": list(tainted), "runners": [], "error": None}
+
+
+def _status_line(app):
+    """The status bar as plain text, with the markup already resolved."""
+    from textual.widgets import Static
+    return app.query_one("#status", Static).render().plain
+
+
+@pytest.mark.asyncio
+async def test_status_line_shows_the_highlighted_runs_health():
+    app = _app()
+    with patch(f"{LT}.list_runs", return_value=RUNS), \
+            patch(f"{HEALTH}.run_health", return_value=_health()) as health:
+        async with app.run_test() as pilot:
+            assert await wait_until(pilot, lambda: app.table.row_count == 2)
+            # A second refresh: the first one had no selection to poll yet.
+            app.action_refresh()
+            assert await wait_until(pilot, lambda: "reqs=1200" in _status_line(app))
+            line = _status_line(app)
+
+    assert "k6-run-a" in line
+    assert "2/2 runners" in line
+    assert "err=30 (2.5%)" in line
+    health.assert_called_with("ma", "k6-run-a")
+
+
+@pytest.mark.asyncio
+async def test_finished_runs_are_not_polled():
+    """A terminal run has no k6 API left — it died with the runner pods — so polling one would buy
+    a guaranteed timeout on every refresh."""
+    app = _app()
+    with patch(f"{LT}.list_runs", return_value=RUNS), \
+            patch(f"{HEALTH}.run_health", return_value=_health()) as health:
+        async with app.run_test() as pilot:
+            assert await wait_until(pilot, lambda: app.table.row_count == 2)
+            app.table.move_cursor(row=1)          # k6-run-b, Succeeded
+            await pilot.pause()
+            health.reset_mock()
+            app.action_refresh()
+            assert await wait_until(pilot, lambda: app._health == (None, None))
+
+    health.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_health_of_another_run_is_never_shown_under_this_name():
+    """The cursor can move between refreshes. One run's error rate under another run's name would
+    be worse than showing nothing, so a stale poll is dropped rather than relabelled."""
+    app = _app()
+    with patch(f"{LT}.list_runs", return_value=RUNS), \
+            patch(f"{HEALTH}.run_health", return_value=_health()):
+        async with app.run_test() as pilot:
+            assert await wait_until(pilot, lambda: app.table.row_count == 2)
+            app.action_refresh()
+            assert await wait_until(pilot, lambda: "reqs=1200" in _status_line(app))
+            app.table.move_cursor(row=1)
+            await pilot.pause()
+            assert "reqs=1200" not in _status_line(app)
+            assert "k6-run-b" in _status_line(app)
