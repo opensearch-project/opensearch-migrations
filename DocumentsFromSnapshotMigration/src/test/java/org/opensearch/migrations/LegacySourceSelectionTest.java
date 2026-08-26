@@ -7,32 +7,17 @@ import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProv
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
-import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
 
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.instanceOf;
 
 /**
- * Guards the assembled application: a missing {@code META-INF/services} entry unit-tests clean and
- * then finds zero providers at runtime, so discovery itself has to be asserted.
+ * Covers the inference from the legacy per-source flags to a provider and its spec, which
+ * {@code --source-kind}/{@code --source-config} supersede. Deleted along with the flags in phase 3.
  */
-class DocumentSourceDiscoveryTest {
-
-    @Test
-    void serviceLoaderFindsEveryShippedProvider() {
-        var registry = DocumentSourceRegistry.fromServiceLoader();
-
-        assertThat(registry.kinds(), containsInAnyOrder(
-            EsSnapshotSourceProvider.KIND, SolrBackupSourceProvider.KIND));
-        assertThat(registry.resolve(EsSnapshotSourceProvider.KIND),
-            instanceOf(EsSnapshotSourceProvider.class));
-        assertThat(registry.resolve(SolrBackupSourceProvider.KIND),
-            instanceOf(SolrBackupSourceProvider.class));
-    }
+class LegacySourceSelectionTest {
 
     @Test
     void selectSource_choosesTheSolrProviderForASolrSourceVersion() {
