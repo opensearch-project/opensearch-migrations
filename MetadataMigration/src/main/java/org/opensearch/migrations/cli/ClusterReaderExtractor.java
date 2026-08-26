@@ -210,10 +210,10 @@ public class ClusterReaderExtractor {
     }
 
     ClusterReader getRemoteReader(ConnectionContext connection) {
-        return SnapshotReaderRegistry.getRemoteReader(connection, arguments.versionStrictness.allowLooseVersionMatches);
+        return SnapshotReaderRegistry.getRemoteReader(connection, arguments.versionStrictness.allowsLooseVersionMatches());
     }
 
     ClusterReader getSnapshotReader(Version sourceVersion, SourceRepo repo) {
-        return SnapshotReaderRegistry.getSnapshotReader(sourceVersion, repo, arguments.versionStrictness.allowLooseVersionMatches);
+        return SnapshotReaderRegistry.getSnapshotReader(sourceVersion, repo, arguments.versionStrictness.allowsLooseVersionMatches());
     }
 }

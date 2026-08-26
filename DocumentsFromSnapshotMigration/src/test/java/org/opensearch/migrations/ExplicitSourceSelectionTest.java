@@ -1,7 +1,11 @@
 package org.opensearch.migrations;
 
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
@@ -11,8 +15,11 @@ import org.opensearch.migrations.bulkload.pipeline.spi.CoordinationRequirement;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 
+import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.beust.jcommander.ParametersDelegate;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
@@ -21,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -40,6 +48,10 @@ class ExplicitSourceSelectionTest {
         "{\"repoUri\":\"s3://bucket/backups\",\"backupName\":\"nightly\",\"solrMajorVersion\":8,"
             + "\"s3Region\":\"us-east-1\"}";
 
+    /** {@link #ES_CONFIG} quoted, for embedding in an ---INLINE-JSON document. */
+    private static final String ES_CONFIG_AS_JSON_STRING =
+        "\"" + ES_CONFIG.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+
     private static final String COORDINATOR = "http://coordinator:9200";
 
     /** The stub provider ignores its config; the checks under test never read it. */
@@ -56,7 +68,7 @@ class ExplicitSourceSelectionTest {
     void explicitKindWinsOverInference() {
         var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
         // A version that inference would read as an ES snapshot.
-        args.sourceVersion = null;
+        args.legacySource.sourceVersion = null;
 
         var selection = RfsMigrateDocuments.selectSource(args, false);
 
@@ -67,9 +79,9 @@ class ExplicitSourceSelectionTest {
     @Test
     void inferenceIsUnchangedWhenNeitherArgumentIsGiven() {
         var args = new RfsMigrateDocuments.Args();
-        args.sourceVersion = Version.fromString("ES 7.10.2");
-        args.repoUri = "file:///snapshots";
-        args.snapshotName = "nightly";
+        args.legacySource.sourceVersion = Version.fromString("ES 7.10.2");
+        args.legacySource.repoUri = "file:///snapshots";
+        args.legacySource.snapshotName = "nightly";
 
         var selection = RfsMigrateDocuments.selectSource(args, false);
 
@@ -122,8 +134,8 @@ class ExplicitSourceSelectionTest {
     @Test
     void supersededArgumentsAreRejectedRatherThanIgnored() {
         var args = argsWithExplicitSource(SolrBackupSourceProvider.KIND, SOLR_CONFIG);
-        args.repoUri = "file:///backups";
-        args.snapshotName = "nightly";
+        args.legacySource.repoUri = "file:///backups";
+        args.legacySource.snapshotName = "nightly";
 
         var message = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage();
@@ -161,9 +173,9 @@ class ExplicitSourceSelectionTest {
     @Test
     void supersededSpecOnlyArgumentsAreRejected() {
         var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
-        args.experimental.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
-        args.experimental.useRecoverySource = true;
-        args.maxShardSizeBytes = 1024L;
+        args.legacySource.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
+        args.legacySource.useRecoverySource = true;
+        args.legacySource.maxShardSizeBytes = 1024L;
 
         var message = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage();
@@ -171,6 +183,106 @@ class ExplicitSourceSelectionTest {
         assertThat(message, containsString("--experimental-delta-mode"));
         assertThat(message, containsString("--use-recovery-source"));
         assertThat(message, containsString("--max-shard-size-bytes"));
+    }
+
+    @Test
+    void aSupersededArgumentNestedInADelegateIsRejected() {
+        var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+        args.legacySource.versionStrictness.allowLooseVersionMatches = true;
+
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage(),
+            containsString(VersionStrictness.ALLOW_LOOSE_VERSION_MATCHING_PARAM_KEY));
+    }
+
+    @Test
+    void aSupersededArgumentGivenItsOwnDefaultValueIsStillRejected() {
+        var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+        args.legacySource.maxShardSizeBytes = RfsMigrateDocuments.DEFAULT_MAX_SHARD_SIZE_BYTES;
+
+        assertThat(assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage(),
+            containsString("--max-shard-size-bytes"));
+    }
+
+    @Test
+    void aSupersededToggleGivenAsFalseThroughJsonIsStillRejected() {
+        var args = new RfsMigrateDocuments.Args();
+        // An arity-0 flag cannot be false on the command line, but JSON can say so.
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON", "{\"sourceKind\": \"" + EsSnapshotSourceProvider.KIND
+                + "\", \"sourceConfig\": " + ES_CONFIG_AS_JSON_STRING
+                + ", \"useRecoverySource\": false, \"allowLooseVersionMatching\": false}"});
+
+        assertThat(args.legacySource.useRecoverySource, equalTo(false));
+
+        var message = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage();
+        assertThat(message, containsString("--use-recovery-source"));
+        assertThat(message, containsString(VersionStrictness.ALLOW_LOOSE_VERSION_MATCHING_PARAM_KEY));
+    }
+
+    /** Every parameter in the group, nested delegates included, must be reported once it is set. */
+    @Test
+    void everyParameterInTheSupersededGroupIsReported() throws Exception {
+        var parameterCount = parametersIn(new RfsMigrateDocuments.LegacySourceArgs()).size();
+        assertThat(parameterCount == 0, equalTo(false));
+
+        for (int i = 0; i < parameterCount; i++) {
+            // A fresh group each time, so the message has one flag to name.
+            var args = argsWithExplicitSource(EsSnapshotSourceProvider.KIND, ES_CONFIG);
+            var parameter = parametersIn(args.legacySource).get(i);
+            var field = parameter.getValue();
+
+            // A defaulted field reads as "not given" when the caller passes that same value.
+            assertThat("default of " + field.getName() + " must be null, see LegacySourceArgs",
+                field.get(parameter.getKey()), nullValue());
+
+            field.set(parameter.getKey(), nonDefaultValueFor(field));
+
+            var flag = field.getAnnotation(Parameter.class).names()[0];
+            assertThat(flag, assertThrows(ParameterException.class,
+                () -> RfsMigrateDocuments.validateSourceSelection(args)).getMessage(),
+                containsString(flag));
+        }
+    }
+
+    /** Every {@code @Parameter} the group holds, paired with the object that owns it. */
+    private static List<Map.Entry<Object, Field>> parametersIn(Object group) throws IllegalAccessException {
+        var found = new ArrayList<Map.Entry<Object, Field>>();
+        for (var field : group.getClass().getDeclaredFields()) {
+            if (field.isSynthetic()) {
+                continue;
+            }
+            field.setAccessible(true);
+            if (field.isAnnotationPresent(ParametersDelegate.class)) {
+                found.addAll(parametersIn(field.get(group)));
+            } else if (field.isAnnotationPresent(Parameter.class)) {
+                found.add(Map.entry(group, field));
+            }
+        }
+        return found;
+    }
+
+    private static Object nonDefaultValueFor(Field field) {
+        var type = field.getType();
+        if (type == String.class) {
+            return "given-by-this-test";
+        }
+        if (type == long.class || type == Long.class) {
+            return 4096L;
+        }
+        if (type == boolean.class || type == Boolean.class) {
+            return true;
+        }
+        if (type == Version.class) {
+            return Version.fromString("ES 7.10.2");
+        }
+        if (type.isEnum()) {
+            return type.getEnumConstants()[0];
+        }
+        throw new AssertionError("No non-default value known for " + field.getName() + " of type " + type
+            + "; teach this test about the type so the new flag stays covered.");
     }
 
     @Test

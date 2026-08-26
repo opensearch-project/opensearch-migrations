@@ -37,10 +37,10 @@ class DocumentSourceDiscoveryTest {
     @Test
     void selectSource_choosesTheSolrProviderForASolrSourceVersion() {
         var args = new RfsMigrateDocuments.Args();
-        args.sourceVersion = Version.fromString("SOLR 8.11.2");
-        args.repoUri = "s3://bucket/backups";
-        args.snapshotName = "nightly";
-        args.s3Region = "us-east-2";
+        args.legacySource.sourceVersion = Version.fromString("SOLR 8.11.2");
+        args.legacySource.repoUri = "s3://bucket/backups";
+        args.legacySource.snapshotName = "nightly";
+        args.legacySource.s3Region = "us-east-2";
         args.indexAllowlist = List.of("catalog");
 
         var selection = RfsMigrateDocuments.selectSource(args, false);
@@ -54,13 +54,13 @@ class DocumentSourceDiscoveryTest {
     @Test
     void selectSource_choosesTheSnapshotProviderOtherwise() {
         var args = new RfsMigrateDocuments.Args();
-        args.sourceVersion = Version.fromString("ES 7.10.2");
-        args.repoUri = "file:///snapshots";
-        args.snapshotName = "nightly";
-        args.maxShardSizeBytes = 1234L;
-        args.experimental.useRecoverySource = true;
-        args.experimental.previousSnapshotName = "previous";
-        args.experimental.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
+        args.legacySource.sourceVersion = Version.fromString("ES 7.10.2");
+        args.legacySource.repoUri = "file:///snapshots";
+        args.legacySource.snapshotName = "nightly";
+        args.legacySource.maxShardSizeBytes = 1234L;
+        args.legacySource.useRecoverySource = true;
+        args.legacySource.previousSnapshotName = "previous";
+        args.legacySource.experimentalDeltaMode = DeltaMode.UPDATES_ONLY;
 
         var selection = RfsMigrateDocuments.selectSource(args, true);
 

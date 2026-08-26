@@ -12,14 +12,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
@@ -151,31 +150,14 @@ public class RfsMigrateDocuments {
             description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(required = false,
-            names = { "--snapshot-name", "--snapshotName" },
-            description = "The name of the snapshot to migrate. Required for snapshot migrations.")
-        public String snapshotName;
-
-        @Parameter(required = false,
-            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
-            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
-        public String repoUri = null;
+        @ParametersDelegate
+        public LegacySourceArgs legacySource = new LegacySourceArgs();
 
         @Parameter(required = false,
             names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
             description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
                 "Required for s3:// and gs:// repos."))
         public String localDir = null;
-
-        @Parameter(required = false,
-            names = { "--s3-region", "--s3Region" },
-            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
-        public String s3Region = null;
-
-        @Parameter(required = false,
-            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
-        public String endpoint = null;
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
@@ -198,13 +180,6 @@ public class RfsMigrateDocuments {
             description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
                 "Default: all non-system indices (e.g. those not starting with '.')"))
         public List<String> indexAllowlist = List.of();
-
-        @Parameter(required = false,
-            names = { "--max-shard-size-bytes", "--maxShardSizeBytes" },
-            description = ("Optional. The maximum shard size, in bytes, to allow when " +
-                "performing the document migration.  " +
-                "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
-        public long maxShardSizeBytes = DEFAULT_MAX_SHARD_SIZE_BYTES;
 
         @Parameter(required = false,
             names = { "--initial-lease-duration", "--initialLeaseDuration" },
@@ -257,12 +232,6 @@ public class RfsMigrateDocuments {
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = false,
-            names = { "--source-version", "--sourceVersion" },
-            converter = VersionConverter.class,
-            description = ("Version of the source cluster, for example: Elasticsearch 7.10, OS 1.3 or Solr 9. Required."))
-        public Version sourceVersion;
-
-        @Parameter(required = false,
             names = { "--session-name", "--sessionName" },
             description = "Name to disambiguate fleets of RFS workers running against the same target.  " +
                 "This will be appended to the name of the index that is used for work coordination.",
@@ -296,9 +265,6 @@ public class RfsMigrateDocuments {
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
-
-        @ParametersDelegate
-        private VersionStrictness versionStrictness = new VersionStrictness();
 
         @ParametersDelegate
         ExperimentalArgs experimental = new ExperimentalArgs();
@@ -369,7 +335,54 @@ public class RfsMigrateDocuments {
         public long failedDocumentStreamMaxBufferBytes = S3FailedDocumentStreamSink.DEFAULT_MAX_BUFFER_BYTES;
     }
 
-    public static class ExperimentalArgs {
+    /**
+     * The flags whose values now live in {@code --source-config}, grouped so the conflict check reads
+     * the group rather than a hand-maintained list. Flags that also configure {@link SourceRuntime}
+     * stay out, since rejecting them would take their runtime meaning with them.
+     *
+     * <p>Every parameter here must default to null, booleans included: JSON and {@code RFS_} env vars
+     * can pass {@code false}, and a defaulted field would read that as "not given". Resolve effective
+     * defaults at the read site. {@code ExplicitSourceSelectionTest} enforces this.
+     */
+    public static class LegacySourceArgs {
+
+        @Parameter(required = false,
+            names = { "--snapshot-name", "--snapshotName" },
+            description = "The name of the snapshot to migrate. Required for snapshot migrations.")
+        public String snapshotName;
+
+        @Parameter(required = false,
+            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
+            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+        public String repoUri = null;
+
+        @Parameter(required = false,
+            names = { "--s3-region", "--s3Region" },
+            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
+        public String s3Region = null;
+
+        @Parameter(required = false,
+            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+        public String endpoint = null;
+
+        @Parameter(required = false,
+            names = { "--source-version", "--sourceVersion" },
+            converter = VersionConverter.class,
+            description = ("Version of the source cluster, for example: Elasticsearch 7.10, OS 1.3 or Solr 9. Required."))
+        public Version sourceVersion;
+
+        @Parameter(required = false,
+            names = { "--max-shard-size-bytes", "--maxShardSizeBytes" },
+            description = ("Optional. The maximum shard size, in bytes, to allow when " +
+                "performing the document migration.  " +
+                "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
+        public Long maxShardSizeBytes;
+
+        public long maxShardSizeBytesOrDefault() {
+            return maxShardSizeBytes != null ? maxShardSizeBytes : DEFAULT_MAX_SHARD_SIZE_BYTES;
+        }
+
         @Parameter(required = false,
             names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
             description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
@@ -392,7 +405,11 @@ public class RfsMigrateDocuments {
                 "Without this flag, migration of sourceless indices will fail with an error.",
             arity = 0
         )
-        public boolean enableSourcelessMigrations = false;
+        public Boolean enableSourcelessMigrations;
+
+        public boolean enableSourcelessMigrationsOrDefault() {
+            return Boolean.TRUE.equals(enableSourcelessMigrations);
+        }
 
         @Parameter(required = false,
             names = { "--use-recovery-source" },
@@ -402,8 +419,52 @@ public class RfsMigrateDocuments {
                 "and stored fields is insufficient.",
             arity = 0
         )
-        public boolean useRecoverySource = false;
+        public Boolean useRecoverySource;
 
+        public boolean useRecoverySourceOrDefault() {
+            return Boolean.TRUE.equals(useRecoverySource);
+        }
+
+        @ParametersDelegate
+        public VersionStrictness versionStrictness = new VersionStrictness();
+
+        /**
+         * The flags in this group that the caller gave. Diffing against a pristine instance covers the
+         * command line, JSON and env vars alike; JCommander's assigned-bit would see only the first.
+         */
+        List<String> givenFlags() {
+            var given = new ArrayList<String>();
+            collectGivenFlags(this, new LegacySourceArgs(), given);
+            return given;
+        }
+
+        private static void collectGivenFlags(Object given, Object pristine, List<String> flags) {
+            for (var field : given.getClass().getDeclaredFields()) {
+                if (field.isSynthetic()) {
+                    continue;
+                }
+                field.setAccessible(true);
+                Object givenValue;
+                Object pristineValue;
+                try {
+                    givenValue = field.get(given);
+                    pristineValue = field.get(pristine);
+                } catch (IllegalAccessException e) {
+                    throw new IllegalStateException("Could not read " + field.getName(), e);
+                }
+                if (field.isAnnotationPresent(ParametersDelegate.class)) {
+                    collectGivenFlags(givenValue, pristineValue, flags);
+                    continue;
+                }
+                var parameter = field.getAnnotation(Parameter.class);
+                if (parameter != null && !Objects.equals(givenValue, pristineValue)) {
+                    flags.add(parameter.names()[0]);
+                }
+            }
+        }
+    }
+
+    public static class ExperimentalArgs {
         @Parameter(required = false,
             names = { "--position-gap-stopword", "--positionGapStopword" },
             description = "Optional. Token used to fill skipped Lucene positions when reconstructing analyzed-text " +
@@ -477,25 +538,6 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private record SupersededArg(String flag, Predicate<Args> wasGiven) {}
-
-    /**
-     * Arguments whose values now live in {@code --source-config}. Working directories are absent on
-     * purpose: they configure {@link SourceRuntime}, not the spec, and are still required.
-     */
-    private static final List<SupersededArg> SUPERSEDED_BY_SOURCE_CONFIG = List.of(
-        new SupersededArg("--repo-uri", a -> a.repoUri != null),
-        new SupersededArg("--snapshot-name", a -> a.snapshotName != null),
-        new SupersededArg("--source-version", a -> a.sourceVersion != null),
-        new SupersededArg("--s3-region", a -> a.s3Region != null),
-        new SupersededArg("--endpoint", a -> a.endpoint != null),
-        new SupersededArg("--max-shard-size-bytes", a -> a.maxShardSizeBytes != DEFAULT_MAX_SHARD_SIZE_BYTES),
-        new SupersededArg("--use-recovery-source", a -> a.experimental.useRecoverySource),
-        new SupersededArg("--enable-sourceless-migrations", a -> a.experimental.enableSourcelessMigrations),
-        new SupersededArg("--experimental-delta-mode", a -> a.experimental.experimentalDeltaMode != null),
-        new SupersededArg("--experimental-previous-snapshot-name",
-            a -> a.experimental.previousSnapshotName != null));
-
     /** Validates the pair and returns the chosen provider, or null when neither argument was given. */
     static DocumentSourceProvider<?> validateSourceSelection(Args args) {
         if (args.sourceKind == null && args.sourceConfig == null) {
@@ -504,10 +546,7 @@ public class RfsMigrateDocuments {
         if (args.sourceKind == null || args.sourceConfig == null) {
             throw new ParameterException("--source-kind and --source-config must be given together.");
         }
-        var conflicting = SUPERSEDED_BY_SOURCE_CONFIG.stream()
-            .filter(s -> s.wasGiven().test(args))
-            .map(SupersededArg::flag)
-            .collect(Collectors.toList());
+        var conflicting = args.legacySource.givenFlags();
         if (!conflicting.isEmpty()) {
             throw new ParameterException("--source-kind supersedes " + String.join(", ", conflicting)
                 + "; put those settings in --source-config instead of passing both.");
@@ -559,14 +598,14 @@ public class RfsMigrateDocuments {
             return;
         }
         // Solr backup path
-        if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
-            if (args.repoUri == null) {
+        if (args.legacySource.sourceVersion != null && args.legacySource.sourceVersion.getFlavor() == Flavor.SOLR) {
+            if (args.legacySource.repoUri == null) {
                 throw new ParameterException(
                     "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
             }
-            var parsedUri = RepoUri.parse(args.repoUri);
-            if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
+            var parsedUri = RepoUri.parse(args.legacySource.repoUri);
+            if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.legacySource.s3Region == null)) {
                 throw new ParameterException(
                     "For Solr backup migration with S3, --local-dir and --s3-region are required."
                 );
@@ -579,22 +618,22 @@ public class RfsMigrateDocuments {
             return;
         }
 
-        if (args.snapshotName == null) {
+        if (args.legacySource.snapshotName == null) {
             throw new ParameterException("--snapshot-name is required for snapshot migrations.");
         }
         if (args.luceneDir == null) {
             throw new ParameterException("--lucene-dir is required for snapshot migrations.");
         }
-        if (args.sourceVersion == null) {
+        if (args.legacySource.sourceVersion == null) {
             throw new ParameterException("--source-version is required.");
         }
 
-        if (args.repoUri == null) {
+        if (args.legacySource.repoUri == null) {
             throw new ParameterException("--repo-uri is required.");
         }
 
-        var parsedUri = RepoUri.parse(args.repoUri);
-        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
+        var parsedUri = RepoUri.parse(args.legacySource.repoUri);
+        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.legacySource.s3Region == null)) {
             throw new ParameterException(
                 "If an s3 repo is being used, --s3-region and --local-dir must be set."
             );
@@ -606,16 +645,16 @@ public class RfsMigrateDocuments {
         }
         
         // Validate delta mode parameters
-        if (args.experimental.experimentalDeltaMode != null) {
-            if (args.experimental.previousSnapshotName == null) {
+        if (args.legacySource.experimentalDeltaMode != null) {
+            if (args.legacySource.previousSnapshotName == null) {
                 throw new ParameterException(
                     "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
                 );
             }
             log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
                     "This feature is experimental and should not be used in production.")
-                    .addArgument(args.experimental.experimentalDeltaMode).log();
-        } else if (args.experimental.previousSnapshotName != null) {
+                    .addArgument(args.legacySource.experimentalDeltaMode).log();
+        } else if (args.legacySource.previousSnapshotName != null) {
             log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
                 "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
@@ -716,7 +755,7 @@ public class RfsMigrateDocuments {
             : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
         boolean emitDocType = resolveEmitDocType(
-            arguments.emitDocType, arguments.sourceVersion, docTransformerConfig);
+            arguments.emitDocType, arguments.legacySource.sourceVersion, docTransformerConfig);
 
         var sourceFactory = buildSourceFactory(arguments, targetClient,
             docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
@@ -845,11 +884,11 @@ public class RfsMigrateDocuments {
         if (snapshotReadFailure == null) {
             return OptionalInt.empty();
         }
-        var repo = arguments.repoUri;
+        var repo = arguments.legacySource.repoUri;
         log.atError().setCause(e)
             .setMessage("{}")
             .addArgument(SnapshotReadFailures.describe(
-                snapshotReadFailure, arguments.snapshotName, repo, arguments.s3Region))
+                snapshotReadFailure, arguments.legacySource.snapshotName, repo, arguments.legacySource.s3Region))
             .log();
         return OptionalInt.of(SNAPSHOT_READ_FAILED_EXIT_CODE);
     }
@@ -865,30 +904,30 @@ public class RfsMigrateDocuments {
         if (arguments.sourceKind != null) {
             return new SourceSelection(arguments.sourceKind, readSourceConfig(arguments.sourceConfig));
         }
-        if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
+        if (arguments.legacySource.sourceVersion != null && arguments.legacySource.sourceVersion.getFlavor() == Flavor.SOLR) {
             return new SourceSelection(SolrBackupSourceProvider.KIND, new SolrBackupSourceSpec(
-                arguments.repoUri,
-                arguments.snapshotName,
-                arguments.sourceVersion.getMajor(),
+                arguments.legacySource.repoUri,
+                arguments.legacySource.snapshotName,
+                arguments.legacySource.sourceVersion.getMajor(),
                 arguments.indexAllowlist,
-                arguments.s3Region,
-                arguments.endpoint
+                arguments.legacySource.s3Region,
+                arguments.legacySource.endpoint
             ).toJson());
         }
         return new SourceSelection(EsSnapshotSourceProvider.KIND, new EsSnapshotSourceSpec(
-            arguments.repoUri,
-            arguments.snapshotName,
-            arguments.sourceVersion,
+            arguments.legacySource.repoUri,
+            arguments.legacySource.snapshotName,
+            arguments.legacySource.sourceVersion,
             arguments.indexAllowlist,
-            arguments.s3Region,
-            arguments.endpoint,
-            arguments.versionStrictness.allowLooseVersionMatches,
-            arguments.maxShardSizeBytes,
-            arguments.experimental.useRecoverySource,
+            arguments.legacySource.s3Region,
+            arguments.legacySource.endpoint,
+            arguments.legacySource.versionStrictness.allowsLooseVersionMatches(),
+            arguments.legacySource.maxShardSizeBytesOrDefault(),
+            arguments.legacySource.useRecoverySourceOrDefault(),
             emitDocType,
-            arguments.experimental.previousSnapshotName,
-            arguments.experimental.experimentalDeltaMode,
-            arguments.experimental.enableSourcelessMigrations
+            arguments.legacySource.previousSnapshotName,
+            arguments.legacySource.experimentalDeltaMode,
+            arguments.legacySource.enableSourcelessMigrationsOrDefault()
         ).toJson());
     }
 
@@ -1073,7 +1112,7 @@ public class RfsMigrateDocuments {
             return null;
         }
         var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
-            : arguments.s3Region;
+            : arguments.legacySource.s3Region;
         if (region == null) {
             throw new ParameterException("--failed-document-stream-s3-region (or --s3-region) is required when --failed-document-stream-s3-bucket is set");
         }
@@ -1087,7 +1126,7 @@ public class RfsMigrateDocuments {
         // go to the default AWS endpoint while snapshot reads use the override.
         var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
             ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
-            : arguments.endpoint;
+            : arguments.legacySource.endpoint;
         if (endpoint != null && !endpoint.isBlank()) {
             s3ClientBuilder.endpointOverride(URI.create(endpoint));
         }
