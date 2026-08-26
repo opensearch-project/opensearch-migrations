@@ -1,12 +1,12 @@
-import { App, Tags } from 'aws-cdk-lib';
+import { App, Aspects } from 'aws-cdk-lib';
 import { readFileSync } from 'node:fs';
+import { RemoveResourceTags } from "../lib/remove-resource-tags";
 import { StackComposer } from "../lib/stack-composer";
 
 export function createApp(): App {
   const app = new App();
   const versionFile = readFileSync('../../../VERSION', 'utf-8');
   const version = versionFile.replaceAll('\n', '');
-  Tags.of(app).add("migration_deployment", version);
 
   const account = process.env.CDK_DEFAULT_ACCOUNT;
   const region = process.env.CDK_DEFAULT_REGION;
@@ -24,6 +24,8 @@ export function createApp(): App {
     migrationsSolutionVersion: version,
     env: { account: account, region: region }
   });
+
+  Aspects.of(app).add(new RemoveResourceTags(), { priority: RemoveResourceTags.PRIORITY });
 
   return app;
 }

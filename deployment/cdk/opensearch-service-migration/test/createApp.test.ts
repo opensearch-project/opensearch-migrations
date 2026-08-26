@@ -1,5 +1,6 @@
-import { App, Tags } from 'aws-cdk-lib';
+import { App, Aspects } from 'aws-cdk-lib';
 import { createApp } from '../bin/createApp';
+import { RemoveResourceTags } from '../lib/remove-resource-tags';
 import { StackComposer } from '../lib/stack-composer';
 
 jest.mock('node:fs', () => ({
@@ -12,7 +13,7 @@ jest.mock('aws-cdk-lib', () => ({
       tryGetContext: jest.fn(),
     },
   })),
-  Tags: {
+  Aspects: {
     of: jest.fn().mockReturnValue({
       add: jest.fn(),
     }),
@@ -40,16 +41,19 @@ describe('createApp', () => {
     process.env.CDK_DEFAULT_REGION = 'test-region';
     process.env.MIGRATIONS_USER_AGENT = 'test-user-agent';
 
-    const mockAddTag = jest.fn();
-    Tags.of = jest.fn().mockReturnValue({ add: mockAddTag });
+    const mockAddAspect = jest.fn();
+    Aspects.of = jest.fn().mockReturnValue({ add: mockAddAspect });
 
     const app = createApp();
 
     // Verify App creation
     expect(App).toHaveBeenCalled();
 
-    // Verify tag addition
-    expect(mockAddTag).toHaveBeenCalledWith('migration_deployment', '1.0.0');
+    // Verify the tag removal aspect is applied, after the tagging aspects
+    expect(mockAddAspect).toHaveBeenCalledWith(
+      expect.any(RemoveResourceTags),
+      { priority: RemoveResourceTags.PRIORITY }
+    );
 
     // Verify StackComposer creation
     expect(StackComposer).toHaveBeenCalledWith(

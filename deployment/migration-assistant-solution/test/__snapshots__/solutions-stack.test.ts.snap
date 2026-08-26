@@ -238,26 +238,6 @@ npm install 2>&1
             },
           ],
         },
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "bootstrap-instance-",
-                  {
-                    "Ref": "Stage",
-                  },
-                  "-",
-                  {
-                    "Ref": "AWS::Region",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "UserData": {
           "Fn::Base64": {
             "Fn::Join": [
@@ -690,26 +670,6 @@ npm install 2>&1
         "SubnetId": {
           "Ref": "VpcPrivateSubnet1Subnet536B997A",
         },
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "bootstrap-instance-",
-                  {
-                    "Ref": "Stage",
-                  },
-                  "-",
-                  {
-                    "Ref": "AWS::Region",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "UserData": {
           "Fn::Base64": {
             "Fn::Join": [
@@ -945,43 +905,11 @@ npm install 2>&1
         "EnableDnsHostnames": true,
         "EnableDnsSupport": true,
         "InstanceTenancy": "default",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-vpc-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
       },
       "Type": "AWS::EC2::VPC",
     },
     "VpcEIGW61416F369": {
       "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-vpc-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },
@@ -989,24 +917,6 @@ npm install 2>&1
       "Type": "AWS::EC2::EgressOnlyInternetGateway",
     },
     "VpcIGWD7BA715C": {
-      "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-vpc-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
-      },
       "Type": "AWS::EC2::InternetGateway",
     },
     "VpcPrivateSubnet1DefaultRoute6B45CB740": {
@@ -1058,22 +968,6 @@ npm install 2>&1
         "Vpcipv6cidr40D3CB78",
       ],
       "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },
@@ -1127,20 +1021,6 @@ npm install 2>&1
             "Key": "aws-cdk:subnet-type",
             "Value": "Private",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
@@ -1183,22 +1063,6 @@ npm install 2>&1
         "Vpcipv6cidr40D3CB78",
       ],
       "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },
@@ -1266,20 +1130,6 @@ npm install 2>&1
             "Key": "aws-cdk:subnet-type",
             "Value": "Private",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
@@ -1324,22 +1174,6 @@ npm install 2>&1
       ],
       "Properties": {
         "Domain": "vpc",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
       },
       "Type": "AWS::EC2::EIP",
     },
@@ -1360,22 +1194,6 @@ npm install 2>&1
         "SubnetId": {
           "Ref": "VpcPublicSubnet1Subnet5C2D37C4",
         },
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
       },
       "Type": "AWS::EC2::NatGateway",
     },
@@ -1384,22 +1202,6 @@ npm install 2>&1
         "Vpcipv6cidr40D3CB78",
       ],
       "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },
@@ -1467,20 +1269,6 @@ npm install 2>&1
             "Key": "aws-cdk:subnet-type",
             "Value": "Public",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
@@ -1525,22 +1313,6 @@ npm install 2>&1
       ],
       "Properties": {
         "Domain": "vpc",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
       },
       "Type": "AWS::EC2::EIP",
     },
@@ -1561,22 +1333,6 @@ npm install 2>&1
         "SubnetId": {
           "Ref": "VpcPublicSubnet2Subnet691E08A3",
         },
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
       },
       "Type": "AWS::EC2::NatGateway",
     },
@@ -1585,22 +1341,6 @@ npm install 2>&1
         "Vpcipv6cidr40D3CB78",
       ],
       "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },
@@ -1667,20 +1407,6 @@ npm install 2>&1
           {
             "Key": "aws-cdk:subnet-type",
             "Value": "Public",
-          },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
           },
         ],
         "VpcId": {

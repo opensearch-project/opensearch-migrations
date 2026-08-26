@@ -2582,43 +2582,11 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         "EnableDnsHostnames": true,
         "EnableDnsSupport": true,
         "InstanceTenancy": "default",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-vpc-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
       },
       "Type": "AWS::EC2::VPC",
     },
     "VpcEIGW61416F369": {
       "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-vpc-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
         },
@@ -2626,24 +2594,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
       "Type": "AWS::EC2::EgressOnlyInternetGateway",
     },
     "VpcIGWD7BA715C": {
-      "Properties": {
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-vpc-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
-        ],
-      },
       "Type": "AWS::EC2::InternetGateway",
     },
     "VpcPrivateSubnet1DefaultRoute6B45CB740": {
@@ -2717,20 +2667,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Key": "kubernetes.io/role/internal-elb",
             "Value": "1",
-          },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
           },
         ],
         "VpcId": {
@@ -2808,20 +2744,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/internal-elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
@@ -2886,20 +2808,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Key": "kubernetes.io/role/internal-elb",
             "Value": "1",
-          },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
           },
         ],
         "VpcId": {
@@ -2991,20 +2899,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/internal-elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-private-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
@@ -3054,20 +2948,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
       },
       "Type": "AWS::EC2::EIP",
@@ -3094,20 +2974,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
       },
       "Type": "AWS::EC2::NatGateway",
@@ -3121,20 +2987,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
-          },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
           },
         ],
         "VpcId": {
@@ -3208,20 +3060,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-1-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
         "VpcId": {
           "Ref": "Vpc8378EB38",
@@ -3271,20 +3109,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
       },
       "Type": "AWS::EC2::EIP",
@@ -3311,20 +3135,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
           },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
-          },
         ],
       },
       "Type": "AWS::EC2::NatGateway",
@@ -3338,20 +3148,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
-          },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
           },
         ],
         "VpcId": {
@@ -3424,20 +3220,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
           {
             "Key": "kubernetes.io/role/elb",
             "Value": "1",
-          },
-          {
-            "Key": "Name",
-            "Value": {
-              "Fn::Join": [
-                "",
-                [
-                  "migration-assistant-public-subnet-2-",
-                  {
-                    "Ref": "Stage",
-                  },
-                ],
-              ],
-            },
           },
         ],
         "VpcId": {

@@ -1,13 +1,13 @@
 import * as cdk from 'aws-cdk-lib';
 import {
+    Aspects,
     Aws,
     CfnCondition,
     CfnMapping, CfnOutput,
     CfnParameter,
     Fn,
     Stack,
-    StackProps,
-    Tags
+    StackProps
 } from 'aws-cdk-lib';
 import {Construct} from 'constructs';
 import {
@@ -28,6 +28,7 @@ import {
     ParameterLabel,
     buildTemplateDescription
 } from "./common-utils";
+import {RemoveResourceTags} from "./remove-resource-tags";
 
 export interface SolutionsInfrastructureStackEKSProps extends StackProps {
     readonly solutionId: string;
@@ -50,6 +51,10 @@ export class SolutionsInfrastructureEKSStack extends Stack {
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackEKSProps) {
         const finalId = props.stackNameSuffix ? `${id}-${props.stackNameSuffix}` : id
         super(scope, finalId, props);
+
+        // Deploying this stack must not require tag/untag permissions, which some organizations
+        // deny via SCPs. See RemoveResourceTags for the tags that are kept.
+        Aspects.of(this).add(new RemoveResourceTags(), { priority: RemoveResourceTags.PRIORITY });
 
         // Distinct description for EKS create vs import
         this.templateOptions.description = buildTemplateDescription(
@@ -91,17 +96,7 @@ export class SolutionsInfrastructureEKSStack extends Stack {
                 // Using 10.212.0.0/16 to avoid default VPC CIDR range conflicts when using VPC peering
                 ipAddresses: IpAddresses.cidr('10.212.0.0/16'),
                 ipProtocol: IpProtocol.DUAL_STACK,
-                vpcName: `migration-assistant-vpc-${stageParameter.valueAsString}`,
                 maxAzs: 2
-            });
-
-            vpc.publicSubnets.forEach((subnet, index) => {
-                Tags.of(subnet)
-                    .add("Name", `migration-assistant-public-subnet-${index + 1}-${stageParameter.valueAsString}`);
-            });
-            vpc.privateSubnets.forEach((subnet, index) => {
-                Tags.of(subnet)
-                    .add("Name", `migration-assistant-private-subnet-${index + 1}-${stageParameter.valueAsString}`);
             });
 
             // S3 used for storage and retrieval of snapshot data for backfills
