@@ -23,8 +23,10 @@ replay-quality dashboard.
    Migration Assistant components.
 
 2. **Elasticsearch** running locally on Docker, port 9200 — the Chorus Elasticsearch edition
-   (`docker compose up elasticsearch` from https://github.com/querqy/chorus-elasticsearch-edition,
-   the no-vector version).
+   from https://github.com/querqy/chorus-elasticsearch-edition.
+   ```bash
+   ./quickstart.sh --es-proxy https://localhost:9201
+   ``` 
 
 3. **kubectl context** pointing to the kind cluster:
    ```bash
