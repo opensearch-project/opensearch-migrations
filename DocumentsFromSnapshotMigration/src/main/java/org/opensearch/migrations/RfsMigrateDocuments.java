@@ -32,6 +32,8 @@ import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.provider.FailedDocumentStreamSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.provider.FailedDocumentStreamSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
 import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
@@ -56,6 +58,8 @@ import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.source.S3FailedDocumentStreamObjectStore;
+import org.opensearch.migrations.reindexer.faileddocumentstream.source.SessionSealer;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -64,6 +68,7 @@ import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.FileSystemUtils;
@@ -230,6 +235,15 @@ public class RfsMigrateDocuments {
                 "ALWAYS: always use server-generated IDs. " +
                 "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
+
+        @Parameter(required = false,
+            names = { "--allow-missing-document-ids", "--allowMissingDocumentIds" },
+            description = "Optional. Send operations that have no _id once transformation has run, rather "
+                + "than skipping and reporting them. Such an operation reproduces a write whose id the "
+                + "server assigned, so replaying it adds a document instead of replacing one — this flag "
+                + "acknowledges that duplicate. Distinct from --server-generated-ids, which strips the id "
+                + "from every operation.")
+        public boolean allowMissingDocumentIds = false;
 
         @Parameter(required = false,
             names = { "--session-name", "--sessionName" },
@@ -590,11 +604,53 @@ public class RfsMigrateDocuments {
         }
     }
 
+    /**
+     * Two things a source cannot check about itself, having no view of the sink's configuration:
+     * that the run does not read what it writes, and that its coordination is namespaced away from
+     * the backfill that produced the failures.
+     */
+    static void validateRedriveArgs(Args args, DocumentSourceProvider<?> provider, JsonNode config) {
+        if (!FailedDocumentStreamSourceProvider.KIND.equals(provider.kind())) {
+            return;
+        }
+        var spec = (FailedDocumentStreamSourceSpec) provider.parseSpec(config);
+        var outBucket = args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
+        if (outBucket != null && !outBucket.isBlank()) {
+            var inUri = RepoUri.parse(spec.streamUri());
+            if (inUri instanceof RepoUri.S3RepoUri in
+                && outBucket.equals(in.s3Uri().bucketName)
+                && normalizeStreamPrefix(args.failedDocumentStreamArgs.failedDocumentStreamS3Prefix)
+                    .equals(normalizeStreamPrefix(in.s3Uri().key))
+                && spec.sessionId().equals(resolveSessionId(args, ""))) {
+                throw new ParameterException("This redrive would write its own failures back into the"
+                    + " session it is reading (" + spec.streamUri() + " session=" + spec.sessionId()
+                    + "), so it would never finish. Give the run a different"
+                    + " --failed-document-stream-s3-session-id or a different bucket/prefix.");
+            }
+        }
+        if (args.indexNameSuffix == null || args.indexNameSuffix.isBlank()) {
+            throw new ParameterException("--session-name is required for " + provider.kind()
+                + " so the redrive coordinates its work separately from the backfill that produced"
+                + " the failures. It changes only the coordination namespace, not which session is read.");
+        }
+    }
+
+    /** Ignores a trailing slash when comparing prefixes. */
+    private static String normalizeStreamPrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return "";
+        }
+        var trimmed = prefix.startsWith("/") ? prefix.substring(1) : prefix;
+        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+    }
+
     public static void validateArgs(Args args) {
         var provider = validateSourceSelection(args);
         if (provider != null) {
             // The provider validates its own config; only the runtime requirements are ours to check.
-            validateRuntimeArgs(args, provider, readSourceConfig(args.sourceConfig));
+            var config = readSourceConfig(args.sourceConfig);
+            validateRuntimeArgs(args, provider, config);
+            validateRedriveArgs(args, provider, config);
             return;
         }
         // Solr backup path
@@ -761,7 +817,8 @@ public class RfsMigrateDocuments {
             docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
-        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink);
+        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory,
+            failedDocumentStreamSink, resolvedSessionId);
     }
 
     private static void runMigration(
@@ -770,7 +827,8 @@ public class RfsMigrateDocuments {
         CoordinatorInfo coordinatorInfo,
         RootDocumentMigrationContext context,
         MigrationSourceFactory sourceFactory,
-        FailedDocumentStreamSink failedDocumentStreamSink
+        FailedDocumentStreamSink failedDocumentStreamSink,
+        String failedDocumentStreamSessionId
     ) throws Exception {
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -852,6 +910,8 @@ public class RfsMigrateDocuments {
             }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire. Exiting with exit code " + NO_WORK_LEFT_EXIT_CODE).log();
+            // The moment the session stops changing. Several workers may race; the seal is conditional.
+            sealFailedDocumentStreamSession(arguments, failedDocumentStreamSink, failedDocumentStreamSessionId);
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
@@ -964,6 +1024,23 @@ public class RfsMigrateDocuments {
         return chosen != null ? Paths.get(chosen) : Paths.get(System.getProperty("java.io.tmpdir"));
     }
 
+    /** Put a source's mandatory transform in front of the user's, if it declares one. */
+    static Supplier<IJsonTransformer> chainRequiredPreTransform(
+        DocumentSourceProvider<?> provider,
+        JsonNode config,
+        Supplier<IJsonTransformer> userTransformerSupplier
+    ) {
+        var required = provider.requiredPreTransform(config);
+        if (required.isEmpty()) {
+            return userTransformerSupplier;
+        }
+        var requiredSupplier = required.get();
+        if (userTransformerSupplier == null) {
+            return requiredSupplier;
+        }
+        return () -> new JsonCompositeTransformer(requiredSupplier.get(), userTransformerSupplier.get());
+    }
+
     private static MigrationSourceFactory buildSourceFactory(
         Args arguments,
         OpenSearchClient targetClient,
@@ -975,6 +1052,7 @@ public class RfsMigrateDocuments {
         var selection = selectSource(arguments, emitDocType);
         var provider = DocumentSourceRegistry.getDefault().resolve(selection.kind());
         var runtime = buildSourceRuntime(arguments, context);
+        var transformerSupplier = chainRequiredPreTransform(provider, selection.config(), docTransformerSupplier);
 
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
             // Skip an expensive setup when nothing is left, so a restarted pod doesn't redo it.
@@ -986,7 +1064,7 @@ public class RfsMigrateDocuments {
             var documentSource = provider.open(selection.config(), runtime);
 
             return prepareAndMigrate(documentSource,
-                workCoordinator, processManager, targetClient, docTransformerSupplier,
+                workCoordinator, processManager, targetClient, transformerSupplier,
                 useServerGeneratedIds, buildDocumentExceptionAllowlist(arguments), progressCursor,
                 cancellationRunnableRef, workItemTimeProvider, arguments, context);
         };
@@ -1018,6 +1096,7 @@ public class RfsMigrateDocuments {
             .batchConcurrency(arguments.maxConnections)
             .transformerSupplier(docTransformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
+            .allowMissingDocumentIds(arguments.allowMissingDocumentIds)
             .allowlist(allowlist)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)
@@ -1070,6 +1149,44 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /**
+     * Publish this run's failure-stream manifest so the session can be read back as a source.
+     *
+     * <p>Best-effort: the backfill has finished, and failing the migration over an unwritten seal
+     * would turn a re-runnable console command into a failed run.
+     */
+    static void sealFailedDocumentStreamSession(Args arguments, FailedDocumentStreamSink sink, String sessionId) {
+        if (sink == null) {
+            return;
+        }
+        var bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
+        var prefix = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Prefix;
+        var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
+            : arguments.legacySource.s3Region;
+        var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
+            : arguments.legacySource.endpoint;
+        try (var store = S3FailedDocumentStreamObjectStore.create(bucket, region, endpoint)) {
+            var result = new SessionSealer(store).seal(prefix, sessionId);
+            log.atInfo()
+                .setMessage("Failure-stream session '{}' is sealed ({} by this worker); digest {}")
+                .addArgument(sessionId)
+                .addArgument(result.publishedByThisCaller() ? "published" : "already published")
+                .addArgument(result.digest())
+                .log();
+        } catch (SessionSealer.SessionSealMismatchException e) {
+            log.atError().setCause(e)
+                .setMessage("Failure-stream session '{}' could not be sealed consistently")
+                .addArgument(sessionId).log();
+        } catch (Exception e) {
+            log.atWarn().setCause(e)
+                .setMessage("Could not seal failure-stream session '{}'. Redriving it needs a seal; run"
+                    + " 'console failed-document-stream seal' before redriving.")
+                .addArgument(sessionId).log();
+        }
     }
 
     /**

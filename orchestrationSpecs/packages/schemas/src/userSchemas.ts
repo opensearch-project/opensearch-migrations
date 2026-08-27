@@ -1067,6 +1067,21 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Maximum uncompressed bytes buffered in memory per target index before the failed document stream rotates " +
             "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
             "failures. Default 67108864 (64 MiB)."),
+    sourceKind: z.string().optional()
+        .describe("Which document source the backfill reads, e.g. 'es-snapshot', 'solr-backup' or " +
+            "'failed-document-stream'. Leave it unset for an ordinary backfill: the kind is then inferred " +
+            "from the snapshot being migrated. Setting it supersedes the snapshot arguments, which are " +
+            "omitted from the RFS invocation, and requires sourceConfig."),
+    sourceConfig: z.string().optional()
+        .describe("The source's own configuration as JSON, for use with sourceKind. Each source defines its " +
+            "own shape — a failure-stream redrive takes {\"streamUri\",\"sessionId\",\"s3Region\"," +
+            "\"indexAllowlist\",\"failureClasses\"}. Normally written by " +
+            "'console failed-document-stream redrive' rather than by hand."),
+    allowMissingDocumentIds: z.boolean().default(false).optional()
+        .describe("Send operations that have no _id rather than skipping and reporting them. Such an " +
+            "operation reproduces a write whose id the server assigned, so replaying it adds a document " +
+            "instead of replacing one — this acknowledges that duplicate. Distinct from serverGeneratedIds, " +
+            "which strips the id from every operation."),
     positionGapStopword: z.string().default("a").optional()
         .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
             "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +

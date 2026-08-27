@@ -1,4 +1,5 @@
 # pyright: ignore[reportCallIssue]
+import io
 import signal
 from contextlib import contextmanager
 import json
@@ -1003,6 +1004,201 @@ def backfill_failed_document_stream_list_cmd(ctx, migration, limit):
         click.echo(f"{r.get('timestamp', '-')}\t{r.get('targetIndex', '-')}\t"
                    f"{r.get('documentId', '-')}\t{r.get('failureClass', '-')}\t"
                    f"{r.get('failureType', '-')}")
+
+
+@failed_document_stream_group.command(
+    name="seal",
+    help="Close this session to further writes by publishing a manifest of what it holds. "
+         "Only a sealed session can be redriven.")
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+@click.pass_obj
+def failed_document_stream_seal_cmd(ctx, migration):
+    """Covers backfills that were aborted before RFS could seal them itself."""
+    try:
+        cfg = failed_document_stream_.load_config(migration_override=migration)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        raise click.ClickException(str(e))
+    try:
+        result = failed_document_stream_.seal(cfg)
+    except failed_document_stream_.SessionSealMismatch as e:
+        raise click.ClickException(str(e))
+
+    summary = failed_document_stream_.manifest_summary(result["manifest"])
+    if ctx.json:
+        click.echo(json.dumps({
+            "sessionId": cfg.session_id,
+            "location": cfg.location_uri,
+            "digest": result["digest"],
+            "published": result["published"],
+            "collections": [
+                {"index": index, "partitions": partitions, "objects": objects}
+                for (index, partitions, objects) in summary
+            ],
+        }))
+        return
+    click.echo(f"{'Sealed' if result['published'] else 'Already sealed'}: {cfg.location_uri}")
+    click.echo(f"Digest: {result['digest']}")
+    if not summary:
+        click.echo("No failed documents were recorded in this session.")
+        return
+    for index, partitions, objects in summary:
+        click.echo(f"  {index}\t{partitions} worker(s)\t{objects} object(s)")
+
+
+@failed_document_stream_group.command(
+    name="redrive",
+    help="Resubmit this session's failed documents to the target cluster.")
+@click.option('--migration', default=None, help='SnapshotMigration to inspect (required when several exist).')
+@click.option('--index', 'indices', multiple=True,
+              help='Limit the redrive to this target index. Repeatable; default is every index.')
+@click.option('--failure-class', 'failure_classes', multiple=True,
+              type=click.Choice(failed_document_stream_.FAILURE_CLASSES, case_sensitive=False),
+              help='Limit the redrive to this failure class. Repeatable; default is both.')
+@click.option('--preview-limit', 'preview_limit', default=None, type=int,
+              help='Cap how many records the preview lists. Affects the preview only — a redrive '
+                   'submits every matching document.')
+@click.option('--dry-run', is_flag=True, default=False,
+              help='Show what would be redriven and submit nothing.')
+@click.option('--allow-missing-document-ids', is_flag=True, default=False,
+              help='Also resubmit documents whose original write had no _id. Their ids were assigned '
+                   'by the server, so resubmitting adds a document rather than replacing one.')
+@click.option('--config-session', 'config_session', default='default', show_default=True,
+              help='Workflow configuration session that ran this migration. Its target and backfill '
+                   'settings are reused, and are verified against the migration before submission.')
+@click.option('--yes', is_flag=True, default=False, help='Skip the confirmation prompt.')
+@click.pass_obj
+def failed_document_stream_redrive_cmd(ctx, migration, indices, failure_classes, preview_limit,
+                                       dry_run, allow_missing_document_ids, config_session, yes):
+    """Submit a backfill whose source is this sealed failure-stream session.
+
+    The session and the settings it runs under are resolved from the same SnapshotMigration, and the
+    saved configuration is checked against it before anything is submitted.
+    """
+    try:
+        cfg, identity = failed_document_stream_.load_config_and_identity(migration_override=migration)
+    except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
+        raise click.ClickException(str(e))
+
+    manifest = failed_document_stream_.read_manifest(cfg)
+    if manifest is None:
+        seal_command = "  console failed-document-stream seal"
+        if migration:
+            seal_command += f" --migration {migration}"
+        raise click.ClickException(
+            f"Failure-stream session '{cfg.session_id}' has not been sealed, so its contents can "
+            "still change while they are being read. Seal it first:\n" + seal_command)
+
+    try:
+        plan = failed_document_stream_.plan_redrive(
+            cfg, manifest, indices=list(indices), failure_classes=list(failure_classes),
+            limit=preview_limit)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    payload = {
+        "migration": identity.name,
+        "sessionId": cfg.session_id,
+        "location": cfg.location_uri,
+        "dryRun": dry_run,
+        "total": plan["total"],
+        "skippedWithoutId": plan["skipped_without_id"],
+        "indices": plan["indices"],
+        "documents": plan["documents"],
+    }
+
+    if plan["total"] == 0:
+        if ctx.json:
+            click.echo(json.dumps({**payload, "submitted": False}))
+        else:
+            click.echo("No failed documents match; nothing to redrive.")
+        return
+
+    if dry_run:
+        if ctx.json:
+            click.echo(json.dumps({**payload, "submitted": False}))
+        else:
+            _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids)
+            click.echo("\nDry run: nothing was submitted.")
+        return
+
+    if ctx.json:
+        # No prompt to answer, so the acknowledgement must come from the command line.
+        if not yes:
+            raise click.ClickException(
+                "Refusing to redrive without --yes under --json: this replaces existing documents "
+                "at the ids being written and there is no prompt to confirm it. Re-run with --yes, "
+                "or with --dry-run to see what would be written.")
+    else:
+        _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids)
+        if not yes:
+            click.confirm("Proceed with the redrive?", abort=True)
+
+    source_config = failed_document_stream_.build_source_config(
+        cfg, indices=list(indices), failure_classes=list(failure_classes))
+    submission = _submit_redrive_workflow(
+        config_session, source_config, identity, allow_missing_document_ids, quiet=ctx.json)
+
+    if ctx.json:
+        click.echo(json.dumps({**payload, "submitted": True, "submission": submission}))
+
+
+def _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids):
+    click.echo(f"Migration: {identity.describe()}")
+    click.echo(f"Session:  {cfg.location_uri}")
+    click.echo(f"Documents to redrive: {plan['total']}")
+    click.echo("Indices that will be WRITTEN:")
+    for index, count in sorted(plan["indices"].items()):
+        click.echo(f"  {index}\t{count} document(s)")
+    # RFS cannot tell whether the migration combined several source indices into one target, so an
+    # id may now hold a different index's document. Only the operator can rule that out.
+    click.echo("\nWARNING: existing documents at these ids will be REPLACED. If this migration "
+               "combined several source indices into one target index, a redriven document can "
+               "overwrite a different index's document that now holds the same id.")
+    if plan["skipped_without_id"]:
+        fate = ("resubmitted, which may create duplicates." if allow_missing_document_ids else
+                "skipped. Their ids were assigned by the server, so resubmitting would add a "
+                "document rather than replace one; pass --allow-missing-document-ids to send "
+                "them anyway.")
+        click.echo(f"\n{plan['skipped_without_id']} document(s) have no _id and will be {fate}")
+
+
+def _submit_redrive_workflow(config_session, source_config, identity, allow_missing_document_ids,
+                             quiet=False):
+    """Submit the saved workflow config with its document backfill pointed at the failure stream.
+
+    Returns the result so a JSON run can fold it in rather than interleave it with progress text.
+    """
+    from console_link.workflow.services.script_runner import ScriptRunner
+    from ruamel.yaml import YAML
+
+    store = WorkflowConfigStore()
+    config = store.load_config(session_name=config_session)
+    if not config or not config.data:
+        raise click.ClickException(
+            f"No workflow configuration found for session '{config_session}'. A redrive reuses the "
+            "target and transforms of the run that produced the failures, so it needs that run's "
+            "own configuration; pass --config-session naming it.")
+
+    try:
+        redrive_data = failed_document_stream_.build_redrive_config(
+            config.data, source_config, identity,
+            allow_missing_document_ids=allow_missing_document_ids)
+    except failed_document_stream_.RedriveConfigError as e:
+        raise click.ClickException(str(e))
+
+    buffer = io.StringIO()
+    YAML().dump(redrive_data, buffer)
+
+    if not quiet:
+        click.echo("Submitting the redrive workflow...")
+    result = ScriptRunner().submit_workflow(buffer.getvalue(), [])
+    workflow_name = result.get("workflow_name", "unknown")
+    warnings = result.get("warnings", []) or []
+    if not quiet:
+        click.echo(f"Redrive workflow submitted: {workflow_name}")
+        for warning in warnings:
+            click.echo(f"\n{warning}", err=True)
+    return {"workflowName": workflow_name, "configSession": config_session, "warnings": warnings}
 
 
 @backfill_group.command(

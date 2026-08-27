@@ -10,6 +10,10 @@ dependencies {
     // provider module, and providers do not depend on each other.
     api project(':RfsPipeline')
     api project(':RfsCommon')
+    // A source may declare a transform its records must pass through before any user transform
+    // (the failure stream's record-to-operation step). That is part of the SPI's vocabulary, so the
+    // interface is api. The module is dependency-free, so this brings nothing else along.
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation libs.jackson.databind
     implementation libs.slf4j.api

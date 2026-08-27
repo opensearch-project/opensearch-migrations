@@ -351,6 +351,106 @@ Outside this design, because a source cannot see the sink's configuration:
 - **Phase 4** — wire up the console command and rewrite #3065's acceptance criteria. #3065's premise
   predates two changes: the stored request is the pre-transform document, and there is no `dlq`
   command group, only `failed-document-stream`.
+
+### What Phases 3 and 4 actually landed
+
+`Document.id` became nullable, which the design listed as a decision but not as a dependency. It is
+one: the source emits a record whose operation transform 1 has yet to derive, so there is no id to
+carry at that point. The skip-and-report rule therefore applies to the *post-transform* operation,
+not to the IR document — an operation still without an `_id` once transformation has run is the one
+that reproduces a server-assigned write. `--allow-missing-document-ids` sends it anyway.
+
+The mandatory transform is declared by the provider (`DocumentSourceProvider.requiredPreTransform`)
+rather than special-cased on the kind string, and `RfsMigrateDocuments` chains it ahead of the user's.
+Leaving it to the operator was never viable: forgetting it writes whole records as documents rather
+than failing.
+
+The cursor is `fds:1:<ordinal>:<objectKey>` — the key is the remainder of the string, not a fourth
+delimited field, so a key containing `:` needs no escaping. Ordinals count the *raw* record stream
+before `--index`/`--failure-class` filtering, so a cursor means the same position whatever the run
+was asked to select.
+
+Two things a source cannot check about itself are checked by the caller, in `validateRedriveArgs`:
+that the run does not write into the session it reads, and that `--session-name` namespaces its
+coordination away from the backfill that produced the failures.
+
+The manifest's canonical encoding is pinned on both sides — `SessionManifestCrossLanguageTest` and
+`test_manifest_encoding_matches_the_java_sealer` assert the same literal. A worker seals when a
+backfill runs out of work and the console command covers the runs that never get there; both can
+race for one session, and the loser proves it lost by comparing digests, which only works if the two
+implementations encode identically.
+
+On the Argo side, `sourceKind`/`sourceConfig`/`allowMissingDocumentIds` are ordinary RFS process
+options, so they reach the process through the existing `---INLINE-JSON` path. `makeParamsDict` had
+to change all the same: it unconditionally emitted the snapshot arguments, and RfsMigrateDocuments
+rejects those alongside an explicit kind rather than silently preferring one. When a kind is named,
+neither the snapshot params nor the four source options it supersedes (`ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS`)
+are emitted.
+
+### #3065's acceptance criteria, rewritten
+
+The original criteria assumed a `console dlq redrive` that reads `requestItem`, POSTs batches to
+`/{index}/_bulk` itself, and reports per-document results. Three premises have since changed: there
+is no `dlq` command group, only `failed-document-stream`; the stored request holds the *source-index*
+document, so the user's transform must re-run rather than be bypassed; and every redrive goes through
+the coordinated path, so the console submits a run and does not do the writing. What replaces them:
+
+- [x] `console failed-document-stream redrive` is a subcommand of the existing
+      `failed-document-stream` group.
+- [x] `--dry-run` reports what would be written — per-index counts and a sample — and submits nothing.
+- [x] `--failure-class` filters before submission and rejects an unknown value by name; `--index`
+      restricts the redrive to named target indices. Both are carried in the source's own config,
+      not as bulk-time filtering.
+- [x] The saved workflow configuration is verified to be the one that produced the session before
+      anything is submitted — see "Configuration provenance" below.
+- [x] The command refuses an unsealed session and names the `seal` command that fixes it.
+- [x] Before submitting, it names every index that will be written and states that existing documents
+      at those ids will be REPLACED — RFS cannot detect a target that combined several source indices,
+      so the operator must.
+- [x] `--json` emits a single JSON document: counts, per-index totals, the sampled records, and the
+      submission result. Progress text is suppressed under it, and `--yes` is required, since there
+      is no prompt to answer in a machine-readable run.
+- [x] Documents whose original write had no `_id` are reported and skipped;
+      `--allow-missing-document-ids` sends them, acknowledging the duplicate.
+- [x] Redriven documents that fail again land back in the failure stream of the redrive run, which
+      can itself be redriven. Nothing is deleted from the original session — a seal is permanent.
+- [x] Unit tests cover filtering, the record-to-operation conversion, cursor resume, sealing races,
+      and that `--dry-run` submits nothing.
+
+Not carried over: "reconstructs bulk NDJSON and POSTs to `/{index}/_bulk`" and "prints per-document
+recovered/still-failed results". The pipeline does the writing, so per-document outcomes are reported
+the way every other backfill reports them — metrics, diagnostics, and re-failures in the stream.
+
+**`--limit` became `--preview-limit`.** #3065 defined it as the maximum number of documents to
+redrive, which a coordinated run cannot honour: partitions are migrated by independent workers with
+no count shared between them, so any "limit" would be per-worker and non-deterministic. Rather than
+ship an option whose name promises a bound it does not enforce, it caps the preview and says so.
+Narrowing what is actually written is `--index` and `--failure-class`, which the source applies
+deterministically.
+
+### Configuration provenance
+
+A redrive needs two things that must come from the same run: the failure-stream session, and the
+target and transforms to write it under. The session comes from the `SnapshotMigration` named by
+`--migration`. The settings come from a saved workflow configuration — and nothing about a saved
+configuration says which run it produced. Taking one from each independently is how documents reach
+a cluster they were never destined for: the configuration may have been edited since, or
+`--migration` may name an older run than the configuration describes.
+
+The config processor already projects the identifying triple onto the `SnapshotMigration`:
+`migrationLabel` is the per-snapshot entry's own label, and `sourceLabel`/`targetLabel` are the
+`fromSource`/`toTarget` it was declared under. Together they name exactly one
+`documentBackfillConfig` in the configuration that produced it. `targetEndpoint` comes along too.
+
+So the backfill to redrive is *derived* from the migration rather than asked for, and refused when:
+
+- the configuration declares no backfill with that triple (it is a different or edited configuration),
+- more than one matches (ambiguous), or
+- the configuration's target now addresses a different endpoint than the run wrote to.
+
+`--config-session` names the configuration and is no longer hidden. It still defaults to `default`,
+but a default that does not verify is never used — a mismatch is an error naming both sides, not a
+silent substitution.
 - **Follow-up, any time after Phase 1** — remove the uncoordinated path, leaving `migratePartition`
   as the only pipeline entry point (`readCollectionMetadata`, `createCollection`,
   `migrateAll`/`migrateCollection` and `partitionConcurrency` go with it).

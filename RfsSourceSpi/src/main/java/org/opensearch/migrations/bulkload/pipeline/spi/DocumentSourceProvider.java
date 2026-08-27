@@ -1,8 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline.spi;
 
 import java.io.IOException;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -66,6 +69,16 @@ public interface DocumentSourceProvider<S extends DocumentSourceSpec> {
         return true;
     }
 
+    /**
+     * A transform this source's documents must pass through before the user's.
+     *
+     * <p>Declared here rather than left to the operator, since omitting it writes the wrong thing
+     * rather than failing. The caller chains it ahead of the user's transform.
+     */
+    default Optional<Supplier<IJsonTransformer>> requiredPreTransform(S spec) {
+        return Optional.empty();
+    }
+
     DocumentSource create(S spec, SourceRuntime runtime) throws IOException;
 
     /**
@@ -76,5 +89,10 @@ public interface DocumentSourceProvider<S extends DocumentSourceSpec> {
         S spec = parseSpec(config);
         validate(spec, runtime);
         return create(spec, runtime);
+    }
+
+    /** For a caller holding a wildcard provider. */
+    default Optional<Supplier<IJsonTransformer>> requiredPreTransform(JsonNode config) {
+        return requiredPreTransform(parseSpec(config));
     }
 }

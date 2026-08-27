@@ -1,10 +1,10 @@
 package org.opensearch.migrations.bulkload.pipeline.source;
 
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 
@@ -118,7 +118,7 @@ public abstract class DocumentSourceContractTest {
                 var resumed = readAll(fresh, resolve(fresh, partition), resumeAfter);
 
                 assertThat("resuming must not re-emit the document its cursor came from",
-                    idsOf(resumed), equalTo(idsOf(all.subList(1, all.size()))));
+                    identitiesOf(resumed), equalTo(identitiesOf(all.subList(1, all.size()))));
             }
         }
     }
@@ -148,7 +148,7 @@ public abstract class DocumentSourceContractTest {
                 var second = readAll(fresh, resolve(fresh, partition), null);
 
                 assertThat("the same cursor must replay the same documents",
-                    idsOf(second), equalTo(idsOf(first)));
+                    identitiesOf(second), equalTo(identitiesOf(first)));
             }
         }
     }
@@ -184,10 +184,19 @@ public abstract class DocumentSourceContractTest {
         return partitions.stream().map(Partition::name).collect(Collectors.toList());
     }
 
-    private static List<String> idsOf(List<PositionedDocument> documents) {
+    /**
+     * What distinguishes one emitted document from another, for a source of any kind.
+     *
+     * <p>Not the id alone: a source may emit documents that have none yet, and comparing a list of
+     * nulls would assert nothing. The cursor is unique per position and the body is what resuming
+     * must bring back unchanged.
+     */
+    private static List<String> identitiesOf(List<PositionedDocument> documents) {
         return documents.stream()
-            .map(PositionedDocument::document)
-            .map(Document::id)
+            .map(positioned -> positioned.cursorAfter()
+                + "|" + positioned.document().id()
+                + "|" + positioned.document().sourceLength()
+                + "|" + Arrays.hashCode(positioned.document().source()))
             .collect(Collectors.toList());
     }
 

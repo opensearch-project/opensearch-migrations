@@ -241,6 +241,17 @@ export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
         skipApproval: z.boolean(),
     })
 );
+/**
+ * Snapshot-source options that `sourceKind` supersedes. RfsMigrateDocuments rejects them alongside
+ * an explicit kind, and they carry defaults, so they must be omitted when one is set.
+ */
+export const ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS = [
+    "allowLooseVersionMatching",
+    "maxShardSizeBytes",
+    "enableSourcelessMigrations",
+    "useRecoverySource",
+] as const satisfies readonly (keyof z.infer<typeof ARGO_RFS_OPTIONS>)[];
+
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = [
     "podReplicas",
     "minPodReplicas",

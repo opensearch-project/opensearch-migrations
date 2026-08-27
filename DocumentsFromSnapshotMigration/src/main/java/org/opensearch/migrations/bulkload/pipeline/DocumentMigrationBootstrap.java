@@ -64,6 +64,8 @@ public class DocumentMigrationBootstrap {
     @Builder.Default
     private final boolean allowServerGeneratedIds = false;
     @Builder.Default
+    private final boolean allowMissingDocumentIds = false;
+    @Builder.Default
     private final DocumentExceptionAllowlist allowlist = DocumentExceptionAllowlist.empty();
 
     @Builder.Default
@@ -93,7 +95,7 @@ public class DocumentMigrationBootstrap {
         var source = documentSource;
         var contextRef = new AtomicReference<IDocumentMigrationContexts.IDocumentReindexContext>();
         var sink = new OpenSearchDocumentSink(
-            targetClient, transformerSupplier, allowServerGeneratedIds, allowlist,
+            targetClient, transformerSupplier, allowServerGeneratedIds, allowMissingDocumentIds, allowlist,
             () -> {
                 var ctx = contextRef.get();
                 return ctx != null ? ctx.createBulkRequest() : null;
