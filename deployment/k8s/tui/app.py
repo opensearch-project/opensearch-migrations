@@ -8,11 +8,13 @@ thread snapshots that buffer and repaints — the same split that keeps a slow o
 consumer from ever blocking the UI.
 
 Data model: every replayed request is a PARENT row (its identity — method, URI, status
-codes) plus one or more CHILD rows, one per sub-query — a plain search has exactly one
-child; an _msearch has one per NDJSON search action. Scoring lives on the children only, on
-purpose: a blended average across an msearch's sub-queries hides exactly the failure that
-matters (one badly-diverged sub-query pulled toward 1.0 by two good ones still looks fine in
-aggregate), so the parent row carries no score of its own.
+codes) plus one or more CHILD rows — one per independently-comparable item. A plain search
+with just hits has exactly one child; an _msearch has one item-group per NDJSON search
+action; and within any single response, hits and every named aggregation are each their own
+item, since a size:0 facet query with two aggregations is really two independent
+comparisons. Scoring lives on the children only, on purpose: a blended average hides exactly
+the failure that matters (one badly-diverged item pulled toward 1.0 by good ones still looks
+fine in aggregate), so the parent row carries no score of its own.
 """
 import collections
 import itertools
@@ -51,10 +53,12 @@ def _spark_char(j: Optional[float]) -> Text:
 
 
 def _has_scoreable_subqueries(s: Dict) -> bool:
+    """subqueries is only ever non-empty for a request that had at least one hits section or
+    named aggregation to compare (scoring.py's _response_items) — an index/delete/_count-style
+    request with neither produces an empty list, so its own emptiness is the filter."""
     if s.get("j_label") == "preflight":
         return False
-    return any(sq.get("src_hits") is not None or sq.get("tgt_hits") is not None
-               for sq in s.get("subqueries", []))
+    return bool(s.get("subqueries"))
 
 
 class JaccardApp(App):
@@ -101,6 +105,10 @@ class JaccardApp(App):
         # "hits" shows the side-by-side doc-ID diff; "request" shows the raw captured HTTP
         # request(s) for copy/paste — toggled with 'v', independent of which row is selected.
         self._view_mode = "hits"
+        # The seqs shown last time _rebuild_table ran — a full clear()+re-add on every tick
+        # visibly flickers and resets scroll position, so it's skipped whenever the visible
+        # set of requests hasn't actually changed (the common case between new arrivals).
+        self._last_row_signature: Optional[Tuple[int, ...]] = None
         self.is_exiting = False
 
     def compose(self) -> ComposeResult:
@@ -206,20 +214,34 @@ class JaccardApp(App):
     def _rebuild_table(self, buf: List[Dict]) -> None:
         """Repaint the table, keeping the cursor (and so the detail pane) on the same row
         across refreshes — row indexes shift as the window slides, so the row key, not
-        index, is what identifies a row from one rebuild to the next."""
+        index, is what identifies a row from one rebuild to the next.
+
+        A tuple's own data never changes once scored, so the visible set of seqs fully
+        determines the table's content — when it's unchanged since the last tick (the common
+        case between new arrivals), clear()+re-add is skipped entirely. Doing it every tick
+        regardless was visibly flickering and resetting scroll position while the user was
+        just reading, not because anything new had actually arrived.
+        """
+        visible = list(reversed(self._visible_tuples(buf)))
+        signature = tuple(s["seq"] for s in visible)
+        if signature == self._last_row_signature:
+            return
+        self._last_row_signature = signature
+
         table = self.table
+        scroll_y = table.scroll_y
         table.clear()
         row_keys: List[str] = []
         # Newest request first — a live monitor's most useful row is the one that just
         # happened, not the oldest one still in the window. Each request's own sub-queries
         # stay in their natural 1st/2nd/3rd order underneath it; only request-to-request
         # order flips.
-        for s in reversed(self._visible_tuples(buf)):
+        for s in visible:
             uri = s["uri"] or "?"
             if len(uri) > 50:
                 uri = uri[:47] + "..."
             subqueries = s.get("subqueries", [])
-            note = f"{len(subqueries)} sub-queries" if len(subqueries) > 1 else ""
+            note = f"{len(subqueries)} rows" if len(subqueries) > 1 else ""
             status_cell = Text(f"{s['src_status']} → {s['tgt_status']}", style="dim")
             parent_key = str(s["seq"])
             table.add_row(Text(""), Text(s["method"], style="bold"), uri, status_cell, note,
@@ -235,7 +257,13 @@ class JaccardApp(App):
                               hits_cell, sq.get("j_label") or "", key=child_key)
                 row_keys.append(child_key)
         if self._selected_key is not None and self._selected_key in row_keys:
-            table.move_cursor(row=row_keys.index(self._selected_key))
+            # scroll=False: the scroll_y restore below is authoritative — letting this also
+            # auto-scroll would fight it and undo exactly what's being preserved.
+            table.move_cursor(row=row_keys.index(self._selected_key), scroll=False)
+        # Deferred one refresh: setting scroll_y synchronously right after add_row() clamps
+        # against stale (pre-layout) scroll extents, so a restore issued immediately here can
+        # silently come out smaller than what was actually saved.
+        self.call_after_refresh(setattr, table, "scroll_y", scroll_y)
 
     @staticmethod
     def _hits_cell(sh: Optional[int], th: Optional[int]) -> Text:
@@ -295,10 +323,8 @@ class JaccardApp(App):
 
         if self._view_mode == "request":
             if sq is not None and sq.get("src_sub_ndjson") is not None:
-                src_pane.update(self._format_ndjson(f"SOURCE — sub-query {sq['label']}",
-                                                     sq.get("src_sub_ndjson")))
-                tgt_pane.update(self._format_ndjson(f"TARGET — sub-query {sq['label']}",
-                                                     sq.get("tgt_sub_ndjson")))
+                src_pane.update(self._format_ndjson(f"SOURCE — {sq['label']}", sq.get("src_sub_ndjson")))
+                tgt_pane.update(self._format_ndjson(f"TARGET — {sq['label']}", sq.get("tgt_sub_ndjson")))
             else:
                 src_pane.update(self._format_request("SOURCE REQUEST", s.get("src_request")))
                 tgt_pane.update(self._format_request("TARGET REQUEST", s.get("tgt_request")))
@@ -309,11 +335,16 @@ class JaccardApp(App):
             tgt_pane.update("")
             return
 
+        if sq.get("kind") == "agg":
+            src_pane.update(self._agg_detail_text(f"SOURCE — {sq['label']}", sq.get("src_agg"), sq.get("tgt_agg")))
+            tgt_pane.update(self._agg_detail_text(f"TARGET — {sq['label']}", sq.get("tgt_agg"), sq.get("src_agg")))
+            return
+
         src_list, tgt_list = sq.get("src_hit_list") or [], sq.get("tgt_hit_list") or []
         if not src_list and not tgt_list:
             src_pane.update(Text(
                 f"{s['method']} {s['uri']}  [{sq['label']}]\n"
-                f"No hit-level detail for this sub-query.\n"
+                f"No hit-level detail for this row.\n"
                 f"Press 'v' to view its raw request instead.",
                 style="dim"))
             tgt_pane.update("")
@@ -324,15 +355,43 @@ class JaccardApp(App):
         tgt_pane.update(self._hit_list_text(f"TARGET — {sq['label']}", sq.get("tgt_hits"), tgt_list, src_ids))
 
     @staticmethod
+    def _agg_detail_text(label: str, agg: Optional[Dict], other_agg: Optional[Dict]) -> Text:
+        """One side's view of an aggregation: bucket key/doc_count pairs (mismatched keys in
+        red, same idea as the hit-ID diff), or a bare value for a metric aggregation."""
+        text = Text(f"{label}\n", style="bold")
+        agg = agg if isinstance(agg, dict) else {}
+        buckets = agg.get("buckets")
+        if buckets is not None:
+            other_keys = {b.get("key") for b in (other_agg or {}).get("buckets", []) if isinstance(b, dict)}
+            for b in buckets:
+                if not isinstance(b, dict):
+                    continue
+                key, count = b.get("key"), b.get("doc_count")
+                style = "" if key in other_keys else "red"
+                text.append(f"{str(key):<28}", style=style)
+                text.append(f" {count}\n", style="dim")
+            if not buckets:
+                text.append("(no buckets)", style="dim")
+            return text
+        if "value" in agg:
+            text.append(f"value: {agg['value']}")
+            return text
+        if "doc_count" in agg:
+            text.append(f"doc_count: {agg['doc_count']}")
+            return text
+        text.append("(no aggregation data)", style="dim")
+        return text
+
+    @staticmethod
     def _subquery_overview(s: Dict) -> Text:
-        """A parent row's detail: a compact list of its sub-queries and their scores — the
-        overview a blended average used to replace. Select a sub-query row below for its
-        full hit-ID diff."""
+        """A parent row's detail: a compact list of its rows (hits and/or aggregations) and
+        their scores — the overview a blended average used to replace. Select a row below for
+        its full detail."""
         subqueries = s.get("subqueries", [])
         text = Text(f"{s['method']} {s['uri']}\n", style="bold")
         n = len(subqueries)
-        text.append(f"{n} sub-quer{'y' if n == 1 else 'ies'} "
-                     f"— select one below for hit detail\n\n", style="dim")
+        text.append(f"{n} row{'s' if n != 1 else ''} "
+                     f"— select one below for detail\n\n", style="dim")
         for sq in subqueries:
             j = sq["j"]
             j_text = "   -   " if j is None else f"{j:>7.3f}"
@@ -451,8 +510,8 @@ class JaccardApp(App):
             return
         s, sq = found
         if sq is not None and sq.get("src_sub_ndjson") is not None:
-            src_text = str(self._format_ndjson(f"SOURCE — sub-query {sq['label']}", sq.get("src_sub_ndjson")))
-            tgt_text = str(self._format_ndjson(f"TARGET — sub-query {sq['label']}", sq.get("tgt_sub_ndjson")))
+            src_text = str(self._format_ndjson(f"SOURCE — {sq['label']}", sq.get("src_sub_ndjson")))
+            tgt_text = str(self._format_ndjson(f"TARGET — {sq['label']}", sq.get("tgt_sub_ndjson")))
         else:
             src_text = str(self._format_request("SOURCE REQUEST", s.get("src_request")))
             tgt_text = str(self._format_request("TARGET REQUEST", s.get("tgt_request")))
