@@ -74,6 +74,8 @@ export class EKSInfra extends Construct {
             vpcSubnets,
         });
 
+        this.allowAutoModeTagPropagation();
+
         // Grant EKS readonly access to all IAM principals in the account
         this.cluster.grantAccess('AccountReadonlyAccess',
             `arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:root`,
@@ -171,6 +173,83 @@ export class EKSInfra extends Construct {
             });
             ackCloudWatchPodIdentityAssociation.node.addDependency(this.cluster)
         }
+    }
+
+    /**
+     * Lets EKS Auto Mode stamp user-defined tags onto the AWS resources it provisions on the
+     * cluster's behalf: EC2 instances, launch templates, EBS volumes, snapshots, ENIs, load
+     * balancers, target groups and load balancer security groups.
+     *
+     * None of those resources are created by CloudFormation, so CloudFormation stack tags never
+     * reach them. Auto Mode applies the tags declared in a `NodeClass` `spec.tags` and in a
+     * `StorageClass` `tagSpecification_N` parameter instead — but the `AmazonEKS*` managed
+     * policies on the cluster role only permit the `eks:`-prefixed tags that Auto Mode adds for
+     * itself. Without the statements below, a single user tag turns every `RunInstances` and
+     * `CreateVolume` into an `AccessDenied` and the cluster silently stops scaling.
+     *
+     * Every statement is conditioned on the request carrying this cluster's own
+     * `eks:eks-cluster-name` tag, which Auto Mode always sets and which is matched against the
+     * session tag on the assumed cluster role — so this grants nothing outside the cluster.
+     *
+     * @see https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop
+     */
+    private allowAutoModeTagPropagation() {
+        // Auto Mode assumes the cluster role with `eks:eks-cluster-name` as a session tag, so this
+        // resolves to the cluster making the call and cannot be spoofed by the request itself.
+        const ownCluster = {
+            'aws:RequestTag/eks:eks-cluster-name': '${aws:PrincipalTag/eks:eks-cluster-name}',
+        };
+        new Policy(this, 'AutoModeTagPropagationPolicy', {
+            roles: [this.cluster.role],
+            statements: [
+                new PolicyStatement({
+                    sid: 'Compute',
+                    effect: Effect.ALLOW,
+                    actions: ['ec2:CreateFleet', 'ec2:RunInstances', 'ec2:CreateLaunchTemplate'],
+                    resources: ['*'],
+                    conditions: {
+                        StringEquals: ownCluster,
+                        StringLike: {
+                            'aws:RequestTag/eks:kubernetes-node-class-name': '*',
+                            'aws:RequestTag/eks:kubernetes-node-pool-name': '*',
+                        },
+                    },
+                }),
+                new PolicyStatement({
+                    sid: 'Storage',
+                    effect: Effect.ALLOW,
+                    actions: ['ec2:CreateVolume', 'ec2:CreateSnapshot'],
+                    resources: [
+                        `arn:${Aws.PARTITION}:ec2:*:*:volume/*`,
+                        `arn:${Aws.PARTITION}:ec2:*:*:snapshot/*`,
+                    ],
+                    conditions: { StringEquals: ownCluster },
+                }),
+                new PolicyStatement({
+                    sid: 'Networking',
+                    effect: Effect.ALLOW,
+                    actions: ['ec2:CreateNetworkInterface'],
+                    resources: ['*'],
+                    conditions: {
+                        StringEquals: ownCluster,
+                        StringLike: { 'aws:RequestTag/eks:kubernetes-cni-node-name': '*' },
+                    },
+                }),
+                new PolicyStatement({
+                    sid: 'LoadBalancer',
+                    effect: Effect.ALLOW,
+                    actions: [
+                        'elasticloadbalancing:CreateLoadBalancer',
+                        'elasticloadbalancing:CreateTargetGroup',
+                        'elasticloadbalancing:CreateListener',
+                        'elasticloadbalancing:CreateRule',
+                        'ec2:CreateSecurityGroup',
+                    ],
+                    resources: ['*'],
+                    conditions: { StringEquals: ownCluster },
+                }),
+            ],
+        });
     }
 
     createDefaultPodIdentityRole(clusterName: string) {

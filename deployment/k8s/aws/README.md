@@ -94,8 +94,44 @@ non-interactive (no console handoff).
 Run `migration-assistant help` for the complete list including legacy
 `aws-bootstrap.sh` flags. A few legacy flags are not yet implemented in
 this CLI (`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`,
-`--vpc-id`, `--subnet-ids`, `--use-general-node-pool`, …); the CLI
-warns and ignores them rather than silently pretending to honor them.
+`--vpc-id`, `--subnet-ids`, `--use-general-node-pool`, `--tags`, …); the
+CLI warns and ignores them rather than silently pretending to honor them.
+
+## Tagging everything the deployment creates
+
+```bash
+./aws-bootstrap.sh --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev \
+  --region us-east-1 --tags CostCenter=1234,Owner=platform-team
+```
+
+`--tags` covers two separate mechanisms, because AWS has no single one:
+
+- **CloudFormation stack tags.** Identical to filling in the console's
+  Tags step. CloudFormation copies them onto every taggable resource it
+  creates.
+- **EKS Auto Mode resources.** Nodes, EBS volumes, ENIs and load
+  balancers are created *after* the stack, by Auto Mode, so stack tags
+  never reach them. Auto Mode reads the tags to apply from in-cluster
+  objects instead, so `aws-bootstrap.sh` also:
+  - creates a custom `NodeClass` carrying the tags (the built-in
+    `default` NodeClass is owned by EKS and cannot be edited) and
+    disables the built-in `system`/`general-purpose` NodePools, whose
+    nodes are hard-wired to it;
+  - sets `tagSpecification_N` parameters on the `auto-ebs-sc`
+    StorageClass so provisioned volumes are tagged;
+  - emits load balancer tag annotations for any Service or Ingress the
+    chart creates.
+
+This requires the cluster IAM role to permit user-defined tags on Auto
+Mode resources — the solution CloudFormation template grants it. A
+cluster built by hand needs the policy from
+[the EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop);
+without it, adding a tag turns every `RunInstances` into `AccessDenied`.
+
+Two caveats: `--tags` is incompatible with `--use-general-node-pool`
+(it deletes that pool), and StorageClass `parameters` are immutable, so
+changing the tag set on an existing release means deleting
+`auto-ebs-sc` first. The script checks for both and tells you.
 
 ## Adopting a stack you deployed elsewhere
 
