@@ -58,6 +58,38 @@ def compute_hits_jaccard(src_body: Dict, tgt_body: Dict) -> Tuple[Optional[float
     return None, None
 
 
+# Persistence: how much weight RBO gives to agreement at deeper ranks versus the very top.
+# 0.9 puts ~65% of the total weight on the first 10 ranks — a reasonable default for the
+# top-20-ish result lists this tool typically sees; a longer results page would want it
+# pushed closer to 1.0 to avoid over-weighting the first few hits.
+RBO_PERSISTENCE = 0.9
+
+
+def rbo_score(list_a: List[str], list_b: List[str], p: float = RBO_PERSISTENCE) -> Optional[float]:
+    """Rank-Biased Overlap (Webber, Moffat & Zobel, 2010) between two ranked ID lists.
+
+    Unlike Jaccard, this is order-sensitive: two lists with identical membership but reversed
+    order score 1.0 under Jaccard but well under 1.0 here, since RBO weights agreement at
+    shallow depths (rank 1, 2, 3...) more heavily than agreement deep in the list. This is the
+    finite-depth base form (evaluated to depth = min(len(a), len(b)), since that's the deepest
+    rank both lists can be compared at), normalized so two identical lists score exactly 1.0 —
+    the raw un-normalized sum only approaches 1.0 as depth goes to infinity, which would read
+    as "diverged" for two short but perfectly-matching lists, the opposite of every other score
+    in this tool.
+    """
+    k = min(len(list_a), len(list_b))
+    if k == 0:
+        return None
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for d in range(1, k + 1):
+        agreement_d = len(set(list_a[:d]) & set(list_b[:d])) / d
+        weight = (1 - p) * (p ** (d - 1))
+        weighted_sum += weight * agreement_d
+        weight_total += weight
+    return (weighted_sum / weight_total) if weight_total > 0 else None
+
+
 def score_agg(sa: Dict, ta: Dict) -> Tuple[Optional[float], str]:
     """Score ONE named aggregation — bucket-based (terms/date-histogram/...) or a single
     metric (avg/sum/cardinality/...). Bucket comparison is a weighted per-key overlap, same
@@ -99,10 +131,18 @@ def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefi
 
     if 'hits' in sb or 'hits' in tb:
         j, lbl = (None, missing_side) if missing_side else compute_hits_jaccard(sb, tb)
+        src_hit_list = hit_summaries(sb)
+        tgt_hit_list = hit_summaries(tb)
+        if missing_side:
+            rbo_j, rbo_lbl = None, missing_side
+        else:
+            rbo_j = rbo_score([h['id'] for h in src_hit_list], [h['id'] for h in tgt_hit_list])
+            rbo_lbl = f'RBO (p={RBO_PERSISTENCE})' if rbo_j is not None else None
         items.append(dict(
             label=f'{label_prefix} · hits'.strip(' ·'), kind='hits', j=j, j_label=lbl,
+            rbo_j=rbo_j, rbo_label=rbo_lbl,
             src_hits=hit_count(sb), tgt_hits=hit_count(tb),
-            src_hit_list=hit_summaries(sb), tgt_hit_list=hit_summaries(tb),
+            src_hit_list=src_hit_list, tgt_hit_list=tgt_hit_list,
             src_agg=None, tgt_agg=None,
         ))
 
@@ -113,6 +153,7 @@ def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefi
         j, lbl = (None, missing_side) if missing_side else score_agg(sa, ta)
         items.append(dict(
             label=f'{label_prefix} · agg:{name}'.strip(' ·'), kind='agg', j=j, j_label=lbl,
+            rbo_j=None, rbo_label=None,
             src_hits=None, tgt_hits=None, src_hit_list=[], tgt_hit_list=[],
             src_agg=sa, tgt_agg=ta,
         ))

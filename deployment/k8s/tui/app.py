@@ -75,6 +75,7 @@ class JaccardApp(App):
     BINDINGS = [
         ("r", "reset", "Reset window"),
         ("v", "toggle_view", "Hits/Request"),
+        ("m", "toggle_metric", "Jaccard/RBO"),
         ("c", "copy_request", "Copy request"),
         ("q", "quit", "Quit"),
     ]
@@ -105,6 +106,12 @@ class JaccardApp(App):
         # "hits" shows the side-by-side doc-ID diff; "request" shows the raw captured HTTP
         # request(s) for copy/paste — toggled with 'v', independent of which row is selected.
         self._view_mode = "hits"
+        # Which score to DISPLAY for "hits" items — both are always computed and stored on
+        # every item (scoring.py's _response_items), so toggling this is just a matter of
+        # which already-computed field gets read; nothing needs rescoring. RBO has no
+        # equivalent for aggregation items (weighted bucket overlap isn't a ranked-list
+        # comparison), so those always show their one score regardless of this setting.
+        self._score_metric = "jaccard"
         # The seqs shown last time _rebuild_table ran — a full clear()+re-add on every tick
         # visibly flickers and resets scroll position, so it's skipped whenever the visible
         # set of requests hasn't actually changed (the common case between new arrivals).
@@ -171,6 +178,14 @@ class JaccardApp(App):
         self._rebuild_table(buf)
         self._update_footnote(buf)
 
+    def _effective_score(self, sq: Dict) -> Tuple[Optional[float], Optional[str]]:
+        """The (score, label) to DISPLAY for one item, per the current metric mode. RBO only
+        applies to "hits" items — aggregations keep their own weighted bucket-overlap score
+        regardless of mode, since RBO has no meaningful equivalent for them."""
+        if self._score_metric == "rbo" and sq.get("kind") == "hits":
+            return sq.get("rbo_j"), sq.get("rbo_label")
+        return sq.get("j"), sq.get("j_label")
+
     def _visible_tuples(self, buf: List[Dict]) -> List[Dict]:
         """The last N qualifying requests — shared by the table and the footnote so both
         agree on what "the window" means. Preflight OPTIONS and requests with no hit data on
@@ -192,10 +207,12 @@ class JaccardApp(App):
             summary.update(f"Confirming topic '{self._topic}' exists and is reachable…")
             return
 
-        all_js = [sq["j"] for s in buf for sq in s.get("subqueries", []) if sq["j"] is not None]
+        all_js = [j for s in buf for sq in s.get("subqueries", [])
+                  for j, _ in [self._effective_score(sq)] if j is not None]
         window = all_js[-self._window:]
         blanks = self._window - len(window)
-        text = Text("Jaccard  ")
+        metric_name = "RBO" if self._score_metric == "rbo" else "Jaccard"
+        text = Text(f"{metric_name}  ")
         text.append(Text("░ " * blanks, style="dim"))
         text.append(Text(" ").join(_spark_char(j) for j in window))
         text.append("\n")
@@ -248,13 +265,13 @@ class JaccardApp(App):
                           key=parent_key)
             row_keys.append(parent_key)
             for i, sq in enumerate(subqueries):
-                j = sq["j"]
+                j, j_label = self._effective_score(sq)
                 j_cell = (Text("-", style="dim") if j is None
                           else Text(f"{j:.3f}", style=f"bold {_score_color(j)}"))
                 hits_cell = self._hits_cell(sq.get("src_hits"), sq.get("tgt_hits"))
                 child_key = f"{s['seq']}:{i}"
                 table.add_row(j_cell, "", Text(f"  ↳ {sq['label']}", style="dim"),
-                              hits_cell, sq.get("j_label") or "", key=child_key)
+                              hits_cell, j_label or "", key=child_key)
                 row_keys.append(child_key)
         if self._selected_key is not None and self._selected_key in row_keys:
             # scroll=False: the scroll_y restore below is authoritative — letting this also
@@ -311,7 +328,8 @@ class JaccardApp(App):
         tgt_pane = self.query_one("#detail-tgt", Static)
         if self._selected_key is None:
             src_pane.update(Text(
-                "select a row to see detail  ·  v: hits/request  ·  c: copy request", style="dim"))
+                "select a row to see detail  ·  v: hits/request  ·  m: jaccard/rbo  ·  c: copy request",
+                style="dim"))
             tgt_pane.update("")
             return
         found = self._lookup_selected()
@@ -382,8 +400,7 @@ class JaccardApp(App):
         text.append("(no aggregation data)", style="dim")
         return text
 
-    @staticmethod
-    def _subquery_overview(s: Dict) -> Text:
+    def _subquery_overview(self, s: Dict) -> Text:
         """A parent row's detail: a compact list of its rows (hits and/or aggregations) and
         their scores — the overview a blended average used to replace. Select a row below for
         its full detail."""
@@ -393,7 +410,7 @@ class JaccardApp(App):
         text.append(f"{n} row{'s' if n != 1 else ''} "
                      f"— select one below for detail\n\n", style="dim")
         for sq in subqueries:
-            j = sq["j"]
+            j, _ = self._effective_score(sq)
             j_text = "   -   " if j is None else f"{j:>7.3f}"
             text.append(j_text, style=f"bold {_score_color(j)}")
             text.append(f"  {sq['label']}")
@@ -488,10 +505,22 @@ class JaccardApp(App):
             self._status["total"] = 0
         self._selected_key = None
         self._update_detail()
+        self._repaint()
 
     def action_toggle_view(self) -> None:
         self._view_mode = "request" if self._view_mode == "hits" else "hits"
         self._update_detail()
+
+    def action_toggle_metric(self) -> None:
+        """Swap which already-computed score 'hits' items display — Jaccard (set overlap,
+        order-blind) or RBO (rank-biased overlap, penalizes reordering). Both scores are
+        always computed and stored per item, so this never needs to rescore anything already
+        in the buffer; it just changes which stored field the table/summary/overview read."""
+        self._score_metric = "rbo" if self._score_metric == "jaccard" else "jaccard"
+        self.notify(f"Scoring metric: {self._score_metric.upper()}")
+        self._last_row_signature = None  # force a table repaint even though seqs are unchanged
+        self._update_detail()
+        self._repaint()
 
     def action_copy_request(self) -> None:
         """Copy the selected row's request(s) to the system clipboard — the whole HTTP
