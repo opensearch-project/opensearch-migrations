@@ -6,13 +6,20 @@ a background thread owns the long-lived I/O (there, k6 run polling; here, the Ka
 consumer subprocess) and only ever touches a lock-guarded buffer. A timer on the main
 thread snapshots that buffer and repaints — the same split that keeps a slow or stalled
 consumer from ever blocking the UI.
+
+Data model: every replayed request is a PARENT row (its identity — method, URI, status
+codes) plus one or more CHILD rows, one per sub-query — a plain search has exactly one
+child; an _msearch has one per NDJSON search action. Scoring lives on the children only, on
+purpose: a blended average across an msearch's sub-queries hides exactly the failure that
+matters (one badly-diverged sub-query pulled toward 1.0 by two good ones still looks fine in
+aggregate), so the parent row carries no score of its own.
 """
 import collections
 import itertools
 import json
 import logging
 import threading
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Tuple
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -41,6 +48,13 @@ def _spark_char(j: Optional[float]) -> Text:
         return Text("░", style="dim")
     idx = min(7, int(j * 8))
     return Text(SPARK[idx], style=f"bold {_score_color(j)}")
+
+
+def _has_scoreable_subqueries(s: Dict) -> bool:
+    if s.get("j_label") == "preflight":
+        return False
+    return any(sq.get("src_hits") is not None or sq.get("tgt_hits") is not None
+               for sq in s.get("subqueries", []))
 
 
 class JaccardApp(App):
@@ -79,12 +93,13 @@ class JaccardApp(App):
         self._status = {"total": 0, "running": True, "connected": False, "error": None}
         self._reader: Optional[KafkaTupleReader] = None
         self._seq = itertools.count(1)
-        # The highlighted row's identity, independent of the table rebuild every tick — a
-        # tuple's seq never changes, so this survives the window sliding underneath it and
-        # is what lets the detail pane and cursor position both be restored after a rebuild.
-        self._selected_seq: Optional[int] = None
+        # Row identity, independent of the table rebuild every tick — "<seq>" for a parent
+        # row, "<seq>:<subquery index>" for a child. Neither changes once assigned, so this
+        # survives the window sliding underneath it and is what lets the detail pane and
+        # cursor position both be restored after a rebuild.
+        self._selected_key: Optional[str] = None
         # "hits" shows the side-by-side doc-ID diff; "request" shows the raw captured HTTP
-        # requests for copy/paste — toggled with 'v', independent of which row is selected.
+        # request(s) for copy/paste — toggled with 'v', independent of which row is selected.
         self._view_mode = "hits"
         self.is_exiting = False
 
@@ -148,15 +163,17 @@ class JaccardApp(App):
         self._rebuild_table(buf)
         self._update_footnote(buf)
 
-    def _update_summary(self, buf: List[Dict]) -> None:
-        """Two distinct phases, not one blended "connecting" state:
+    def _visible_tuples(self, buf: List[Dict]) -> List[Dict]:
+        """The last N qualifying requests — shared by the table and the footnote so both
+        agree on what "the window" means. Preflight OPTIONS and requests with no hit data on
+        either side (index/delete ops, errors) never get a row at all."""
+        return [s for s in buf if _has_scoreable_subqueries(s)][-self._window:]
 
-        1. Setup — verifying the topic exists and creds work (ensure_ready() hasn't returned
-           yet). Shown as its own message, since it's a one-shot check, not something the
-           sparkline should represent.
-        2. Live — setup succeeded and the consumer is attached. The standard sparkline layout
-           renders immediately here, with placeholders for a still-empty window, rather than
-           waiting for the first tuple to appear before showing the normal screen at all.
+    def _update_summary(self, buf: List[Dict]) -> None:
+        """Two distinct setup phases, then a live sparkline built from individual sub-query
+        scores rather than one blended score per request — an msearch with 3 sub-queries
+        contributes 3 marks, each colored on its own merit, not one averaged mark that could
+        hide a badly-diverged sub-query behind two good ones.
         """
         summary = self.query_one("#summary", Static)
 
@@ -167,20 +184,19 @@ class JaccardApp(App):
             summary.update(f"Confirming topic '{self._topic}' exists and is reachable…")
             return
 
-        scoreable = [s for s in buf if s["j"] is not None]
-        window = scoreable[-self._window:]
+        all_js = [sq["j"] for s in buf for sq in s.get("subqueries", []) if sq["j"] is not None]
+        window = all_js[-self._window:]
         blanks = self._window - len(window)
         text = Text("Jaccard  ")
         text.append(Text("░ " * blanks, style="dim"))
-        text.append(Text(" ").join(_spark_char(s["j"]) for s in window))
+        text.append(Text(" ").join(_spark_char(j) for j in window))
         text.append("\n")
         if window:
-            js = [s["j"] for s in window]
-            avg_j = sum(js) / len(js)
+            avg_j = sum(window) / len(window)
             text.append("avg ")
             text.append(f"{avg_j:.3f}", style=f"bold {_score_color(avg_j)}")
-            text.append(f"   min {min(js):.3f}   max {max(js):.3f}"
-                         f"   ({len(window)} of {self._status['total']} tuples seen)")
+            text.append(f"   min {min(window):.3f}   max {max(window):.3f}"
+                         f"   ({len(window)} sub-query scores, {self._status['total']} requests seen)")
         else:
             text.append(f"0 tuples seen yet — waiting for live traffic on '{self._topic}'")
             if not self._status["running"]:
@@ -188,31 +204,38 @@ class JaccardApp(App):
         summary.update(text)
 
     def _rebuild_table(self, buf: List[Dict]) -> None:
-        """Repaint the table, keeping the cursor (and so the detail pane) on the same tuple
-        across refreshes — row indexes shift as the window slides, so seq, not index, is what
-        identifies a row from one rebuild to the next."""
+        """Repaint the table, keeping the cursor (and so the detail pane) on the same row
+        across refreshes — row indexes shift as the window slides, so the row key, not
+        index, is what identifies a row from one rebuild to the next."""
         table = self.table
         table.clear()
-        show = [s for s in buf if s.get("j_label") != "preflight"][-self._window:]
-        added: List[Dict] = []
-        for s in show:
-            sh, th = s.get("src_hits"), s.get("tgt_hits")
-            if sh is None and th is None:
-                continue
-            j = s["j"]
-            j_cell = Text("-", style="dim") if j is None else Text(f"{j:.3f}", style=f"bold {_score_color(j)}")
-            hits_cell = self._hits_cell(sh, th)
+        row_keys: List[str] = []
+        # Newest request first — a live monitor's most useful row is the one that just
+        # happened, not the oldest one still in the window. Each request's own sub-queries
+        # stay in their natural 1st/2nd/3rd order underneath it; only request-to-request
+        # order flips.
+        for s in reversed(self._visible_tuples(buf)):
             uri = s["uri"] or "?"
             if len(uri) > 50:
                 uri = uri[:47] + "..."
-            table.add_row(j_cell, s["method"], uri, hits_cell, s.get("j_label") or "",
-                          key=str(s["seq"]))
-            added.append(s)
-        if self._selected_seq is not None:
-            for i, s in enumerate(added):
-                if s["seq"] == self._selected_seq:
-                    table.move_cursor(row=i)
-                    break
+            subqueries = s.get("subqueries", [])
+            note = f"{len(subqueries)} sub-queries" if len(subqueries) > 1 else ""
+            status_cell = Text(f"{s['src_status']} → {s['tgt_status']}", style="dim")
+            parent_key = str(s["seq"])
+            table.add_row(Text(""), Text(s["method"], style="bold"), uri, status_cell, note,
+                          key=parent_key)
+            row_keys.append(parent_key)
+            for i, sq in enumerate(subqueries):
+                j = sq["j"]
+                j_cell = (Text("-", style="dim") if j is None
+                          else Text(f"{j:.3f}", style=f"bold {_score_color(j)}"))
+                hits_cell = self._hits_cell(sq.get("src_hits"), sq.get("tgt_hits"))
+                child_key = f"{s['seq']}:{i}"
+                table.add_row(j_cell, "", Text(f"  ↳ {sq['label']}", style="dim"),
+                              hits_cell, sq.get("j_label") or "", key=child_key)
+                row_keys.append(child_key)
+        if self._selected_key is not None and self._selected_key in row_keys:
+            table.move_cursor(row=row_keys.index(self._selected_key))
 
     @staticmethod
     def _hits_cell(sh: Optional[int], th: Optional[int]) -> Text:
@@ -227,57 +250,108 @@ class JaccardApp(App):
         return Text(f"{sh} → {th}", style=style)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        seq = int(event.row_key.value) if event.row_key is not None and event.row_key.value else None
-        if seq == self._selected_seq:
+        key = event.row_key.value if event.row_key is not None else None
+        if key == self._selected_key:
             return
-        self._selected_seq = seq
+        self._selected_key = key
         self._update_detail()
 
-    def _lookup_selected(self) -> Optional[Dict]:
-        if self._selected_seq is None:
+    def _lookup_selected(self) -> Optional[Tuple[Dict, Optional[Dict]]]:
+        """The selected (tuple, subquery) pair — subquery is None when a parent row is
+        selected. Looks the tuple up by seq in the live buffer rather than caching it at
+        selection time, so this still works right after a reset clears everything."""
+        if self._selected_key is None:
             return None
+        if ":" in self._selected_key:
+            seq_str, idx_str = self._selected_key.split(":", 1)
+            seq, idx = int(seq_str), int(idx_str)
+        else:
+            seq, idx = int(self._selected_key), None
         with self._buf_lock:
-            return next((x for x in self._buf if x.get("seq") == self._selected_seq), None)
+            s = next((x for x in self._buf if x.get("seq") == seq), None)
+        if s is None:
+            return None
+        if idx is None:
+            return s, None
+        subqueries = s.get("subqueries", [])
+        if idx >= len(subqueries):
+            return None
+        return s, subqueries[idx]
 
     def _update_detail(self) -> None:
-        """Render the highlighted tuple into the two side-by-side panes — either the hit-ID
-        diff or the raw request, per self._view_mode ('v' toggles between them).
-
-        Looks the tuple up by seq in the live buffer rather than caching it at selection time,
-        so the pane still works right after a reset clears everything (falls through to "no
-        longer available" instead of showing stale data).
-        """
         src_pane = self.query_one("#detail-src", Static)
         tgt_pane = self.query_one("#detail-tgt", Static)
-        if self._selected_seq is None:
+        if self._selected_key is None:
             src_pane.update(Text(
                 "select a row to see detail  ·  v: hits/request  ·  c: copy request", style="dim"))
             tgt_pane.update("")
             return
-        s = self._lookup_selected()
-        if s is None:
-            src_pane.update(Text("(tuple no longer in buffer)", style="dim"))
+        found = self._lookup_selected()
+        if found is None:
+            src_pane.update(Text("(row no longer in buffer)", style="dim"))
+            tgt_pane.update("")
+            return
+        s, sq = found
+
+        if self._view_mode == "request":
+            if sq is not None and sq.get("src_sub_ndjson") is not None:
+                src_pane.update(self._format_ndjson(f"SOURCE — sub-query {sq['label']}",
+                                                     sq.get("src_sub_ndjson")))
+                tgt_pane.update(self._format_ndjson(f"TARGET — sub-query {sq['label']}",
+                                                     sq.get("tgt_sub_ndjson")))
+            else:
+                src_pane.update(self._format_request("SOURCE REQUEST", s.get("src_request")))
+                tgt_pane.update(self._format_request("TARGET REQUEST", s.get("tgt_request")))
+            return
+
+        if sq is None:
+            src_pane.update(self._subquery_overview(s))
             tgt_pane.update("")
             return
 
-        if self._view_mode == "request":
-            src_pane.update(self._format_request("SOURCE REQUEST", s.get("src_request")))
-            tgt_pane.update(self._format_request("TARGET REQUEST", s.get("tgt_request")))
-            return
-
-        src_list, tgt_list = s.get("src_hit_list") or [], s.get("tgt_hit_list") or []
+        src_list, tgt_list = sq.get("src_hit_list") or [], sq.get("tgt_hit_list") or []
         if not src_list and not tgt_list:
             src_pane.update(Text(
-                f"{s['method']} {s['uri']}\n"
-                f"No hit-level detail for this request (status {s['src_status']} → {s['tgt_status']}).\n"
-                f"Press 'v' to view the raw request instead.",
+                f"{s['method']} {s['uri']}  [{sq['label']}]\n"
+                f"No hit-level detail for this sub-query.\n"
+                f"Press 'v' to view its raw request instead.",
                 style="dim"))
             tgt_pane.update("")
             return
         src_ids = {h["id"] for h in src_list}
         tgt_ids = {h["id"] for h in tgt_list}
-        src_pane.update(self._hit_list_text("SOURCE", s.get("src_hits"), src_list, tgt_ids))
-        tgt_pane.update(self._hit_list_text("TARGET", s.get("tgt_hits"), tgt_list, src_ids))
+        src_pane.update(self._hit_list_text(f"SOURCE — {sq['label']}", sq.get("src_hits"), src_list, tgt_ids))
+        tgt_pane.update(self._hit_list_text(f"TARGET — {sq['label']}", sq.get("tgt_hits"), tgt_list, src_ids))
+
+    @staticmethod
+    def _subquery_overview(s: Dict) -> Text:
+        """A parent row's detail: a compact list of its sub-queries and their scores — the
+        overview a blended average used to replace. Select a sub-query row below for its
+        full hit-ID diff."""
+        subqueries = s.get("subqueries", [])
+        text = Text(f"{s['method']} {s['uri']}\n", style="bold")
+        n = len(subqueries)
+        text.append(f"{n} sub-quer{'y' if n == 1 else 'ies'} "
+                     f"— select one below for hit detail\n\n", style="dim")
+        for sq in subqueries:
+            j = sq["j"]
+            j_text = "   -   " if j is None else f"{j:>7.3f}"
+            text.append(j_text, style=f"bold {_score_color(j)}")
+            text.append(f"  {sq['label']}")
+            sh, th = sq.get("src_hits"), sq.get("tgt_hits")
+            if sh is not None or th is not None:
+                text.append(f"   ({sh} → {th})", style="dim")
+            text.append("\n")
+        return text
+
+    @staticmethod
+    def _format_ndjson(label: str, pair: Optional[List[Dict]]) -> Text:
+        text = Text(f"{label}\n", style="bold")
+        if not pair:
+            text.append("(not captured)", style="dim")
+            return text
+        text.append("\n".join(json.dumps(obj) for obj in pair))
+        return text
 
     @staticmethod
     def _format_request(label: str, req: Optional[Dict]) -> Text:
@@ -335,7 +409,7 @@ class JaccardApp(App):
 
     def _update_footnote(self, buf: List[Dict]) -> None:
         n_options = sum(1 for s in buf if s.get("j_label") == "preflight")
-        no_score = [s for s in buf if s["j"] is None and s.get("j_label") != "preflight"]
+        no_score = [s for s in buf if not s.get("subqueries") and s.get("j_label") != "preflight"]
         parts = []
         if n_options:
             parts.append(f"{n_options}× OPTIONS preflight (skipped)")
@@ -353,7 +427,7 @@ class JaccardApp(App):
         with self._buf_lock:
             self._buf.clear()
             self._status["total"] = 0
-        self._selected_seq = None
+        self._selected_key = None
         self._update_detail()
 
     def action_toggle_view(self) -> None:
@@ -361,20 +435,27 @@ class JaccardApp(App):
         self._update_detail()
 
     def action_copy_request(self) -> None:
-        """Copy the selected tuple's source + target request to the system clipboard.
+        """Copy the selected row's request(s) to the system clipboard — the whole HTTP
+        request for a parent row (or a single-query child), or just that one sub-query's
+        NDJSON slice for an msearch child.
 
         Tries the OS's own clipboard tool (pbcopy/xclip/etc.) first — Textual's built-in
         copy_to_clipboard() only works via an OSC 52 terminal escape sequence, which its own
         docs say plainly does not work on macOS Terminal.app, so it's the fallback here, not
         the first attempt.
         """
-        s = self._lookup_selected()
-        if s is None:
-            self.notify("No row selected to copy" if self._selected_seq is None
-                        else "Tuple no longer in buffer", severity="warning")
+        found = self._lookup_selected()
+        if found is None:
+            self.notify("No row selected to copy" if self._selected_key is None
+                        else "Row no longer in buffer", severity="warning")
             return
-        src_text = str(self._format_request("SOURCE REQUEST", s.get("src_request")))
-        tgt_text = str(self._format_request("TARGET REQUEST", s.get("tgt_request")))
+        s, sq = found
+        if sq is not None and sq.get("src_sub_ndjson") is not None:
+            src_text = str(self._format_ndjson(f"SOURCE — sub-query {sq['label']}", sq.get("src_sub_ndjson")))
+            tgt_text = str(self._format_ndjson(f"TARGET — sub-query {sq['label']}", sq.get("tgt_sub_ndjson")))
+        else:
+            src_text = str(self._format_request("SOURCE REQUEST", s.get("src_request")))
+            tgt_text = str(self._format_request("TARGET REQUEST", s.get("tgt_request")))
         combined = f"{src_text}\n\n{tgt_text}"
         if copy_via_system_tool(combined):
             self.notify("Copied source + target request to clipboard")

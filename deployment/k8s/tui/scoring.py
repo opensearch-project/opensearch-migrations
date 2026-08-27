@@ -97,29 +97,45 @@ def compute_jaccard(src_body: Dict, tgt_body: Dict) -> Tuple[Optional[float], Op
     return None, None
 
 
-def score_msearch(src_body: Dict, tgt_body: Dict) -> Tuple[Optional[float], Optional[str]]:
-    src_subs = src_body.get('responses', [])
-    tgt_subs = tgt_body.get('responses', [])
-    scores = []
-    for sb, tb in zip(src_subs, tgt_subs):
-        if not isinstance(sb, dict) or not isinstance(tb, dict):
-            continue
-        if sb.get('status', 200) >= 400 or tb.get('status', 200) >= 400:
-            continue
-        j, _ = compute_jaccard(sb, tb)
-        if j is not None:
-            scores.append(j)
-    if not scores:
-        return None, None
-    return sum(scores) / len(scores), f'msearch ({len(src_subs)} sub-queries)'
+def _subquery_score(sb: Dict, tb: Dict) -> Tuple[Optional[float], Optional[str]]:
+    if not isinstance(sb, dict) or not isinstance(tb, dict):
+        return None, 'malformed'
+    if sb.get('status', 200) >= 400 or tb.get('status', 200) >= 400:
+        return None, 'error'
+    return compute_jaccard(sb, tb)
+
+
+def _msearch_sub_bodies(src_request: Dict, count: int) -> List[Optional[List[Dict]]]:
+    """The raw NDJSON (header, body) pair behind each _msearch sub-query, for the detail
+    pane's request view — an _msearch has no per-sub-query HTTP request of its own, just its
+    slice of the outer POST body, so this is what "the request" means for one sub-query."""
+    seq = (src_request.get('payload', {}) or {}).get('inlinedJsonSequenceBodies', [])
+    pairs: List[Optional[List[Dict]]] = []
+    for i in range(count):
+        pair = seq[2 * i:2 * i + 2]
+        pairs.append(pair if pair else None)
+    return pairs
+
+
+def _msearch_sub_labels(src_request: Dict, count: int) -> List[str]:
+    seq = (src_request.get('payload', {}) or {}).get('inlinedJsonSequenceBodies', [])
+    labels = []
+    for i in range(count):
+        header = seq[2 * i] if 2 * i < len(seq) else None
+        pref = header.get('preference') if isinstance(header, dict) else None
+        labels.append(f'{i + 1}/{count} ({pref})' if pref else f'{i + 1}/{count}')
+    return labels
 
 
 def score_tuple(r: Dict) -> Dict:
     """Score one TrafficReplayer tuple record (already JSON-decoded).
 
-    Returns a dict with j (Jaccard score or None), j_label, src/tgt status and hit counts, and
-    whether the request was actually replayed — used uniformly by both the summary sparkline and
-    the per-tuple table.
+    Every replayed request decomposes into one or more "subqueries": a plain search is
+    exactly one (the request itself); an _msearch is one per NDJSON search action, each
+    scored independently. A single blended average across an msearch's sub-queries hides
+    exactly the failure that matters — one badly-diverged sub-query pulled toward 1.0 by two
+    good ones still looks fine in aggregate — so subqueries are returned as a list rather
+    than pre-averaged, leaving any aggregation to the display layer.
     """
     src_request = r.get('sourceRequest', {})
     tgt_request = r.get('targetRequest', {})
@@ -128,48 +144,60 @@ def score_tuple(r: Dict) -> Dict:
     method = src_request.get('Method', '?')
     uri = src_request.get('Request-URI', '?')
     src_status = src_resp.get('Status-Code', '?')
+    base = dict(method=method, uri=uri, src_status=src_status,
+                src_request=src_request, tgt_request=tgt_request, src_response=src_resp)
     if method == 'OPTIONS':
-        return dict(method=method, uri=uri, src_status=src_status,
-                    tgt_status=None, j=None, j_label='preflight',
-                    src_hits=None, tgt_hits=None,
-                    src_hit_list=[], tgt_hit_list=[],
-                    src_request=src_request, tgt_request=tgt_request,
-                    src_response=src_resp, tgt_response=None, replayed=False)
+        return dict(base, tgt_status=None, tgt_response=None,
+                    j_label='preflight', replayed=False, subqueries=[])
     if not tgt_resps:
-        return dict(method=method, uri=uri, src_status=src_status,
-                    tgt_status=None, j=None, j_label=None,
-                    src_hits=None, tgt_hits=None,
-                    src_hit_list=[], tgt_hit_list=[],
-                    src_request=src_request, tgt_request=tgt_request,
-                    src_response=src_resp, tgt_response=None, replayed=False)
+        return dict(base, tgt_status=None, tgt_response=None,
+                    j_label=None, replayed=False, subqueries=[])
     tgt = tgt_resps[0]
     tgt_status = tgt.get('Status-Code', '?')
     src_body = src_resp.get('payload', {}).get('inlinedJsonBody', {})
     tgt_body = tgt.get('payload', {}).get('inlinedJsonBody', {})
+    # A missing sourceResponse/targetResponse (e.g. the browser aborted the request before its
+    # response arrived — this is real, observed capture data, not hypothetical) leaves src_body
+    # or tgt_body as {}. compute_jaccard would then compare real data against nothing and
+    # mathematically bottom out at 0.0 — indistinguishable from "genuinely diverged" in the
+    # display. Detected once here (Status-Code is only absent when the response itself never
+    # arrived) and forced to an explicit unscored label instead, for every subquery at once.
+    missing_side = (
+        'no source or target data' if 'Status-Code' not in src_resp and 'Status-Code' not in tgt else
+        'no source data' if 'Status-Code' not in src_resp else
+        'no target data' if 'Status-Code' not in tgt else
+        None
+    )
     is_msearch = ('_msearch' in uri or 'responses' in src_body)
     if is_msearch:
-        j, lbl = score_msearch(src_body, tgt_body)
-        src_subs = [s for s in src_body.get('responses', []) if isinstance(s, dict)]
-        tgt_subs = [s for s in tgt_body.get('responses', []) if isinstance(s, dict)]
-        # sum(...) over an empty list is a real 0, which would misread as "matched nothing"
-        # rather than "not applicable" — only sum when there's at least one sub-response.
-        src_hits = sum((hit_count(s) or 0) for s in src_subs) if src_subs else None
-        tgt_hits = sum((hit_count(s) or 0) for s in tgt_subs) if tgt_subs else None
-        # Sub-queries are concatenated in order — the detail pane doesn't break an msearch out
-        # by sub-query, just shows every hit it returned across all of them.
-        src_hit_list = [h for s in src_subs for h in hit_summaries(s)]
-        tgt_hit_list = [h for s in tgt_subs for h in hit_summaries(s)]
+        src_subs = src_body.get('responses', [])
+        tgt_subs = tgt_body.get('responses', [])
+        n = max(len(src_subs), len(tgt_subs))
+        labels = _msearch_sub_labels(src_request, n)
+        # Both sides' NDJSON pairs are carried separately, not assumed identical — a
+        # transformation plugin can legitimately rewrite the body on its way to the target.
+        src_sub_bodies = _msearch_sub_bodies(src_request, n)
+        tgt_sub_bodies = _msearch_sub_bodies(tgt_request, n)
+        subqueries = []
+        for i in range(n):
+            sb = src_subs[i] if i < len(src_subs) else {}
+            tb = tgt_subs[i] if i < len(tgt_subs) else {}
+            j, lbl = (None, missing_side) if missing_side else _subquery_score(sb, tb)
+            subqueries.append(dict(
+                label=labels[i], j=j, j_label=lbl,
+                src_hits=hit_count(sb) if isinstance(sb, dict) else None,
+                tgt_hits=hit_count(tb) if isinstance(tb, dict) else None,
+                src_hit_list=hit_summaries(sb) if isinstance(sb, dict) else [],
+                tgt_hit_list=hit_summaries(tb) if isinstance(tb, dict) else [],
+                src_sub_ndjson=src_sub_bodies[i], tgt_sub_ndjson=tgt_sub_bodies[i],
+            ))
     else:
-        j, lbl = compute_jaccard(src_body, tgt_body)
-        src_hits = hit_count(src_body)
-        tgt_hits = hit_count(tgt_body)
-        src_hit_list = hit_summaries(src_body)
-        tgt_hit_list = hit_summaries(tgt_body)
-    return dict(method=method, uri=uri,
-                src_status=src_status, tgt_status=tgt_status,
-                j=j, j_label=lbl,
-                src_hits=src_hits, tgt_hits=tgt_hits,
-                src_hit_list=src_hit_list, tgt_hit_list=tgt_hit_list,
-                src_request=src_request, tgt_request=tgt_request,
-                src_response=src_resp, tgt_response=tgt,
-                replayed=True)
+        j, lbl = (None, missing_side) if missing_side else compute_jaccard(src_body, tgt_body)
+        subqueries = [dict(
+            label='query', j=j, j_label=lbl,
+            src_hits=hit_count(src_body), tgt_hits=hit_count(tgt_body),
+            src_hit_list=hit_summaries(src_body), tgt_hit_list=hit_summaries(tgt_body),
+            src_sub_ndjson=None, tgt_sub_ndjson=None,
+        )]
+    return dict(base, tgt_status=tgt_status, tgt_response=tgt,
+                j_label=None, replayed=True, subqueries=subqueries)
