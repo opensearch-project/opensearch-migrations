@@ -66,7 +66,7 @@ class JaccardApp(App):
 
     CSS = """
     #summary { height: 4; padding: 0 1; }
-    #footnote { height: 1; padding: 0 1; color: $text-muted; }
+    #footnote { height: auto; max-height: 4; padding: 0 1; color: $text-muted; }
     DataTable { height: 1fr; }
     #detail { height: 14; border-top: solid $primary; }
     #detail-src, #detail-tgt { width: 1fr; padding: 0 1; overflow-y: auto; }
@@ -112,6 +112,15 @@ class JaccardApp(App):
         # equivalent for aggregation items (weighted bucket overlap isn't a ranked-list
         # comparison), so those always show their one score regardless of this setting.
         self._score_metric = "jaccard"
+        # Unbounded, per-label running stats — deliberately NOT tied to the sliding window or
+        # to 'r' (reset only clears what's on screen). A flat overall average has the same
+        # blind spot per-request averaging did before the parent/child rework: one badly
+        # diverged label could hide inside an otherwise-good overall number. Both metrics are
+        # tracked simultaneously (mirroring how each item always carries both scores) so
+        # toggling 'm' swaps which lifetime breakdown is shown without losing history.
+        self._lifetime_stats = {"jaccard": {}, "rbo": {}}
+        self._lifetime_preflight = 0
+        self._lifetime_no_subqueries: Dict[str, int] = {}
         # The seqs shown last time _rebuild_table ran — a full clear()+re-add on every tick
         # visibly flickers and resets scroll position, so it's skipped whenever the visible
         # set of requests hasn't actually changed (the common case between new arrivals).
@@ -167,7 +176,32 @@ class JaccardApp(App):
             with self._buf_lock:
                 self._buf.append(s)
                 self._status["total"] += 1
+                self._record_lifetime(s)
         self._status["running"] = False
+
+    def _record_lifetime(self, s: Dict) -> None:
+        """Accumulate one newly-scored tuple into the lifetime, per-label stats. Caller must
+        already hold _buf_lock — this mutates the same shared state _repaint() reads."""
+        if s.get("j_label") == "preflight":
+            self._lifetime_preflight += 1
+            return
+        subqueries = s.get("subqueries", [])
+        if not subqueries:
+            method = s["method"]
+            self._lifetime_no_subqueries[method] = self._lifetime_no_subqueries.get(method, 0) + 1
+            return
+        for sq in subqueries:
+            for metric in ("jaccard", "rbo"):
+                value, label = self._metric_score(sq, metric)
+                label = label or "(unlabeled)"
+                bucket = self._lifetime_stats[metric].setdefault(
+                    label, {"count": 0, "scored_count": 0, "sum": 0.0, "min": None, "max": None})
+                bucket["count"] += 1
+                if value is not None:
+                    bucket["scored_count"] += 1
+                    bucket["sum"] += value
+                    bucket["min"] = value if bucket["min"] is None else min(bucket["min"], value)
+                    bucket["max"] = value if bucket["max"] is None else max(bucket["max"], value)
 
     # --- Repaint (main thread, on a timer — never touches the Kafka subprocess) ---
 
@@ -176,15 +210,22 @@ class JaccardApp(App):
             buf = list(self._buf)
         self._update_summary(buf)
         self._rebuild_table(buf)
-        self._update_footnote(buf)
+        self._update_footnote()
 
-    def _effective_score(self, sq: Dict) -> Tuple[Optional[float], Optional[str]]:
-        """The (score, label) to DISPLAY for one item, per the current metric mode. RBO only
-        applies to "hits" items — aggregations keep their own weighted bucket-overlap score
-        regardless of mode, since RBO has no meaningful equivalent for them."""
-        if self._score_metric == "rbo" and sq.get("kind") == "hits":
+    @staticmethod
+    def _metric_score(sq: Dict, metric: str) -> Tuple[Optional[float], Optional[str]]:
+        """The (score, label) for one item under a GIVEN metric — RBO only applies to "hits"
+        items; aggregations keep their own weighted bucket-overlap score under either metric,
+        since RBO has no meaningful equivalent for them. Parameterized (rather than reading
+        self._score_metric directly) so lifetime stats can accumulate both metrics at once
+        without needing the display mode to match what's being recorded."""
+        if metric == "rbo" and sq.get("kind") == "hits":
             return sq.get("rbo_j"), sq.get("rbo_label")
         return sq.get("j"), sq.get("j_label")
+
+    def _effective_score(self, sq: Dict) -> Tuple[Optional[float], Optional[str]]:
+        """The (score, label) to DISPLAY for one item, per the current metric mode."""
+        return self._metric_score(sq, self._score_metric)
 
     def _visible_tuples(self, buf: List[Dict]) -> List[Dict]:
         """The last N qualifying requests — shared by the table and the footnote so both
@@ -483,19 +524,49 @@ class JaccardApp(App):
             text.append("(no hits)", style="dim")
         return text
 
-    def _update_footnote(self, buf: List[Dict]) -> None:
-        n_options = sum(1 for s in buf if s.get("j_label") == "preflight")
-        no_score = [s for s in buf if not s.get("subqueries") and s.get("j_label") != "preflight"]
-        parts = []
-        if n_options:
-            parts.append(f"{n_options}× OPTIONS preflight (skipped)")
-        if no_score:
-            methods: Dict[str, int] = {}
-            for s in no_score:
-                methods[s["method"]] = methods.get(s["method"], 0) + 1
-            breakdown = ", ".join(f"{c}× {m}" for m, c in sorted(methods.items()))
-            parts.append(f"no score: {breakdown}")
-        self.query_one("#footnote", Static).update("  •  ".join(parts))
+    # Most labels ever seen at once is small and known (doc IDs / hit count ratio / RBO / a
+    # handful of agg + unscored variants from scoring.py) — this cap is just a backstop against
+    # the footnote panel growing without bound if that ever changes.
+    _MAX_LIFETIME_LABELS_SHOWN = 8
+
+    def _update_footnote(self) -> None:
+        """Lifetime, per-label running stats — unbounded, independent of the sliding window
+        and of 'r' (which only clears what's on screen). A flat overall average would have
+        the same blind spot per-request averaging did before the parent/child rework: one
+        consistently-diverged label could hide inside an otherwise-good overall number.
+        """
+        with self._buf_lock:
+            stats = {k: dict(v) for k, v in self._lifetime_stats[self._score_metric].items()}
+            preflight = self._lifetime_preflight
+            no_subq = dict(self._lifetime_no_subqueries)
+
+        text = Text()
+        meta_parts = []
+        if preflight:
+            meta_parts.append(f"{preflight}× OPTIONS preflight (skipped)")
+        if no_subq:
+            breakdown = ", ".join(f"{c}× {m}" for m, c in sorted(no_subq.items()))
+            meta_parts.append(f"no score: {breakdown}")
+        if meta_parts:
+            text.append("  •  ".join(meta_parts) + "\n", style="dim")
+
+        if not stats:
+            text.append("lifetime: (no scored items yet)", style="dim")
+        else:
+            ranked = sorted(stats.items(), key=lambda kv: -kv[1]["count"])
+            shown, hidden = ranked[:self._MAX_LIFETIME_LABELS_SHOWN], ranked[self._MAX_LIFETIME_LABELS_SHOWN:]
+            text.append("LIFETIME", style="bold")
+            text.append(f" ({self._score_metric})  ", style="dim")
+            for label, st in shown:
+                avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+                text.append(f"{label}", style="bold" if avg is None else _score_color(avg))
+                text.append(f" n={st['count']}", style="dim")
+                if avg is not None:
+                    text.append(f" avg={avg:.3f} [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
+                text.append("   ")
+            if hidden:
+                text.append(f"+{len(hidden)} more label(s)", style="dim")
+        self.query_one("#footnote", Static).update(text)
 
     # --- Actions ---
 
