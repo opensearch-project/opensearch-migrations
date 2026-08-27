@@ -1,7 +1,7 @@
 # Live replay-quality TUI
 
 A [Textual](https://textual.textualize.io/) replacement for
-`eric_demo/07-live-jaccard-kafka.sh`. Consumes the `tuple-output` Kafka topic and shows a
+`chorus_es_to_os_demo/07-live-jaccard-kafka.sh`. Consumes the `tuple-output` Kafka topic and shows a
 live sparkline + table of how closely each replayed request's target response matched the
 source, scoring by doc-ID overlap, aggregation buckets, or hit-count ratio (see
 `scoring.py`).

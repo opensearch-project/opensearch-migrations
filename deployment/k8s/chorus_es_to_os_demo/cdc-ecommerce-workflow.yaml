@@ -1,0 +1,46 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: cdc-ecommerce-migration
+  namespace: ma
+spec:
+  workflowTemplateRef:
+    name: cdc-full-e2e-imported-clusters
+  entrypoint: main
+  # argo-test-workflow-executor has pods/exec permission (via workflow-test-console-role)
+  # which is required for the configureAndSubmitWorkflow step that kubectl exec's into
+  # migration-console-0. argo-workflow-executor lacks this permission.
+  serviceAccountName: argo-test-workflow-executor
+  arguments:
+    parameters:
+      # source-configs: snapshotRepo.repoPathUri overrides the auto-generated
+      # S3 path suffix so RFS reads from the bucket root where the snapshot lives.
+      # documentBackfillConfig.documentsPerBulkRequest=200 avoids bulk timeouts
+      # on the remote chorus-opensearch-edition target.
+      - name: source-configs
+        value: >-
+          [{"source":{"endpoint":"http://host.docker.internal:9200","version":"ES_8.5","allow_insecure":true,"basic_auth":{"k8s_secret_name":"source-es-creds"},"snapshotRepo":{"repoPathUri":"s3://migrations-default-123456789012-dev-us-east-2"}},"snapshot-and-migration-configs":[{"snapshotConfig":{"snapshotLabel":"ecommerce_snapshot","snapshotNameConfig":{"externallyManagedSnapshotName":"ecommerce_snapshot"}},"migrations":[{"metadataMigrationConfig":{"allowLooseVersionMatching":true},"documentBackfillConfig":{"documentsPerBulkRequest":200}}]}]}]
+      - name: target-config
+        value: >-
+          {"endpoint":"https://chorus-opensearch-edition.dev.o19s.com:9200","allow_insecure":true,"basic_auth":{"k8s_secret_name":"target-os-creds"}}
+      - name: snapshot-configmap
+        value: "migrations-default-s3-config"
+      - name: migration-image-configmap
+        value: "migration-image-config"
+      # ClusterIP: no cloud load balancer in kind — use port-forward to reach proxy
+      - name: capture-proxy-service-type
+        value: "ClusterIP"
+      # speedup-factor=1: replay captured traffic at real-time pace
+      - name: speedup-factor
+        value: "1"
+      - name: observed-packet-timeout
+        value: "30"
+      # pre-snapshot-proxy-submit=false: start proxy after snapshot migration
+      - name: pre-snapshot-proxy-submit
+        value: "false"
+      - name: replayer-config-overrides
+        value: "{}"
+      - name: otel-trace-collector-endpoint
+        value: ""
+      - name: client-auth-pem-base64
+        value: ""
