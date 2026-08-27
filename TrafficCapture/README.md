@@ -305,6 +305,16 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
 
 </details>
 
+##### HTTP/1.1 1xx interim responses
+
+HTTP/1.1 1xx interim responses (`100 Continue`, `102 Processing`, `103 Early Hints`) are
+captured separately from the final response so the request/response pairing stays correct:
+
+- `sourceInterimResponses` — top-level array of interims from the source server.
+- `targetResponses[i].interimResponses` — interims from each target retry attempt.
+
+`101 Switching Protocols` is a final response and stays under `sourceResponse`/`targetResponses`.
+
 ### Capture Kafka Offloader
 
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.

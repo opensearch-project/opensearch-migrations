@@ -4,10 +4,15 @@ import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultLastHttpContent;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.codec.http.HttpStatusClass;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +22,7 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
 
     private AggregatedRawResponse.Builder aggregatedRawResponseBuilder;
     private boolean doneReadingRequest;
+    private boolean awaitingFinalAfterInterim;
     Consumer<AggregatedRawResponse> responseCallback;
 
     public BacksideHttpWatcherHandler(AggregatedRawResponse.Builder aggregatedRawResponseBuilder) {
@@ -27,10 +33,45 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) {
         if (msg instanceof HttpResponse) {
-            aggregatedRawResponseBuilder.addHttpParsedResponseObject((HttpResponse) msg);
+            var response = (HttpResponse) msg;
+            if (isInterimResponse(response)) {
+                aggregatedRawResponseBuilder.addInterimResponsePacket(encodeHttpResponse(response));
+                awaitingFinalAfterInterim = true;
+            } else {
+                aggregatedRawResponseBuilder.addHttpParsedResponseObject(response);
+                awaitingFinalAfterInterim = false;
+            }
         }
-        if (msg instanceof LastHttpContent) {
+        if (msg instanceof LastHttpContent && !awaitingFinalAfterInterim) {
             triggerResponseCallbackAndRemoveCallback();
+        } else if (msg instanceof LastHttpContent) {
+            // LastHttpContent of an interim 1xx; the final response is still coming.
+            awaitingFinalAfterInterim = false;
+        }
+    }
+
+    private static boolean isInterimResponse(HttpResponse response) {
+        var status = response.status();
+        return status.codeClass() == HttpStatusClass.INFORMATIONAL && status.code() != 101;
+    }
+
+    private static byte[] encodeHttpResponse(HttpResponse response) {
+        var encoder = new EmbeddedChannel(new HttpResponseEncoder());
+        try {
+            encoder.writeOutbound(response);
+            encoder.writeOutbound(new DefaultLastHttpContent());
+            var sb = new StringBuilder();
+            ByteBuf buf;
+            while ((buf = encoder.readOutbound()) != null) {
+                try {
+                    sb.append(buf.toString(java.nio.charset.StandardCharsets.ISO_8859_1));
+                } finally {
+                    buf.release();
+                }
+            }
+            return sb.toString().getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        } finally {
+            encoder.finishAndReleaseAll();
         }
     }
 
