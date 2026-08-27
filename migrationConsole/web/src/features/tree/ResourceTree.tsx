@@ -752,7 +752,14 @@ export function ResourceTree({
 }: Readonly<ResourceTreeProps>) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set(
+      Object.values(snapshot.nodes)
+        .filter((node) => (
+          node.childIds.length > 0
+          && (node.kind === "section" || node.kind === "group")
+        ))
+        .map((node) => node.id),
+    ),
   );
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
