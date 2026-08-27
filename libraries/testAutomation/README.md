@@ -113,3 +113,35 @@ pipenv run app --delete-clusters-only
 3. Inspect test reports in `./reports`
 4. Check pod status: `kubectl get pods -n ma`
 5. Clean up and retry: `pipenv run app --delete-only`
+
+## Verifying AWS resource tags (EKS only)
+
+`aws-bootstrap.sh --tags` is supposed to reach every AWS resource the deployment
+creates, including the EC2 instances, EBS volumes and load balancers that EKS
+Auto Mode provisions at runtime — which CloudFormation stack tags never touch.
+This verifies that it actually happened:
+
+```bash
+pipenv run verify-tags \
+  --region us-east-1 \
+  --kube-context migration-eks-esoscdc-p42 \
+  --stack-name Migration-Assistant-Infra-Create-VPC-eks-esoscdc-p42-us-east-1
+```
+
+The expected tags are read from the stack's own tags, so there is nothing to
+configure — whoever deployed chose them, and this asserts they propagated. Pass
+`--expect-tags 'K=V,K2=V2'` to override.
+
+It never searches by tag: an untagged resource is exactly the one a tag search
+cannot find. Instead it reaches every resource from an oracle that knows it
+exists independently — `ListStackResources` for the CloudFormation half, and the
+Kubernetes API for everything Auto Mode made (`Node.spec.providerID` → instances
+→ their volumes/ENIs/launch template; `PersistentVolume.spec.csi.volumeHandle` →
+PVC volumes; `Service.status.loadBalancer` → load balancer → target groups,
+listeners, security groups). Because the cluster is the index, it is exact
+regardless of what else lives in the region, and needs no clean account.
+
+The EKS CDC pipelines run this automatically via `--verify-resource-tags` on the
+normal test invocation, after the tests so the load balancer and PVC volumes
+exist. Use at least two tags: a single tag cannot catch a bug that keeps only the
+first entry of a comma-separated list.

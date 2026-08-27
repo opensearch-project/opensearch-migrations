@@ -713,6 +713,29 @@ def parse_args(argv=None) -> argparse.Namespace:
              "If not set, uses the current kubectl context."
     )
     parser.add_argument(
+        "--verify-resource-tags",
+        action="store_true",
+        help="After the tests, verify that the deployer tags on the CloudFormation stack reached "
+             "every AWS resource the deployment created -- including the EC2 instances, EBS volumes "
+             "and load balancers that EKS Auto Mode creates at runtime, which CloudFormation stack "
+             "tags never touch. Needs --ma-stack-name and --aws-region. The expected tags are read "
+             "from the stack, so there is nothing to configure. Can also be run on its own later: "
+             "pipenv run verify-tags --stack-name <stack> --region <region> --kube-context <ctx>"
+    )
+    parser.add_argument(
+        "--ma-stack-name",
+        type=str,
+        default=None,
+        help="Migration Assistant CloudFormation stack name (for --verify-resource-tags)."
+    )
+    parser.add_argument(
+        "--aws-region",
+        type=str,
+        default=None,
+        help="AWS region of the deployment (for --verify-resource-tags). "
+             "Falls back to AWS_REGION / AWS_CFN_REGION."
+    )
+    parser.add_argument(
         "--speedup-factor",
         type=int,
         default=20,
@@ -838,6 +861,31 @@ def main() -> None:
                     reuse_clusters=reuse_clusters,
                     test_reports_dir=args.test_reports_dir,
                     copy_logs=args.copy_logs)
+
+    # Deliberately after the tests, not before: the load balancer, PVC volumes and any scaled-up
+    # nodes only exist once a migration has actually run, so checking earlier would silently verify
+    # a much smaller set of resources. Requires --skip-delete (as the EKS pipelines use), otherwise
+    # the resources are already gone.
+    if args.verify_resource_tags:
+        from .resource_tag_verifier import (expected_tags_from_stack, format_report,
+                                            verify_resource_tags)
+        region = args.aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_CFN_REGION")
+        if not region:
+            sys.exit("error: --verify-resource-tags needs --aws-region (or AWS_REGION set)")
+        if not args.ma_stack_name:
+            sys.exit("error: --verify-resource-tags needs --ma-stack-name")
+        # The expected tags come from the stack itself, so nothing about them is configured here or
+        # in any CI job -- whoever deployed chose them, and this asserts they propagated.
+        expected = expected_tags_from_stack(args.ma_stack_name, region)
+        if not expected:
+            sys.exit(f"error: stack {args.ma_stack_name} carries no deployer tags -- "
+                     "was it created with --tags?")
+        result = verify_resource_tags(expected, region,
+                                      kube_context=args.kube_context,
+                                      stack_name=args.ma_stack_name)
+        logger.info("Resource tag verification:\n%s", format_report(result, expected))
+        if not result.ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -100,13 +100,20 @@ def call(Map config = [:]) {
                         script {
                             env.sourceVer = params.SOURCE_VERSION
 
+                            // Deliberately no useGeneralNodePool: --tags below replaces the built-in
+                            // general-purpose NodePool with a tagged one, because the NodeClass
+                            // behind the built-in pools is owned by EKS and cannot carry tags.
                             def bootstrap = resolveBootstrap(
                                 useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                 build: params.BUILD,
                                 skipTestImages: true,
-                                version: params.VERSION,
-                                useGeneralNodePool: true
+                                version: params.VERSION
                             )
+
+                            // TWO tags on purpose: one static, one stage-derived. A single tag would
+                            // not catch a bug that drops all but the first entry, and the
+                            // stage-derived value proves values (not just keys) are carried through.
+                            env.MA_RESOURCE_TAGS = "MATestOwner=migrations-ci,MATestStage=${maStageName}"
 
                             withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
                                 bootstrapMA(
@@ -115,7 +122,8 @@ def call(Map config = [:]) {
                                     region: params.REGION,
                                     bootstrap: bootstrap,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
-                                    kubectlContext: "migration-eks-${maStageName}"
+                                    kubectlContext: "migration-eks-${maStageName}",
+                                    resourceTags: env.MA_RESOURCE_TAGS
                                 )
                             }
                         }
@@ -220,7 +228,7 @@ def call(Map config = [:]) {
                             script {
                                 sh "pipenv install --deploy"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=${env.sourceVer} --target-type=AOSS --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
+                                    sh "pipenv run app --source-version=${env.sourceVer} --target-type=AOSS --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --verify-resource-tags --ma-stack-name='${env.STACK_NAME}' --aws-region=${params.REGION}"
                                 }
                             }
                         }
