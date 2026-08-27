@@ -15,12 +15,16 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
+import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpMessageDecoderResult;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpResponseDecoder;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
@@ -133,9 +137,62 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
     }
 
+    /**
+     * Response-side counterpart to {@link SimpleHttpRequestDecoder}. Unlike the request decoder, this
+     * needs no capture predicate or header matcher — the capture-or-not decision was already made when
+     * the request came in ({@link CaptureState#shouldCapture()}), so this exists purely to detect where
+     * a response ends. {@link PassThruHttpHeaders} is reused as-is: the headers it tracks
+     * (Content-Length/Transfer-Encoding/Trailer) are what Netty's decoder needs to find that boundary
+     * on ANY HTTP message, request or response — nothing about them is request-specific.
+     */
+    static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
+        private final PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve;
+
+        public SimpleHttpResponseDecoder(@NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve) {
+            this.headersToPreserve = headersToPreserve;
+        }
+
+        @Override
+        public HttpMessage createMessage(String[] initialLine) {
+            return new DefaultHttpResponse(
+                HttpVersion.valueOf(initialLine[0]),
+                HttpResponseStatus.valueOf(Integer.parseInt(initialLine[1]), initialLine[2]),
+                new PassThruHttpHeaders(headersToPreserve)
+            );
+        }
+    }
+
+    static class SimpleDecodedHttpResponseHandler extends ChannelInboundHandlerAdapter {
+        @Getter
+        private HttpResponse currentResponse;
+        boolean haveParsedFullResponse;
+
+        @Override
+        public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
+            if (msg instanceof HttpResponse) {
+                currentResponse = (HttpResponse) msg;
+            } else if (msg instanceof HttpContent) {
+                ((HttpContent) msg).release();
+                if (msg instanceof LastHttpContent) {
+                    haveParsedFullResponse = true;
+                }
+            } else {
+                super.channelRead(ctx, msg);
+            }
+        }
+
+        public HttpResponse resetCurrentResponse() {
+            this.haveParsedFullResponse = false;
+            var old = currentResponse;
+            this.currentResponse = null;
+            return old;
+        }
+    }
+
     protected final IChannelConnectionCaptureSerializer<T> trafficOffloader;
 
     protected final EmbeddedChannel httpDecoderChannel;
+    protected final EmbeddedChannel httpResponseDecoderChannel;
 
     protected IWireCaptureContexts.IHttpMessageContext messageContext;
 
@@ -155,6 +212,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher(), captureState),
             new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
         );
+        httpResponseDecoderChannel = new EmbeddedChannel(
+            new SimpleHttpResponseDecoder(new PassThruHttpHeaders.HttpHeadersToPreserve()),
+            new SimpleDecodedHttpResponseHandler()
+        );
     }
 
     private IWireCaptureContexts.ICapturingConnectionContext getConnectionContext() {
@@ -163,6 +224,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
         return (SimpleDecodedHttpRequestHandler) httpDecoderChannel.pipeline().last();
+    }
+
+    private SimpleDecodedHttpResponseHandler getHandlerThatHoldsParsedHttpResponse() {
+        return (SimpleDecodedHttpResponseHandler) httpResponseDecoderChannel.pipeline().last();
     }
 
     @Override
@@ -284,9 +349,57 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             responseContext = (IWireCaptureContexts.IResponseContext) messageContext;
         }
 
+        var timestamp = Instant.now();
         var bb = (ByteBuf) msg;
-        if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
-            trafficOffloader.addWriteEvent(Instant.now(), bb);
+        var shouldCapture = getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture();
+        if (shouldCapture) {
+            trafficOffloader.addWriteEvent(timestamp, bb);
+
+            // Without this, the accumulator on the far end only learns a response is complete
+            // via connection close, connection reuse (next request read), or an expiry timeout
+            // — all proxies for "done", never a real signal — so a response sent over a
+            // still-open keep-alive connection sits unfinalized until one of those eventually
+            // fires. This mirrors channelRead()'s embedded-decoder pattern above so a response
+            // gets the same deterministic, immediate end-of-message signal a request already
+            // does. NOTE: plain HttpResponseDecoder doesn't know the originating request's
+            // method, so a response to a HEAD request (no body despite Content-Length) isn't
+            // detected as complete here — same gap as before for that one case.
+            var responseParsingHandler = getHandlerThatHoldsParsedHttpResponse();
+            httpResponseDecoderChannel.writeInbound(bb.retainedDuplicate()); // consumed/released by this method
+            if (responseParsingHandler.haveParsedFullResponse) {
+                var httpResponse = responseParsingHandler.resetCurrentResponse();
+                var decoderResultLoose = httpResponse.decoderResult();
+                if (decoderResultLoose instanceof HttpMessageDecoderResult) {
+                    var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
+                    trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
+                    trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+                } else {
+                    log.atWarn().setMessage("HttpResponse decoder result was not an HttpMessageDecoderResult "
+                        + "(was {}). EOM will have -1 for firstLineByteLength and headersByteLength. "
+                        + "This may indicate a missing header in PassThruHttpHeaders.")
+                        .addArgument(() -> decoderResultLoose.getClass().getName())
+                        .log();
+                }
+                trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
+                // commitEndOfHttpMessageIndicator() only appends the EOM marker to the current
+                // in-memory buffer — it does NOT push anything to Kafka. Without an explicit
+                // flush here, a response sits buffered until some UNRELATED later trigger comes
+                // along (the request side gets exactly this treatment already, via
+                // ConditionallyReliableLoggingHttpHandler's blocking flushCommitAndResetStream()
+                // before forwarding to the backend). On a keep-alive connection with no next
+                // request imminent, that could be connection teardown minutes later — long past
+                // the accumulator's own observedPacketConnectionTimeout, so it gives up and
+                // finalizes the tuple with no response, and the real data arrives too late for
+                // anything to be listening for it. A response needs the same not-just-buffered
+                // guarantee a request already gets.
+                trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
+                    if (t != null) {
+                        log.atWarn().setCause(t)
+                            .setMessage("Error flushing captured response; response data may be lost")
+                            .log();
+                    }
+                });
+            }
         }
         responseContext.onBytesWritten(bb.readableBytes());
 
@@ -298,6 +411,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
         messageContext.addCaughtException(cause);
         httpDecoderChannel.close();
+        httpResponseDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }
 
