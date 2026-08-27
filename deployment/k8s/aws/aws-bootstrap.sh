@@ -1013,7 +1013,7 @@ warn_if_storage_class_tags_are_stale() {
     -o jsonpath='{range $k,$v := .parameters}{$k}={$v}{"\n"}{end}' 2>/dev/null) || return 0
   # `grep` finding nothing is the "currently untagged" case, not an error -- and it is precisely
   # the case that breaks when tags are added, so it must not short-circuit the comparison.
-  existing=$(printf '%s\n' "$params" | { /usr/bin/grep '^tagSpecification' || true; } \
+  existing=$(printf '%s\n' "$params" | { grep '^tagSpecification' || true; } \
     | sed 's/^[^=]*=//' | sort | tr '\n' ',')
   want=""
   for i in "${!tag_keys[@]}"; do
