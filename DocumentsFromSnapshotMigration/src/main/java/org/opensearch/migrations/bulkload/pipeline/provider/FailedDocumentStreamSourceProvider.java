@@ -32,7 +32,10 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Only a sealed session can be read: an open one can still gain records after enumeration, and
  * silently skipping those is not good enough for a feature whose promise is completeness.
  */
+// KIND mirrors EsSnapshotSourceProvider and SolrBackupSourceProvider; renaming only this one would
+// make the three inconsistent.
 @Slf4j
+@SuppressWarnings("java:S1845")
 public class FailedDocumentStreamSourceProvider
     implements DocumentSourceProvider<FailedDocumentStreamSourceSpec> {
 

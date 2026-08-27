@@ -27,6 +27,8 @@ public class SessionSealer {
         this.store = store;
     }
 
+    // Sonar reads an empty record body as an empty method; see CoordinatorInfo in RfsMigrateDocuments.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record SealResult(SessionManifest manifest, String digest, boolean publishedByThisCaller) {}
 
     /**

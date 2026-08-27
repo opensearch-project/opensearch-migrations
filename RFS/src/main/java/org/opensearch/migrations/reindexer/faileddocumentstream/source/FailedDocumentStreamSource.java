@@ -155,21 +155,21 @@ public class FailedDocumentStreamSource implements DocumentSource {
      * Unknown fields are ignored, so a newer writer stays readable.
      */
     private Optional<Document> toDocument(String key, long ordinal, String line) {
-        com.fasterxml.jackson.databind.JsonNode record;
+        com.fasterxml.jackson.databind.JsonNode parsed;
         try {
-            record = MAPPER.readTree(line);
+            parsed = MAPPER.readTree(line);
         } catch (IOException e) {
             throw new UnreadableRecordException(key, ordinal, "it is not valid JSON", e);
         }
-        if (record == null || !record.isObject()) {
+        if (parsed == null || !parsed.isObject()) {
             throw new UnreadableRecordException(key, ordinal, "it is not a JSON object", null);
         }
-        var requestItem = record.get(FIELD_REQUEST_ITEM);
+        var requestItem = parsed.get(FIELD_REQUEST_ITEM);
         if (requestItem == null || requestItem.isNull() || !requestItem.isObject()) {
             throw new UnreadableRecordException(key, ordinal,
                 "it has no '" + FIELD_REQUEST_ITEM + "' object to replay", null);
         }
-        if (!failureClasses.isEmpty() && !matchesFailureClass(record)) {
+        if (!failureClasses.isEmpty() && !matchesFailureClass(parsed)) {
             return Optional.empty();
         }
         return Optional.of(new Document(
@@ -181,8 +181,8 @@ public class FailedDocumentStreamSource implements DocumentSource {
             Map.of(META_OBJECT_KEY, key, META_RECORD_ORDINAL, ordinal)));
     }
 
-    private boolean matchesFailureClass(com.fasterxml.jackson.databind.JsonNode record) {
-        var raw = record.path(FIELD_FAILURE_CLASS).asText(null);
+    private boolean matchesFailureClass(com.fasterxml.jackson.databind.JsonNode parsed) {
+        var raw = parsed.path(FIELD_FAILURE_CLASS).asText(null);
         if (raw == null || raw.isBlank()) {
             return false;
         }

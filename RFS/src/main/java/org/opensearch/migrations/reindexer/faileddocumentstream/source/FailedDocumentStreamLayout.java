@@ -63,5 +63,7 @@ public class FailedDocumentStreamLayout {
         return Optional.of(new RecordLocation(index, worker));
     }
 
+    // Sonar reads an empty record body as an empty method; see CoordinatorInfo in RfsMigrateDocuments.
+    @SuppressWarnings({"java:S100", "java:S1186"})
     public record RecordLocation(String collectionName, String partitionName) {}
 }

@@ -45,9 +45,9 @@ public class FailedDocumentStreamRecordTransformer implements IJsonTransformer {
     }
 
     private Map<String, Object> toOperation(Map<String, Object> item) {
-        var record = asMap(item.get(FIELD_DOCUMENT),
+        var failureRecord = asMap(item.get(FIELD_DOCUMENT),
             "a failure-stream record under '" + FIELD_DOCUMENT + "'");
-        var requestItem = asMap(record.get(FailedDocumentStreamSource.FIELD_REQUEST_ITEM),
+        var requestItem = asMap(failureRecord.get(FailedDocumentStreamSource.FIELD_REQUEST_ITEM),
             "a '" + FailedDocumentStreamSource.FIELD_REQUEST_ITEM + "' object");
 
         // Copy, not mutate: a later transform may still read the record as emitted.

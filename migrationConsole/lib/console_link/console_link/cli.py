@@ -1074,6 +1074,41 @@ def failed_document_stream_redrive_cmd(ctx, migration, indices, failure_classes,
     The session and the settings it runs under are resolved from the same SnapshotMigration, and the
     saved configuration is checked against it before anything is submitted.
     """
+    cfg, identity, plan = _prepare_redrive(migration, indices, failure_classes, preview_limit)
+    payload = {
+        "migration": identity.name,
+        "sessionId": cfg.session_id,
+        "location": cfg.location_uri,
+        "dryRun": dry_run,
+        "total": plan["total"],
+        "skippedWithoutId": plan["skipped_without_id"],
+        "indices": plan["indices"],
+        "documents": plan["documents"],
+    }
+
+    if plan["total"] == 0:
+        _finish_without_submitting(ctx, payload, "No failed documents match; nothing to redrive.")
+        return
+
+    if dry_run:
+        if not ctx.json:
+            _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids)
+        _finish_without_submitting(ctx, payload, "\nDry run: nothing was submitted.")
+        return
+
+    _confirm_redrive(ctx, cfg, identity, plan, allow_missing_document_ids, yes)
+
+    source_config = failed_document_stream_.build_source_config(
+        cfg, indices=list(indices), failure_classes=list(failure_classes))
+    submission = _submit_redrive_workflow(
+        config_session, source_config, identity, allow_missing_document_ids, quiet=ctx.json)
+
+    if ctx.json:
+        click.echo(json.dumps({**payload, "submitted": True, "submission": submission}))
+
+
+def _prepare_redrive(migration, indices, failure_classes, preview_limit):
+    """Resolve the session, insist it is sealed, and work out what a redrive would write."""
     try:
         cfg, identity = failed_document_stream_.load_config_and_identity(migration_override=migration)
     except failed_document_stream_.FailedDocumentStreamNotConfigured as e:
@@ -1094,33 +1129,17 @@ def failed_document_stream_redrive_cmd(ctx, migration, indices, failure_classes,
             limit=preview_limit)
     except ValueError as e:
         raise click.ClickException(str(e))
+    return cfg, identity, plan
 
-    payload = {
-        "migration": identity.name,
-        "sessionId": cfg.session_id,
-        "location": cfg.location_uri,
-        "dryRun": dry_run,
-        "total": plan["total"],
-        "skippedWithoutId": plan["skipped_without_id"],
-        "indices": plan["indices"],
-        "documents": plan["documents"],
-    }
 
-    if plan["total"] == 0:
-        if ctx.json:
-            click.echo(json.dumps({**payload, "submitted": False}))
-        else:
-            click.echo("No failed documents match; nothing to redrive.")
-        return
+def _finish_without_submitting(ctx, payload, message):
+    if ctx.json:
+        click.echo(json.dumps({**payload, "submitted": False}))
+    else:
+        click.echo(message)
 
-    if dry_run:
-        if ctx.json:
-            click.echo(json.dumps({**payload, "submitted": False}))
-        else:
-            _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids)
-            click.echo("\nDry run: nothing was submitted.")
-        return
 
+def _confirm_redrive(ctx, cfg, identity, plan, allow_missing_document_ids, yes):
     if ctx.json:
         # No prompt to answer, so the acknowledgement must come from the command line.
         if not yes:
@@ -1128,18 +1147,10 @@ def failed_document_stream_redrive_cmd(ctx, migration, indices, failure_classes,
                 "Refusing to redrive without --yes under --json: this replaces existing documents "
                 "at the ids being written and there is no prompt to confirm it. Re-run with --yes, "
                 "or with --dry-run to see what would be written.")
-    else:
-        _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids)
-        if not yes:
-            click.confirm("Proceed with the redrive?", abort=True)
-
-    source_config = failed_document_stream_.build_source_config(
-        cfg, indices=list(indices), failure_classes=list(failure_classes))
-    submission = _submit_redrive_workflow(
-        config_session, source_config, identity, allow_missing_document_ids, quiet=ctx.json)
-
-    if ctx.json:
-        click.echo(json.dumps({**payload, "submitted": True, "submission": submission}))
+        return
+    _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids)
+    if not yes:
+        click.confirm("Proceed with the redrive?", abort=True)
 
 
 def _echo_redrive_plan(cfg, identity, plan, allow_missing_document_ids):

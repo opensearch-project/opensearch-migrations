@@ -548,6 +548,26 @@ def build_source_config(
     return source_config
 
 
+def _selected_object_keys(manifest: dict, wanted_indices: set) -> List[str]:
+    """The sealed manifest's object keys for the indices in scope, in read order."""
+    keys = []
+    for collection in manifest.get("collections", []) or []:
+        if wanted_indices and collection.get("name") not in wanted_indices:
+            continue
+        for partition in collection.get("partitions", []) or []:
+            keys.extend(partition.get("objectKeys", []) or [])
+    return sorted(keys)
+
+
+def _iter_selected_records(client, cfg: FailedDocumentStreamConfig, keys: List[str],
+                           wanted_classes: set) -> Iterator[dict]:
+    for key in keys:
+        for record in _iter_object_records(client, cfg.bucket, key):
+            if wanted_classes and record.get("failureClass") not in wanted_classes:
+                continue
+            yield record
+
+
 def plan_redrive(
     cfg: FailedDocumentStreamConfig,
     manifest: dict,
@@ -561,37 +581,36 @@ def plan_redrive(
 
     Reads every record in scope, which is the only way to answer what is about to be overwritten.
     """
-    wanted_indices = set(indices or [])
+    keys = _selected_object_keys(manifest, set(indices or []))
     wanted_classes = set(normalize_failure_classes(failure_classes))
-    keys = []
-    for collection in manifest.get("collections", []) or []:
-        if wanted_indices and collection.get("name") not in wanted_indices:
-            continue
-        for partition in collection.get("partitions", []) or []:
-            keys.extend(partition.get("objectKeys", []) or [])
-
     client = client or _s3_client(cfg)
+
     per_index: dict = {}
     sample: List[dict] = []
     total = 0
     skipped_without_id = 0
-    for key in sorted(keys):
-        for record in _iter_object_records(client, cfg.bucket, key):
-            if wanted_classes and record.get("failureClass") not in wanted_classes:
-                continue
-            total += 1
-            index = record.get("targetIndex") or "(unknown)"
-            per_index[index] = per_index.get(index, 0) + 1
-            if not record.get("documentId"):
-                skipped_without_id += 1
-            if limit is None or len(sample) < limit:
-                sample.append(record)
+    for record in _iter_selected_records(client, cfg, keys, wanted_classes):
+        total += 1
+        index = record.get("targetIndex") or "(unknown)"
+        per_index[index] = per_index.get(index, 0) + 1
+        if not record.get("documentId"):
+            skipped_without_id += 1
+        if limit is None or len(sample) < limit:
+            sample.append(record)
     return {
         "indices": per_index,
         "documents": sample,
         "total": total,
         "skipped_without_id": skipped_without_id,
     }
+
+
+def _labelled_entries(snapshot_name: str, configs) -> Iterator[tuple]:
+    """The ``(label, entry)`` pairs under one snapshot that declare a document backfill."""
+    for position, entry in enumerate(configs or []):
+        if not isinstance(entry, dict) or "documentBackfillConfig" not in entry:
+            continue
+        yield entry.get("label") or f"{snapshot_name}[{position}]", entry
 
 
 def _document_backfill_entries(data: dict) -> List[tuple]:
@@ -602,10 +621,7 @@ def _document_backfill_entries(data: dict) -> List[tuple]:
         target_label = migration.get("toTarget")
         per_snapshot = migration.get("perSnapshotConfig", {}) or {}
         for snapshot_name, configs in per_snapshot.items():
-            for position, entry in enumerate(configs or []):
-                if not isinstance(entry, dict) or "documentBackfillConfig" not in entry:
-                    continue
-                label = entry.get("label") or f"{snapshot_name}[{position}]"
+            for label, entry in _labelled_entries(snapshot_name, configs):
                 entries.append((source_label, target_label, label, entry))
     return entries
 
