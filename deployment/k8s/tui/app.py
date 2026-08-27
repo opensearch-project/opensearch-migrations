@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 TABLE_ANCHOR = "tuples"
 COLUMNS = ("J", "METHOD", "URI", "SRC → TGT", "NOTE")
+TYPE_COLUMNS = ("TYPE", "N", "SCORED", "AVG", "MIN", "MAX")
 SPARK = "▁▂▃▄▅▆▇█"
 
 
@@ -43,6 +44,17 @@ def _score_color(j: Optional[float]) -> str:
     if j is None:
         return "dim"
     return "green" if j >= 0.95 else ("yellow" if j >= 0.80 else "red")
+
+
+def _type_key(label: str) -> str:
+    """Strip a per-position prefix like '1/2 (typefilter)' off a subquery label, leaving just
+    the comparison TYPE — 'hits', 'agg:filter_product_type', etc. Labels are built in
+    scoring.py as '{position prefix} · {type}'; grouping by this tail is what lets the
+    by-type view answer "how is agg:supplier doing overall" across every position/request
+    it's ever shown up in, rather than one row per position."""
+    if " · " in label:
+        return label.rsplit(" · ", 1)[1]
+    return label
 
 
 def _spark_char(j: Optional[float]) -> Text:
@@ -74,6 +86,7 @@ class JaccardApp(App):
     """
     BINDINGS = [
         ("r", "reset", "Reset window"),
+        ("t", "toggle_top_view", "Live/By type"),
         ("v", "toggle_view", "Hits/Request"),
         ("m", "toggle_metric", "Jaccard/RBO"),
         ("c", "copy_request", "Copy request"),
@@ -119,12 +132,30 @@ class JaccardApp(App):
         # tracked simultaneously (mirroring how each item always carries both scores) so
         # toggling 'm' swaps which lifetime breakdown is shown without losing history.
         self._lifetime_stats = {"jaccard": {}, "rbo": {}}
+        # Same shape as _lifetime_stats (count/scored_count/sum/min/max per metric), but keyed
+        # by comparison TYPE (_type_key(sq["label"]) — "hits", "agg:filter_product_type", ...)
+        # instead of by scoring method. _lifetime_stats answers "how is 'doc IDs' scoring doing
+        # overall"; this answers "how is 'agg:filter_product_type' doing overall" — two
+        # different axes over the same underlying items, so both are tracked, not derived from
+        # each other (a "doc IDs" bucket can span many item types' worth of hits comparisons;
+        # an "agg:filter_product_type" bucket can span many scoring-method labels if its shape
+        # ever varies request to request).
+        self._lifetime_by_type = {"jaccard": {}, "rbo": {}}
+        # type_key -> scoring-method label -> stats — the by-type view's drill-down: which
+        # scoring methods make up a given type's rolled-up total, and how each is doing.
+        self._lifetime_by_type_detail: Dict[str, Dict[str, Dict]] = {"jaccard": {}, "rbo": {}}
         self._lifetime_preflight = 0
         self._lifetime_no_subqueries: Dict[str, int] = {}
         # The seqs shown last time _rebuild_table ran — a full clear()+re-add on every tick
         # visibly flickers and resets scroll position, so it's skipped whenever the visible
         # set of requests hasn't actually changed (the common case between new arrivals).
         self._last_row_signature: Optional[Tuple[int, ...]] = None
+        # "live" is the per-request table this class started with; "types" replaces it with
+        # one row per comparison TYPE (hits, agg:filter_product_type, ...), aggregated across
+        # every position it's ever appeared at — toggled with 't', independent of the sliding
+        # window / 'r' reset, same lifetime scope as the footnote it's built from.
+        self._top_view = "live"
+        self._last_types_signature: Optional[Tuple[Tuple[str, int, float], ...]] = None
         self.is_exiting = False
 
     def compose(self) -> ComposeResult:
@@ -180,8 +211,10 @@ class JaccardApp(App):
         self._status["running"] = False
 
     def _record_lifetime(self, s: Dict) -> None:
-        """Accumulate one newly-scored tuple into the lifetime, per-label stats. Caller must
-        already hold _buf_lock — this mutates the same shared state _repaint() reads."""
+        """Accumulate one newly-scored tuple into every lifetime breakdown this app tracks —
+        by scoring method (_lifetime_stats), by comparison type (_lifetime_by_type), and type
+        drilled down to scoring method (_lifetime_by_type_detail). Caller must already hold
+        _buf_lock — this mutates the same shared state _repaint() reads."""
         if s.get("j_label") == "preflight":
             self._lifetime_preflight += 1
             return
@@ -191,17 +224,25 @@ class JaccardApp(App):
             self._lifetime_no_subqueries[method] = self._lifetime_no_subqueries.get(method, 0) + 1
             return
         for sq in subqueries:
+            type_key = _type_key(sq.get("label") or "(unlabeled)")
             for metric in ("jaccard", "rbo"):
                 value, label = self._metric_score(sq, metric)
                 label = label or "(unlabeled)"
-                bucket = self._lifetime_stats[metric].setdefault(
-                    label, {"count": 0, "scored_count": 0, "sum": 0.0, "min": None, "max": None})
-                bucket["count"] += 1
-                if value is not None:
-                    bucket["scored_count"] += 1
-                    bucket["sum"] += value
-                    bucket["min"] = value if bucket["min"] is None else min(bucket["min"], value)
-                    bucket["max"] = value if bucket["max"] is None else max(bucket["max"], value)
+                self._accumulate(self._lifetime_stats[metric], label, value)
+                self._accumulate(self._lifetime_by_type[metric], type_key, value)
+                self._accumulate(
+                    self._lifetime_by_type_detail[metric].setdefault(type_key, {}), label, value)
+
+    @staticmethod
+    def _accumulate(store: Dict[str, Dict], key: str, value: Optional[float]) -> None:
+        bucket = store.setdefault(
+            key, {"count": 0, "scored_count": 0, "sum": 0.0, "min": None, "max": None})
+        bucket["count"] += 1
+        if value is not None:
+            bucket["scored_count"] += 1
+            bucket["sum"] += value
+            bucket["min"] = value if bucket["min"] is None else min(bucket["min"], value)
+            bucket["max"] = value if bucket["max"] is None else max(bucket["max"], value)
 
     # --- Repaint (main thread, on a timer — never touches the Kafka subprocess) ---
 
@@ -209,7 +250,10 @@ class JaccardApp(App):
         with self._buf_lock:
             buf = list(self._buf)
         self._update_summary(buf)
-        self._rebuild_table(buf)
+        if self._top_view == "types":
+            self._rebuild_types_table()
+        else:
+            self._rebuild_table(buf)
         self._update_footnote()
 
     @staticmethod
@@ -323,6 +367,40 @@ class JaccardApp(App):
         # silently come out smaller than what was actually saved.
         self.call_after_refresh(setattr, table, "scroll_y", scroll_y)
 
+    def _rebuild_types_table(self) -> None:
+        """Repaint the table in 'by type' mode: one row per comparison TYPE (hits,
+        agg:filter_product_type, agg:supplier, ...), aggregated across every position/request
+        that type has ever appeared at — a live per-request table answers "how did THIS
+        request do"; this answers "how is agg:supplier doing overall, across everything
+        replayed so far". Reads _lifetime_by_type directly — already keyed by type, not by
+        scoring method, so no re-derivation is needed here.
+        """
+        with self._buf_lock:
+            by_type = {k: dict(v) for k, v in self._lifetime_by_type[self._score_metric].items()}
+
+        ranked = sorted(by_type.items(), key=lambda kv: -kv[1]["count"])
+        signature = tuple((k, v["count"], round(v["sum"], 6)) for k, v in ranked)
+        if signature == self._last_types_signature:
+            return
+        self._last_types_signature = signature
+
+        table = self.table
+        scroll_y = table.scroll_y
+        table.clear()
+        row_keys: List[str] = []
+        for type_key, st in ranked:
+            avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+            avg_cell = (Text("-", style="dim") if avg is None
+                        else Text(f"{avg:.3f}", style=f"bold {_score_color(avg)}"))
+            min_cell = "-" if st["min"] is None else f"{st['min']:.3f}"
+            max_cell = "-" if st["max"] is None else f"{st['max']:.3f}"
+            table.add_row(Text(type_key, style="bold"), str(st["count"]), str(st["scored_count"]),
+                          avg_cell, min_cell, max_cell, key=type_key)
+            row_keys.append(type_key)
+        if self._selected_key is not None and self._selected_key in row_keys:
+            table.move_cursor(row=row_keys.index(self._selected_key), scroll=False)
+        self.call_after_refresh(setattr, table, "scroll_y", scroll_y)
+
     @staticmethod
     def _hits_cell(sh: Optional[int], th: Optional[int]) -> Text:
         if sh is None or th is None:
@@ -367,6 +445,9 @@ class JaccardApp(App):
     def _update_detail(self) -> None:
         src_pane = self.query_one("#detail-src", Static)
         tgt_pane = self.query_one("#detail-tgt", Static)
+        if self._top_view == "types":
+            self._update_types_detail(src_pane, tgt_pane)
+            return
         if self._selected_key is None:
             src_pane.update(Text(
                 "select a row to see detail  ·  v: hits/request  ·  m: jaccard/rbo  ·  c: copy request",
@@ -412,6 +493,36 @@ class JaccardApp(App):
         tgt_ids = {h["id"] for h in tgt_list}
         src_pane.update(self._hit_list_text(f"SOURCE — {sq['label']}", sq.get("src_hits"), src_list, tgt_ids))
         tgt_pane.update(self._hit_list_text(f"TARGET — {sq['label']}", sq.get("tgt_hits"), tgt_list, src_ids))
+
+    def _update_types_detail(self, src_pane: Static, tgt_pane: Static) -> None:
+        """The selected type's breakdown by scoring method — e.g. 'hits' items are scored
+        either 'doc IDs' or 'hit count ratio' depending on whether either side's response had
+        an empty hits array; this is where that split is still visible, since the main
+        by-type table itself only shows the type's rolled-up total."""
+        if self._selected_key is None:
+            src_pane.update(Text(
+                "select a type to see its breakdown by scoring method  ·  t: live view  ·  m: jaccard/rbo",
+                style="dim"))
+            tgt_pane.update("")
+            return
+        type_key = self._selected_key
+        with self._buf_lock:
+            by_label = {k: dict(v) for k, v
+                        in self._lifetime_by_type_detail[self._score_metric].get(type_key, {}).items()}
+        text = Text(f"{type_key} — by scoring method\n", style="bold")
+        if not by_label:
+            text.append("(no data)", style="dim")
+        else:
+            for label, st in sorted(by_label.items(), key=lambda kv: -kv[1]["count"]):
+                avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+                avg_text = "   -   " if avg is None else f"{avg:>7.3f}"
+                text.append(avg_text, style="bold" if avg is None else _score_color(avg))
+                text.append(f"  {label}   n={st['count']}")
+                if avg is not None:
+                    text.append(f"   [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
+                text.append("\n")
+        src_pane.update(text)
+        tgt_pane.update("")
 
     @staticmethod
     def _agg_detail_text(label: str, agg: Optional[Dict], other_agg: Optional[Dict]) -> Text:
@@ -515,7 +626,7 @@ class JaccardApp(App):
     def _hit_list_text(label: str, total: Optional[int], hits: List[Dict], other_ids: set) -> Text:
         text = Text(f"{label} — {total if total is not None else len(hits)} hits\n", style="bold")
         for i, h in enumerate(hits, 1):
-            style = "" if h["id"] in other_ids else "red"
+            style = "green" if h["id"] in other_ids else "red"
             text.append(f"{i:>2}. {h['id']}", style=style)
             if h.get("score") is not None:
                 text.append(f"  ({h['score']:.2f})", style="dim")
@@ -578,7 +689,29 @@ class JaccardApp(App):
         self._update_detail()
         self._repaint()
 
+    def action_toggle_top_view(self) -> None:
+        """Swap the whole main table between 'live' (one row per replayed request, the
+        original view) and 'types' (one row per comparison TYPE, aggregated across every
+        position it's ever appeared at). Column sets differ between the two, so the table's
+        columns are rebuilt too, not just its rows; row-key formats also differ ("<seq>" /
+        "<seq>:<idx>" vs. a bare type key), so any prior selection is dropped rather than
+        carried across — it wouldn't resolve to anything meaningful on the other side anyway.
+        """
+        self._top_view = "types" if self._top_view == "live" else "live"
+        self._selected_key = None
+        self._last_row_signature = None
+        self._last_types_signature = None
+        table = self.table
+        table.clear(columns=True)
+        table.add_columns(*(TYPE_COLUMNS if self._top_view == "types" else COLUMNS))
+        self._update_detail()
+        self._repaint()
+
     def action_toggle_view(self) -> None:
+        if self._top_view == "types":
+            self.notify("Not available in 'by type' view — press 't' for live view",
+                        severity="warning")
+            return
         self._view_mode = "request" if self._view_mode == "hits" else "hits"
         self._update_detail()
 
@@ -603,6 +736,10 @@ class JaccardApp(App):
         docs say plainly does not work on macOS Terminal.app, so it's the fallback here, not
         the first attempt.
         """
+        if self._top_view == "types":
+            self.notify("Not available in 'by type' view — press 't' for live view",
+                        severity="warning")
+            return
         found = self._lookup_selected()
         if found is None:
             self.notify("No row selected to copy" if self._selected_key is None
