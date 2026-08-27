@@ -3,9 +3,11 @@ Annotations that make the EKS Auto Mode load balancing controller stamp `aws.res
 the load balancer, target groups, listeners and load balancer security group it creates.
 
 Unlike nodes and volumes, there is no cluster-wide place to declare load balancer tags: the Auto
-Mode controller is managed by EKS, so its `--default-tags` flag is not reachable. The tags have to
-be repeated on every Service and Ingress that asks for a load balancer. Include this in the
-metadata of any such object so it stays in step with the rest of the deployment:
+Mode controller is managed by EKS, so its `--default-tags` flag is not reachable. For NLBs
+(`Service` of type `LoadBalancer`) the annotation is the only option and has to be repeated on
+every object. For ALBs an `IngressClassParams` with `spec.tags` covers every `Ingress` using that
+`IngressClass`, so prefer that if this chart ever grows one. Include this in the metadata of any
+such object so it stays in step with the rest of the deployment:
 
     metadata:
       annotations:
