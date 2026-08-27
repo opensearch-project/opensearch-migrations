@@ -97,37 +97,52 @@ describe('Solutions stack', () => {
      * template has been consciously classified: add a resource type and this fails until someone
      * decides which bucket it belongs in. Whether tags actually land is verified against a live
      * deployment -- see deployment/k8s/aws/README.md, "Tagging everything the deployment creates".
+     *
+     * `stack tags`   - CloudFormation applies stack tags to this type, so `--tags` covers it.
+     * `not taggable` - The type has no tag support in CloudFormation; nothing to assert.
      */
-    const enum TagCoverage {
-        /** CloudFormation applies stack tags to this type, so `--tags` covers it. */
-        STACK_TAGS = 'stack tags',
-        /** The type has no tag support in CloudFormation; nothing to assert. */
-        NOT_TAGGABLE = 'not taggable',
+    type TagCoverage = 'stack tags' | 'not taggable';
+
+    /** Minimal shape of the bits of a synthesized template this file reads. */
+    interface PolicyStatementJson {
+        Sid?: string;
+        Effect?: string;
+        Condition?: { StringEquals?: Record<string, string> };
+    }
+    interface TemplateResourceJson {
+        Type: string;
+        Properties?: { PolicyDocument?: { Statement?: PolicyStatementJson[] } };
     }
 
-    const TAG_COVERAGE: Record<string, TagCoverage> = {
-        'AWS::EC2::EIP': TagCoverage.STACK_TAGS,
-        'AWS::EC2::InternetGateway': TagCoverage.STACK_TAGS,
-        'AWS::EC2::NatGateway': TagCoverage.STACK_TAGS,
-        'AWS::EC2::RouteTable': TagCoverage.STACK_TAGS,
-        'AWS::EC2::SecurityGroup': TagCoverage.STACK_TAGS,
-        'AWS::EC2::Subnet': TagCoverage.STACK_TAGS,
-        'AWS::EC2::VPC': TagCoverage.STACK_TAGS,
-        'AWS::EC2::VPCEndpoint': TagCoverage.STACK_TAGS,
-        'AWS::ECR::Repository': TagCoverage.STACK_TAGS,
-        'AWS::EKS::AccessEntry': TagCoverage.STACK_TAGS,
-        'AWS::EKS::Cluster': TagCoverage.STACK_TAGS,
-        'AWS::EKS::PodIdentityAssociation': TagCoverage.STACK_TAGS,
-        'AWS::IAM::Role': TagCoverage.STACK_TAGS,
-        'AWS::SSM::Parameter': TagCoverage.STACK_TAGS,
+    function resourcesOf(stack: SolutionsInfrastructureEKSStack): TemplateResourceJson[] {
+        const resources = Template.fromStack(stack).toJSON().Resources as
+            Record<string, TemplateResourceJson> | undefined;
+        return Object.values(resources ?? {});
+    }
+
+    const TagCoverageBy: Record<string, TagCoverage> = {
+        'AWS::EC2::EIP': 'stack tags',
+        'AWS::EC2::InternetGateway': 'stack tags',
+        'AWS::EC2::NatGateway': 'stack tags',
+        'AWS::EC2::RouteTable': 'stack tags',
+        'AWS::EC2::SecurityGroup': 'stack tags',
+        'AWS::EC2::Subnet': 'stack tags',
+        'AWS::EC2::VPC': 'stack tags',
+        'AWS::EC2::VPCEndpoint': 'stack tags',
+        'AWS::ECR::Repository': 'stack tags',
+        'AWS::EKS::AccessEntry': 'stack tags',
+        'AWS::EKS::Cluster': 'stack tags',
+        'AWS::EKS::PodIdentityAssociation': 'stack tags',
+        'AWS::IAM::Role': 'stack tags',
+        'AWS::SSM::Parameter': 'stack tags',
 
         // Association/attachment records and inline policies carry no tags of their own.
-        'AWS::EC2::EgressOnlyInternetGateway': TagCoverage.NOT_TAGGABLE,
-        'AWS::EC2::Route': TagCoverage.NOT_TAGGABLE,
-        'AWS::EC2::SubnetRouteTableAssociation': TagCoverage.NOT_TAGGABLE,
-        'AWS::EC2::VPCCidrBlock': TagCoverage.NOT_TAGGABLE,
-        'AWS::EC2::VPCGatewayAttachment': TagCoverage.NOT_TAGGABLE,
-        'AWS::IAM::Policy': TagCoverage.NOT_TAGGABLE,
+        'AWS::EC2::EgressOnlyInternetGateway': 'not taggable',
+        'AWS::EC2::Route': 'not taggable',
+        'AWS::EC2::SubnetRouteTableAssociation': 'not taggable',
+        'AWS::EC2::VPCCidrBlock': 'not taggable',
+        'AWS::EC2::VPCGatewayAttachment': 'not taggable',
+        'AWS::IAM::Policy': 'not taggable',
     };
 
     test.each([
@@ -138,29 +153,25 @@ describe('Solutions stack', () => {
             ...defaultProperties,
             createVPC,
         });
-        const resources = Template.fromStack(stack).toJSON().Resources ?? {};
-        const unclassified = [...new Set(
-            Object.values(resources).map((r: any) => r.Type as string)
-        )].filter(type => !(type in TAG_COVERAGE)).sort();
+        const unclassified = [...new Set(resourcesOf(stack).map(r => r.Type))]
+            .filter(type => !(type in TagCoverageBy)).sort();
 
         expect(unclassified).toEqual([]);
     });
 
     test('Auto Mode tag propagation policy stays scoped to this cluster', () => {
         const stack = new SolutionsInfrastructureEKSStack(new App(), 'TestMigrationAssistantStack', defaultProperties);
-        const resources = Template.fromStack(stack).toJSON().Resources ?? {};
-
         // Without this policy, a single deployer tag turns every RunInstances and CreateVolume that
         // EKS Auto Mode issues into AccessDenied, so the cluster silently stops scaling. Assert it
         // exists and that nobody has widened the condition that keeps it scoped to one cluster.
-        const policies = Object.values(resources).filter(
-            (r: any) => r.Type === 'AWS::IAM::Policy'
-                && r.Properties?.PolicyDocument?.Statement?.some((s: any) => s.Sid === 'Compute')
-        ) as any[];
+        const policies = resourcesOf(stack).filter(
+            r => r.Type === 'AWS::IAM::Policy'
+                && (r.Properties?.PolicyDocument?.Statement ?? []).some(s => s.Sid === 'Compute')
+        );
         expect(policies).toHaveLength(1);
 
-        const statements = policies[0].Properties.PolicyDocument.Statement;
-        expect(statements.map((s: any) => s.Sid).sort())
+        const statements = policies[0].Properties?.PolicyDocument?.Statement ?? [];
+        expect(statements.map(s => s.Sid).sort())
             .toEqual(['Compute', 'LoadBalancer', 'Networking', 'Storage']);
         for (const statement of statements) {
             expect(statement.Effect).toBe('Allow');
