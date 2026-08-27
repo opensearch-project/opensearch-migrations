@@ -15,6 +15,7 @@ function snapshotMigrationConfig(opts: {
     externalSolrBackupName?: string;
     externalElasticsearchSnapshotName?: string;
     collectionAllowlist?: string[];
+    topology?: "cloud" | "standalone";
     solrContextPath?: string;
     snapshotPrefix?: string;
     withDocumentBackfill?: boolean;
@@ -32,6 +33,7 @@ function snapshotMigrationConfig(opts: {
                     repoName: "default",
                     externalBackupName: opts.externalSolrBackupName ?? "preexisting-solr-backup",
                     collectionAllowlist: opts.collectionAllowlist ?? [],
+                    ...(opts.topology ? {topology: opts.topology} : {}),
                 },
             },
         }
@@ -49,6 +51,7 @@ function snapshotMigrationConfig(opts: {
                         createBackupConfig: {
                             ...(opts.snapshotPrefix !== undefined ? {snapshotPrefix: opts.snapshotPrefix} : {}),
                             collectionAllowlist: opts.collectionAllowlist ?? [],
+                            ...(opts.topology ? {topology: opts.topology} : {}),
                         },
                     },
                 },
@@ -102,6 +105,44 @@ function snapshotMigrationConfig(opts: {
 }
 
 describe("Solr backup snapshotInfo paths", () => {
+    it("folds user-facing topology into solrTopology on the import prepare config", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrExternalBackups",
+                topology: "standalone",
+            }));
+
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.config.mode).toBe("import");
+        // Reaches CreateSnapshot as --solr-topology, which import needs when the backup's own
+        // layout identifies neither kind.
+        expect(item.config.solrTopology).toBe("standalone");
+    });
+
+    it("folds user-facing topology into solrTopology on the create-backup config", async () => {
+        const workflowConfig = await new MigrationConfigTransformer()
+            .processFromObject(snapshotMigrationConfig({
+                shape: "solrCreateBackups",
+                topology: "cloud",
+            }));
+
+        const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+        expect(item.config.mode).toBe("create");
+        expect(item.config.solrTopology).toBe("cloud");
+    });
+
+    it("omits solrTopology entirely when the user does not set it", async () => {
+        for (const shape of ["solrExternalBackups", "solrCreateBackups"] as const) {
+            const workflowConfig = await new MigrationConfigTransformer()
+                .processFromObject(snapshotMigrationConfig({shape}));
+
+            const item = workflowConfig.snapshots[0].createSnapshotConfig[0];
+            // Absent rather than empty: an empty value would still be inference, but emitting the
+            // key invites a bare --solr-topology on the command line.
+            expect(item.config).not.toHaveProperty("solrTopology");
+        }
+    });
+
     it("routes a Solr backup through the create path with mode=import", async () => {
         const workflowConfig = await new MigrationConfigTransformer()
             .processFromObject(snapshotMigrationConfig({shape: "solrExternalBackups"}));

@@ -1,6 +1,6 @@
 package org.opensearch.migrations.transform.shim.tracing;
 
-import java.net.ServerSocket;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -57,13 +57,11 @@ class ShimProxyInstrumentationTest {
     private Channel backendChannelA;
     private Channel backendChannelB;
     private ShimProxy proxy;
-    private int proxyPort;
 
     @BeforeEach
     void setUp() throws Exception {
         bundle = new InMemoryInstrumentationBundle(true, true);
         rootContext = new RootShimProxyContext(bundle.openTelemetrySdk, IContextTracker.DO_NOTHING_TRACKER);
-        proxyPort = findFreePort();
     }
 
     @AfterEach
@@ -78,17 +76,16 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void requestThroughProxy_emitsShimRequestSpan() throws Exception {
-        int backendPort = findFreePort();
-        startBackend("A", backendPort, "{\"status\":\"ok\"}");
+        int backendPort = startBackend("A", "{\"status\":\"ok\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
 
-        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+        proxy = new ShimProxy(0, targets, "alpha", null, List.of(),
             null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
         proxy.start();
 
-        var resp = httpGet("http://localhost:" + proxyPort + "/test/endpoint");
+        var resp = httpGet("http://localhost:" + proxy.getBoundPort() + "/test/endpoint");
         assertEquals(200, resp.statusCode());
         Thread.sleep(200);
 
@@ -106,17 +103,16 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void requestThroughProxy_emitsCountMetric() throws Exception {
-        int backendPort = findFreePort();
-        startBackend("A", backendPort, "{\"status\":\"ok\"}");
+        int backendPort = startBackend("A", "{\"status\":\"ok\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
 
-        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+        proxy = new ShimProxy(0, targets, "alpha", null, List.of(),
             null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
         proxy.start();
 
-        httpGet("http://localhost:" + proxyPort + "/metrics-check");
+        httpGet("http://localhost:" + proxy.getBoundPort() + "/metrics-check");
         Thread.sleep(200);
 
         var metrics = bundle.getFinishedMetrics();
@@ -126,16 +122,15 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void proxyWithoutRootContext_emitsNoSpans() throws Exception {
-        int backendPort = findFreePort();
-        startBackend("A", backendPort, "{\"status\":\"ok\"}");
+        int backendPort = startBackend("A", "{\"status\":\"ok\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
 
-        proxy = new ShimProxy(proxyPort, targets, "alpha", List.of());
+        proxy = new ShimProxy(0, targets, "alpha", List.of());
         proxy.start();
 
-        httpGet("http://localhost:" + proxyPort + "/no-otel");
+        httpGet("http://localhost:" + proxy.getBoundPort() + "/no-otel");
         Thread.sleep(200);
 
         assertTrue(bundle.getFinishedSpans().isEmpty(), "No spans should be emitted without rootContext");
@@ -143,20 +138,18 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void dualTargetDispatch_emitsTargetDispatchSpans() throws Exception {
-        int portA = findFreePort();
-        int portB = findFreePort();
-        startBackend("A", portA, "{\"source\":\"alpha\"}");
-        startBackend("B", portB, "{\"source\":\"beta\"}");
+        int portA = startBackend("A", "{\"source\":\"alpha\"}");
+        int portB = startBackend("B", "{\"source\":\"beta\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + portA)));
         targets.put("beta", new Target("beta", URI.create("http://localhost:" + portB)));
 
-        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+        proxy = new ShimProxy(0, targets, "alpha", null, List.of(),
             null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
         proxy.start();
 
-        httpGet("http://localhost:" + proxyPort + "/dual");
+        httpGet("http://localhost:" + proxy.getBoundPort() + "/dual");
         Thread.sleep(300);
 
         var dispatchSpans = bundle.getFinishedSpans().stream()
@@ -177,8 +170,7 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void targetWithTransform_emitsTransformSpan() throws Exception {
-        int backendPort = findFreePort();
-        startBackend("A", backendPort, "{\"status\":\"ok\"}");
+        int backendPort = startBackend("A", "{\"status\":\"ok\"}");
 
         // Identity transform — returns input unchanged
         IJsonTransformer identityTransform = input -> input;
@@ -187,11 +179,11 @@ class ShimProxyInstrumentationTest {
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort),
             identityTransform, null, null));
 
-        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+        proxy = new ShimProxy(0, targets, "alpha", null, List.of(),
             null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
         proxy.start();
 
-        httpGet("http://localhost:" + proxyPort + "/with-transform");
+        httpGet("http://localhost:" + proxy.getBoundPort() + "/with-transform");
         Thread.sleep(300);
 
         var transformSpans = bundle.getFinishedSpans().stream()
@@ -206,17 +198,14 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void dispatchToUnreachableTarget_recordsException() throws Exception {
-        // Point at a port with nothing listening
-        int deadPort = findFreePort();
-
         Map<String, Target> targets = new LinkedHashMap<>();
-        targets.put("dead", new Target("dead", URI.create("http://localhost:" + deadPort)));
+        targets.put("dead", new Target("dead", URI.create("http://localhost:1")));
 
-        proxy = new ShimProxy(proxyPort, targets, "dead", null, List.of(),
+        proxy = new ShimProxy(0, targets, "dead", null, List.of(),
             null, false, Duration.ofSeconds(2), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
         proxy.start();
 
-        httpGet("http://localhost:" + proxyPort + "/fail");
+        httpGet("http://localhost:" + proxy.getBoundPort() + "/fail");
         Thread.sleep(300);
 
         // Should still have a shimRequest span
@@ -228,7 +217,7 @@ class ShimProxyInstrumentationTest {
 
     // --- Mock backend ---
 
-    private void startBackend(String label, int port, String responseBody) throws InterruptedException {
+    private int startBackend(String label, String responseBody) throws InterruptedException {
         NioEventLoopGroup group = new NioEventLoopGroup(1);
         Channel channel = new ServerBootstrap()
             .group(group)
@@ -254,7 +243,7 @@ class ShimProxyInstrumentationTest {
                         });
                 }
             })
-            .bind(port).sync().channel();
+            .bind(0).sync().channel();
 
         if ("A".equals(label)) {
             backendGroupA = group;
@@ -263,6 +252,7 @@ class ShimProxyInstrumentationTest {
             backendGroupB = group;
             backendChannelB = channel;
         }
+        return ((InetSocketAddress) channel.localAddress()).getPort();
     }
 
     private static HttpResponse<String> httpGet(String url) throws Exception {
@@ -271,9 +261,4 @@ class ShimProxyInstrumentationTest {
             HttpResponse.BodyHandlers.ofString());
     }
 
-    private static int findFreePort() throws Exception {
-        try (var socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
 }
