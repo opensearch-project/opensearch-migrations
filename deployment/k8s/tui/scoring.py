@@ -137,7 +137,12 @@ def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefi
             rbo_j, rbo_lbl = None, missing_side
         else:
             rbo_j = rbo_score([h['id'] for h in src_hit_list], [h['id'] for h in tgt_hit_list])
-            rbo_lbl = f'RBO (p={RBO_PERSISTENCE})' if rbo_j is not None else None
+            # rbo_j is None here specifically when there's no ranked list to compare at all —
+            # a size:0 query still has a 'hits' section (so it's still a "hits" item, and
+            # Jaccard's hit-count fallback still applies), but an empty hits.hits array means
+            # RBO has nothing to measure. Distinct from missing_side: the response is real and
+            # complete, RBO just doesn't apply to it.
+            rbo_lbl = f'RBO (p={RBO_PERSISTENCE})' if rbo_j is not None else 'RBO (no ranked hits)'
         items.append(dict(
             label=f'{label_prefix} · hits'.strip(' ·'), kind='hits', j=j, j_label=lbl,
             rbo_j=rbo_j, rbo_label=rbo_lbl,
