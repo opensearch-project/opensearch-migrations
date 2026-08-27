@@ -2562,6 +2562,16 @@ function snapshotInfoEntries(snapshotInfo: SnapshotInfo | undefined): Record<str
     return snapshotInfoVariant(snapshotInfo)?.entries(snapshotInfo) ?? {};
 }
 
+function snapshotRequiresSourceEndpoint(snapshotInfo: SnapshotInfo | undefined, snapshotName: string): boolean {
+    if (!snapshotInfo) return false;
+    if ("snapshots" in snapshotInfo) {
+        const snapshot = snapshotInfo.snapshots[snapshotName];
+        return snapshot?.config !== undefined && "createSnapshotConfig" in snapshot.config;
+    }
+    // Solr's external-backup import path still contacts the source to capture its live schema.
+    return snapshotInfo.backups[snapshotName] !== undefined;
+}
+
 const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws)(?::\d+)?(?:\/)?$/i;
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
@@ -2789,7 +2799,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     path: ['snapshotMigrationConfigs', i, 'fromSource']
                 });
             } else {
-                addSourceEndpointRequirement(mc.fromSource, `snapshotMigrationConfigs[${i}]`);
+                const source = data.sourceClusters[mc.fromSource];
+                if (Object.keys(mc.perSnapshotConfig).some(snapshotName =>
+                    snapshotRequiresSourceEndpoint(source.snapshotInfo, snapshotName))) {
+                    addSourceEndpointRequirement(mc.fromSource, `snapshotMigrationConfigs[${i}]`);
+                }
             }
 
             if (!(mc.toTarget in data.targetClusters)) {

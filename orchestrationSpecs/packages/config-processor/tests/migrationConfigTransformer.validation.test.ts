@@ -348,6 +348,17 @@ describe('MigrationConfigTransformer validation', () => {
             .toThrow(/Source endpoint is required because snapshotMigrationConfigs\[0\], traffic\.proxies\.proxy1 references this source\. at: sourceClusters\.source1\.endpoint/);
     });
 
+    it('should allow snapshot migrations over externally managed snapshots without a source endpoint', () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.endpoint = "";
+        config.sourceClusters.source1.snapshotInfo.snapshots.snap1.config = {
+            externallyManagedSnapshotName: "preexisting-snapshot",
+        };
+        delete config.traffic;
+
+        expect(() => transformer.validateInput(config)).not.toThrow();
+    });
+
     it('should reject kafka cluster configs that define both modes', () => {
         const config = cloneBaseConfig();
         config.traffic.kafkaClusters.default = {
