@@ -2,28 +2,35 @@
 
 Full end-to-end migration from a local Elasticsearch 8.5 instance to a remote OpenSearch 3.7
 cluster, using the Migration Assistant's Traffic Capture/Replay (CDC) approach, with a live
-replay-quality dashboard.
+replay-quality dashboard. Takes about 20-30 minutes end-to-end, most of it Step 3's workflow.
 
 **Source**: `localhost:9200` — Elasticsearch 8.5.3 (Docker), `elastic:ElasticRocks`
 **Target**: `https://chorus-opensearch-edition.dev.o19s.com:9200` — OpenSearch 3.7.0, `admin:MyStr0ng!P@ssw0rd2024`
 **Index**: `ecommerce`
 
+First time through? Skim [Known Gotchas](#known-gotchas) before you start — several of them
+(especially the Docker/Mac sleep-wake DNS issue) are common enough on a fresh run that it's
+worth recognizing them on sight rather than debugging from scratch.
+
 ---
 
 ## Prerequisites
+
+Also needed on your machine: `docker`, `kind`, `kubectl`, `python3` + `pip` (used by the
+patch command below and the TUI).
 
 1. **kind cluster** running — start it with:
    ```bash
    cd deployment/k8s
    ./kindTesting.sh
    ```
-   This creates a 3-node kind cluster named `ma`, builds all images from the current source
-   (Kafka tuple sink support and reliable response capture are both mainline now — no custom
-   image needed), and installs Argo Workflows, LocalStack S3, Strimzi Kafka, and the
-   Migration Assistant components.
+   This creates a 3-node kind cluster named `ma`, builds all images from the current source,
+   and installs Argo Workflows, LocalStack S3, Strimzi Kafka, and the Migration Assistant
+   components.
 
-2. **Elasticsearch** running locally on Docker, port 9200 — the Chorus Elasticsearch edition
-   from https://github.com/querqy/chorus-elasticsearch-edition.
+2. **Elasticsearch** running locally on Docker, port 9200, Web UI proxies to ES via port 9201 — the Chorus Elasticsearch edition
+   from https://github.com/querqy/chorus-elasticsearch-edition. Clone it, then from inside
+   that repo:
    ```bash
    ./quickstart.sh --es-proxy https://localhost:9201
    ``` 
@@ -98,11 +105,20 @@ bash 03-monitor.sh
 kubectl exec -n ma migration-console-0 -- /bin/bash -lc 'workflow status'
 ```
 
-### Step 4 — Tune the TrafficReplayer for the live dashboard
+### Step 4 — Set up  `tuple-output` Kafka Topic
 
-The Argo workflow deploys the TrafficReplayer with sane defaults, but `tupleKafkaTopic` and a
-few timing settings aren't in the `TrafficReplay` CRD, so they need a direct patch once the
-`capture-proxy-target1-replay1` deployment exists:
+The TrafficReplayer CLI supports `--tuple-kafka-topic`, but nothing in the orchestration
+layer (the `TrafficReplay` CRD schema, the workflow template) threads it through yet, so
+`tupleKafkaTopic` still needs a direct patch once the `capture-proxy-target1-replay1`
+deployment exists.
+
+You don't need to wait for the full workflow — this deployment shows up well before the
+15-20 minutes are done. Wait for it first:
+```bash
+kubectl get deployment -n ma capture-proxy-target1-replay1 -w
+# Ctrl-C once it appears
+```
+Then patch it:
 
 ```bash
 kubectl patch deployment -n ma capture-proxy-target1-replay1 --type=json -p='[
@@ -112,31 +128,22 @@ kubectl patch deployment -n ma capture-proxy-target1-replay1 --type=json -p='[
       | base64 -d | python3 -c '
 import json, sys, base64
 cfg = json.load(sys.stdin)
-cfg.update({
-    "tupleKafkaTopic": "tuple-output",
-    "speedupFactor": 100,
-    "observedPacketConnectionTimeout": 5,
-    "quiescentPeriodMs": 1000,
-    "tupleMaxBufferSeconds": 10,
-})
+cfg.update({"tupleKafkaTopic": "tuple-output"})
 print(base64.b64encode(json.dumps(cfg, indent=2).encode()).decode())
 '
   )"'"}
 ]'
 ```
-This decodes the deployment's current base64 JSON config, adds the dashboard settings, and
-patches it back in one step. Re-apply after any Argo re-run — the workflow resets the
-Deployment to its own defaults each time (no operator reconciles it directly).
-
-`speedupFactor: 100` matters even for a live demo: without it, the replayer paces replay to
-match real elapsed time between captured requests, so any gap in traffic (e.g. between
-searches) stalls replay for that same real-world duration.
+This decodes the deployment's current base64 JSON config, adds `tupleKafkaTopic`, and patches
+it back in one step. Re-apply after any Argo re-run — the workflow resets the Deployment to
+its own defaults each time (no operator reconciles it directly).
 
 ### Step 5 — Create the `tuple-output` Kafka topic
 
 This Strimzi cluster doesn't auto-create topics on first produce, so create it once, up front
 — the TUI does this automatically now too, but it's worth doing explicitly if you're not
-starting there:
+starting there. Unlike Step 4, this can be applied any time after Step 3 — the Strimzi topic
+operator picks it up as soon as the Kafka cluster is ready, no need to wait or check first:
 
 ```bash
 cat <<'EOF' | kubectl apply -f -
