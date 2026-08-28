@@ -201,3 +201,26 @@ class TestCloudTrailOracle:
         # findings in the rest of the sweep.
         assert _request_tags({"requestParameters": {"tags": ["not-a-dict", None]}}) == {}
         assert _request_tags({"requestParameters": {"tagSpecificationSet": {"items": [None]}}}) == {}
+
+
+class TestDeniedCreates:
+    """A refused create is the strongest signal available: it names the failing action."""
+
+    def test_denied_creates_fail_the_run_even_with_no_tag_findings(self):
+        r = VerificationResult(checked=5)
+        r.denied.append("CreateNetworkInterface DENIED (AccessDenied) at ...: explicit deny")
+        assert not r.ok
+
+    def test_report_leads_with_denials(self):
+        r = VerificationResult(checked=5)
+        r.denied.append("CreateNetworkInterface DENIED (AccessDenied) at T: explicit deny in policy")
+        out = format_report(r, {"A": "1"})
+        assert "DENIED CREATES (1)" in out
+        assert "CreateNetworkInterface" in out
+        assert "FAILED" in out
+        # A denial must not be reported as a pass just because no resource was found untagged.
+        assert "PASSED" not in out
+
+    def test_clean_run_still_passes(self):
+        assert VerificationResult(checked=3).ok
+        assert "PASSED" in format_report(VerificationResult(checked=3), {"A": "1"})

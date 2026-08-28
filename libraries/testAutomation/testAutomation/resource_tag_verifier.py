@@ -68,10 +68,14 @@ class VerificationResult:
     # Resources we located but could not read tags for (permissions, races, eventual consistency).
     # Reported separately: an unreadable resource is not evidence of a missing tag either way.
     unreadable: List[str] = field(default_factory=list)
+    # Creates the cluster role attempted and was refused. These name the failing action outright, so
+    # they are the most actionable output here: either our plumbing failed to tag a taggable create,
+    # or the action cannot carry tags and a deployer whose SCP covers it cannot run Auto Mode.
+    denied: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return not self.findings
+        return not self.findings and not self.denied
 
 
 def parse_tag_spec(spec: str) -> Dict[str, str]:
@@ -430,11 +434,14 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
             name = detail.get("eventName", "")
             if not is_create_event(name):
                 continue
-            # A rejected call created nothing, so it cannot be missing tags on a real resource. This
-            # is also what a working Deny policy looks like from the outside.
+            # A rejected call created nothing, so there is no resource whose tags could be checked --
+            # but a refusal is stronger evidence than a missing tag, because it names the action. It
+            # is also exactly what --enforce-tags-on-create produces when a create carries no tags.
             if detail.get("errorCode"):
-                logger.info("%s was rejected (%s); not a created resource",
-                            name, detail.get("errorCode"))
+                note = (f"{name} DENIED ({detail.get('errorCode')}) at {detail.get('eventTime')}: "
+                        f"{(detail.get('errorMessage') or '')[:300]}")
+                result.denied.append(note)
+                logger.error("%s", note)
                 continue
             matched += 1
             enforceable = name in TAGGABLE_CREATE_EVENTS
@@ -494,6 +501,15 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
 def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
     from tabulate import tabulate
     lines = [f"Expected tags: {expected}", f"Resources checked: {result.checked}"]
+    if result.denied:
+        # First, because it names the failing action and every other symptom (pods Pending, pods
+        # without IPs, a buildkit deployment that never becomes Ready) is downstream of it.
+        lines.append("")
+        lines.append(f"DENIED CREATES ({len(result.denied)}) -- the cluster role was refused these:")
+        lines.extend(f"  - {note}" for note in result.denied)
+        lines.append("  An action listed here either should have carried the tags (our bug) or "
+                     "cannot carry them at all,")
+        lines.append("  in which case a deployer whose SCP covers it cannot run EKS Auto Mode.")
     if result.unreadable:
         lines.append("")
         lines.append("Not verified:")
@@ -506,7 +522,10 @@ def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
         ))
         lines.append("")
         lines.append(f"FAILED: {len(result.findings)} resource(s) missing expected tags")
-    else:
+    if result.denied:
+        lines.append("")
+        lines.append(f"FAILED: {len(result.denied)} create(s) refused for want of the tags")
+    elif not result.findings:
         lines.append("")
         lines.append("PASSED: every resource checked carries the expected tags")
     return "\n".join(lines)
