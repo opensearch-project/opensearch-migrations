@@ -254,3 +254,18 @@ class TestDryRunIsNotADenial:
     ])
     def test_non_authorization_errors_are_not_refusals(self, code):
         assert not any(m in code for m in _AUTH_FAILURE_CODES)
+
+
+def test_test_runner_uses_no_relative_imports():
+    """test_runner.py is executed as a script, so it has no parent package.
+
+    A relative import there fails at runtime with "attempted relative import with no known parent
+    package" -- and only on the code path that triggers it, so it survives both unit tests (which
+    import the package normally) and a successful migration run. That is exactly how it escaped:
+    build #470's migration passed and then died on the verification hook.
+    """
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "testAutomation" / "test_runner.py").read_text()
+    offenders = [ln.strip() for ln in src.splitlines()
+                 if ln.strip().startswith("from .") or ln.strip().startswith("import .")]
+    assert offenders == []

@@ -882,8 +882,11 @@ def main() -> None:
     # a much smaller set of resources. Requires --skip-delete (as the EKS pipelines use), otherwise
     # the resources are already gone.
     if args.verify_resource_tags:
-        from .resource_tag_verifier import (expected_tags_from_stack, format_report,
-                                            verify_resource_tags)
+        # Bare import, matching `from k8s_service import ...` above: this file is executed as a
+        # script (`python3 testAutomation/test_runner.py`), so it has no parent package and a
+        # relative import fails with "attempted relative import with no known parent package".
+        from resource_tag_verifier import (expected_tags_from_stack, format_report,
+                                           verify_resource_tags)
         region = args.aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_CFN_REGION")
         if not region:
             sys.exit("error: --verify-resource-tags needs --aws-region (or AWS_REGION set)")
