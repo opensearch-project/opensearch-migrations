@@ -46,7 +46,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 - **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
 
 - **Flexible Deployment Options**:
-  - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
+  - **[AWS Deployment](deployment/terraform/aws/README.md)**: Provision EKS Auto Mode infrastructure with Terraform, or use the existing [AWS Solution CloudFormation deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/).
   - **[GCP Deployment](deployment/terraform/gcp/README.md)**: Terraform module that provisions a GKE cluster, GCS snapshot bucket, and the Workload Identity bindings required by the migration workflows, deployed via the [GKE Helm overlay](deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml).
   - **[Local Docker Deployment](./TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
   - Contribute to add more deployment options.
@@ -138,7 +138,7 @@ User guide documentation is available in the [OpenSearch Migration Assistant doc
 
 ### AWS Deployment
 
-To deploy the solution on AWS, follow the steps outlined in [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/), specifically [deploying the solution](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
+To deploy EKS infrastructure on AWS with Terraform, see the [AWS Terraform README](deployment/terraform/aws/README.md). The existing CloudFormation-based AWS Solution remains available through [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/) and its [deployment guide](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
 
 ### GCP Deployment
 
