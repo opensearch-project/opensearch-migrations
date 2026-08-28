@@ -242,6 +242,8 @@ class TestDryRunIsNotADenial:
         "Client.UnauthorizedOperation",   # what EC2 returns for an explicit Deny
         "UnauthorizedOperation",
         "Client.AccessDenied",
+        # An Organizations tag policy refusing a non-compliant tag VALUE reports its own code.
+        "TagPolicyViolation",
     ])
     def test_real_refusals_are_recognized(self, code):
         assert any(m in code for m in _AUTH_FAILURE_CODES)

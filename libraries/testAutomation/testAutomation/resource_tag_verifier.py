@@ -353,10 +353,18 @@ TAGGABLE_CREATE_EVENTS = frozenset({
 # customer whose SCP requires tags on create has to know about.
 _CREATE_EVENT_PREFIXES = ("Create", "Run", "Allocate", "Provision", "Request", "Register")
 
-# CloudTrail error codes that mean "IAM refused this call". Deliberately narrow: an explicit Deny
-# reports Client.UnauthorizedOperation for EC2 and AccessDenied for most other services, while a
-# DryRun probe also carries an errorCode and must not be mistaken for a refusal.
-_AUTH_FAILURE_CODES = ("AccessDenied", "UnauthorizedOperation", "Forbidden")
+# CloudTrail error codes that mean "the call was refused for want of the right tags". Deliberately
+# narrow: an explicit Deny reports Client.UnauthorizedOperation for EC2 and AccessDenied for most
+# other services, while a DryRun probe also carries an errorCode and must not be mistaken for a
+# refusal.
+#
+# TagPolicyViolation is included because an AWS Organizations tag policy refuses a create whose
+# supplied tag VALUE is not on the allowed list -- a different mechanism from an SCP or IAM deny, and
+# one that produces a distinct error code. Note that a tag policy does not refuse creates with tags
+# merely absent: "Basic compliance rules do not enforce tag compliance on resources that are created
+# without tags." Missing mandatory tags are an SCP's job, so both codes have to be watched for.
+# https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_tag-policies-enforcement.html
+_AUTH_FAILURE_CODES = ("AccessDenied", "UnauthorizedOperation", "Forbidden", "TagPolicyViolation")
 
 
 def _request_tags(detail: dict) -> Dict[str, str]:
