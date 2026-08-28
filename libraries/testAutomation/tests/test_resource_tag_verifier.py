@@ -13,6 +13,7 @@ from testAutomation.resource_tag_verifier import (
     Finding,
     VerificationResult,
     _check,
+    _run_oracle,
     _tag_list_to_dict,
     collect_instance_ids,
     collect_load_balancer_hostnames,
@@ -152,17 +153,11 @@ class TestReport:
 class TestCloudTrailOracle:
     """The CloudTrail sweep's pure parts: which events count, and where the tags hide."""
 
-    def test_taggable_set_matches_the_iam_policy_we_attach(self):
-        # If AutoModeTagPropagationPolicy in eks-infra.ts grows or loses an action, this set has to
-        # move with it -- otherwise an untagged create gets filed under "no AWS mechanism" and looks
-        # like someone else's problem instead of our bug.
-        assert TAGGABLE_CREATE_EVENTS == {
-            "RunInstances",
-            "CreateVolume", "CreateSnapshot",
-            "CreateNetworkInterface",
-            "CreateLoadBalancer", "CreateTargetGroup", "CreateListener", "CreateRule",
-            "CreateSecurityGroup",
-        }
+    def test_only_proven_creates_are_enforced(self):
+        # Deliberately just RunInstances: it is the only create observed on a live tagged cluster to
+        # carry the deployer's tags in its request. CreateFleet, CreateLaunchTemplate and
+        # CreateSecurityGroup were each in this set and each produced a false failure.
+        assert TAGGABLE_CREATE_EVENTS == {"RunInstances"}
 
     @pytest.mark.parametrize("name", [
         "RunInstances", "CreateVolume", "CreateLoadBalancer",
@@ -317,3 +312,29 @@ class TestClassificationFromLiveEvidence:
         assert r.ok, "an unknown create must not fail the run"
         out = format_report(r, {"A": "1"})
         assert "UNCLASSIFIED CREATES (1)" in out and "CreateSomethingNew" in out
+
+
+class TestOracleResilience:
+    """One oracle breaking must not discard the others -- this runs at the end of a 60-min pipeline."""
+
+    def test_broken_oracle_is_recorded_not_raised(self):
+        r = VerificationResult(checked=2)
+
+        def boom():
+            raise RuntimeError("InvalidLaunchTemplateId.NotFound")
+
+        _run_oracle(r, "compute and storage", boom)
+        assert any("compute and storage oracle failed" in n for n in r.unreadable)
+        assert "RuntimeError" in " ".join(r.unreadable)
+
+    def test_broken_oracle_cannot_read_as_a_clean_pass(self):
+        r = VerificationResult(checked=2)
+        _run_oracle(r, "CloudTrail sweep", lambda: (_ for _ in ()).throw(ValueError("nope")))
+        out = format_report(r, {"A": "1"})
+        # It may still say PASSED for what it checked, but the breakage must be visible.
+        assert "CloudTrail sweep oracle failed" in out
+
+    def test_successful_oracle_records_nothing(self):
+        r = VerificationResult()
+        _run_oracle(r, "x", lambda: None)
+        assert r.unreadable == []

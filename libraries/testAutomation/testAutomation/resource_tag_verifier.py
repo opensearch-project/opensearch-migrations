@@ -226,7 +226,7 @@ def verify_compute_and_storage(result: VerificationResult, expected: Dict[str, s
     logger.info("Discovered %d instance(s) from Node.spec.providerID: %s",
                 len(instance_ids), instance_ids)
 
-    volume_ids, launch_template_ids = set(), set()
+    volume_ids = set()
     for reservation in ec2.describe_instances(InstanceIds=instance_ids)["Reservations"]:
         for inst in reservation["Instances"]:
             tags = _tag_list_to_dict(inst.get("Tags"))
@@ -236,10 +236,6 @@ def verify_compute_and_storage(result: VerificationResult, expected: Dict[str, s
                 vol_id = bdm.get("Ebs", {}).get("VolumeId")
                 if vol_id:
                     volume_ids.add(vol_id)
-            # AWS injects this tag when an instance comes from a launch template, so using it to
-            # find the template is not circular -- it is not one of the tags under test.
-            if tags.get("aws:ec2launchtemplate:id"):
-                launch_template_ids.add(tags["aws:ec2launchtemplate:id"])
 
     volume_ids.update(collect_pv_volume_ids(core_v1))
     if volume_ids:
@@ -256,12 +252,10 @@ def verify_compute_and_storage(result: VerificationResult, expected: Dict[str, s
         _check(result, "network interface", eni["NetworkInterfaceId"],
                _tag_list_to_dict(eni.get("TagSet")), expected, "ENI attached to a cluster node")
 
-    for lt_id in sorted(launch_template_ids):
-        templates = ec2.describe_launch_templates(LaunchTemplateIds=[lt_id])["LaunchTemplates"]
-        for lt in templates:
-            _check(result, "launch template", lt["LaunchTemplateId"],
-                   _tag_list_to_dict(lt.get("Tags")), expected,
-                   "aws:ec2launchtemplate:id on a node")
+    # Launch templates are deliberately not checked. They carry no user tags -- their own
+    # TagSpecification is null, and the tags in launchTemplateData belong to the instances they
+    # launch, which are checked above. Auto Mode also rotates them away after launch, so looking one
+    # up by the instance's aws:ec2launchtemplate:id tag fails with InvalidLaunchTemplateId.NotFound.
 
 
 def verify_load_balancers(result: VerificationResult, expected: Dict[str, str],
@@ -315,6 +309,21 @@ def verify_load_balancers(result: VerificationResult, expected: Dict[str, str],
                        "security group on the Service's load balancer")
 
 
+def _run_oracle(result: "VerificationResult", label: str, fn, *args) -> None:
+    """Run one oracle, recording rather than raising if it breaks.
+
+    An unexpected AWS error in one oracle used to abort the whole verification and throw away what
+    the others had already established -- and since this runs at the end of a 60-minute pipeline,
+    that costs a full cycle to learn one thing. Recording the breakage keeps the rest of the verdict
+    while making sure a broken oracle can never read as a pass.
+    """
+    try:
+        fn(*args)
+    except Exception as exc:  # noqa: BLE001 - any AWS/client error must degrade, not abort
+        result.unreadable.append(f"{label} oracle failed: {type(exc).__name__}: {exc}")
+        logger.exception("%s oracle failed", label)
+
+
 def expected_tags_from_stack(stack_name: str, region: str) -> Dict[str, str]:
     """Derive what to expect from the stack's own tags, so no test has to hardcode them.
 
@@ -337,33 +346,29 @@ def expected_tags_from_stack(stack_name: str, region: str) -> Dict[str, str]:
 # Oracle 3: CloudTrail
 # --------------------------------------------------------------------------------------------------
 
-# The creates that EKS Auto Mode can be made to tag. This is not a guess: it is exactly the action
-# set of the AWS-documented tag-propagation policy that the solution attaches to the cluster role
-# (see EksInfra.allowAutoModeTagPropagation). An untagged create in this set is therefore always a
-# defect in our plumbing -- there is no "legitimately untagged" case here.
-# https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop
-TAGGABLE_CREATE_EVENTS = frozenset({
-    "RunInstances",                                                 # Compute
-    "CreateVolume", "CreateSnapshot",                               # Storage
-    "CreateNetworkInterface",                                       # Networking
-    "CreateLoadBalancer", "CreateTargetGroup", "CreateListener", "CreateRule",
-    "CreateSecurityGroup",                                          # LoadBalancer
-})
+# Creates for which there is POSITIVE EVIDENCE, from CloudTrail on a live tagged cluster, that the
+# request carries the deployer's tags. An untagged create here is therefore a real gap in our
+# plumbing and fails the run.
+#
+# This list is short on purpose. It started as the action set of the AWS tag-propagation policy, but
+# that policy says which actions *may* carry user tags, not which ones *do*, and three of its members
+# turned out not to:
+#   CreateFleet          - no TagSpecifications at all; instances inherit from the launch template
+#   CreateLaunchTemplate - its own TagSpecification is null
+#   CreateSecurityGroup  - the load balancer's frontend SG is tagged, but the shared backend
+#                          "k8s-traffic-*" SG the controller attaches to nodes is not
+# Anything not proven is reported for review instead (see the call site), because a create we cannot
+# influence would make every run red and the signal worthless.
+TAGGABLE_CREATE_EVENTS = frozenset({"RunInstances"})
 
 # Creates where AWS offers no way to put the user tags on the resource itself, so requiring them
-# would fail every run for something outside our control.
-#
-# CreateLaunchTemplate is here on evidence, not assumption: in CloudTrail its own TagSpecification is
-# null, and the user tags appear under launchTemplateData.tagSpecifications -- they are the tags for
-# the *instances* the template launches, not tags on the template. The instances themselves are
-# checked via RunInstances, so nothing is lost by exempting this.
+# would fail every run for something outside our control. Each entry is here on CloudTrail evidence.
 UNTAGGABLE_CREATE_EVENTS = frozenset({
+    # Its own TagSpecification is null; the tags under launchTemplateData belong to the instances it
+    # launches, which are checked via RunInstances.
     "CreateLaunchTemplate",
-    # CreateFleet wraps everything in CreateFleetRequest and carries no TagSpecifications: the
-    # instances it launches get their tags from the launch template instead. Verified in CloudTrail
-    # against a cluster whose instances were correctly tagged, so an untagged CreateFleet request is
-    # normal. Worth knowing for deployers: an SCP requiring aws:RequestTag on ec2:CreateFleet blocks
-    # EKS Auto Mode outright, for the same reason.
+    # Wraps its arguments in CreateFleetRequest with no TagSpecifications at all. Worth knowing for
+    # deployers: an SCP requiring aws:RequestTag on ec2:CreateFleet blocks EKS Auto Mode outright.
     "CreateFleet",
 })
 
@@ -373,6 +378,8 @@ UNTAGGABLE_CREATE_EVENTS = frozenset({
 NOT_RESOURCE_CREATES = frozenset({
     "CreateTags", "CreateGrant", "CreateNetworkInterfacePermission", "CreateServiceLinkedRole",
     "CreateLaunchTemplateVersion", "CreateRoute", "CreateNetworkAclEntry",
+    # Registers existing targets in a target group; creates nothing. Matched by the "Register" prefix.
+    "RegisterTargets", "RegisterInstancesWithLoadBalancer",
 })
 
 # Anything else that creates a resource. Kept broad on purpose: the entire point of this oracle is to
@@ -546,8 +553,10 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
         stack_created_at = stack["CreationTime"]
 
     core_v1, _ = _k8s_clients(kube_context)
-    verify_compute_and_storage(result, expected, core_v1, region)
-    verify_load_balancers(result, expected, core_v1, region)
+    _run_oracle(result, "compute and storage",
+                verify_compute_and_storage, result, expected, core_v1, region)
+    _run_oracle(result, "load balancers",
+                verify_load_balancers, result, expected, core_v1, region)
 
     if cluster_name and stack_created_at:
         if cloudtrail_wait_seconds > 0:
@@ -557,7 +566,8 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
                         cloudtrail_wait_seconds)
             time.sleep(cloudtrail_wait_seconds)
         now = datetime.now(timezone.utc)
-        verify_cloudtrail_creates(result, expected, region, cluster_name, stack_created_at, now)
+        _run_oracle(result, "CloudTrail sweep", verify_cloudtrail_creates,
+                    result, expected, region, cluster_name, stack_created_at, now)
     else:
         result.unreadable.append(
             "CloudTrail sweep skipped (needs --cluster-name and --stack-name); creates whose "
