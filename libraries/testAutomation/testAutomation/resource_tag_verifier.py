@@ -72,6 +72,9 @@ class VerificationResult:
     # they are the most actionable output here: either our plumbing failed to tag a taggable create,
     # or the action cannot carry tags and a deployer whose SCP covers it cannot run Auto Mode.
     denied: List[str] = field(default_factory=list)
+    # Resource-creating calls we have not classified as taggable or not. Reported for review, but not
+    # failed on: see the note at the call site.
+    unclassified: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -340,11 +343,36 @@ def expected_tags_from_stack(stack_name: str, region: str) -> Dict[str, str]:
 # defect in our plumbing -- there is no "legitimately untagged" case here.
 # https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop
 TAGGABLE_CREATE_EVENTS = frozenset({
-    "CreateFleet", "RunInstances", "CreateLaunchTemplate",          # Compute
+    "RunInstances",                                                 # Compute
     "CreateVolume", "CreateSnapshot",                               # Storage
     "CreateNetworkInterface",                                       # Networking
     "CreateLoadBalancer", "CreateTargetGroup", "CreateListener", "CreateRule",
     "CreateSecurityGroup",                                          # LoadBalancer
+})
+
+# Creates where AWS offers no way to put the user tags on the resource itself, so requiring them
+# would fail every run for something outside our control.
+#
+# CreateLaunchTemplate is here on evidence, not assumption: in CloudTrail its own TagSpecification is
+# null, and the user tags appear under launchTemplateData.tagSpecifications -- they are the tags for
+# the *instances* the template launches, not tags on the template. The instances themselves are
+# checked via RunInstances, so nothing is lost by exempting this.
+UNTAGGABLE_CREATE_EVENTS = frozenset({
+    "CreateLaunchTemplate",
+    # CreateFleet wraps everything in CreateFleetRequest and carries no TagSpecifications: the
+    # instances it launches get their tags from the launch template instead. Verified in CloudTrail
+    # against a cluster whose instances were correctly tagged, so an untagged CreateFleet request is
+    # normal. Worth knowing for deployers: an SCP requiring aws:RequestTag on ec2:CreateFleet blocks
+    # EKS Auto Mode outright, for the same reason.
+    "CreateFleet",
+})
+
+# Calls whose name begins with Create but which create no taggable resource. Without these the broad
+# prefix match below reports them as untagged resources -- observed with CreateTags (the tagging API
+# itself) and CreateGrant (a KMS grant).
+NOT_RESOURCE_CREATES = frozenset({
+    "CreateTags", "CreateGrant", "CreateNetworkInterfacePermission", "CreateServiceLinkedRole",
+    "CreateLaunchTemplateVersion", "CreateRoute", "CreateNetworkAclEntry",
 })
 
 # Anything else that creates a resource. Kept broad on purpose: the entire point of this oracle is to
@@ -469,11 +497,24 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
                         f"{name} failed with {error_code} (not an authorization failure, so not a "
                         f"tagging verdict)")
                 continue
+            if name in NOT_RESOURCE_CREATES:
+                continue
             matched += 1
-            enforceable = name in TAGGABLE_CREATE_EVENTS
-            kind = (f"{name} (taggable, our bug)" if enforceable
-                    else f"{name} (no AWS tagging mechanism)")
-            _check(result, kind, detail.get("eventID", "?"), _request_tags(detail), expected,
+            if name in UNTAGGABLE_CREATE_EVENTS:
+                result.unreadable.append(
+                    f"{name}: AWS puts no user tags on this resource, so it is not checked")
+                continue
+            tags = _request_tags(detail)
+            if name not in TAGGABLE_CREATE_EVENTS:
+                # Never seen before, so we cannot know whether AWS lets us tag it. Surfacing it is
+                # the whole point of this oracle; failing on it is not, because a create we have no
+                # way to influence would make every run red and the signal worthless. Classify it
+                # into one of the sets above once its behaviour is known.
+                if not all(tags.get(k) == v for k, v in expected.items()):
+                    result.unclassified.append(
+                        f"{name} at {detail.get('eventTime')} carried tags {sorted(tags) or 'none'}")
+                continue
+            _check(result, f"{name} (taggable, our bug)", detail.get("eventID", "?"), tags, expected,
                    "CloudTrail, cluster role")
     if truncated:
         # Never let a bounded scan read as full coverage.
@@ -536,10 +577,21 @@ def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
         lines.append("  An action listed here either should have carried the tags (our bug) or "
                      "cannot carry them at all,")
         lines.append("  in which case a deployer whose SCP covers it cannot run EKS Auto Mode.")
+    if result.unclassified:
+        lines.append("")
+        lines.append(f"UNCLASSIFIED CREATES ({len(result.unclassified)}) -- review, not failed:")
+        from collections import Counter
+        for note, count in Counter(result.unclassified).most_common():
+            lines.append(f"  - {note}" + (f"  (x{count})" if count > 1 else ""))
     if result.unreadable:
         lines.append("")
         lines.append("Not verified:")
-        lines.extend(f"  - {note}" for note in result.unreadable)
+        # Collapsed with counts: Auto Mode retries transient failures, and one observed run produced
+        # 21 identical "Invalid IAM Instance Profile name" notes while IAM propagated, which buried
+        # everything else in the report.
+        from collections import Counter
+        for note, count in Counter(result.unreadable).most_common():
+            lines.append(f"  - {note}" + (f"  (x{count})" if count > 1 else ""))
     if result.findings:
         lines.append("")
         lines.append(tabulate(

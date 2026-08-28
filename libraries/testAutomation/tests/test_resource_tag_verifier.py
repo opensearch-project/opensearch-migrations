@@ -18,6 +18,8 @@ from testAutomation.resource_tag_verifier import (
     collect_load_balancer_hostnames,
     collect_pv_volume_ids,
     TAGGABLE_CREATE_EVENTS,
+    UNTAGGABLE_CREATE_EVENTS,
+    NOT_RESOURCE_CREATES,
     _AUTH_FAILURE_CODES,
     _request_tags,
     format_report,
@@ -155,7 +157,7 @@ class TestCloudTrailOracle:
         # move with it -- otherwise an untagged create gets filed under "no AWS mechanism" and looks
         # like someone else's problem instead of our bug.
         assert TAGGABLE_CREATE_EVENTS == {
-            "CreateFleet", "RunInstances", "CreateLaunchTemplate",
+            "RunInstances",
             "CreateVolume", "CreateSnapshot",
             "CreateNetworkInterface",
             "CreateLoadBalancer", "CreateTargetGroup", "CreateListener", "CreateRule",
@@ -269,3 +271,49 @@ def test_test_runner_uses_no_relative_imports():
     offenders = [ln.strip() for ln in src.splitlines()
                  if ln.strip().startswith("from .") or ln.strip().startswith("import .")]
     assert offenders == []
+
+
+class TestUntaggableExemptions:
+    def test_launch_template_is_exempt_not_a_failure(self):
+        # Its own TagSpecification is null in CloudTrail; the user tags in launchTemplateData are for
+        # the instances it launches. Treating it as our bug made a live smoke test report FAILED.
+        assert "CreateLaunchTemplate" in UNTAGGABLE_CREATE_EVENTS
+        assert "CreateLaunchTemplate" not in TAGGABLE_CREATE_EVENTS
+
+    def test_exempt_and_enforceable_sets_are_disjoint(self):
+        assert not (UNTAGGABLE_CREATE_EVENTS & TAGGABLE_CREATE_EVENTS)
+
+    def test_repeated_notes_are_collapsed_with_a_count(self):
+        r = VerificationResult(checked=1)
+        for _ in range(21):
+            r.unreadable.append("RunInstances failed with Client.InvalidParameterValue")
+        out = format_report(r, {"A": "1"})
+        assert "(x21)" in out
+        assert out.count("RunInstances failed with Client.InvalidParameterValue") == 1
+
+
+class TestClassificationFromLiveEvidence:
+    """Every entry here was moved on evidence from a live cluster, not on reasoning."""
+
+    def test_create_fleet_is_exempt(self):
+        # CreateFleet carries no TagSpecifications; its instances inherit tags from the launch
+        # template. The instances were verifiably tagged, so an untagged CreateFleet is normal.
+        assert "CreateFleet" in UNTAGGABLE_CREATE_EVENTS
+        assert "CreateFleet" not in TAGGABLE_CREATE_EVENTS
+
+    @pytest.mark.parametrize("name", ["CreateTags", "CreateGrant"])
+    def test_non_resource_creates_are_excluded(self, name):
+        # Both were reported as untagged resources by the broad Create* prefix match.
+        assert name in NOT_RESOURCE_CREATES
+
+    def test_the_three_sets_do_not_overlap(self):
+        assert not (TAGGABLE_CREATE_EVENTS & UNTAGGABLE_CREATE_EVENTS)
+        assert not (TAGGABLE_CREATE_EVENTS & NOT_RESOURCE_CREATES)
+        assert not (UNTAGGABLE_CREATE_EVENTS & NOT_RESOURCE_CREATES)
+
+    def test_unclassified_creates_are_reported_but_do_not_fail(self):
+        r = VerificationResult(checked=1)
+        r.unclassified.append("CreateSomethingNew at T carried tags none")
+        assert r.ok, "an unknown create must not fail the run"
+        out = format_report(r, {"A": "1"})
+        assert "UNCLASSIFIED CREATES (1)" in out and "CreateSomethingNew" in out

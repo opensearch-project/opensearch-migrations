@@ -1032,8 +1032,10 @@ emit_tag_helm_values() {
 #   not authorized to perform: ec2:RunInstances on resource: .../launch-template/lt-0f5992a0cef08107b
 #   with an explicit deny in an identity-based policy
 #
-# For the same reason CreateLaunchTemplate, CreateNetworkInterface, CreateSecurityGroup and the
-# elasticloadbalancing creates are deliberately NOT denied here: Auto Mode does not put the user tags
+# For the same reason CreateFleet, CreateLaunchTemplate, CreateNetworkInterface, CreateSecurityGroup
+# and the elasticloadbalancing creates are deliberately NOT denied here. CreateFleet in particular
+# carries no TagSpecifications at all -- the instances it launches inherit their tags from the launch
+# template -- so requiring request tags on it would block Auto Mode's fleet path outright: Auto Mode does not put the user tags
 # on those resources at create time, so requiring them would block the cluster rather than test it.
 # The CloudTrail sweep in resource_tag_verifier.py reports on them instead, which is the right tool
 # for actions we cannot influence.
@@ -1070,7 +1072,7 @@ enforce_tags_on_cluster_role() {
     {
       "Sid": "DenyUntaggedInstanceLaunch",
       "Effect": "Deny",
-      "Action": [ "ec2:RunInstances", "ec2:CreateFleet" ],
+      "Action": [ "ec2:RunInstances" ],
       "Resource": [
         "arn:${AWS_PARTITION:-aws}:ec2:*:*:instance/*",
         "arn:${AWS_PARTITION:-aws}:ec2:*:*:volume/*",
