@@ -123,7 +123,8 @@ def call(Map config = [:]) {
                                     bootstrap: bootstrap,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}",
-                                    resourceTags: env.MA_RESOURCE_TAGS
+                                    resourceTags: env.MA_RESOURCE_TAGS,
+                                    enforceTagsOnCreate: true
                                 )
                             }
                         }
@@ -228,7 +229,7 @@ def call(Map config = [:]) {
                             script {
                                 sh "pipenv install --deploy"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=${env.sourceVer} --target-type=AOSS --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --verify-resource-tags --ma-stack-name='${env.STACK_NAME}' --aws-region=${params.REGION}"
+                                    sh "pipenv run app --source-version=${env.sourceVer} --target-type=AOSS --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --verify-resource-tags --ma-stack-name='${env.STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
                                 }
                             }
                         }

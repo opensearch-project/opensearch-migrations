@@ -141,7 +141,20 @@ PVC volumes; `Service.status.loadBalancer` → load balancer → target groups,
 listeners, security groups). Because the cluster is the index, it is exact
 regardless of what else lives in the region, and needs no clean account.
 
-The EKS CDC pipelines run this automatically via `--verify-resource-tags` on the
-normal test invocation, after the tests so the load balancer and PVC volumes
-exist. Use at least two tags: a single tag cannot catch a bug that keeps only the
-first entry of a comma-separated list.
+Pass `--cluster-name` to add a third, catch-all oracle: a CloudTrail sweep of
+every resource-creating call made by the **cluster IAM role** (the principal Auto
+Mode assumes). That checks *calls* rather than resources, so it catches a create
+whose resource type nobody enumerated. Findings are split by whether AWS lets us
+tag the action — `AutoModeTagPropagationPolicy`'s action set — so "our bug" is
+distinguishable from "no AWS mechanism exists, the deployer must exempt it".
+CloudTrail lags 5–15 minutes, hence `--cloudtrail-wait-seconds` (default 300).
+
+The EKS CDC pipelines run all of this automatically via `--verify-resource-tags`
+on the normal test invocation, after the tests so the load balancer and PVC
+volumes exist. They also bootstrap with `--enforce-tags-on-create`, which adds an
+IAM **Deny** on the cluster role for those same create actions when a required
+tag is absent — reproducing a deployer SCP that requires tags on create, so an
+untagged create fails at the moment it happens instead of being found later.
+
+Use at least two tags: a single tag cannot catch a bug that keeps only the first
+entry of a comma-separated list.

@@ -20,6 +20,10 @@ independently of its tags:
         Service .status.loadBalancer.ingress[].hostname -> load balancer,
             and from it its target groups, listeners and security groups
 
+  * CloudTrail -- belt and suspenders. The two oracles above check resources we know how to find;
+    this one checks *calls*, so it catches a create whose resource type nobody enumerated. Scoped to
+    the cluster IAM role, the principal Auto Mode assumes on the cluster's behalf.
+
 Because the cluster is the index, this is exact regardless of what else lives in the region, and
 needs no clean account.
 
@@ -37,9 +41,12 @@ Exits non-zero and prints a table of every resource missing any expected tag.
 """
 
 import argparse
+import json
 import logging
 import sys
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -319,16 +326,168 @@ def expected_tags_from_stack(stack_name: str, region: str) -> Dict[str, str]:
             if not k.startswith("aws:")}
 
 
+# --------------------------------------------------------------------------------------------------
+# Oracle 3: CloudTrail
+# --------------------------------------------------------------------------------------------------
+
+# The creates that EKS Auto Mode can be made to tag. This is not a guess: it is exactly the action
+# set of the AWS-documented tag-propagation policy that the solution attaches to the cluster role
+# (see EksInfra.allowAutoModeTagPropagation). An untagged create in this set is therefore always a
+# defect in our plumbing -- there is no "legitimately untagged" case here.
+# https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop
+TAGGABLE_CREATE_EVENTS = frozenset({
+    "CreateFleet", "RunInstances", "CreateLaunchTemplate",          # Compute
+    "CreateVolume", "CreateSnapshot",                               # Storage
+    "CreateNetworkInterface",                                       # Networking
+    "CreateLoadBalancer", "CreateTargetGroup", "CreateListener", "CreateRule",
+    "CreateSecurityGroup",                                          # LoadBalancer
+})
+
+# Anything else that creates a resource. Kept broad on purpose: the entire point of this oracle is to
+# surface creates nobody thought to enumerate. A hit here that carries no tags means AWS offers no
+# mechanism to tag it, which is not something this repo can fix -- but it is exactly the list a
+# customer whose SCP requires tags on create has to know about.
+_CREATE_EVENT_PREFIXES = ("Create", "Run", "Allocate", "Provision", "Request", "Register")
+
+
+def _request_tags(detail: dict) -> Dict[str, str]:
+    """Pull tags out of a CloudTrail event's requestParameters.
+
+    Shapes differ by service, and CloudTrail lowercases EC2's keys:
+      EC2    requestParameters.tagSpecificationSet.items[].tags[].{key,value}
+      elbv2  requestParameters.tags[].{key,value}
+    Both spellings are accepted since CloudTrail is not consistent about casing across services.
+    """
+    params = detail.get("requestParameters") or {}
+    collected: Dict[str, str] = {}
+
+    def absorb(items) -> None:
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key", item.get("Key"))
+            if key is not None:
+                collected[key] = item.get("value", item.get("Value", "")) or ""
+
+    absorb(params.get("tags"))
+    absorb(params.get("tagSet"))
+    spec = params.get("tagSpecificationSet") or {}
+    for entry in spec.get("items") or []:
+        if isinstance(entry, dict):
+            absorb(entry.get("tags"))
+    # RunInstances with a launch template can also carry TagSpecifications at the top level.
+    for entry in params.get("tagSpecifications") or []:
+        if isinstance(entry, dict):
+            absorb(entry.get("tags", entry.get("Tags")))
+    return collected
+
+
+def is_create_event(event_name: str) -> bool:
+    return event_name in TAGGABLE_CREATE_EVENTS or event_name.startswith(_CREATE_EVENT_PREFIXES)
+
+
+def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, str], region: str,
+                              cluster_name: str, start_time, end_time,
+                              max_events: int = 200000) -> None:
+    """Fail on any resource-creating call by the cluster role whose request omitted the tags.
+
+    This is the belt-and-suspenders oracle. The other two check resources we know how to find; this
+    one checks *calls*, so it catches a create whose resource type nobody enumerated. Scoped to the
+    cluster IAM role -- the principal EKS Auto Mode assumes on the cluster's behalf -- which makes it
+    exact without any assumption about the region being otherwise idle.
+
+    Findings are split by whether the action is one AWS lets us tag (our bug) or not (no mechanism
+    exists; the deployer has to exempt it). Both are reported as failures because a create without
+    the tag is fatal under an SCP that requires the tag on create, whoever owns the fix.
+    """
+    import boto3
+
+    eks = boto3.client("eks", region_name=region)
+    cluster_role_arn = eks.describe_cluster(name=cluster_name)["cluster"]["roleArn"]
+    logger.info("Scanning CloudTrail for creates by the cluster role %s between %s and %s",
+                cluster_role_arn, start_time, end_time)
+
+    ct = boto3.client("cloudtrail", region_name=region)
+    paginator = ct.get_paginator("lookup_events")
+    scanned = matched = 0
+    truncated = False
+    for page in paginator.paginate(
+            LookupAttributes=[{"AttributeKey": "ReadOnly", "AttributeValue": "false"}],
+            StartTime=start_time, EndTime=end_time):
+        for event in page["Events"]:
+            scanned += 1
+            if scanned > max_events:
+                truncated = True
+                break
+            try:
+                detail = json.loads(event["CloudTrailEvent"])
+            except (KeyError, ValueError):
+                continue
+            issuer = (((detail.get("userIdentity") or {}).get("sessionContext") or {})
+                      .get("sessionIssuer") or {}).get("arn")
+            if issuer != cluster_role_arn:
+                continue
+            name = detail.get("eventName", "")
+            if not is_create_event(name):
+                continue
+            # A rejected call created nothing, so it cannot be missing tags on a real resource. This
+            # is also what a working Deny policy looks like from the outside.
+            if detail.get("errorCode"):
+                logger.info("%s was rejected (%s); not a created resource",
+                            name, detail.get("errorCode"))
+                continue
+            matched += 1
+            enforceable = name in TAGGABLE_CREATE_EVENTS
+            kind = (f"{name} (taggable, our bug)" if enforceable
+                    else f"{name} (no AWS tagging mechanism)")
+            _check(result, kind, detail.get("eventID", "?"), _request_tags(detail), expected,
+                   "CloudTrail, cluster role")
+    if truncated:
+        # Never let a bounded scan read as full coverage.
+        result.unreadable.append(
+            f"CloudTrail scan stopped after {max_events} events; coverage is incomplete")
+        logger.error("CloudTrail scan hit the %d event cap", max_events)
+    logger.info("CloudTrail: %d write events scanned, %d creates by the cluster role", scanned, matched)
+    if matched == 0:
+        result.unreadable.append(
+            "CloudTrail found no creates by the cluster role; either nothing scaled during the "
+            "window or events had not been delivered yet (delivery lags by 5-15 minutes)")
+
+
 def verify_resource_tags(expected: Dict[str, str], region: str,
                          kube_context: Optional[str] = None,
-                         stack_name: Optional[str] = None) -> VerificationResult:
+                         stack_name: Optional[str] = None,
+                         cluster_name: Optional[str] = None,
+                         cloudtrail_wait_seconds: int = 0) -> VerificationResult:
     """Run every oracle. Returns a result; does not raise on findings."""
+    import boto3
     result = VerificationResult()
+    stack_created_at = None
     if stack_name:
         verify_cloudformation(result, expected, stack_name, region)
+        stack = boto3.client("cloudformation", region_name=region) \
+            .describe_stacks(StackName=stack_name)["Stacks"][0]
+        # The stack predates every resource the deployment created, so its creation time is a
+        # config-free lower bound for the CloudTrail window.
+        stack_created_at = stack["CreationTime"]
+
     core_v1, _ = _k8s_clients(kube_context)
     verify_compute_and_storage(result, expected, core_v1, region)
     verify_load_balancers(result, expected, core_v1, region)
+
+    if cluster_name and stack_created_at:
+        if cloudtrail_wait_seconds > 0:
+            # CloudTrail delivers management events with a 5-15 minute lag, so the most recent
+            # creates would otherwise be invisible and the sweep would look clean when it is not.
+            logger.info("Waiting %ds for CloudTrail delivery before sweeping",
+                        cloudtrail_wait_seconds)
+            time.sleep(cloudtrail_wait_seconds)
+        now = datetime.now(timezone.utc)
+        verify_cloudtrail_creates(result, expected, region, cluster_name, stack_created_at, now)
+    else:
+        result.unreadable.append(
+            "CloudTrail sweep skipped (needs --cluster-name and --stack-name); creates whose "
+            "resource type is not enumerated above were not checked")
     return result
 
 
@@ -364,7 +523,16 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--kube-context", default=None,
                         help="kubectl context for the EKS cluster (default: current context)")
     parser.add_argument("--stack-name", default=None,
-                        help="CloudFormation stack to check as well as the cluster")
+                        help="CloudFormation stack to check as well as the cluster. Also supplies "
+                             "the CloudTrail window (the stack predates every resource) and, when "
+                             "--expect-tags is omitted, the tags to expect.")
+    parser.add_argument("--cluster-name", default=None,
+                        help="EKS cluster name. Enables the CloudTrail sweep, which fails on ANY "
+                             "resource-creating call by the cluster role whose request omitted the "
+                             "tags -- including resource types the other checks do not enumerate.")
+    parser.add_argument("--cloudtrail-wait-seconds", type=int, default=300,
+                        help="Wait before sweeping CloudTrail. Management events lag by 5-15 "
+                             "minutes, so without this the newest creates look clean. Default 300.")
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args(argv)
 
@@ -390,7 +558,9 @@ def main(argv=None) -> int:
         # Not fatal, but a single tag cannot catch the most likely bug in this area.
         logger.warning("Only one expected tag given; two or more is strongly recommended so that "
                        "a bug dropping all but the first tag is detectable")
-    result = verify_resource_tags(expected, args.region, args.kube_context, args.stack_name)
+    result = verify_resource_tags(expected, args.region, args.kube_context, args.stack_name,
+                                  cluster_name=args.cluster_name,
+                                  cloudtrail_wait_seconds=args.cloudtrail_wait_seconds)
     print(format_report(result, expected))
     return 0 if result.ok else 1
 

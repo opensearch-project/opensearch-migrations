@@ -17,7 +17,10 @@ from testAutomation.resource_tag_verifier import (
     collect_instance_ids,
     collect_load_balancer_hostnames,
     collect_pv_volume_ids,
+    TAGGABLE_CREATE_EVENTS,
+    _request_tags,
     format_report,
+    is_create_event,
     parse_tag_spec,
 )
 
@@ -141,3 +144,60 @@ class TestReport:
             Finding("EC2 instance", "i-1", {"B": None}, "Node.spec.providerID")])
         out = format_report(r, {"A": "1", "B": "2"})
         assert "FAILED" in out and "i-1" in out
+
+
+class TestCloudTrailOracle:
+    """The CloudTrail sweep's pure parts: which events count, and where the tags hide."""
+
+    def test_taggable_set_matches_the_iam_policy_we_attach(self):
+        # If AutoModeTagPropagationPolicy in eks-infra.ts grows or loses an action, this set has to
+        # move with it -- otherwise an untagged create gets filed under "no AWS mechanism" and looks
+        # like someone else's problem instead of our bug.
+        assert TAGGABLE_CREATE_EVENTS == {
+            "CreateFleet", "RunInstances", "CreateLaunchTemplate",
+            "CreateVolume", "CreateSnapshot",
+            "CreateNetworkInterface",
+            "CreateLoadBalancer", "CreateTargetGroup", "CreateListener", "CreateRule",
+            "CreateSecurityGroup",
+        }
+
+    @pytest.mark.parametrize("name", [
+        "RunInstances", "CreateVolume", "CreateLoadBalancer",
+        # Deliberately broad: the point is to catch creates nobody enumerated.
+        "CreateSomethingBrandNew", "AllocateAddress", "ProvisionByoipCidr", "RegisterTargets",
+    ])
+    def test_recognizes_creates(self, name):
+        assert is_create_event(name)
+
+    @pytest.mark.parametrize("name", [
+        "DeleteVolume", "TerminateInstances", "ModifyInstanceAttribute", "AssumeRole", "TagResource",
+    ])
+    def test_ignores_non_creates(self, name):
+        assert not is_create_event(name)
+
+    def test_extracts_ec2_tag_specification_set_with_lowercase_keys(self):
+        # CloudTrail lowercases EC2 request parameters, unlike the describe APIs.
+        detail = {"requestParameters": {"tagSpecificationSet": {"items": [
+            {"resourceType": "instance",
+             "tags": [{"key": "MATestOwner", "value": "migrations-ci"},
+                      {"key": "MATestStage", "value": "esoscdc-p1"}]}]}}}
+        assert _request_tags(detail) == {"MATestOwner": "migrations-ci",
+                                         "MATestStage": "esoscdc-p1"}
+
+    def test_extracts_elbv2_style_tags(self):
+        detail = {"requestParameters": {"tags": [{"key": "A", "value": "1"}]}}
+        assert _request_tags(detail) == {"A": "1"}
+
+    def test_accepts_capitalized_spelling_too(self):
+        detail = {"requestParameters": {"tags": [{"Key": "A", "Value": "1"}]}}
+        assert _request_tags(detail) == {"A": "1"}
+
+    def test_untagged_create_yields_no_tags(self):
+        assert _request_tags({"requestParameters": {}}) == {}
+        assert _request_tags({}) == {}
+
+    def test_tolerates_junk_shapes(self):
+        # CloudTrail request parameters are not schema-guaranteed; a crash here would mask real
+        # findings in the rest of the sweep.
+        assert _request_tags({"requestParameters": {"tags": ["not-a-dict", None]}}) == {}
+        assert _request_tags({"requestParameters": {"tagSpecificationSet": {"items": [None]}}}) == {}

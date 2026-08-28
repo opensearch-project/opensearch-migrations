@@ -163,7 +163,8 @@ def call(Map config = [:]) {
                                             eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                             kubectlContext: "migration-eks-${maStageName}",
                                             tlsMode: tlsMode != 'none' ? tlsMode : null,
-                                            resourceTags: env.MA_RESOURCE_TAGS
+                                            resourceTags: env.MA_RESOURCE_TAGS,
+                                    enforceTagsOnCreate: true
                                         )
                                     }
                                 }
@@ -272,7 +273,7 @@ def call(Map config = [:]) {
                                     traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
                                 }
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}' --verify-resource-tags --ma-stack-name='${env.MA_STACK_NAME}' --aws-region=${params.REGION}"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}' --verify-resource-tags --ma-stack-name='${env.MA_STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
                                 }
                             }
                         }

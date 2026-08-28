@@ -73,6 +73,7 @@ skip_test_images=false
 image_tag="latest"
 kubectl_context=""
 tags_raw=()
+enforce_tags_on_create=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -114,6 +115,7 @@ while [[ $# -gt 0 ]]; do
     --tls-mode) tls_mode="$2"; shift 2 ;;
     --pca-arn) pca_arn="$2"; shift 2 ;;
     --tags) tags_raw+=("$2"); shift 2 ;;
+    --enforce-tags-on-create) enforce_tags_on_create=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -147,6 +149,12 @@ while [[ $# -gt 0 ]]; do
       echo "                                            (EC2 instances, EBS volumes, load balancers) carry them, which"
       echo "                                            CloudFormation cannot do on its own. See 'Tag propagation'"
       echo "                                            below for what that entails."
+      echo "  --enforce-tags-on-create                  Additionally DENY the cluster role from creating any resource"
+      echo "                                            without the --tags keys. Reproduces an SCP that requires tags"
+      echo "                                            on create: an untagged create then fails immediately instead"
+      echo "                                            of being discovered later. Intended for testing the tagging"
+      echo "                                            path -- it will stop the cluster scaling if anything Auto Mode"
+      echo "                                            creates cannot carry the tags. Requires --tags."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
       echo "                                            from public.ecr.aws/opensearchproject and public helm chart"
@@ -322,6 +330,7 @@ if [[ ${#tag_keys[@]} -gt 0 ]]; then
   # carry tags. Honouring both would schedule onto a NodePool that no longer exists.
   if [[ "$use_general_node_pool" == "true" ]]; then
     echo "ERROR: --tags and --use-general-node-pool are mutually exclusive." >&2
+    # (--enforce-tags-on-create is validated below; it needs tags to require.)
     echo "  --tags replaces the built-in general-purpose NodePool with a tagged one, because the" >&2
     echo "  NodeClass behind the built-in pools is owned by EKS and cannot carry user tags." >&2
     exit 1
@@ -332,6 +341,13 @@ if [[ ${#tag_keys[@]} -gt 0 ]]; then
     echo "      built-in NodePools (system and general-purpose) for the life of the cluster."
     disable_general_purpose_pool=false
   fi
+fi
+
+# There is nothing to require without tags, and silently doing nothing would make a test that relies
+# on enforcement pass for the wrong reason.
+if [[ "$enforce_tags_on_create" == "true" && ${#tag_keys[@]} -eq 0 ]]; then
+  echo "ERROR: --enforce-tags-on-create requires --tags: there would be no tag to require." >&2
+  exit 1
 fi
 
 # --- derive state from parsed arguments ---
@@ -1002,34 +1018,72 @@ emit_tag_helm_values() {
   printf '%s' "$values_file"
 }
 
-# StorageClass `parameters` are immutable, so Helm cannot change the volume tags on an existing
-# release -- the upgrade fails partway through instead. Say so up front, with the fix, rather than
-# letting it surface as an opaque apply error. Deleting the StorageClass is safe for existing
-# volumes (it is only consulted when provisioning new ones) but is left to the operator.
-warn_if_storage_class_tags_are_stale() {
-  local params existing want i
-  # No StorageClass yet (fresh install) means nothing to collide with.
-  params=$(kubectl --context="${KUBE_CONTEXT}" get storageclass auto-ebs-sc \
-    -o jsonpath='{range $k,$v := .parameters}{$k}={$v}{"\n"}{end}' 2>/dev/null) || return 0
-  # `grep` finding nothing is the "currently untagged" case, not an error -- and it is precisely
-  # the case that breaks when tags are added, so it must not short-circuit the comparison.
-  existing=$(printf '%s\n' "$params" | { grep '^tagSpecification' || true; } \
-    | sed 's/^[^=]*=//' | sort | tr '\n' ',')
-  want=""
-  for i in "${!tag_keys[@]}"; do
-    want+="${tag_keys[$i]}=${tag_values[$i]}"$'\n'
-  done
-  want=$(printf '%s' "$want" | sort | tr '\n' ',')
-  if [[ "$existing" != "$want" ]]; then
-    echo ""
-    echo "WARNING: StorageClass auto-ebs-sc already exists with different volume tags."
-    echo "  existing: ${existing%,}"
-    echo "  wanted:   ${want%,}"
-    echo "  StorageClass parameters are immutable, so this upgrade will fail. Delete it first"
-    echo "  (existing volumes are unaffected; only new provisioning consults it):"
-    echo "    kubectl --context=${KUBE_CONTEXT} delete storageclass auto-ebs-sc"
-    echo ""
+# Deny the cluster role any resource-creating call that does not carry every --tags key.
+#
+# The inverse of AutoModeTagPropagationPolicy: that policy *permits* user tags on these actions,
+# this one *requires* them. The action list is deliberately identical, because that list is exactly
+# the set AWS documents as taggable by Auto Mode -- so an untagged create here is always a gap in our
+# plumbing, never an action that had no way to carry tags.
+#
+# This reproduces a deployer SCP that requires tags on create: the failure surfaces at the moment of
+# the untagged create rather than being discovered afterwards. That also means it will stop the
+# cluster scaling if anything Auto Mode creates cannot carry the tags -- which is the point, since
+# that is precisely what such a deployer experiences.
+#
+# Attached out-of-band rather than through CloudFormation so that enabling it cannot change the
+# shipped template. Remove with: aws iam delete-role-policy --role-name <role> --policy-name <name>
+enforce_tags_on_cluster_role() {
+  local cluster_role_arn cluster_role_name policy_doc conditions i
+  cluster_role_arn=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" --query 'cluster.roleArn' --output text)
+  if [[ -z "$cluster_role_arn" || "$cluster_role_arn" == "None" ]]; then
+    echo "Error: could not resolve the EKS cluster role for tag enforcement." >&2
+    exit 1
   fi
+  cluster_role_name="${cluster_role_arn##*/}"
+
+  # Null:true means "the request did not supply this tag at all". One condition entry per key, so
+  # every --tags key is individually required rather than just any one of them.
+  conditions=""
+  for i in "${!tag_keys[@]}"; do
+    [[ -n "$conditions" ]] && conditions+=","
+    conditions+=$(printf '"aws:RequestTag/%s": "true"' "${tag_keys[$i]}")
+  done
+
+  policy_doc=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUntaggedAutoModeCreates",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:CreateFleet",
+        "ec2:RunInstances",
+        "ec2:CreateLaunchTemplate",
+        "ec2:CreateVolume",
+        "ec2:CreateSnapshot",
+        "ec2:CreateNetworkInterface",
+        "ec2:CreateSecurityGroup",
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:CreateRule"
+      ],
+      "Resource": "*",
+      "Condition": { "Null": { ${conditions} } }
+    }
+  ]
+}
+EOF
+)
+  echo "  Enforcing tags on create for cluster role ${cluster_role_name}:"
+  echo "    any create without ${#tag_keys[@]} tag(s) (${tag_keys[*]}) will be denied."
+  aws iam put-role-policy \
+    --role-name "$cluster_role_name" \
+    --policy-name "MigrationsDenyUntaggedCreates" \
+    --policy-document "$policy_doc" \
+    || { echo "Error: failed to attach the tag-enforcement policy." >&2; exit 1; }
 }
 
 # An EC2-type access entry lets nodes launched by a custom NodeClass join the cluster. EKS creates
@@ -1087,6 +1141,10 @@ configure_tagged_auto_mode_compute() {
   echo "  Security group:  $cluster_sg"
 
   ensure_auto_node_access_entry "$node_role_arn"
+
+  if [[ "$enforce_tags_on_create" == "true" ]]; then
+    enforce_tags_on_cluster_role
+  fi
 
   # The NodeClass carries the tags; Auto Mode stamps them on the instance, its launch template,
   # its ENIs and its root/ephemeral volumes. The NodePool exists so that pods -- including the
@@ -1190,7 +1248,6 @@ configure_tagged_auto_mode_compute() {
 
 if [[ ${#tag_keys[@]} -gt 0 ]]; then
   configure_tagged_auto_mode_compute
-  warn_if_storage_class_tags_are_stale
   # Prepended, not appended, so an explicit --helm-values file still wins.
   tag_values_file=$(emit_tag_helm_values)
   echo "  Tag values written to $tag_values_file"

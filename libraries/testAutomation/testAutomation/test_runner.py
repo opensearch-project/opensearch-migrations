@@ -736,6 +736,21 @@ def parse_args(argv=None) -> argparse.Namespace:
              "Falls back to AWS_REGION / AWS_CFN_REGION."
     )
     parser.add_argument(
+        "--eks-cluster-name",
+        type=str,
+        default=None,
+        help="EKS cluster name (for --verify-resource-tags). Enables the CloudTrail sweep, which "
+             "fails on ANY resource-creating call by the cluster role whose request omitted the "
+             "tags -- catching resource types the other checks do not enumerate."
+    )
+    parser.add_argument(
+        "--cloudtrail-wait-seconds",
+        type=int,
+        default=300,
+        help="Wait before the CloudTrail sweep. Management events lag 5-15 minutes, so without "
+             "this the newest creates look clean."
+    )
+    parser.add_argument(
         "--speedup-factor",
         type=int,
         default=20,
@@ -882,7 +897,9 @@ def main() -> None:
                      "was it created with --tags?")
         result = verify_resource_tags(expected, region,
                                       kube_context=args.kube_context,
-                                      stack_name=args.ma_stack_name)
+                                      stack_name=args.ma_stack_name,
+                                      cluster_name=args.eks_cluster_name,
+                                      cloudtrail_wait_seconds=args.cloudtrail_wait_seconds)
         logger.info("Resource tag verification:\n%s", format_report(result, expected))
         if not result.ok:
             sys.exit(1)
