@@ -75,6 +75,9 @@ class VerificationResult:
     # Resource-creating calls we have not classified as taggable or not. Reported for review, but not
     # failed on: see the note at the call site.
     unclassified: List[str] = field(default_factory=list)
+    # eventName -> count of creates seen in CloudTrail that carried every expected tag. Distinguishes
+    # "enforcement would have caught this" from "we watched it happen correctly".
+    observed_tagged: Dict[str, int] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -377,6 +380,23 @@ def expected_tags_from_stack(stack_name: str, region: str) -> Dict[str, str]:
 # influence would make every run red and the signal worthless.
 TAGGABLE_CREATE_EVENTS = frozenset({"RunInstances"})
 
+# The actions aws-bootstrap.sh --enforce-tags-on-create denies when the tags are absent. Kept in step
+# with enforce_tags_on_cluster_role() in that script by a test; if the two drift, the report below
+# will claim enforcement that is not in place.
+#
+# For these, an untagged create does not merely get reported -- it is refused by IAM at the moment it
+# happens, which is a materially stronger claim than "we looked afterwards and the tags were there".
+DENY_ENFORCED_ACTIONS = (
+    "ec2:RunInstances",
+    "ec2:CreateVolume",
+    "ec2:CreateSnapshot",
+    "ec2:CreateNetworkInterface",
+    "elasticloadbalancing:CreateLoadBalancer",
+    "elasticloadbalancing:CreateTargetGroup",
+    "elasticloadbalancing:CreateListener",
+    "elasticloadbalancing:CreateRule",
+)
+
 # Creates where AWS offers no way to put the user tags on the resource itself, so requiring them
 # would fail every run for something outside our control. Each entry is here on CloudTrail evidence.
 UNTAGGABLE_CREATE_EVENTS = frozenset({
@@ -527,6 +547,9 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
                 result.unreadable.append(
                     f"{name}: AWS puts no user tags on this resource, so it is not checked")
                 continue
+            if all(_request_tags(detail).get(k) == v for k, v in expected.items()):
+                result.observed_tagged[name] = result.observed_tagged.get(name, 0) + 1
+                continue
             tags = _request_tags(detail)
             if name not in TAGGABLE_CREATE_EVENTS:
                 # Never seen before, so we cannot know whether AWS lets us tag it. Surfacing it is
@@ -537,8 +560,11 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
                     result.unclassified.append(
                         f"{name} at {detail.get('eventTime')} carried tags {sorted(tags) or 'none'}")
                 continue
+            before = len(result.findings)
             _check(result, f"{name} (taggable, our bug)", detail.get("eventID", "?"), tags, expected,
                    "CloudTrail, cluster role")
+            if len(result.findings) == before:
+                result.observed_tagged[name] = result.observed_tagged.get(name, 0) + 1
     if truncated:
         # Never let a bounded scan read as full coverage.
         result.unreadable.append(
@@ -598,6 +624,19 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
 def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
     from tabulate import tabulate
     lines = [f"Expected tags: {expected}", f"Resources checked: {result.checked}"]
+    lines.append("")
+    lines.append("How each result was established:")
+    lines.append("  Enforced by IAM -- an untagged create would have been REFUSED, not just noticed:")
+    for action in DENY_ENFORCED_ACTIONS:
+        seen = result.observed_tagged.get(action.split(":")[-1], 0)
+        lines.append(f"    {action}" + (f"  ({seen} create(s) observed)" if seen else "  (none seen)"))
+    unenforced = {k: v for k, v in result.observed_tagged.items()
+                  if not any(k == a.split(":")[-1] for a in DENY_ENFORCED_ACTIONS)}
+    if unenforced:
+        lines.append("  Observed tagged in CloudTrail, but NOT enforced -- an untagged one would have")
+        lines.append("  been reported after the fact rather than refused:")
+        for name, count in sorted(unenforced.items()):
+            lines.append(f"    {name}  ({count})")
     if result.denied:
         # First, because it names the failing action and every other symptom (pods Pending, pods
         # without IPs, a buildkit deployment that never becomes Ready) is downstream of it.

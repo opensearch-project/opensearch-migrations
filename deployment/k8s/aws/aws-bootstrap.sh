@@ -1032,10 +1032,21 @@ emit_tag_helm_values() {
 #   not authorized to perform: ec2:RunInstances on resource: .../launch-template/lt-0f5992a0cef08107b
 #   with an explicit deny in an identity-based policy
 #
-# For the same reason CreateFleet, CreateLaunchTemplate, CreateNetworkInterface, CreateSecurityGroup
-# and the elasticloadbalancing creates are deliberately NOT denied here. CreateFleet in particular
-# carries no TagSpecifications at all -- the instances it launches inherit their tags from the launch
-# template -- so requiring request tags on it would block Auto Mode's fleet path outright: Auto Mode does not put the user tags
+# Each action is scoped to ONLY the resource types that receive its request tags, and each gets its
+# own statement rather than sharing a Resource list, so one action's untaggable resource cannot make
+# another action's deny fire.
+#
+# Deliberately NOT denied, on evidence from CloudTrail:
+#   ec2:CreateFleet           carries no TagSpecifications at all; the instances it launches inherit
+#                             their tags from the launch template. Denying it blocks the fleet path.
+#   ec2:CreateLaunchTemplate  its own TagSpecification is null, for the same reason.
+#   ec2:CreateSecurityGroup   MIXED. A load balancer's frontend SG carries the tags, but the shared
+#                             "k8s-traffic-*" SG the controller attaches to nodes does not, so a deny
+#                             here would block every load balancer.
+#
+# ec2:CreateNetworkInterface is denied without direct evidence that standalone CNI interface creates
+# carry the user tags -- interfaces created as part of RunInstances demonstrably do. If nodes come up
+# but pods never get addresses, this statement is the first thing to remove: Auto Mode does not put the user tags
 # on those resources at create time, so requiring them would block the cluster rather than test it.
 # The CloudTrail sweep in resource_tag_verifier.py reports on them instead, which is the right tool
 # for actions we cannot influence.
@@ -1087,6 +1098,40 @@ enforce_tags_on_cluster_role() {
       "Resource": [
         "arn:${AWS_PARTITION:-aws}:ec2:*:*:volume/*",
         "arn:${AWS_PARTITION:-aws}:ec2:*:*:snapshot/*"
+      ],
+      "Condition": { "Null": { ${conditions} } }
+    },
+    {
+      "Sid": "DenyUntaggedNetworkInterface",
+      "Effect": "Deny",
+      "Action": [ "ec2:CreateNetworkInterface" ],
+      "Resource": [ "arn:${AWS_PARTITION:-aws}:ec2:*:*:network-interface/*" ],
+      "Condition": { "Null": { ${conditions} } }
+    },
+    {
+      "Sid": "DenyUntaggedLoadBalancer",
+      "Effect": "Deny",
+      "Action": [ "elasticloadbalancing:CreateLoadBalancer" ],
+      "Resource": [ "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:loadbalancer/*" ],
+      "Condition": { "Null": { ${conditions} } }
+    },
+    {
+      "Sid": "DenyUntaggedTargetGroup",
+      "Effect": "Deny",
+      "Action": [ "elasticloadbalancing:CreateTargetGroup" ],
+      "Resource": [ "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:targetgroup/*" ],
+      "Condition": { "Null": { ${conditions} } }
+    },
+    {
+      "Sid": "DenyUntaggedListenerAndRule",
+      "Effect": "Deny",
+      "Action": [
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:CreateRule"
+      ],
+      "Resource": [
+        "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:listener/*",
+        "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:listener-rule/*"
       ],
       "Condition": { "Null": { ${conditions} } }
     }

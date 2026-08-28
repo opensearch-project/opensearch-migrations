@@ -21,6 +21,7 @@ from testAutomation.resource_tag_verifier import (
     TAGGABLE_CREATE_EVENTS,
     UNTAGGABLE_CREATE_EVENTS,
     NOT_RESOURCE_CREATES,
+    DENY_ENFORCED_ACTIONS,
     _AUTH_FAILURE_CODES,
     _request_tags,
     format_report,
@@ -367,3 +368,40 @@ class TestLoadBalancerDiscovery:
 
     def test_no_match_is_not_an_error(self):
         assert find_cluster_load_balancers(self.FakeElbv2([], {}), "c") == []
+
+
+class TestEnforcementReport:
+    """The report must not claim enforcement the IAM policy does not actually provide."""
+
+    def test_deny_list_matches_the_bootstrap_policy(self):
+        """DENY_ENFORCED_ACTIONS must equal what enforce_tags_on_cluster_role() denies.
+
+        If they drift, the report tells the reader an untagged create would have been refused when
+        nothing would have stopped it -- the worst possible failure for this tool, because it
+        overstates the strength of a passing run.
+        """
+        import re
+        from pathlib import Path
+        repo = Path(__file__).parent.parent.parent.parent
+        script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+        body = script[script.index("enforce_tags_on_cluster_role() {"):]
+        body = body[:body.index('\n}\n')]
+        in_policy = set(re.findall(r'"((?:ec2|elasticloadbalancing):Create[A-Za-z]+|ec2:RunInstances)"',
+                                   body))
+        assert in_policy == set(DENY_ENFORCED_ACTIONS), (
+            f"only in policy: {in_policy - set(DENY_ENFORCED_ACTIONS)}; "
+            f"only in report: {set(DENY_ENFORCED_ACTIONS) - in_policy}")
+
+    def test_report_separates_enforced_from_merely_observed(self):
+        r = VerificationResult(checked=3)
+        r.observed_tagged["RunInstances"] = 4       # enforced
+        r.observed_tagged["CreateSecurityGroup"] = 1  # observed only
+        out = format_report(r, {"A": "1"})
+        assert "Enforced by IAM" in out
+        assert "ec2:RunInstances  (4 create(s) observed)" in out
+        assert "NOT enforced" in out
+        assert "CreateSecurityGroup  (1)" in out
+
+    def test_enforced_actions_with_nothing_seen_are_marked(self):
+        out = format_report(VerificationResult(checked=1), {"A": "1"})
+        assert "(none seen)" in out
