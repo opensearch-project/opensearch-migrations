@@ -2,6 +2,8 @@ package org.opensearch.migrations.trafficcapture.netty;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Queue;
 
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -147,9 +149,28 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
      */
     static class SimpleHttpResponseDecoder extends HttpResponseDecoder {
         private final PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve;
+        // Plain HttpResponseDecoder has no way to know which HTTP method produced a given
+        // response, so on its own it can't tell that a HEAD response carrying Content-Length
+        // has no body — it would wait for body bytes that never arrive and then misparse the
+        // start of the next response as leftover body, desyncing every response after it on
+        // the connection. Netty's own HttpClientCodec solves this exact problem the same way:
+        // one method queued per request as it's read, one polled per response as its headers
+        // finish parsing (requests and responses are handled one at a time on this connection,
+        // never pipelined, so a simple FIFO queue is always in the right order).
+        private final Queue<HttpMethod> requestMethodQueue = new ArrayDeque<>();
 
         public SimpleHttpResponseDecoder(@NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve) {
             this.headersToPreserve = headersToPreserve;
+        }
+
+        void requestMethodParsed(HttpMethod method) {
+            requestMethodQueue.add(method);
+        }
+
+        @Override
+        protected boolean isContentAlwaysEmpty(HttpMessage msg) {
+            var requestMethod = requestMethodQueue.poll();
+            return HttpMethod.HEAD.equals(requestMethod) || super.isContentAlwaysEmpty(msg);
         }
 
         @Override
@@ -228,6 +249,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     private SimpleDecodedHttpResponseHandler getHandlerThatHoldsParsedHttpResponse() {
         return (SimpleDecodedHttpResponseHandler) httpResponseDecoderChannel.pipeline().last();
+    }
+
+    private SimpleHttpResponseDecoder getResponseDecoder() {
+        return (SimpleHttpResponseDecoder) httpResponseDecoderChannel.pipeline().first();
     }
 
     @Override
@@ -333,6 +358,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                         .log();
                 }
                 trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
+                // One entry per request that will actually be fed into httpResponseDecoderChannel
+                // (write() below only writes response bytes into it when shouldCapture is true for
+                // this same request/response cycle) — see SimpleHttpResponseDecoder's queue comment.
+                getResponseDecoder().requestMethodParsed(httpRequest.method());
             }
             channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         } else {
@@ -361,9 +390,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             // still-open keep-alive connection sits unfinalized until one of those eventually
             // fires. This mirrors channelRead()'s embedded-decoder pattern above so a response
             // gets the same deterministic, immediate end-of-message signal a request already
-            // does. NOTE: plain HttpResponseDecoder doesn't know the originating request's
-            // method, so a response to a HEAD request (no body despite Content-Length) isn't
-            // detected as complete here — same gap as before for that one case.
+            // does. SimpleHttpResponseDecoder's request-method queue (fed above, when the
+            // request finished parsing) is what lets it correctly treat a HEAD response as
+            // bodyless despite a declared Content-Length, same as HttpClientCodec does.
             var responseParsingHandler = getHandlerThatHoldsParsedHttpResponse();
             httpResponseDecoderChannel.writeInbound(bb.retainedDuplicate()); // consumed/released by this method
             if (responseParsingHandler.haveParsedFullResponse) {

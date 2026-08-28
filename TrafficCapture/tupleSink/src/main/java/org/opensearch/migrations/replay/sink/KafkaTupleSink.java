@@ -4,7 +4,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +33,9 @@ public class KafkaTupleSink implements TupleSink {
     private final Producer<String, byte[]> producer;
     private final String topic;
     private final ExecutorService executor;
+    // Set on close() so accept() rejects late writes synchronously (rather than racing the executor
+    // shutdown) — mirrors S3TupleSink's accept-after-close guard.
+    private final AtomicBoolean closeRequested = new AtomicBoolean();
 
     public KafkaTupleSink(Producer<String, byte[]> producer, String topic) {
         this.producer = producer;
@@ -44,28 +49,38 @@ public class KafkaTupleSink implements TupleSink {
 
     @Override
     public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
-        executor.execute(() -> {
-            final byte[] json;
-            try {
-                json = mapper.writeValueAsBytes(tupleMap);
-            } catch (Exception e) {
-                future.completeExceptionally(e);
-                return;
-            }
-            var key = (String) tupleMap.get("connectionId");
-            try {
-                producer.send(new ProducerRecord<>(topic, key, json), (metadata, exception) -> {
-                    if (exception != null) {
-                        log.atWarn().setCause(exception).setMessage("Failed to send tuple to Kafka topic {}").addArgument(topic).log();
-                        future.completeExceptionally(exception);
-                    } else {
-                        future.complete(null);
-                    }
-                });
-            } catch (Exception e) {
-                future.completeExceptionally(e);
-            }
-        });
+        if (closeRequested.get()) {
+            future.completeExceptionally(new IllegalStateException("KafkaTupleSink is closed"));
+            return;
+        }
+        try {
+            executor.execute(() -> {
+                final byte[] json;
+                try {
+                    json = mapper.writeValueAsBytes(tupleMap);
+                } catch (Exception e) {
+                    future.completeExceptionally(e);
+                    return;
+                }
+                var key = (String) tupleMap.get("connectionId");
+                try {
+                    producer.send(new ProducerRecord<>(topic, key, json), (metadata, exception) -> {
+                        if (exception != null) {
+                            log.atWarn().setCause(exception).setMessage("Failed to send tuple to Kafka topic {}").addArgument(topic).log();
+                            future.completeExceptionally(exception);
+                        } else {
+                            future.complete(null);
+                        }
+                    });
+                } catch (Exception e) {
+                    future.completeExceptionally(e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // Lost the race with close() between the check above and this call — fail gracefully
+            // rather than letting the exception propagate to the caller.
+            future.completeExceptionally(new IllegalStateException("KafkaTupleSink is closed", e));
+        }
     }
 
     @Override
@@ -76,6 +91,7 @@ public class KafkaTupleSink implements TupleSink {
     @Override
     public void close() {
         // Flush only — caller owns the producer and closes it after all sinks are done.
+        closeRequested.set(true);
         executor.shutdown();
         try {
             executor.awaitTermination(30, TimeUnit.SECONDS);
