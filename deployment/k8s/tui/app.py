@@ -188,7 +188,7 @@ class JaccardApp(App):
 
     def _bootstrap_and_stream(self) -> None:
         reader = KafkaTupleReader(self._namespace, self._topic,
-                                   auto_create_topic=self._auto_create_topic)
+                                  auto_create_topic=self._auto_create_topic)
         try:
             reader.ensure_ready()
         except KafkaReaderError as e:
@@ -306,7 +306,7 @@ class JaccardApp(App):
             text.append("avg ")
             text.append(f"{avg_j:.3f}", style=f"bold {_score_color(avg_j)}")
             text.append(f"   min {min(window):.3f}   max {max(window):.3f}"
-                         f"   ({len(window)} sub-query scores, {self._status['total']} requests seen)")
+                        f"   ({len(window)} sub-query scores, {self._status['total']} requests seen)")
         else:
             text.append(f"0 tuples seen yet — waiting for live traffic on '{self._topic}'")
             if not self._status["running"]:
@@ -560,7 +560,7 @@ class JaccardApp(App):
         text = Text(f"{s['method']} {s['uri']}\n", style="bold")
         n = len(subqueries)
         text.append(f"{n} row{'s' if n != 1 else ''} "
-                     f"— select one below for detail\n\n", style="dim")
+                    f"— select one below for detail\n\n", style="dim")
         for sq in subqueries:
             j, _ = self._effective_score(sq)
             j_text = "   -   " if j is None else f"{j:>7.3f}"
