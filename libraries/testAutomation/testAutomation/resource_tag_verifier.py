@@ -258,55 +258,71 @@ def verify_compute_and_storage(result: VerificationResult, expected: Dict[str, s
     # up by the instance's aws:ec2launchtemplate:id tag fails with InvalidLaunchTemplateId.NotFound.
 
 
-def verify_load_balancers(result: VerificationResult, expected: Dict[str, str],
-                          core_v1, region: str) -> None:
-    import boto3
-    hostnames = collect_load_balancer_hostnames(core_v1)
-    if not hostnames:
-        # Not a failure on its own: only the CDC tests create a Service of type LoadBalancer. But
-        # record it, so a run that was supposed to exercise load balancers cannot quietly skip them.
-        result.unreadable.append("no LoadBalancer Services found; load balancer tags unverified")
-        logger.warning("No LoadBalancer Services with a provisioned hostname were found")
-        return
+def find_cluster_load_balancers(elbv2, cluster_name: str) -> List[dict]:
+    """Load balancers belonging to this cluster, found without consulting the tags under test.
 
-    elbv2 = boto3.client("elbv2", region_name=region)
-    ec2 = boto3.client("ec2", region_name=region)
-    # Map DNS name -> ARN by listing the account's load balancers. The DNS name comes from the
-    # Service status, so the match is driven by the cluster, not by tags.
-    by_dns = {}
+    Deliberately NOT via Service.status.loadBalancer: the capture proxy Service has ownerReferences to
+    a CaptureProxy CR, and the integration test's reset deletes those CRs, so by the time verification
+    runs the Service -- and any load balancer it owned -- is already garbage-collected. That made the
+    load balancer check silently vacuous ("no LoadBalancer Services found").
+
+    eks:eks-cluster-name is injected by EKS itself, not by us, so filtering on it is no more circular
+    than using a node's providerID.
+    """
+    matches, arns, by_arn = [], [], {}
     for page in elbv2.get_paginator("describe_load_balancers").paginate():
         for lb in page["LoadBalancers"]:
-            by_dns[lb["DNSName"].lower()] = lb
+            arns.append(lb["LoadBalancerArn"])
+            by_arn[lb["LoadBalancerArn"]] = lb
+    # describe_tags takes at most 20 ARNs per call.
+    for i in range(0, len(arns), 20):
+        for desc in elbv2.describe_tags(ResourceArns=arns[i:i + 20])["TagDescriptions"]:
+            tags = _tag_list_to_dict(desc.get("Tags"))
+            if tags.get("eks:eks-cluster-name") == cluster_name:
+                matches.append((by_arn[desc["ResourceArn"]], tags))
+    return matches
 
-    for hostname in hostnames:
-        lb = by_dns.get(hostname.lower())
-        if lb is None:
-            result.unreadable.append(f"load balancer for {hostname} not found via elbv2")
-            logger.warning("No elbv2 load balancer matches Service hostname %s", hostname)
-            continue
+
+def verify_load_balancers(result: VerificationResult, expected: Dict[str, str], region: str,
+                          cluster_name: str) -> None:
+    import boto3
+    elbv2 = boto3.client("elbv2", region_name=region)
+    ec2 = boto3.client("ec2", region_name=region)
+
+    matches = find_cluster_load_balancers(elbv2, cluster_name)
+    if not matches:
+        # Only the CDC tests create a Service of type LoadBalancer, so this is not a failure on its
+        # own -- but record it, so a run that was supposed to cover load balancers cannot pass while
+        # silently checking none.
+        result.unreadable.append(
+            f"no load balancers tagged eks:eks-cluster-name={cluster_name} were found; load "
+            "balancer tags unverified")
+        logger.warning("No load balancers found for cluster %s", cluster_name)
+        return
+
+    for lb, tags in matches:
         lb_arn = lb["LoadBalancerArn"]
-        _check(result, "load balancer", lb_arn,
-               _tag_list_to_dict(elbv2.describe_tags(ResourceArns=[lb_arn])
-                                 ["TagDescriptions"][0].get("Tags")),
-               expected, "Service status hostname")
+        _check(result, "load balancer", lb_arn, tags, expected, "elbv2 by eks:eks-cluster-name")
 
-        target_groups = elbv2.describe_target_groups(LoadBalancerArn=lb_arn)["TargetGroups"]
-        listeners = elbv2.describe_listeners(LoadBalancerArn=lb_arn)["Listeners"]
-        child_arns = [tg["TargetGroupArn"] for tg in target_groups]
-        child_arns += [ln["ListenerArn"] for ln in listeners]
-        # describe_tags takes at most 20 ARNs per call.
+        child_arns = [tg["TargetGroupArn"]
+                      for tg in elbv2.describe_target_groups(LoadBalancerArn=lb_arn)["TargetGroups"]]
+        child_arns += [ln["ListenerArn"]
+                       for ln in elbv2.describe_listeners(LoadBalancerArn=lb_arn)["Listeners"]]
         for i in range(0, len(child_arns), 20):
             for desc in elbv2.describe_tags(ResourceArns=child_arns[i:i + 20])["TagDescriptions"]:
                 kind = "target group" if ":targetgroup/" in desc["ResourceArn"] else "listener"
                 _check(result, kind, desc["ResourceArn"], _tag_list_to_dict(desc.get("Tags")),
-                       expected, "child of the Service's load balancer")
+                       expected, "child of the cluster's load balancer")
 
+        # Only the load balancer's own (frontend) security groups. The controller also creates a
+        # shared "k8s-traffic-*" group on the nodes, which per-Service tags do not reach; it is not
+        # attached to the load balancer, so it correctly does not appear here.
         sg_ids = lb.get("SecurityGroups") or []
         if sg_ids:
             for sg in ec2.describe_security_groups(GroupIds=sg_ids)["SecurityGroups"]:
                 _check(result, "LB security group", sg["GroupId"],
                        _tag_list_to_dict(sg.get("Tags")), expected,
-                       "security group on the Service's load balancer")
+                       "security group on the cluster's load balancer")
 
 
 def _run_oracle(result: "VerificationResult", label: str, fn, *args) -> None:
@@ -539,7 +555,7 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
                          kube_context: Optional[str] = None,
                          stack_name: Optional[str] = None,
                          cluster_name: Optional[str] = None,
-                         cloudtrail_wait_seconds: int = 0) -> VerificationResult:
+                         cloudtrail_wait_seconds: int = 60) -> VerificationResult:
     """Run every oracle. Returns a result; does not raise on findings."""
     import boto3
     result = VerificationResult()
@@ -555,8 +571,12 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
     core_v1, _ = _k8s_clients(kube_context)
     _run_oracle(result, "compute and storage",
                 verify_compute_and_storage, result, expected, core_v1, region)
-    _run_oracle(result, "load balancers",
-                verify_load_balancers, result, expected, core_v1, region)
+    if cluster_name:
+        _run_oracle(result, "load balancers",
+                    verify_load_balancers, result, expected, region, cluster_name)
+    else:
+        result.unreadable.append(
+            "load balancer check skipped (needs --cluster-name)")
 
     if cluster_name and stack_created_at:
         if cloudtrail_wait_seconds > 0:
@@ -637,9 +657,12 @@ def parse_args(argv=None) -> argparse.Namespace:
                         help="EKS cluster name. Enables the CloudTrail sweep, which fails on ANY "
                              "resource-creating call by the cluster role whose request omitted the "
                              "tags -- including resource types the other checks do not enumerate.")
-    parser.add_argument("--cloudtrail-wait-seconds", type=int, default=300,
-                        help="Wait before sweeping CloudTrail. Management events lag by 5-15 "
-                             "minutes, so without this the newest creates look clean. Default 300.")
+    parser.add_argument("--cloudtrail-wait-seconds", type=int, default=60,
+                        help="Wait before sweeping CloudTrail. Management events lag 5-15 minutes, "
+                             "so the newest creates may be missing; the report says so when it finds "
+                             "none. Kept short because the sweep's window starts at stack creation, "
+                             "so everything but the last few minutes is long delivered, and because "
+                             "load balancers are now found via elbv2 rather than CloudTrail.")
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args(argv)
 

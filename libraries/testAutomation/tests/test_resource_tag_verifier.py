@@ -16,7 +16,7 @@ from testAutomation.resource_tag_verifier import (
     _run_oracle,
     _tag_list_to_dict,
     collect_instance_ids,
-    collect_load_balancer_hostnames,
+    find_cluster_load_balancers,
     collect_pv_volume_ids,
     TAGGABLE_CREATE_EVENTS,
     UNTAGGABLE_CREATE_EVENTS,
@@ -113,21 +113,6 @@ class TestKubernetesDerivedEnumeration:
             SimpleNamespace(spec=SimpleNamespace(csi=None)),
         ]))
         assert collect_pv_volume_ids(core) == ["vol-0abc"]
-
-    def test_collects_only_loadbalancer_services_with_a_hostname(self):
-        def svc(name, type_, ingress):
-            return SimpleNamespace(
-                spec=SimpleNamespace(type=type_),
-                status=SimpleNamespace(load_balancer=SimpleNamespace(ingress=ingress)),
-                metadata=SimpleNamespace(name=name, namespace="ma"),
-            )
-        core = SimpleNamespace(list_service_for_all_namespaces=lambda: SimpleNamespace(items=[
-            svc("proxy", "LoadBalancer", [SimpleNamespace(hostname="a.elb.amazonaws.com", ip=None)]),
-            svc("clusterip", "ClusterIP", None),
-            # Provisioning not finished yet: no hostname to resolve.
-            svc("pending", "LoadBalancer", []),
-        ]))
-        assert collect_load_balancer_hostnames(core) == ["a.elb.amazonaws.com"]
 
 
 class TestReport:
@@ -338,3 +323,47 @@ class TestOracleResilience:
         r = VerificationResult()
         _run_oracle(r, "x", lambda: None)
         assert r.unreadable == []
+
+
+class TestLoadBalancerDiscovery:
+    """Found via the AWS-set eks:eks-cluster-name tag, not via the Service.
+
+    The capture proxy Service is owned by a CaptureProxy CR that the integration test's reset
+    deletes, so by verification time the Service and its load balancer are garbage-collected. The
+    Service-based lookup therefore reported "no LoadBalancer Services found" on every run and the
+    check was silently vacuous.
+    """
+
+    class FakeElbv2:
+        def __init__(self, lbs, tags):
+            self._lbs, self._tags = lbs, tags
+
+        def get_paginator(self, _name):
+            outer = self
+
+            class P:
+                def paginate(self):
+                    return [{"LoadBalancers": outer._lbs}]
+            return P()
+
+        def describe_tags(self, ResourceArns):
+            return {"TagDescriptions": [{"ResourceArn": a,
+                                         "Tags": [{"Key": k, "Value": v}
+                                                  for k, v in self._tags.get(a, {}).items()]}
+                                        for a in ResourceArns]}
+
+    def test_selects_only_this_clusters_load_balancers(self):
+        lbs = [{"LoadBalancerArn": "arn:ours"}, {"LoadBalancerArn": "arn:someone-elses"}]
+        tags = {"arn:ours": {"eks:eks-cluster-name": "my-cluster", "MATestOwner": "x"},
+                "arn:someone-elses": {"eks:eks-cluster-name": "other-cluster"}}
+        found = find_cluster_load_balancers(self.FakeElbv2(lbs, tags), "my-cluster")
+        assert [lb["LoadBalancerArn"] for lb, _ in found] == ["arn:ours"]
+
+    def test_returns_the_tags_so_they_are_not_re_fetched(self):
+        lbs = [{"LoadBalancerArn": "arn:ours"}]
+        tags = {"arn:ours": {"eks:eks-cluster-name": "c", "MATestOwner": "migrations-ci"}}
+        (_, got), = find_cluster_load_balancers(self.FakeElbv2(lbs, tags), "c")
+        assert got["MATestOwner"] == "migrations-ci"
+
+    def test_no_match_is_not_an_error(self):
+        assert find_cluster_load_balancers(self.FakeElbv2([], {}), "c") == []
