@@ -30,16 +30,20 @@ spec:
       # ClusterIP: no cloud load balancer in kind — use port-forward to reach proxy
       - name: capture-proxy-service-type
         value: "ClusterIP"
-      # speedup-factor=1: replay captured traffic at real-time pace
+      # speedup-factor=100: burns through gaps between captured requests so the live
+      # dashboard doesn't stall between searches — see Known Gotchas in README.md.
       - name: speedup-factor
-        value: "1"
+        value: "100"
       - name: observed-packet-timeout
-        value: "30"
+        value: "5"
       # pre-snapshot-proxy-submit=false: start proxy after snapshot migration
       - name: pre-snapshot-proxy-submit
         value: "false"
+      # quiescentPeriodMs/tupleMaxBufferSeconds tune the dashboard's replay latency —
+      # see Step 4 in README.md. tupleKafkaTopic isn't wired through the workflow yet,
+      # so it still needs a post-hoc kubectl patch.
       - name: replayer-config-overrides
-        value: "{}"
+        value: '{"quiescentPeriodMs":1000,"tupleMaxBufferSeconds":10}'
       - name: otel-trace-collector-endpoint
         value: ""
       - name: client-auth-pem-base64
