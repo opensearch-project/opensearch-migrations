@@ -1171,10 +1171,15 @@ configure_tagged_auto_mode_compute() {
     echo "  Disabling the built-in NodePools (currently: ${builtin_pools//,/, })."
     echo "  Their nodes use the untaggable 'default' NodeClass, so any pods running on them will be"
     echo "  drained and rescheduled onto ${AUTO_MODE_BOOTSTRAP_NODE_POOL}."
+    # nodeRoleArn is deliberately omitted: EKS rejects it alongside an empty nodePools list with
+    # "When Compute Config nodeRoleArn is not null or empty, nodePool value(s) must be provided."
+    # A cluster with no built-in NodePools is expected to carry no compute-level node role -- the
+    # role lives on the custom NodeClass applied above instead.
+    # https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_cluster_without_built_in_node_pools
     aws eks update-cluster-config \
       --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
       --region "${AWS_CFN_REGION}" \
-      --compute-config "{\"enabled\": true, \"nodePools\": [], \"nodeRoleArn\": \"${node_role_arn}\"}" \
+      --compute-config '{"enabled": true, "nodePools": []}' \
       --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
       --storage-config '{"blockStorage":{"enabled": true}}' >/dev/null
     echo "  Waiting for the cluster update to complete..."
@@ -1207,6 +1212,15 @@ if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]
   echo "Re-enabling it temporarily to allow pod scheduling during installation..."
   NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
     --query 'cluster.computeConfig.nodeRoleArn' --output text)
+  # A cluster previously bootstrapped with --tags has no compute-level node role, because EKS
+  # requires nodeRoleArn to be empty when nodePools is. Re-enabling a built-in pool needs one back,
+  # and EKS reports that as a confusing parameter error, so explain the situation instead.
+  if [[ -z "$NODE_ROLE_ARN" || "$NODE_ROLE_ARN" == "None" ]]; then
+    echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no computeConfig.nodeRoleArn, so the" >&2
+    echo "  built-in NodePools cannot be re-enabled. This is what --tags leaves behind: its nodes" >&2
+    echo "  come from a custom NodeClass instead. Re-run with --tags to keep using that path." >&2
+    exit 1
+  fi
   aws eks update-cluster-config \
     --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --region "${AWS_CFN_REGION}" \
