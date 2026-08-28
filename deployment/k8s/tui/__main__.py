@@ -22,6 +22,18 @@ def main() -> None:
                         help="UI repaint interval in seconds (default: 2.0)")
     parser.add_argument("--no-auto-create-topic", action="store_true",
                         help="Fail instead of creating the topic if it does not exist")
+    parser.add_argument("--source", choices=["kafka", "s3"], default="kafka",
+                        help="Where to read tuples from (default: kafka). 's3' polls the "
+                        "same tuples written to S3 instead, mirroring 06-live-jaccard.sh — "
+                        "real, rotation-interval-scale lag versus Kafka's near-real-time feed.")
+    parser.add_argument("--s3-bucket", default="migrations-default-123456789012-dev-us-east-2",
+                        help="S3 bucket tuples are written to (only used with --source s3)")
+    parser.add_argument("--s3-prefix", default="tuples/",
+                        help="S3 key prefix tuples are written under (only used with "
+                        "--source s3, default: tuples/)")
+    parser.add_argument("--poll-interval", type=float, default=10.0,
+                        help="Seconds between S3 polls (only used with --source s3, "
+                        "default: 10.0)")
     args = parser.parse_args()
 
     app = JaccardApp(
@@ -30,6 +42,10 @@ def main() -> None:
         window=args.window,
         refresh_interval=args.interval,
         auto_create_topic=not args.no_auto_create_topic,
+        source=args.source,
+        s3_bucket=args.s3_bucket,
+        s3_prefix=args.s3_prefix,
+        poll_interval=args.poll_interval,
     )
     app.run()
 

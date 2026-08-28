@@ -1,11 +1,14 @@
 """Text-UI replacement for 07-live-jaccard-kafka.sh — a live table of replayed tuples
-scored for source/target agreement, read from the tuple-output Kafka topic.
+scored for source/target agreement, read from the tuple-output Kafka topic by default, or
+from S3 (--source s3, mirroring 06-live-jaccard.sh) as an alternative. Both sinks write the
+same tuple JSON schema, so scoring.py is source-agnostic — only which reader class
+_bootstrap_and_stream() constructs differs.
 
 Follows the structure of the loadtest TUI (opensearch-project/opensearch-migrations#3263):
 a background thread owns the long-lived I/O (there, k6 run polling; here, the Kafka
-consumer subprocess) and only ever touches a lock-guarded buffer. A timer on the main
-thread snapshots that buffer and repaints — the same split that keeps a slow or stalled
-consumer from ever blocking the UI.
+consumer subprocess or S3 poll loop) and only ever touches a lock-guarded buffer. A timer
+on the main thread snapshots that buffer and repaints — the same split that keeps a slow or
+stalled reader from ever blocking the UI.
 
 Data model: every replayed request is a PARENT row (its identity — method, URI, status
 codes) plus one or more CHILD rows — one per independently-comparable item. A plain search
@@ -30,6 +33,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from .clipboard import copy_via_system_tool
 from .kafka_reader import KafkaReaderError, KafkaTupleReader
+from .s3_reader import S3ReaderError, S3TupleReader
 from .scoring import score_tuple
 
 logger = logging.getLogger(__name__)
@@ -95,21 +99,41 @@ class JaccardApp(App):
 
     def __init__(self, namespace: str, topic: str = "tuple-output", *,
                  window: int = 15, refresh_interval: float = 2.0,
-                 auto_create_topic: bool = True):
+                 auto_create_topic: bool = True,
+                 source: str = "kafka",
+                 s3_bucket: str = "migrations-default-123456789012-dev-us-east-2",
+                 s3_prefix: str = "tuples/",
+                 poll_interval: float = 10.0):
         super().__init__()
         self.title = f"[{namespace}] live replay quality"
-        self.sub_title = f"topic: {topic}"
+        self.sub_title = (
+            f"topic: {topic}" if source == "kafka" else f"s3://{s3_bucket}/{s3_prefix}"
+        )
+        # Shared by the "confirming..." and "waiting for..." status messages so neither one
+        # says "topic" while actually polling S3, or vice versa.
+        self._source_description = (
+            f"topic '{topic}'" if source == "kafka" else f"'s3://{s3_bucket}/{s3_prefix}'"
+        )
         self._namespace = namespace
         self._topic = topic
         self._window = window
         self._refresh_interval = refresh_interval
         self._auto_create_topic = auto_create_topic
+        # "kafka" (default) streams tuple-output near-real-time; "s3" polls the same tuples
+        # written to S3 instead (mirrors 06-live-jaccard.sh) — real, rotation-interval-scale
+        # lag, but useful when the Kafka topic isn't set up or reachable from this machine.
+        self._source = source
+        self._s3_bucket = s3_bucket
+        self._s3_prefix = s3_prefix
+        self._poll_interval = poll_interval
         # Holds every scored tuple seen this "generation" (since last reset), capped so a
         # long-running demo can't grow this unboundedly; the window is a suffix of it.
         self._buf: Deque[Dict] = collections.deque(maxlen=window * 20)
         self._buf_lock = threading.Lock()
         self._status = {"total": 0, "running": True, "connected": False, "error": None}
-        self._reader: Optional[KafkaTupleReader] = None
+        # KafkaTupleReader or S3TupleReader depending on self._source — both duck-type the
+        # same ensure_ready()/stream()/stop() contract.
+        self._reader: Optional[object] = None
         self._seq = itertools.count(1)
         # Row identity, independent of the table rebuild every tick — "<seq>" for a parent
         # row, "<seq>:<subquery index>" for a child. Neither changes once assigned, so this
@@ -171,7 +195,7 @@ class JaccardApp(App):
     def on_mount(self) -> None:
         self.table.add_columns(*COLUMNS)
         self._update_detail()
-        self.run_worker(self._bootstrap_and_stream, thread=True, name="kafka_reader")
+        self.run_worker(self._bootstrap_and_stream, thread=True, name="tuple_reader")
         self.set_interval(self._refresh_interval, self._repaint)
 
     def on_unmount(self) -> None:
@@ -183,15 +207,20 @@ class JaccardApp(App):
     def table(self) -> DataTable:
         return self.query_one(f"#{TABLE_ANCHOR}", DataTable)
 
-    # --- Kafka bootstrap + streaming (background thread — no UI calls except via
+    # --- Reader bootstrap + streaming (background thread — no UI calls except via
     #     call_from_thread, and only for one-shot setup failures) ---
 
     def _bootstrap_and_stream(self) -> None:
-        reader = KafkaTupleReader(self._namespace, self._topic,
-                                  auto_create_topic=self._auto_create_topic)
+        if self._source == "s3":
+            reader = S3TupleReader(
+                self._namespace, bucket=self._s3_bucket, prefix=self._s3_prefix,
+                poll_interval=self._poll_interval)
+        else:
+            reader = KafkaTupleReader(self._namespace, self._topic,
+                                      auto_create_topic=self._auto_create_topic)
         try:
             reader.ensure_ready()
-        except KafkaReaderError as e:
+        except (KafkaReaderError, S3ReaderError) as e:
             if not self.is_exiting:
                 self.call_from_thread(self.notify, str(e), severity="error", timeout=None)
             self._status["error"] = str(e)
@@ -289,7 +318,7 @@ class JaccardApp(App):
             summary.update(Text(f"Setup failed: {self._status['error']}", style="bold red"))
             return
         if not self._status["connected"]:
-            summary.update(f"Confirming topic '{self._topic}' exists and is reachable…")
+            summary.update(f"Confirming {self._source_description} exists and is reachable…")
             return
 
         all_js = [j for s in buf for sq in s.get("subqueries", [])
@@ -308,7 +337,7 @@ class JaccardApp(App):
             text.append(f"   min {min(window):.3f}   max {max(window):.3f}"
                         f"   ({len(window)} sub-query scores, {self._status['total']} requests seen)")
         else:
-            text.append(f"0 tuples seen yet — waiting for live traffic on '{self._topic}'")
+            text.append(f"0 tuples seen yet — waiting for live traffic on {self._source_description}")
             if not self._status["running"]:
                 text.append("  (consumer disconnected)", style="dim")
         summary.update(text)

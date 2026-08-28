@@ -188,6 +188,16 @@ pip install -r tui/requirements.txt
 python3 -m tui --namespace ma
 ```
 
+Want it in a browser instead of a terminal — e.g. to share the view with someone without
+handing them a kubeconfig? Same TUI, served over HTTP via `textual-serve`:
+```bash
+bash 08-live-replay-quality.sh
+# open http://localhost:8321
+```
+The `c` (copy request) keybinding copies to the clipboard of whatever machine runs this
+script, not the browser viewer's — fine if that's the same machine, a gotcha if someone
+else opens the URL from their own.
+
 Older, simpler alternatives, kept for when a full TUI isn't wanted:
 - `bash 06-live-jaccard.sh` — polls S3 tuples (~10s lag)
 - `bash 07-live-jaccard-kafka.sh` — reads Kafka directly (near real-time, single blended score
