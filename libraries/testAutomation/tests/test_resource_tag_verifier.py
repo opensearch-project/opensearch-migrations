@@ -18,6 +18,7 @@ from testAutomation.resource_tag_verifier import (
     collect_load_balancer_hostnames,
     collect_pv_volume_ids,
     TAGGABLE_CREATE_EVENTS,
+    _AUTH_FAILURE_CODES,
     _request_tags,
     format_report,
     is_create_event,
@@ -224,3 +225,30 @@ class TestDeniedCreates:
     def test_clean_run_still_passes(self):
         assert VerificationResult(checked=3).ok
         assert "PASSED" in format_report(VerificationResult(checked=3), {"A": "1"})
+
+
+class TestDryRunIsNotADenial:
+    """Auto Mode probes its permissions with DryRun constantly; those must not read as refusals.
+
+    Observed in the migrations test account: 44 of 50 sampled RunInstances CloudTrail events were
+    Client.DryRunOperation. Counting those as denials would fail every single run.
+    """
+
+    def test_dryrun_is_not_an_auth_failure(self):
+        assert not any(m in "Client.DryRunOperation" for m in _AUTH_FAILURE_CODES)
+
+    @pytest.mark.parametrize("code", [
+        "AccessDenied",
+        "Client.UnauthorizedOperation",   # what EC2 returns for an explicit Deny
+        "UnauthorizedOperation",
+        "Client.AccessDenied",
+    ])
+    def test_real_refusals_are_recognized(self, code):
+        assert any(m in code for m in _AUTH_FAILURE_CODES)
+
+    @pytest.mark.parametrize("code", [
+        "Client.DryRunOperation", "Client.InvalidParameterValue",
+        "Client.InsufficientInstanceCapacity", "RequestLimitExceeded",
+    ])
+    def test_non_authorization_errors_are_not_refusals(self, code):
+        assert not any(m in code for m in _AUTH_FAILURE_CODES)

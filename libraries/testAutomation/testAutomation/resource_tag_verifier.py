@@ -353,6 +353,11 @@ TAGGABLE_CREATE_EVENTS = frozenset({
 # customer whose SCP requires tags on create has to know about.
 _CREATE_EVENT_PREFIXES = ("Create", "Run", "Allocate", "Provision", "Request", "Register")
 
+# CloudTrail error codes that mean "IAM refused this call". Deliberately narrow: an explicit Deny
+# reports Client.UnauthorizedOperation for EC2 and AccessDenied for most other services, while a
+# DryRun probe also carries an errorCode and must not be mistaken for a refusal.
+_AUTH_FAILURE_CODES = ("AccessDenied", "UnauthorizedOperation", "Forbidden")
+
 
 def _request_tags(detail: dict) -> Dict[str, str]:
     """Pull tags out of a CloudTrail event's requestParameters.
@@ -434,14 +439,27 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
             name = detail.get("eventName", "")
             if not is_create_event(name):
                 continue
-            # A rejected call created nothing, so there is no resource whose tags could be checked --
-            # but a refusal is stronger evidence than a missing tag, because it names the action. It
-            # is also exactly what --enforce-tags-on-create produces when a create carries no tags.
-            if detail.get("errorCode"):
-                note = (f"{name} DENIED ({detail.get('errorCode')}) at {detail.get('eventTime')}: "
-                        f"{(detail.get('errorMessage') or '')[:300]}")
-                result.denied.append(note)
-                logger.error("%s", note)
+            error_code = detail.get("errorCode") or ""
+            if error_code:
+                # A rejected call created nothing, so there is no resource whose tags to check -- but
+                # an AUTHORIZATION refusal is stronger evidence than a missing tag, because it names
+                # the action outright.
+                #
+                # Only authorization failures count. EKS Auto Mode probes its own permissions
+                # constantly with DryRun, and every probe lands in CloudTrail as
+                # Client.DryRunOperation "Request would have succeeded, but DryRun flag is set" --
+                # observed at 44 of 50 sampled RunInstances events. Treating those as denials would
+                # fail every run. Other error codes (InvalidParameterValue and friends) are real
+                # failures but say nothing about tags, so they are noted rather than failed on.
+                if any(marker in error_code for marker in _AUTH_FAILURE_CODES):
+                    note = (f"{name} DENIED ({error_code}) at {detail.get('eventTime')}: "
+                            f"{(detail.get('errorMessage') or '')[:400]}")
+                    result.denied.append(note)
+                    logger.error("%s", note)
+                elif "DryRun" not in error_code:
+                    result.unreadable.append(
+                        f"{name} failed with {error_code} (not an authorization failure, so not a "
+                        f"tagging verdict)")
                 continue
             matched += 1
             enforceable = name in TAGGABLE_CREATE_EVENTS

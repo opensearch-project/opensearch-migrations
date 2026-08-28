@@ -1018,12 +1018,25 @@ emit_tag_helm_values() {
   printf '%s' "$values_file"
 }
 
-# Deny the cluster role any resource-creating call that does not carry every --tags key.
+# Deny the cluster role from launching instances or provisioning volumes without every --tags key.
 #
-# The inverse of AutoModeTagPropagationPolicy: that policy *permits* user tags on these actions,
-# this one *requires* them. The action list is deliberately identical, because that list is exactly
-# the set AWS documents as taggable by Auto Mode -- so an untagged create here is always a gap in our
-# plumbing, never an action that had no way to carry tags.
+# The inverse of AutoModeTagPropagationPolicy: that policy *permits* user tags on these actions, this
+# one *requires* them.
+#
+# Resource is scoped, NOT "*", and that distinction is the whole ballgame. ec2:RunInstances authorizes
+# against every resource it touches -- instance, volume, network-interface, launch-template, subnet,
+# security group, AMI -- but only the first three receive the request's tags. With Resource "*" the
+# Null condition is therefore true for launch-template/subnet/etc and the deny fires on every launch,
+# even when the instance tags are perfectly correct. A broad Resource is harmless in an Allow and
+# fatal in a Deny. Observed as:
+#   not authorized to perform: ec2:RunInstances on resource: .../launch-template/lt-0f5992a0cef08107b
+#   with an explicit deny in an identity-based policy
+#
+# For the same reason CreateLaunchTemplate, CreateNetworkInterface, CreateSecurityGroup and the
+# elasticloadbalancing creates are deliberately NOT denied here: Auto Mode does not put the user tags
+# on those resources at create time, so requiring them would block the cluster rather than test it.
+# The CloudTrail sweep in resource_tag_verifier.py reports on them instead, which is the right tool
+# for actions we cannot influence.
 #
 # This reproduces a deployer SCP that requires tags on create: the failure surfaces at the moment of
 # the untagged create rather than being discovered afterwards. That also means it will stop the
@@ -1055,22 +1068,24 @@ enforce_tags_on_cluster_role() {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "DenyUntaggedAutoModeCreates",
+      "Sid": "DenyUntaggedInstanceLaunch",
       "Effect": "Deny",
-      "Action": [
-        "ec2:CreateFleet",
-        "ec2:RunInstances",
-        "ec2:CreateLaunchTemplate",
-        "ec2:CreateVolume",
-        "ec2:CreateSnapshot",
-        "ec2:CreateNetworkInterface",
-        "ec2:CreateSecurityGroup",
-        "elasticloadbalancing:CreateLoadBalancer",
-        "elasticloadbalancing:CreateTargetGroup",
-        "elasticloadbalancing:CreateListener",
-        "elasticloadbalancing:CreateRule"
+      "Action": [ "ec2:RunInstances", "ec2:CreateFleet" ],
+      "Resource": [
+        "arn:${AWS_PARTITION:-aws}:ec2:*:*:instance/*",
+        "arn:${AWS_PARTITION:-aws}:ec2:*:*:volume/*",
+        "arn:${AWS_PARTITION:-aws}:ec2:*:*:network-interface/*"
       ],
-      "Resource": "*",
+      "Condition": { "Null": { ${conditions} } }
+    },
+    {
+      "Sid": "DenyUntaggedStandaloneStorage",
+      "Effect": "Deny",
+      "Action": [ "ec2:CreateVolume", "ec2:CreateSnapshot" ],
+      "Resource": [
+        "arn:${AWS_PARTITION:-aws}:ec2:*:*:volume/*",
+        "arn:${AWS_PARTITION:-aws}:ec2:*:*:snapshot/*"
+      ],
       "Condition": { "Null": { ${conditions} } }
     }
   ]
