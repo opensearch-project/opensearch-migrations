@@ -14,6 +14,7 @@ from testAutomation.resource_tag_verifier import (
     VerificationResult,
     _check,
     _run_oracle,
+    _lb_absent_note,
     _tag_list_to_dict,
     collect_instance_ids,
     find_cluster_load_balancers,
@@ -405,3 +406,25 @@ class TestEnforcementReport:
     def test_enforced_actions_with_nothing_seen_are_marked(self):
         out = format_report(VerificationResult(checked=1), {"A": "1"})
         assert "(none seen)" in out
+
+
+class TestEphemeralLoadBalancerReporting:
+    """A load balancer that no longer exists is not the same as one that was never verified.
+
+    The capture proxy's load balancer is deleted with its CaptureProxy CR during the test's reset, so
+    by verification time there is usually nothing live to inspect. Build #476 reported both
+    "CreateLoadBalancer (1 create(s) observed)" and "load balancer tags unverified" -- contradictory,
+    and the second half understated what the run had established.
+    """
+
+    def test_cloudtrail_evidence_replaces_the_unverified_claim(self):
+        r = VerificationResult()
+        r.observed_tagged["CreateLoadBalancer"] = 1
+        note = _lb_absent_note(r, "my-cluster")
+        assert "unverified" not in note
+        assert "CloudTrail recorded 1 created WITH the expected tags" in note
+
+    def test_no_evidence_anywhere_still_says_unverified(self):
+        note = _lb_absent_note(VerificationResult(), "my-cluster")
+        assert "unverified" in note
+        assert "my-cluster" in note

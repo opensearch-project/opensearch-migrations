@@ -261,6 +261,16 @@ def verify_compute_and_storage(result: VerificationResult, expected: Dict[str, s
     # up by the instance's aws:ec2launchtemplate:id tag fails with InvalidLaunchTemplateId.NotFound.
 
 
+def _lb_absent_note(result: "VerificationResult", cluster_name: str) -> str:
+    """Explain an absent load balancer without overstating or understating the evidence."""
+    seen = result.observed_tagged.get("CreateLoadBalancer", 0)
+    if seen:
+        return (f"no load balancer still existed at verification time, but CloudTrail recorded "
+                f"{seen} created WITH the expected tags -- see the enforcement summary")
+    return (f"no load balancers tagged eks:eks-cluster-name={cluster_name} were found and "
+            "CloudTrail recorded none being created; load balancer tags unverified")
+
+
 def find_cluster_load_balancers(elbv2, cluster_name: str) -> List[dict]:
     """Load balancers belonging to this cluster, found without consulting the tags under test.
 
@@ -294,13 +304,15 @@ def verify_load_balancers(result: VerificationResult, expected: Dict[str, str], 
 
     matches = find_cluster_load_balancers(elbv2, cluster_name)
     if not matches:
-        # Only the CDC tests create a Service of type LoadBalancer, so this is not a failure on its
-        # own -- but record it, so a run that was supposed to cover load balancers cannot pass while
-        # silently checking none.
-        result.unreadable.append(
-            f"no load balancers tagged eks:eks-cluster-name={cluster_name} were found; load "
-            "balancer tags unverified")
-        logger.warning("No load balancers found for cluster %s", cluster_name)
+        # A load balancer here is short-lived: it belongs to the capture proxy Service, whose
+        # CaptureProxy CR the integration test deletes on reset, taking the load balancer with it. So
+        # by verification time there is usually nothing left to inspect -- which is why the earlier
+        # Service-based lookup was vacuous, and why looking it up by tag instead did not help.
+        #
+        # That is not the same as unverified. If the CloudTrail sweep (which runs first) saw the
+        # create carry the tags, the evidence exists; it is just historical rather than a live
+        # resource. Saying "unverified" in that case would understate what the run established.
+        result.unreadable.append(_lb_absent_note(result, cluster_name))
         return
 
     for lb, tags in matches:
@@ -597,13 +609,6 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
     core_v1, _ = _k8s_clients(kube_context)
     _run_oracle(result, "compute and storage",
                 verify_compute_and_storage, result, expected, core_v1, region)
-    if cluster_name:
-        _run_oracle(result, "load balancers",
-                    verify_load_balancers, result, expected, region, cluster_name)
-    else:
-        result.unreadable.append(
-            "load balancer check skipped (needs --cluster-name)")
-
     if cluster_name and stack_created_at:
         if cloudtrail_wait_seconds > 0:
             # CloudTrail delivers management events with a 5-15 minute lag, so the most recent
@@ -618,6 +623,14 @@ def verify_resource_tags(expected: Dict[str, str], region: str,
         result.unreadable.append(
             "CloudTrail sweep skipped (needs --cluster-name and --stack-name); creates whose "
             "resource type is not enumerated above were not checked")
+
+    # Deliberately after the sweep: load balancers are short-lived, and when none survive to be
+    # inspected the sweep's record of how they were created is the evidence that remains.
+    if cluster_name:
+        _run_oracle(result, "load balancers",
+                    verify_load_balancers, result, expected, region, cluster_name)
+    else:
+        result.unreadable.append("load balancer check skipped (needs --cluster-name)")
     return result
 
 
