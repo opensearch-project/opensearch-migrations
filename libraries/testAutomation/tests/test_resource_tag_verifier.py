@@ -5,6 +5,8 @@ multi-tag spec, deciding what counts as missing, and pulling resource IDs out of
 without ever consulting a tag -- are all testable offline.
 """
 
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -373,6 +375,65 @@ class TestLoadBalancerDiscovery:
 
     def test_no_match_is_not_an_error(self):
         assert find_cluster_load_balancers(self.FakeElbv2([], {}), "c") == []
+
+
+class TestBootstrapNodeRoleRecovery:
+    @staticmethod
+    def _resolver_function() -> str:
+        repo = Path(__file__).parent.parent.parent.parent
+        script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+        body = script[script.index("resolve_auto_mode_node_role_arn() {"):]
+        return body[:body.index("\n}\n") + 3]
+
+    def test_first_run_keeps_compute_config_role_without_aws_or_kubectl_lookup(self):
+        harness = """
+set -euo pipefail
+AUTO_MODE_TAGGED_NODE_CLASS=migrations-tagged
+KUBE_CONTEXT=ctx
+kubectl() { echo "unexpected kubectl call" >&2; return 99; }
+aws() { echo "unexpected aws call" >&2; return 99; }
+""" + self._resolver_function() + """
+resolve_auto_mode_node_role_arn arn:aws:iam::123456789012:role/AutoNodeRole
+"""
+        completed = subprocess.run(
+            ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
+        assert completed.returncode == 0
+        assert completed.stdout == "arn:aws:iam::123456789012:role/AutoNodeRole"
+        assert "unexpected" not in completed.stderr
+
+    def test_rerun_recovers_role_arn_from_existing_tagged_nodeclass(self):
+        harness = """
+set -euo pipefail
+AUTO_MODE_TAGGED_NODE_CLASS=migrations-tagged
+KUBE_CONTEXT=ctx
+kubectl() {
+  [[ "$1" == "--context=ctx" && "$2" == "get" &&
+     "$3" == "nodeclass" && "$4" == "migrations-tagged" ]]
+  printf '%s' ExistingNodeRole
+}
+aws() {
+  [[ "$1" == "iam" && "$2" == "get-role" &&
+     "$3" == "--role-name" && "$4" == "ExistingNodeRole" ]]
+  printf '%s' arn:aws:iam::123456789012:role/ExistingNodeRole
+}
+""" + self._resolver_function() + """
+resolve_auto_mode_node_role_arn NONE
+"""
+        completed = subprocess.run(
+            ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
+        assert completed.returncode == 0
+        assert completed.stdout == "arn:aws:iam::123456789012:role/ExistingNodeRole"
+        assert "Recovered node role from existing NodeClass migrations-tagged" in completed.stderr
+
+    def test_configure_uses_recovery_before_rejecting_an_empty_compute_role(self):
+        repo = Path(__file__).parent.parent.parent.parent
+        script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+        body = script[script.index("configure_tagged_auto_mode_compute() {"):]
+        body = body[:body.index("\n}\n")]
+        recovery = 'node_role_arn=$(resolve_auto_mode_node_role_arn "$node_role_arn")'
+        rejection = 'if [[ -z "$node_role_arn"'
+        assert recovery in body
+        assert body.index(recovery) < body.index(rejection)
 
 
 class TestEnforcementReport:

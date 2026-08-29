@@ -1183,6 +1183,35 @@ ensure_auto_node_access_entry() {
     --region "${AWS_CFN_REGION}" >/dev/null 2>&1 || true
 }
 
+# The first tagged run gets the node role from EKS computeConfig. Disabling every built-in NodePool
+# deliberately clears that field, because EKS rejects nodeRoleArn alongside nodePools: []. On a
+# re-run the role still exists on the custom NodeClass, so recover its name there and resolve the ARN
+# through IAM instead of treating the already-configured cluster as if Auto Mode were unavailable.
+resolve_auto_mode_node_role_arn() {
+  local node_role_arn="$1"
+  local existing_role_name
+  if [[ -n "$node_role_arn" && "$node_role_arn" != "NONE" && "$node_role_arn" != "None" ]]; then
+    printf '%s' "$node_role_arn"
+    return 0
+  fi
+
+  existing_role_name=$(kubectl --context="${KUBE_CONTEXT}" \
+    get nodeclass "${AUTO_MODE_TAGGED_NODE_CLASS}" \
+    -o jsonpath='{.spec.role}' 2>/dev/null || true)
+  if [[ -z "$existing_role_name" ]]; then
+    printf '%s' "$node_role_arn"
+    return 0
+  fi
+
+  node_role_arn=$(aws iam get-role \
+    --role-name "$existing_role_name" \
+    --query 'Role.Arn' --output text 2>/dev/null || true)
+  if [[ -n "$node_role_arn" && "$node_role_arn" != "None" ]]; then
+    echo "  Recovered node role from existing NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS}." >&2
+  fi
+  printf '%s' "$node_role_arn"
+}
+
 configure_tagged_auto_mode_compute() {
   echo ""
   echo "Configuring EKS Auto Mode to tag the resources it creates..."
@@ -1196,9 +1225,11 @@ configure_tagged_auto_mode_compute() {
     --output text)
   IFS='|' read -r node_role_arn cluster_sg subnet_ids_text builtin_pools <<< "$described"
   subnet_ids_text="${subnet_ids_text//,/ }"
+  node_role_arn=$(resolve_auto_mode_node_role_arn "$node_role_arn")
 
-  if [[ -z "$node_role_arn" || "$node_role_arn" == "NONE" ]]; then
-    echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no Auto Mode node role." >&2
+  if [[ -z "$node_role_arn" || "$node_role_arn" == "NONE" || "$node_role_arn" == "None" ]]; then
+    echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no Auto Mode node role in computeConfig" >&2
+    echo "  and no usable role could be recovered from NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS}." >&2
     echo "  --tags can only propagate to nodes on an EKS Auto Mode cluster." >&2
     exit 1
   fi
