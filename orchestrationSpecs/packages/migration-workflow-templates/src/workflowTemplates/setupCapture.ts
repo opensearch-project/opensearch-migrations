@@ -100,7 +100,7 @@ function makeProxyServiceAnnotations(
         "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": expr.literal("ip"),
         "service.beta.kubernetes.io/aws-load-balancer-scheme":
             expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal")),
-    }), expr.cast(tagAnnotations).to<Record<string, string>>());
+    }), tagAnnotations);
     const gcpAnnotations = expr.ternary(
         internetFacing,
         expr.makeDict({}),
