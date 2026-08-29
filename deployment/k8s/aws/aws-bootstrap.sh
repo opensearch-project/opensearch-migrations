@@ -1219,64 +1219,77 @@ configure_tagged_auto_mode_compute() {
   # its ENIs and its root/ephemeral volumes. The NodePool exists so that pods -- including the
   # chart's own pre-install hook Jobs -- have somewhere to land once the built-in pools are gone.
   # It is deliberately weighted below the chart's general-work-pool (weight 100).
-  local manifest sid
+  # Only two parts of the manifest need building: one subnet term per cluster subnet, and one line
+  # per --tags entry. Both are assembled first so the YAML itself can be a heredoc and stay readable
+  # as YAML rather than as a wall of quoted echo lines.
+  local manifest subnet_terms tag_lines sid i
+  subnet_terms=""
+  for sid in $subnet_ids_text; do
+    subnet_terms+="    - id: ${sid}"$'\n'
+  done
+  tag_lines=""
+  for i in "${!tag_keys[@]}"; do
+    tag_lines+=$(printf '    "%s": "%s"' "${tag_keys[$i]}" "${tag_values[$i]}")$'\n'
+  done
+  # Trim the trailing newline here, not in the heredoc: a heredoc performs parameter expansion but
+  # not ANSI-C quoting, so ${var%$'\n'} inside one matches the literal characters $'\n' and strips
+  # nothing, leaving a blank line in the YAML.
+  subnet_terms="${subnet_terms%$'\n'}"
+  tag_lines="${tag_lines%$'\n'}"
+
+  # The bootstrap pool is deliberately small: it only has to hold whatever the chart's own pools do
+  # not claim (pre-install hook Jobs, add-on pods). The chart's general-work-pool outranks it at
+  # weight 100.
   manifest=$(mktemp)
-  {
-    echo "apiVersion: eks.amazonaws.com/v1"
-    echo "kind: NodeClass"
-    echo "metadata:"
-    echo "  name: ${AUTO_MODE_TAGGED_NODE_CLASS}"
-    echo "spec:"
-    echo "  role: ${node_role_name}"
-    echo "  subnetSelectorTerms:"
-    for sid in $subnet_ids_text; do
-      echo "    - id: ${sid}"
-    done
-    echo "  securityGroupSelectorTerms:"
-    echo "    - id: ${cluster_sg}"
-    echo "  tags:"
-    local i
-    for i in "${!tag_keys[@]}"; do
-      printf '    "%s": "%s"\n' "${tag_keys[$i]}" "${tag_values[$i]}"
-    done
-    echo "---"
-    echo "apiVersion: karpenter.sh/v1"
-    echo "kind: NodePool"
-    echo "metadata:"
-    echo "  name: ${AUTO_MODE_BOOTSTRAP_NODE_POOL}"
-    echo "spec:"
-    echo "  weight: 1"
-    # Deliberately small: this pool only has to hold whatever the chart's own pools do not claim
-    # (pre-install hook Jobs, add-on pods). The chart's general-work-pool outranks it at weight 100.
-    echo "  limits:"
-    echo "    cpu: \"16\""
-    echo "    memory: 64Gi"
-    echo "  template:"
-    echo "    spec:"
-    echo "      nodeClassRef:"
-    echo "        group: eks.amazonaws.com"
-    echo "        kind: NodeClass"
-    echo "        name: ${AUTO_MODE_TAGGED_NODE_CLASS}"
-    echo "      requirements:"
-    echo "        - key: karpenter.sh/capacity-type"
-    echo "          operator: In"
-    echo "          values: [\"on-demand\"]"
-    echo "        - key: eks.amazonaws.com/instance-category"
-    echo "          operator: In"
-    echo "          values: [\"c\", \"m\", \"r\", \"t\"]"
-    echo "        - key: eks.amazonaws.com/instance-generation"
-    echo "          operator: Gt"
-    echo "          values: [\"4\"]"
-    echo "        - key: eks.amazonaws.com/instance-size"
-    echo "          operator: In"
-    echo "          values: [\"medium\", \"large\", \"xlarge\", \"2xlarge\"]"
-    echo "        - key: kubernetes.io/os"
-    echo "          operator: In"
-    echo "          values: [\"linux\"]"
-    echo "  disruption:"
-    echo "    consolidationPolicy: WhenEmpty"
-    echo "    consolidateAfter: 30m"
-  } > "$manifest"
+  cat > "$manifest" <<EOF
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: ${AUTO_MODE_TAGGED_NODE_CLASS}
+spec:
+  role: ${node_role_name}
+  subnetSelectorTerms:
+${subnet_terms}
+  securityGroupSelectorTerms:
+    - id: ${cluster_sg}
+  tags:
+${tag_lines}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: ${AUTO_MODE_BOOTSTRAP_NODE_POOL}
+spec:
+  weight: 1
+  limits:
+    cpu: "16"
+    memory: 64Gi
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: ${AUTO_MODE_TAGGED_NODE_CLASS}
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: eks.amazonaws.com/instance-category
+          operator: In
+          values: ["c", "m", "r", "t"]
+        - key: eks.amazonaws.com/instance-generation
+          operator: Gt
+          values: ["4"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["medium", "large", "xlarge", "2xlarge"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m
+EOF
 
   echo "  Applying NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS} and NodePool ${AUTO_MODE_BOOTSTRAP_NODE_POOL}..."
   kubectl --context="${KUBE_CONTEXT}" apply -f "$manifest" \
