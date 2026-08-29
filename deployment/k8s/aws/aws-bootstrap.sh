@@ -1057,9 +1057,15 @@ emit_tag_helm_values() {
 # that is precisely what such a deployer experiences.
 #
 # Attached out-of-band rather than through CloudFormation so that enabling it cannot change the
-# shipped template. Remove with: aws iam delete-role-policy --role-name <role> --policy-name <name>
+# shipped template, and so it can be detached without a stack update when a statement turns out to be
+# wrong. Remove with:
+#   for p in $(aws iam list-role-policies --role-name <role> \
+#       --query "PolicyNames[?starts_with(@, 'MigrationsDenyUntaggedCreates')]" --output text); do
+#     aws iam delete-role-policy --role-name <role> --policy-name "$p"; done
+DENY_POLICY_PREFIX="MigrationsDenyUntaggedCreates"
+
 enforce_tags_on_cluster_role() {
-  local cluster_role_arn cluster_role_name policy_doc conditions i
+  local cluster_role_arn cluster_role_name sid key i j
   cluster_role_arn=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --region "${AWS_CFN_REGION}" --query 'cluster.roleArn' --output text)
   if [[ -z "$cluster_role_arn" || "$cluster_role_arn" == "None" ]]; then
@@ -1068,84 +1074,85 @@ enforce_tags_on_cluster_role() {
   fi
   cluster_role_name="${cluster_role_arn##*/}"
 
-  # Null:true means "the request did not supply this tag at all". One condition entry per key, so
-  # every --tags key is individually required rather than just any one of them.
-  conditions=""
-  for i in "${!tag_keys[@]}"; do
-    [[ -n "$conditions" ]] && conditions+=","
-    conditions+=$(printf '"aws:RequestTag/%s": "true"' "${tag_keys[$i]}")
+  # Parallel arrays rather than an associative array: bash 3.2 (macOS) has none.
+  # Each group pairs a set of actions with ONLY the resource types that receive those actions'
+  # request tags -- see the note above about RunInstances and launch-template/*.
+  local part="${AWS_PARTITION:-aws}"
+  local group_sids=(InstanceLaunch StandaloneStorage NetworkInterface LoadBalancer TargetGroup ListenerAndRule)
+  local group_actions=(
+    '"ec2:RunInstances"'
+    '"ec2:CreateVolume", "ec2:CreateSnapshot"'
+    '"ec2:CreateNetworkInterface"'
+    '"elasticloadbalancing:CreateLoadBalancer"'
+    '"elasticloadbalancing:CreateTargetGroup"'
+    '"elasticloadbalancing:CreateListener", "elasticloadbalancing:CreateRule"'
+  )
+  local group_resources=(
+    "\"arn:${part}:ec2:*:*:instance/*\", \"arn:${part}:ec2:*:*:volume/*\", \"arn:${part}:ec2:*:*:network-interface/*\""
+    "\"arn:${part}:ec2:*:*:volume/*\", \"arn:${part}:ec2:*:*:snapshot/*\""
+    "\"arn:${part}:ec2:*:*:network-interface/*\""
+    "\"arn:${part}:elasticloadbalancing:*:*:loadbalancer/*\""
+    "\"arn:${part}:elasticloadbalancing:*:*:targetgroup/*\""
+    "\"arn:${part}:elasticloadbalancing:*:*:listener/*\", \"arn:${part}:elasticloadbalancing:*:*:listener-rule/*\""
+  )
+
+  # ONE statement per (action group x tag key). Multiple context keys inside a single condition
+  # operator are AND-ed by IAM -- "All context keys in a condition element block must resolve to true"
+  # -- so listing every key in one Null block would only deny a create that omitted ALL of them, and
+  # a create carrying one tag but not another would pass. Deny statements are OR-ed instead, so a
+  # separate statement per key is what makes each key independently mandatory.
+  # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_multi-value-conditions.html
+  local stmts=()
+  for i in "${!group_sids[@]}"; do
+    for j in "${!tag_keys[@]}"; do
+      key="${tag_keys[$j]}"
+      # Sids permit only alphanumerics, and tag keys may contain dots or slashes.
+      sid="Deny${group_sids[$i]}$(printf '%s' "$key" | tr -cd '[:alnum:]')"
+      stmts+=("{\"Sid\":\"${sid}\",\"Effect\":\"Deny\",\"Action\":[${group_actions[$i]}],\"Resource\":[${group_resources[$i]}],\"Condition\":{\"Null\":{\"aws:RequestTag/${key}\":\"true\"}}}")
+    done
   done
 
-  policy_doc=$(cat <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "DenyUntaggedInstanceLaunch",
-      "Effect": "Deny",
-      "Action": [ "ec2:RunInstances" ],
-      "Resource": [
-        "arn:${AWS_PARTITION:-aws}:ec2:*:*:instance/*",
-        "arn:${AWS_PARTITION:-aws}:ec2:*:*:volume/*",
-        "arn:${AWS_PARTITION:-aws}:ec2:*:*:network-interface/*"
-      ],
-      "Condition": { "Null": { ${conditions} } }
-    },
-    {
-      "Sid": "DenyUntaggedStandaloneStorage",
-      "Effect": "Deny",
-      "Action": [ "ec2:CreateVolume", "ec2:CreateSnapshot" ],
-      "Resource": [
-        "arn:${AWS_PARTITION:-aws}:ec2:*:*:volume/*",
-        "arn:${AWS_PARTITION:-aws}:ec2:*:*:snapshot/*"
-      ],
-      "Condition": { "Null": { ${conditions} } }
-    },
-    {
-      "Sid": "DenyUntaggedNetworkInterface",
-      "Effect": "Deny",
-      "Action": [ "ec2:CreateNetworkInterface" ],
-      "Resource": [ "arn:${AWS_PARTITION:-aws}:ec2:*:*:network-interface/*" ],
-      "Condition": { "Null": { ${conditions} } }
-    },
-    {
-      "Sid": "DenyUntaggedLoadBalancer",
-      "Effect": "Deny",
-      "Action": [ "elasticloadbalancing:CreateLoadBalancer" ],
-      "Resource": [ "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:loadbalancer/*" ],
-      "Condition": { "Null": { ${conditions} } }
-    },
-    {
-      "Sid": "DenyUntaggedTargetGroup",
-      "Effect": "Deny",
-      "Action": [ "elasticloadbalancing:CreateTargetGroup" ],
-      "Resource": [ "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:targetgroup/*" ],
-      "Condition": { "Null": { ${conditions} } }
-    },
-    {
-      "Sid": "DenyUntaggedListenerAndRule",
-      "Effect": "Deny",
-      "Action": [
-        "elasticloadbalancing:CreateListener",
-        "elasticloadbalancing:CreateRule"
-      ],
-      "Resource": [
-        "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:listener/*",
-        "arn:${AWS_PARTITION:-aws}:elasticloadbalancing:*:*:listener-rule/*"
-      ],
-      "Condition": { "Null": { ${conditions} } }
-    }
-  ]
-}
-EOF
-)
+  # An inline role policy cannot exceed 10,240 characters, and the statement count is
+  # (action groups x --tags keys) because IAM AND-s multiple keys in one condition block. Seven tag
+  # keys already overflows a single policy, so spread the statements across as many as are needed.
+  # IAM caps each inline policy, not their number.
   echo "  Enforcing tags on create for cluster role ${cluster_role_name}:"
-  echo "    any create without ${#tag_keys[@]} tag(s) (${tag_keys[*]}) will be denied."
-  aws iam put-role-policy \
-    --role-name "$cluster_role_name" \
-    --policy-name "MigrationsDenyUntaggedCreates" \
-    --policy-document "$policy_doc" \
-    || { echo "Error: failed to attach the tag-enforcement policy." >&2; exit 1; }
+  echo "    ${#stmts[@]} deny statement(s): each of ${#tag_keys[@]} tag key(s) (${tag_keys[*]})"
+  echo "    required independently on 6 action group(s)."
+
+  # Remove the previous generation first, so a re-run with fewer keys cannot leave stale statements
+  # enforcing a tag that is no longer requested. Only policies this script named are touched.
+  local stale
+  for stale in $(aws iam list-role-policies --role-name "$cluster_role_name" \
+      --query "PolicyNames[?starts_with(@, '${DENY_POLICY_PREFIX}')]" --output text 2>/dev/null); do
+    aws iam delete-role-policy --role-name "$cluster_role_name" --policy-name "$stale" >/dev/null \
+      2>&1 || true
+  done
+
+  local chunk="" part_n=1 attached=0
+  flush_deny_policy() {
+    [[ -z "$chunk" ]] && return 0
+    aws iam put-role-policy \
+      --role-name "$cluster_role_name" \
+      --policy-name "${DENY_POLICY_PREFIX}${part_n}" \
+      --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[${chunk}]}" \
+      || { echo "Error: failed to attach the tag-enforcement policy." >&2; exit 1; }
+    attached=$((attached + 1))
+    part_n=$((part_n + 1))
+    chunk=""
+  }
+
+  local st
+  for st in "${stmts[@]}"; do
+    # 9500 leaves room for the envelope and keeps every policy clear of the 10,240 limit.
+    if [[ -n "$chunk" && $(( ${#chunk} + ${#st} )) -gt 9500 ]]; then
+      flush_deny_policy
+    fi
+    [[ -n "$chunk" ]] && chunk+=","
+    chunk+="$st"
+  done
+  flush_deny_policy
+  echo "    Attached as ${attached} inline policy/policies named ${DENY_POLICY_PREFIX}N."
 }
 
 # An EC2-type access entry lets nodes launched by a custom NodeClass join the cluster. EKS creates
