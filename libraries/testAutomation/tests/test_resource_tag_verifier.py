@@ -5,7 +5,9 @@ multi-tag spec, deciding what counts as missing, and pulling resource IDs out of
 without ever consulting a tag -- are all testable offline.
 """
 
+import json
 import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -439,6 +441,63 @@ printf '%s' "$node_role_name"
         assert "aws iam get-role" not in script
 
 
+class TestBootstrapNodeAccessEntry:
+    @staticmethod
+    def _function() -> str:
+        repo = Path(__file__).parent.parent.parent.parent
+        script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+        body = script[script.index("ensure_auto_node_access_entry() {"):]
+        return body[:body.index("\n}\n") + 3]
+
+    def test_missing_entry_is_created_and_associated(self):
+        harness = """
+set -euo pipefail
+MIGRATIONS_EKS_CLUSTER_NAME=migration-cluster
+AWS_CFN_REGION=us-east-1
+calls_file="$1"
+aws() {
+  if [[ "$1 $2" == "eks describe-access-entry" ]]; then
+    return 1
+  fi
+  if [[ "$1 $2" == "eks create-access-entry" ]]; then
+    printf '%s\n' create >> "$calls_file"
+    return
+  fi
+  if [[ "$1 $2" == "eks associate-access-policy" ]]; then
+    printf '%s\n' associate >> "$calls_file"
+    return
+  fi
+  return 99
+}
+""" + self._function() + """
+ensure_auto_node_access_entry arn:aws:iam::123456789012:role/AutoNodeRole
+"""
+        with tempfile.NamedTemporaryFile() as calls:
+            completed = subprocess.run(
+                ["/bin/bash", "-c", harness, "bash", calls.name],
+                check=False, capture_output=True, text=True)
+            assert completed.returncode == 0, completed.stderr
+            assert Path(calls.name).read_text().splitlines() == ["create", "associate"]
+
+    def test_association_failure_is_not_ignored(self):
+        harness = """
+set -euo pipefail
+MIGRATIONS_EKS_CLUSTER_NAME=migration-cluster
+AWS_CFN_REGION=us-east-1
+aws() {
+  [[ "$1 $2" == "eks describe-access-entry" ]] && return 0
+  [[ "$1 $2" == "eks associate-access-policy" ]] && return 42
+  return 99
+}
+""" + self._function() + """
+ensure_auto_node_access_entry arn:aws:iam::123456789012:role/AutoNodeRole
+"""
+        completed = subprocess.run(
+            ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
+        assert completed.returncode == 1
+        assert "failed to associate AmazonEKSAutoNodePolicy" in completed.stderr
+
+
 class TestBootstrapTagYaml:
     def test_shared_renderer_quotes_keys_and_values(self):
         repo = Path(__file__).parent.parent.parent.parent
@@ -458,6 +517,88 @@ emit_resource_tags_yaml
         assert completed.stdout == (
             '    "owner/team": "migration dev"\n'
             '    "Cost Center": "1234"\n')
+
+
+class TestBootstrapTagPropagationPolicy:
+    @staticmethod
+    def _script() -> str:
+        repo = Path(__file__).parent.parent.parent.parent
+        return (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+
+    def test_bootstrap_attaches_the_documented_policy_to_the_cluster_role(self):
+        script = self._script()
+        body = script[script.index("ensure_auto_mode_tag_propagation_policy() {"):]
+        function = body[:body.index("\n}\n") + 3]
+        harness = """
+set -euo pipefail
+MIGRATIONS_EKS_CLUSTER_NAME=migration-cluster
+AWS_CFN_REGION=us-gov-west-1
+AUTO_MODE_TAG_PROPAGATION_POLICY_NAME=AutoModeTagPropagationPolicy
+capture_dir="$1"
+aws() {
+  local service="$1" operation="$2"
+  shift 2
+  if [[ "$service" == "eks" && "$operation" == "describe-cluster" ]]; then
+    printf '%s' arn:aws-us-gov:iam::123456789012:role/path/ClusterRole
+    return
+  fi
+  if [[ "$service" == "iam" && "$operation" == "put-role-policy" ]]; then
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --role-name) printf '%s' "$2" > "$capture_dir/role"; shift 2 ;;
+        --policy-name) printf '%s' "$2" > "$capture_dir/name"; shift 2 ;;
+        --policy-document) printf '%s' "$2" > "$capture_dir/policy.json"; shift 2 ;;
+        *) return 98 ;;
+      esac
+    done
+    return
+  fi
+  return 99
+}
+""" + function + """
+ensure_auto_mode_tag_propagation_policy
+"""
+        with tempfile.TemporaryDirectory() as capture_dir:
+            completed = subprocess.run(
+                ["/bin/bash", "-c", harness, "bash", capture_dir],
+                check=False, capture_output=True, text=True)
+            assert completed.returncode == 0, completed.stderr
+            assert Path(capture_dir, "role").read_text() == "ClusterRole"
+            assert Path(capture_dir, "name").read_text() == "AutoModeTagPropagationPolicy"
+            policy = json.loads(Path(capture_dir, "policy.json").read_text())
+
+        statements = {statement["Sid"]: statement for statement in policy["Statement"]}
+        assert set(statements) == {"Compute", "Storage", "Networking", "LoadBalancer", "Shield"}
+        expected_actions = {
+            "Compute": {"ec2:CreateFleet", "ec2:RunInstances", "ec2:CreateLaunchTemplate"},
+            "Storage": {"ec2:CreateVolume", "ec2:CreateSnapshot"},
+            "Networking": {"ec2:CreateNetworkInterface"},
+            "LoadBalancer": {
+                "elasticloadbalancing:CreateLoadBalancer",
+                "elasticloadbalancing:CreateTargetGroup",
+                "elasticloadbalancing:CreateListener",
+                "elasticloadbalancing:CreateRule",
+                "ec2:CreateSecurityGroup",
+            },
+            "Shield": {"shield:CreateProtection", "shield:TagResource"},
+        }
+        for sid, expected in expected_actions.items():
+            actions = statements[sid]["Action"]
+            assert set(actions if isinstance(actions, list) else [actions]) == expected
+        assert statements["Shield"]["Resource"] == (
+            "arn:aws-us-gov:shield::*:protection/*")
+        for statement in statements.values():
+            assert statement["Condition"]["StringEquals"] == {
+                "aws:RequestTag/eks:eks-cluster-name":
+                    "${aws:PrincipalTag/eks:eks-cluster-name}",
+            }
+
+    def test_policy_is_attached_before_the_tagged_nodeclass_is_applied(self):
+        body = self._script()
+        body = body[body.index("configure_tagged_auto_mode_compute() {"):]
+        body = body[:body.index("\n}\n")]
+        assert body.index("ensure_auto_mode_tag_propagation_policy") < body.index(
+            'kubectl --context="${KUBE_CONTEXT}" apply')
 
 
 class TestEnforcementReport:

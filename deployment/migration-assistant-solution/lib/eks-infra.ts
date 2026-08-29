@@ -191,7 +191,7 @@ export class EKSInfra extends Construct {
      * `eks:eks-cluster-name` tag, which Auto Mode always sets and which is matched against the
      * session tag on the assumed cluster role — so this grants nothing outside the cluster.
      *
-     * @see https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop
+     * @see https://docs.aws.amazon.com/eks/latest/userguide/auto-learn-iam.html
      */
     private allowAutoModeTagPropagation() {
         // Auto Mode assumes the cluster role with `eks:eks-cluster-name` as a session tag, so this
@@ -200,6 +200,9 @@ export class EKSInfra extends Construct {
             'aws:RequestTag/eks:eks-cluster-name': '${aws:PrincipalTag/eks:eks-cluster-name}',
         };
         new Policy(this, 'AutoModeTagPropagationPolicy', {
+            // aws-bootstrap.sh asserts this same named policy when --tags is used so older,
+            // adopted, and hand-built clusters receive the prerequisite without a manual IAM step.
+            policyName: 'AutoModeTagPropagationPolicy',
             roles: [this.cluster.role],
             statements: [
                 new PolicyStatement({
@@ -246,6 +249,13 @@ export class EKSInfra extends Construct {
                         'ec2:CreateSecurityGroup',
                     ],
                     resources: ['*'],
+                    conditions: { StringEquals: ownCluster },
+                }),
+                new PolicyStatement({
+                    sid: 'Shield',
+                    effect: Effect.ALLOW,
+                    actions: ['shield:CreateProtection', 'shield:TagResource'],
+                    resources: [`arn:${Aws.PARTITION}:shield::*:protection/*`],
                     conditions: { StringEquals: ownCluster },
                 }),
             ],

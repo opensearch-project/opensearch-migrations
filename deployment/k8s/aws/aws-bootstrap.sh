@@ -225,8 +225,8 @@ while [[ $# -gt 0 ]]; do
       echo "    * sets tagSpecification parameters on the StorageClass so provisioned EBS volumes"
       echo "      are tagged, and annotates any load balancer the chart creates."
       echo "  This requires the cluster IAM role to permit user-defined tags on Auto Mode resources."
-      echo "  The solution CloudFormation template grants that; a hand-built cluster needs the policy"
-      echo "  from https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop"
+      echo "  --tags ensures the required inline policy even for older, adopted, or hand-built clusters;"
+      echo "  the caller therefore needs iam:PutRolePolicy on the cluster role."
       echo ""
       echo "Examples:"
       echo "  # Mode 1 — Default: download latest release artifacts, create new VPC:"
@@ -1022,6 +1022,52 @@ emit_tag_helm_values() {
   printf '%s' "$values_file"
 }
 
+AUTO_MODE_TAG_PROPAGATION_POLICY_NAME="AutoModeTagPropagationPolicy"
+
+# EKS Auto Mode's managed cluster policy only permits its own eks:* request tags. A custom
+# NodeClass carrying deployer tags therefore needs the additional Allow policy documented by EKS.
+# The solution template declares the same named inline policy, but assert it here as well so --tags
+# works against older stacks and clusters created outside this solution without manual IAM changes.
+ensure_auto_mode_tag_propagation_policy() {
+  local cluster_role_arn cluster_role_name part policy_document
+  cluster_role_arn=$(aws eks describe-cluster \
+    --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --query 'cluster.roleArn' \
+    --output text)
+  if [[ -z "$cluster_role_arn" || "$cluster_role_arn" == "None" ]]; then
+    echo "Error: could not resolve the EKS cluster role required for --tags." >&2
+    exit 1
+  fi
+  cluster_role_name="${cluster_role_arn##*/}"
+  part="${cluster_role_arn#arn:}"
+  part="${part%%:*}"
+
+  # Keep this aligned with the EKS Auto Mode tag-propagation policy:
+  # https://docs.aws.amazon.com/eks/latest/userguide/auto-learn-iam.html
+  policy_document=$(cat <<EOF
+{"Version":"2012-10-17","Statement":[
+{"Sid":"Compute","Effect":"Allow","Action":["ec2:CreateFleet","ec2:RunInstances","ec2:CreateLaunchTemplate"],"Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"},"StringLike":{"aws:RequestTag/eks:kubernetes-node-class-name":"*","aws:RequestTag/eks:kubernetes-node-pool-name":"*"}}},
+{"Sid":"Storage","Effect":"Allow","Action":["ec2:CreateVolume","ec2:CreateSnapshot"],"Resource":["arn:${part}:ec2:*:*:volume/*","arn:${part}:ec2:*:*:snapshot/*"],"Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"}}},
+{"Sid":"Networking","Effect":"Allow","Action":"ec2:CreateNetworkInterface","Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"},"StringLike":{"aws:RequestTag/eks:kubernetes-cni-node-name":"*"}}},
+{"Sid":"LoadBalancer","Effect":"Allow","Action":["elasticloadbalancing:CreateLoadBalancer","elasticloadbalancing:CreateTargetGroup","elasticloadbalancing:CreateListener","elasticloadbalancing:CreateRule","ec2:CreateSecurityGroup"],"Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"}}},
+{"Sid":"Shield","Effect":"Allow","Action":["shield:CreateProtection","shield:TagResource"],"Resource":"arn:${part}:shield::*:protection/*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"}}}
+]}
+EOF
+)
+
+  echo "  Ensuring Auto Mode may propagate user tags through cluster role ${cluster_role_name}..."
+  aws iam put-role-policy \
+    --role-name "$cluster_role_name" \
+    --policy-name "$AUTO_MODE_TAG_PROPAGATION_POLICY_NAME" \
+    --policy-document "$policy_document" \
+    || {
+      echo "Error: --tags could not attach ${AUTO_MODE_TAG_PROPAGATION_POLICY_NAME}" >&2
+      echo "  to cluster role ${cluster_role_name}. The caller needs iam:PutRolePolicy." >&2
+      exit 1
+    }
+}
+
 # Deny the cluster role from launching instances or provisioning volumes without every --tags key.
 #
 # The inverse of AutoModeTagPropagationPolicy: that policy *permits* user tags on these actions, this
@@ -1182,7 +1228,11 @@ ensure_auto_node_access_entry() {
     --principal-arn "$node_role_arn" \
     --policy-arn "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy" \
     --access-scope type=cluster \
-    --region "${AWS_CFN_REGION}" >/dev/null 2>&1 || true
+    --region "${AWS_CFN_REGION}" >/dev/null \
+    || {
+      echo "Error: failed to associate AmazonEKSAutoNodePolicy with ${node_role_arn}." >&2
+      exit 1
+    }
 }
 
 configure_tagged_auto_mode_compute() {
@@ -1203,6 +1253,8 @@ configure_tagged_auto_mode_compute() {
     echo "Error: could not read subnets / cluster security group from ${MIGRATIONS_EKS_CLUSTER_NAME}." >&2
     exit 1
   fi
+  ensure_auto_mode_tag_propagation_policy
+
   if [[ -z "$node_role_arn" || "$node_role_arn" == "NONE" || "$node_role_arn" == "None" ]]; then
     # A successful first run created the access entry before disabling the built-in NodePools.
     # That update clears computeConfig.nodeRoleArn, so on a re-run only the role name remains on

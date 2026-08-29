@@ -111,7 +111,10 @@ describe('Solutions stack', () => {
     }
     interface TemplateResourceJson {
         Type: string;
-        Properties?: { PolicyDocument?: { Statement?: PolicyStatementJson[] } };
+        Properties?: {
+            PolicyDocument?: { Statement?: PolicyStatementJson[] };
+            PolicyName?: string;
+        };
     }
 
     function resourcesOf(stack: SolutionsInfrastructureEKSStack): TemplateResourceJson[] {
@@ -169,10 +172,11 @@ describe('Solutions stack', () => {
                 && (r.Properties?.PolicyDocument?.Statement ?? []).some(s => s.Sid === 'Compute')
         );
         expect(policies).toHaveLength(1);
+        expect(policies[0].Properties?.PolicyName).toBe('AutoModeTagPropagationPolicy');
 
         const statements = policies[0].Properties?.PolicyDocument?.Statement ?? [];
         expect(statements.map(s => s.Sid).sort())
-            .toEqual(['Compute', 'LoadBalancer', 'Networking', 'Storage']);
+            .toEqual(['Compute', 'LoadBalancer', 'Networking', 'Shield', 'Storage']);
         for (const statement of statements) {
             expect(statement.Effect).toBe('Allow');
             // Auto Mode assumes the cluster role with eks:eks-cluster-name as a session tag, so

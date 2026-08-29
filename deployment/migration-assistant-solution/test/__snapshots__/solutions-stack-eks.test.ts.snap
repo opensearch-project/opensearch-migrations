@@ -740,10 +740,35 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
               "Resource": "*",
               "Sid": "LoadBalancer",
             },
+            {
+              "Action": [
+                "shield:CreateProtection",
+                "shield:TagResource",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":shield::*:protection/*",
+                  ],
+                ],
+              },
+              "Sid": "Shield",
+            },
           ],
           "Version": "2012-10-17",
         },
-        "PolicyName": "EKSInfraAutoModeTagPropagationPolicy30F6625C",
+        "PolicyName": "AutoModeTagPropagationPolicy",
         "Roles": [
           {
             "Ref": "EKSInfraMigrationsEKSClusterRole243C21EF",
@@ -1947,10 +1972,35 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
               "Resource": "*",
               "Sid": "LoadBalancer",
             },
+            {
+              "Action": [
+                "shield:CreateProtection",
+                "shield:TagResource",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":shield::*:protection/*",
+                  ],
+                ],
+              },
+              "Sid": "Shield",
+            },
           ],
           "Version": "2012-10-17",
         },
-        "PolicyName": "EKSInfraAutoModeTagPropagationPolicy30F6625C",
+        "PolicyName": "AutoModeTagPropagationPolicy",
         "Roles": [
           {
             "Ref": "EKSInfraMigrationsEKSClusterRole243C21EF",

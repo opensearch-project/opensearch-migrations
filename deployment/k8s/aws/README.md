@@ -123,9 +123,10 @@ CLI warns and ignores them rather than silently pretending to honor them.
     chart creates.
 
 This requires the cluster IAM role to permit user-defined tags on Auto
-Mode resources — the solution CloudFormation template grants it. A
-cluster built by hand needs the policy from
-[the EKS docs](https://docs.aws.amazon.com/eks/latest/userguide/auto-cluster-iam-role.html#tag-prop);
+Mode resources. The solution CloudFormation template declares that
+policy, and `aws-bootstrap.sh --tags` also ensures the same named inline
+policy so older, adopted, and hand-built clusters need no manual IAM
+changes. The caller needs `iam:PutRolePolicy` on the cluster role;
 without it, adding a tag turns every `RunInstances` into `AccessDenied`.
 
 Two caveats: `--tags` is incompatible with `--use-general-node-pool`
