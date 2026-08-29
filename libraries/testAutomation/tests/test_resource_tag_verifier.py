@@ -17,6 +17,7 @@ from testAutomation.resource_tag_verifier import (
     Finding,
     VerificationResult,
     _check,
+    _cloudtrail_retry_config,
     _run_oracle,
     _lb_absent_note,
     _tag_list_to_dict,
@@ -151,6 +152,12 @@ class TestCloudTrailOracle:
         # carry the deployer's tags in its request. CreateFleet, CreateLaunchTemplate and
         # CreateSecurityGroup were each in this set and each produced a false failure.
         assert TAGGABLE_CREATE_EVENTS == {"RunInstances"}
+
+    def test_uses_bounded_adaptive_retries_for_account_wide_throttling(self):
+        assert _cloudtrail_retry_config().retries == {
+            "mode": "adaptive",
+            "total_max_attempts": 12,
+        }
 
     @pytest.mark.parametrize("name", [
         "RunInstances", "CreateVolume", "CreateLoadBalancer",

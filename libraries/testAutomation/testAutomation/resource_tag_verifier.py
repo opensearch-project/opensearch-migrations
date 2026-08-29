@@ -51,6 +51,17 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
+CLOUDTRAIL_TOTAL_MAX_ATTEMPTS = 12
+
+
+def _cloudtrail_retry_config():
+    """Use adaptive rate limiting for CloudTrail's account-wide two-request/second quota."""
+    from botocore.config import Config
+    return Config(retries={
+        "mode": "adaptive",
+        "total_max_attempts": CLOUDTRAIL_TOTAL_MAX_ATTEMPTS,
+    })
+
 
 @dataclass
 class Finding:
@@ -581,7 +592,11 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
     logger.info("Scanning CloudTrail for creates by the cluster role %s between %s and %s",
                 cluster_role_arn, start_time, end_time)
 
-    ct = boto3.client("cloudtrail", region_name=region)
+    # LookupEvents is limited account-wide, and the Jenkins matrix runs several EKS tests in the
+    # same account concurrently. Botocore's default four attempts were exhausted by that contention
+    # in build 486. Adaptive mode adds client-side rate limiting and a bounded retry budget while
+    # preserving the strict verdict if CloudTrail remains unreadable after all attempts.
+    ct = boto3.client("cloudtrail", region_name=region, config=_cloudtrail_retry_config())
     paginator = ct.get_paginator("lookup_events")
     scanned = matched = 0
     truncated = False
