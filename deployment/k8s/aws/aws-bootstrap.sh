@@ -1045,14 +1045,95 @@ ensure_auto_mode_tag_propagation_policy() {
 
   # Keep this aligned with the EKS Auto Mode tag-propagation policy:
   # https://docs.aws.amazon.com/eks/latest/userguide/auto-learn-iam.html
+  # The Shield statement only supports the optional Auto Mode ALB Shield Advanced annotation;
+  # granting it does not enable Shield or create a protection by itself.
   policy_document=$(cat <<EOF
-{"Version":"2012-10-17","Statement":[
-{"Sid":"Compute","Effect":"Allow","Action":["ec2:CreateFleet","ec2:RunInstances","ec2:CreateLaunchTemplate"],"Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"},"StringLike":{"aws:RequestTag/eks:kubernetes-node-class-name":"*","aws:RequestTag/eks:kubernetes-node-pool-name":"*"}}},
-{"Sid":"Storage","Effect":"Allow","Action":["ec2:CreateVolume","ec2:CreateSnapshot"],"Resource":["arn:${part}:ec2:*:*:volume/*","arn:${part}:ec2:*:*:snapshot/*"],"Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"}}},
-{"Sid":"Networking","Effect":"Allow","Action":"ec2:CreateNetworkInterface","Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"},"StringLike":{"aws:RequestTag/eks:kubernetes-cni-node-name":"*"}}},
-{"Sid":"LoadBalancer","Effect":"Allow","Action":["elasticloadbalancing:CreateLoadBalancer","elasticloadbalancing:CreateTargetGroup","elasticloadbalancing:CreateListener","elasticloadbalancing:CreateRule","ec2:CreateSecurityGroup"],"Resource":"*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"}}},
-{"Sid":"Shield","Effect":"Allow","Action":["shield:CreateProtection","shield:TagResource"],"Resource":"arn:${part}:shield::*:protection/*","Condition":{"StringEquals":{"aws:RequestTag/eks:eks-cluster-name":"\${aws:PrincipalTag/eks:eks-cluster-name}"}}}
-]}
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Compute",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateFleet",
+        "ec2:RunInstances",
+        "ec2:CreateLaunchTemplate"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:RequestTag/eks:kubernetes-node-class-name": "*",
+          "aws:RequestTag/eks:kubernetes-node-pool-name": "*"
+        }
+      }
+    },
+    {
+      "Sid": "Storage",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVolume",
+        "ec2:CreateSnapshot"
+      ],
+      "Resource": [
+        "arn:${part}:ec2:*:*:volume/*",
+        "arn:${part}:ec2:*:*:snapshot/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        }
+      }
+    },
+    {
+      "Sid": "Networking",
+      "Effect": "Allow",
+      "Action": "ec2:CreateNetworkInterface",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:RequestTag/eks:kubernetes-cni-node-name": "*"
+        }
+      }
+    },
+    {
+      "Sid": "LoadBalancer",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:CreateRule",
+        "ec2:CreateSecurityGroup"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        }
+      }
+    },
+    {
+      "Sid": "Shield",
+      "Effect": "Allow",
+      "Action": [
+        "shield:CreateProtection",
+        "shield:TagResource"
+      ],
+      "Resource": "arn:${part}:shield::*:protection/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        }
+      }
+    }
+  ]
+}
 EOF
 )
 

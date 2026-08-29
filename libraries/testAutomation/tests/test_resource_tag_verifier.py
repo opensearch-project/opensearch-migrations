@@ -527,8 +527,9 @@ class TestBootstrapTagPropagationPolicy:
 
     def test_bootstrap_attaches_the_documented_policy_to_the_cluster_role(self):
         script = self._script()
-        body = script[script.index("ensure_auto_mode_tag_propagation_policy() {"):]
-        function = body[:body.index("\n}\n") + 3]
+        start = script.index("ensure_auto_mode_tag_propagation_policy() {")
+        end = script.index("\n\n# Deny the cluster role", start)
+        function = script[start:end]
         harness = """
 set -euo pipefail
 MIGRATIONS_EKS_CLUSTER_NAME=migration-cluster
