@@ -124,7 +124,7 @@ def call(Map config = [:]) {
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}",
                                     resourceTags: env.MA_RESOURCE_TAGS,
-                                    enforceTagsOnCreate: true
+                                    enforceTagsOnCreateForTests: true
                                 )
                             }
                         }

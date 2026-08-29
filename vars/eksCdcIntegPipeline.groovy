@@ -164,7 +164,7 @@ def call(Map config = [:]) {
                                             kubectlContext: "migration-eks-${maStageName}",
                                             tlsMode: tlsMode != 'none' ? tlsMode : null,
                                             resourceTags: env.MA_RESOURCE_TAGS,
-                                    enforceTagsOnCreate: true
+                                            enforceTagsOnCreateForTests: true
                                         )
                                     }
                                 }

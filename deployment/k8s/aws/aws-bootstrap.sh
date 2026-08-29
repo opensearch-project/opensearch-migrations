@@ -73,7 +73,7 @@ skip_test_images=false
 image_tag="latest"
 kubectl_context=""
 tags_raw=()
-enforce_tags_on_create=false
+enforce_tags_on_create_for_tests=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -115,7 +115,7 @@ while [[ $# -gt 0 ]]; do
     --tls-mode) tls_mode="$2"; shift 2 ;;
     --pca-arn) pca_arn="$2"; shift 2 ;;
     --tags) tags_raw+=("$2"); shift 2 ;;
-    --enforce-tags-on-create) enforce_tags_on_create=true; shift 1 ;;
+    --enforce-tags-on-create-for-tests) enforce_tags_on_create_for_tests=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -149,12 +149,12 @@ while [[ $# -gt 0 ]]; do
       echo "                                            (EC2 instances, EBS volumes, load balancers) carry them, which"
       echo "                                            CloudFormation cannot do on its own. See 'Tag propagation'"
       echo "                                            below for what that entails."
-      echo "  --enforce-tags-on-create                  Additionally DENY the cluster role from creating any resource"
-      echo "                                            without the --tags keys. Reproduces an SCP that requires tags"
-      echo "                                            on create: an untagged create then fails immediately instead"
-      echo "                                            of being discovered later. Intended for testing the tagging"
-      echo "                                            path -- it will stop the cluster scaling if anything Auto Mode"
-      echo "                                            creates cannot carry the tags. Requires --tags."
+      echo "  --enforce-tags-on-create-for-tests        TEST ONLY: additionally DENY the cluster role from creating"
+      echo "                                            any covered resource without the --tags keys. Reproduces an"
+      echo "                                            SCP that requires tags on create: an untagged create then fails"
+      echo "                                            immediately instead of being discovered later. This can stop"
+      echo "                                            cluster scaling and is not a production enforcement mechanism."
+      echo "                                            Requires --tags and is intended only for integration tests."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
       echo "                                            from public.ecr.aws/opensearchproject and public helm chart"
@@ -330,7 +330,7 @@ if [[ ${#tag_keys[@]} -gt 0 ]]; then
   # carry tags. Honouring both would schedule onto a NodePool that no longer exists.
   if [[ "$use_general_node_pool" == "true" ]]; then
     echo "ERROR: --tags and --use-general-node-pool are mutually exclusive." >&2
-    # (--enforce-tags-on-create is validated below; it needs tags to require.)
+    # (--enforce-tags-on-create-for-tests is validated below; it needs tags to require.)
     echo "  --tags replaces the built-in general-purpose NodePool with a tagged one, because the" >&2
     echo "  NodeClass behind the built-in pools is owned by EKS and cannot carry user tags." >&2
     exit 1
@@ -345,8 +345,8 @@ fi
 
 # There is nothing to require without tags, and silently doing nothing would make a test that relies
 # on enforcement pass for the wrong reason.
-if [[ "$enforce_tags_on_create" == "true" && ${#tag_keys[@]} -eq 0 ]]; then
-  echo "ERROR: --enforce-tags-on-create requires --tags: there would be no tag to require." >&2
+if [[ "$enforce_tags_on_create_for_tests" == "true" && ${#tag_keys[@]} -eq 0 ]]; then
+  echo "ERROR: --enforce-tags-on-create-for-tests requires --tags: there would be no tag to require." >&2
   exit 1
 fi
 
@@ -1063,8 +1063,9 @@ emit_tag_helm_values() {
 #       --query "PolicyNames[?starts_with(@, 'MigrationsDenyUntaggedCreates')]" --output text); do
 #     aws iam delete-role-policy --role-name <role> --policy-name "$p"; done
 DENY_POLICY_PREFIX="MigrationsDenyUntaggedCreates"
+DENY_POLICY_NAME="${DENY_POLICY_PREFIX}ForTests"
 
-enforce_tags_on_cluster_role() {
+enforce_tags_on_cluster_role_for_tests() {
   local cluster_role_arn cluster_role_name sid key i j
   cluster_role_arn=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --region "${AWS_CFN_REGION}" --query 'cluster.roleArn' --output text)
@@ -1112,11 +1113,27 @@ enforce_tags_on_cluster_role() {
     done
   done
 
-  # An inline role policy cannot exceed 10,240 characters, and the statement count is
-  # (action groups x --tags keys) because IAM AND-s multiple keys in one condition block. Seven tag
-  # keys already overflows a single policy, so spread the statements across as many as are needed.
-  # IAM caps each inline policy, not their number.
-  echo "  Enforcing tags on create for cluster role ${cluster_role_name}:"
+  # This is intentionally one inline policy. IAM's 10,240-character quota is aggregate across every
+  # inline policy on a role, so splitting the statements into multiple policies does not create more
+  # capacity and can leave a partially attached deny if a later part fails. This test-only option is
+  # exercised with two tags in CI. A sufficiently large tag set can exceed the role's remaining
+  # inline-policy quota; in that case put-role-policy fails and the caller must use fewer test tags.
+  local policy_document
+  local chunk=""
+  local st
+  for st in "${stmts[@]}"; do
+    [[ -n "$chunk" ]] && chunk+=","
+    chunk+="$st"
+  done
+  policy_document="{\"Version\":\"2012-10-17\",\"Statement\":[${chunk}]}"
+  if [[ ${#policy_document} -gt 10240 ]]; then
+    echo "Error: the generated test-only tag-enforcement policy is ${#policy_document} characters," >&2
+    echo "  exceeding IAM's 10,240-character aggregate inline-policy quota for a role." >&2
+    echo "  Use fewer --tags with --enforce-tags-on-create-for-tests." >&2
+    exit 1
+  fi
+
+  echo "  Enforcing tags on create for TESTS on cluster role ${cluster_role_name}:"
   echo "    ${#stmts[@]} deny statement(s): each of ${#tag_keys[@]} tag key(s) (${tag_keys[*]})"
   echo "    required independently on 6 action group(s)."
 
@@ -1129,30 +1146,17 @@ enforce_tags_on_cluster_role() {
       2>&1 || true
   done
 
-  local chunk="" part_n=1 attached=0
-  flush_deny_policy() {
-    [[ -z "$chunk" ]] && return 0
-    aws iam put-role-policy \
-      --role-name "$cluster_role_name" \
-      --policy-name "${DENY_POLICY_PREFIX}${part_n}" \
-      --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[${chunk}]}" \
-      || { echo "Error: failed to attach the tag-enforcement policy." >&2; exit 1; }
-    attached=$((attached + 1))
-    part_n=$((part_n + 1))
-    chunk=""
-  }
-
-  local st
-  for st in "${stmts[@]}"; do
-    # 9500 leaves room for the envelope and keeps every policy clear of the 10,240 limit.
-    if [[ -n "$chunk" && $(( ${#chunk} + ${#st} )) -gt 9500 ]]; then
-      flush_deny_policy
-    fi
-    [[ -n "$chunk" ]] && chunk+=","
-    chunk+="$st"
-  done
-  flush_deny_policy
-  echo "    Attached as ${attached} inline policy/policies named ${DENY_POLICY_PREFIX}N."
+  aws iam put-role-policy \
+    --role-name "$cluster_role_name" \
+    --policy-name "$DENY_POLICY_NAME" \
+    --policy-document "$policy_document" \
+    || {
+      echo "Error: failed to attach the test-only tag-enforcement policy." >&2
+      echo "  IAM limits all inline policies on a role to 10,240 aggregate characters;" >&2
+      echo "  use fewer --tags if the role has insufficient remaining capacity." >&2
+      exit 1
+    }
+  echo "    Attached test-only inline policy ${DENY_POLICY_NAME}."
 }
 
 # An EC2-type access entry lets nodes launched by a custom NodeClass join the cluster. EKS creates
@@ -1211,8 +1215,8 @@ configure_tagged_auto_mode_compute() {
 
   ensure_auto_node_access_entry "$node_role_arn"
 
-  if [[ "$enforce_tags_on_create" == "true" ]]; then
-    enforce_tags_on_cluster_role
+  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
+    enforce_tags_on_cluster_role_for_tests
   fi
 
   # The NodeClass carries the tags; Auto Mode stamps them on the instance, its launch template,

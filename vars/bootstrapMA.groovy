@@ -31,8 +31,8 @@
  *       // EBS volumes and load balancers EKS Auto Mode provisions later. Mutually
  *       // exclusive with resolveBootstrap(useGeneralNodePool: true).
  *       resourceTags: "Key=Value,Key2=Value2",
- *       // Optional — also DENY the cluster role from creating anything untagged.
- *       enforceTagsOnCreate: true
+ *       // Optional, TEST ONLY — also DENY the cluster role from creating anything untagged.
+ *       enforceTagsOnCreateForTests: true
  *   )
  */
 def call(Map config = [:]) {
@@ -68,10 +68,10 @@ def call(Map config = [:]) {
     // up a tagged Auto Mode NodeClass, so it is incompatible with resolveBootstrap's
     // useGeneralNodePool (which selects the built-in pool that --tags has to delete).
     def resourceTagsFlag = config.resourceTags ? "--tags '${config.resourceTags}'" : ''
-    // Turns the tag requirement into a hard IAM Deny on the cluster role, so an untagged create
-    // fails at the moment it happens -- the same way a deployer SCP that requires tags on create
-    // behaves. Only meaningful alongside resourceTags.
-    def enforceTagsFlag = config.enforceTagsOnCreate ? '--enforce-tags-on-create' : ''
+    // TEST ONLY: turns the tag requirement into a hard IAM Deny on the cluster role, so an untagged
+    // create fails at the moment it happens -- the same way a deployer SCP that requires tags on
+    // create behaves. Only meaningful alongside resourceTags.
+    def enforceTagsFlag = config.enforceTagsOnCreateForTests ? '--enforce-tags-on-create-for-tests' : ''
 
     sh """
         ${bootstrap.script} \

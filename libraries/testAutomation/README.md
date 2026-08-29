@@ -147,14 +147,19 @@ Mode assumes). That checks *calls* rather than resources, so it catches a create
 whose resource type nobody enumerated. Findings are split by whether AWS lets us
 tag the action — `AutoModeTagPropagationPolicy`'s action set — so "our bug" is
 distinguishable from "no AWS mechanism exists, the deployer must exempt it".
+The report only says a create was IAM-enforced after inspecting the cluster
+role and confirming the complete test-only Deny policy is actually attached;
+otherwise it describes CloudTrail results as observational.
 CloudTrail lags 5–15 minutes, hence `--cloudtrail-wait-seconds` (default 300).
 
 The EKS CDC pipelines run all of this automatically via `--verify-resource-tags`
 on the normal test invocation, after the tests so the load balancer and PVC
-volumes exist. They also bootstrap with `--enforce-tags-on-create`, which adds an
-IAM **Deny** on the cluster role for those same create actions when a required
-tag is absent — reproducing a deployer SCP that requires tags on create, so an
-untagged create fails at the moment it happens instead of being found later.
+volumes exist. They also bootstrap with the test-only
+`--enforce-tags-on-create-for-tests`, which adds an IAM **Deny** on the cluster
+role for those same create actions when a required tag is absent — reproducing
+a deployer SCP that requires tags on create, so an untagged create fails at the
+moment it happens instead of being found later. This is integration-test
+instrumentation, not a production enforcement mechanism.
 
 Use at least two tags: a single tag cannot catch a bug that keeps only the first
 entry of a comma-separated list.

@@ -47,7 +47,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,11 @@ class VerificationResult:
     checked: int = 0
     findings: List[Finding] = field(default_factory=list)
     # Resources we located but could not read tags for (permissions, races, eventual consistency).
-    # Reported separately: an unreadable resource is not evidence of a missing tag either way.
+    # These are coverage failures: an unreadable resource is not evidence that its tags are correct.
     unreadable: List[str] = field(default_factory=list)
+    # Context worth reporting that does not weaken the verdict (for example, a known-untaggable
+    # wrapper call or an ephemeral load balancer whose tagged create was captured in CloudTrail).
+    notes: List[str] = field(default_factory=list)
     # Creates the cluster role attempted and was refused. These name the failing action outright, so
     # they are the most actionable output here: either our plumbing failed to tag a taggable create,
     # or the action cannot carry tags and a deployer whose SCP covers it cannot run Auto Mode.
@@ -78,10 +81,14 @@ class VerificationResult:
     # eventName -> count of creates seen in CloudTrail that carried every expected tag. Distinguishes
     # "enforcement would have caught this" from "we watched it happen correctly".
     observed_tagged: Dict[str, int] = field(default_factory=dict)
+    # Actions actually covered by the test-only inline Deny policy on the cluster role. Populated by
+    # inspecting IAM; an action is included only when every expected tag key is independently denied.
+    enforced_actions: Set[str] = field(default_factory=set)
+    enforcement_checked: bool = False
 
     @property
     def ok(self) -> bool:
-        return not self.findings and not self.denied
+        return not self.findings and not self.denied and not self.unreadable
 
 
 def parse_tag_spec(spec: str) -> Dict[str, str]:
@@ -266,7 +273,7 @@ def _lb_absent_note(result: "VerificationResult", cluster_name: str) -> str:
     seen = result.observed_tagged.get("CreateLoadBalancer", 0)
     if seen:
         return (f"no load balancer still existed at verification time, but CloudTrail recorded "
-                f"{seen} created WITH the expected tags -- see the enforcement summary")
+                f"{seen} created WITH the expected tags")
     return (f"no load balancers tagged eks:eks-cluster-name={cluster_name} were found and "
             "CloudTrail recorded none being created; load balancer tags unverified")
 
@@ -312,7 +319,11 @@ def verify_load_balancers(result: VerificationResult, expected: Dict[str, str], 
         # That is not the same as unverified. If the CloudTrail sweep (which runs first) saw the
         # create carry the tags, the evidence exists; it is just historical rather than a live
         # resource. Saying "unverified" in that case would understate what the run established.
-        result.unreadable.append(_lb_absent_note(result, cluster_name))
+        note = _lb_absent_note(result, cluster_name)
+        if result.observed_tagged.get("CreateLoadBalancer", 0):
+            result.notes.append(note)
+        else:
+            result.unreadable.append(note)
         return
 
     for lb, tags in matches:
@@ -392,12 +403,12 @@ def expected_tags_from_stack(stack_name: str, region: str) -> Dict[str, str]:
 # influence would make every run red and the signal worthless.
 TAGGABLE_CREATE_EVENTS = frozenset({"RunInstances"})
 
-# The actions aws-bootstrap.sh --enforce-tags-on-create denies when the tags are absent. Kept in step
-# with enforce_tags_on_cluster_role() in that script by a test; if the two drift, the report below
-# will claim enforcement that is not in place.
+# The actions aws-bootstrap.sh --enforce-tags-on-create-for-tests denies when the tags are absent.
+# Kept in step with enforce_tags_on_cluster_role_for_tests() in that script by a test.
 #
 # For these, an untagged create does not merely get reported -- it is refused by IAM at the moment it
-# happens, which is a materially stronger claim than "we looked afterwards and the tags were there".
+# happens when that explicitly test-only policy is present. The report inspects IAM before making
+# that stronger claim; without the policy, the same CloudTrail evidence is reported as observational.
 DENY_ENFORCED_ACTIONS = (
     "ec2:RunInstances",
     "ec2:CreateVolume",
@@ -408,6 +419,57 @@ DENY_ENFORCED_ACTIONS = (
     "elasticloadbalancing:CreateListener",
     "elasticloadbalancing:CreateRule",
 )
+TEST_ENFORCEMENT_POLICY_NAME = "MigrationsDenyUntaggedCreatesForTests"
+
+
+def _policy_document_dict(document) -> dict:
+    """Normalize IAM get-role-policy's dict or URL-encoded JSON response."""
+    if isinstance(document, dict):
+        return document
+    if isinstance(document, str):
+        from urllib.parse import unquote
+        return json.loads(unquote(document))
+    raise TypeError(f"unexpected IAM policy document type: {type(document).__name__}")
+
+
+def enforced_actions_from_policy(document, expected: Dict[str, str]) -> Set[str]:
+    """Return actions for which the test policy independently requires every expected tag key."""
+    required_by_action: Dict[str, Set[str]] = {}
+    for statement in _policy_document_dict(document).get("Statement", []):
+        if statement.get("Effect") != "Deny":
+            continue
+        null_conditions = (statement.get("Condition") or {}).get("Null") or {}
+        required = {
+            key.removeprefix("aws:RequestTag/")
+            for key, value in null_conditions.items()
+            if key.startswith("aws:RequestTag/") and str(value).lower() == "true"
+        }
+        actions = statement.get("Action") or []
+        if isinstance(actions, str):
+            actions = [actions]
+        for action in actions:
+            required_by_action.setdefault(action, set()).update(required)
+    expected_keys = set(expected)
+    return {
+        action for action, required_keys in required_by_action.items()
+        if expected_keys.issubset(required_keys)
+    }
+
+
+def detect_test_enforcement(cluster_role_arn: str, expected: Dict[str, str]) -> Tuple[bool, Set[str]]:
+    """Inspect the cluster role instead of assuming the test-only Deny flag was used."""
+    import boto3
+    iam = boto3.client("iam")
+    role_name = cluster_role_arn.rsplit("/", 1)[-1]
+    names = iam.list_role_policies(RoleName=role_name).get("PolicyNames", [])
+    if TEST_ENFORCEMENT_POLICY_NAME not in names:
+        return False, set()
+    document = iam.get_role_policy(
+        RoleName=role_name,
+        PolicyName=TEST_ENFORCEMENT_POLICY_NAME,
+    )["PolicyDocument"]
+    return True, enforced_actions_from_policy(document, expected)
+
 
 # Creates where AWS offers no way to put the user tags on the resource itself, so requiring them
 # would fail every run for something outside our control. Each entry is here on CloudTrail evidence.
@@ -497,13 +559,25 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
     exact without any assumption about the region being otherwise idle.
 
     Findings are split by whether the action is one AWS lets us tag (our bug) or not (no mechanism
-    exists; the deployer has to exempt it). Both are reported as failures because a create without
-    the tag is fatal under an SCP that requires the tag on create, whoever owns the fix.
+    exists; the deployer has to exempt it). Proven taggable creates fail when tags are absent;
+    unknown and known-untaggable wrapper calls are reported separately.
     """
     import boto3
 
     eks = boto3.client("eks", region_name=region)
     cluster_role_arn = eks.describe_cluster(name=cluster_name)["cluster"]["roleArn"]
+    enforcement_present, result.enforced_actions = detect_test_enforcement(
+        cluster_role_arn, expected)
+    result.enforcement_checked = True
+    if enforcement_present:
+        missing_actions = set(DENY_ENFORCED_ACTIONS) - result.enforced_actions
+        if missing_actions:
+            result.unreadable.append(
+                "test-only tag-enforcement policy is present but does not independently require "
+                f"every expected tag for: {', '.join(sorted(missing_actions))}")
+    else:
+        logger.info("Test-only tag-enforcement policy is not attached; CloudTrail results are "
+                    "observational")
     logger.info("Scanning CloudTrail for creates by the cluster role %s between %s and %s",
                 cluster_role_arn, start_time, end_time)
 
@@ -548,7 +622,7 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
                     result.denied.append(note)
                     logger.error("%s", note)
                 elif "DryRun" not in error_code:
-                    result.unreadable.append(
+                    result.notes.append(
                         f"{name} failed with {error_code} (not an authorization failure, so not a "
                         f"tagging verdict)")
                 continue
@@ -556,7 +630,7 @@ def verify_cloudtrail_creates(result: VerificationResult, expected: Dict[str, st
                 continue
             matched += 1
             if name in UNTAGGABLE_CREATE_EVENTS:
-                result.unreadable.append(
+                result.notes.append(
                     f"{name}: AWS puts no user tags on this resource, so it is not checked")
                 continue
             if all(_request_tags(detail).get(k) == v for k, v in expected.items()):
@@ -639,15 +713,25 @@ def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
     lines = [f"Expected tags: {expected}", f"Resources checked: {result.checked}"]
     lines.append("")
     lines.append("How each result was established:")
-    lines.append("  Enforced by IAM -- an untagged create would have been REFUSED, not just noticed:")
-    for action in DENY_ENFORCED_ACTIONS:
-        seen = result.observed_tagged.get(action.split(":")[-1], 0)
-        lines.append(f"    {action}" + (f"  ({seen} create(s) observed)" if seen else "  (none seen)"))
+    if result.enforced_actions:
+        lines.append("  Enforced by the TEST-ONLY IAM policy -- an untagged create would have been")
+        lines.append("  REFUSED, not just noticed:")
+        for action in DENY_ENFORCED_ACTIONS:
+            if action not in result.enforced_actions:
+                continue
+            seen = result.observed_tagged.get(action.split(":")[-1], 0)
+            lines.append(
+                f"    {action}" + (f"  ({seen} create(s) observed)" if seen else "  (none seen)"))
+    elif result.enforcement_checked:
+        lines.append("  Test-only IAM enforcement was not enabled; create results are observational.")
+    else:
+        lines.append("  Test-only IAM enforcement was not checked.")
+    enforced_event_names = {action.split(":")[-1] for action in result.enforced_actions}
     unenforced = {k: v for k, v in result.observed_tagged.items()
-                  if not any(k == a.split(":")[-1] for a in DENY_ENFORCED_ACTIONS)}
+                  if k not in enforced_event_names}
     if unenforced:
-        lines.append("  Observed tagged in CloudTrail, but NOT enforced -- an untagged one would have")
-        lines.append("  been reported after the fact rather than refused:")
+        lines.append("  Observed tagged in CloudTrail, but NOT test-enforced -- an untagged one")
+        lines.append("  would have been reported after the fact rather than refused:")
         for name, count in sorted(unenforced.items()):
             lines.append(f"    {name}  ({count})")
     if result.denied:
@@ -665,9 +749,15 @@ def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
         from collections import Counter
         for note, count in Counter(result.unclassified).most_common():
             lines.append(f"  - {note}" + (f"  (x{count})" if count > 1 else ""))
+    if result.notes:
+        lines.append("")
+        lines.append("Notes (do not weaken the verdict):")
+        from collections import Counter
+        for note, count in Counter(result.notes).most_common():
+            lines.append(f"  - {note}" + (f"  (x{count})" if count > 1 else ""))
     if result.unreadable:
         lines.append("")
-        lines.append("Not verified:")
+        lines.append("VERIFICATION INCOMPLETE:")
         # Collapsed with counts: Auto Mode retries transient failures, and one observed run produced
         # 21 identical "Invalid IAM Instance Profile name" notes while IAM propagated, which buried
         # everything else in the report.
@@ -685,7 +775,10 @@ def format_report(result: VerificationResult, expected: Dict[str, str]) -> str:
     if result.denied:
         lines.append("")
         lines.append(f"FAILED: {len(result.denied)} create(s) refused for want of the tags")
-    elif not result.findings:
+    if result.unreadable:
+        lines.append("")
+        lines.append(f"FAILED: {len(result.unreadable)} verification gap(s)")
+    if result.ok:
         lines.append("")
         lines.append("PASSED: every resource checked carries the expected tags")
     return "\n".join(lines)

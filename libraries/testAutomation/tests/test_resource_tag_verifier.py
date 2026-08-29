@@ -25,6 +25,7 @@ from testAutomation.resource_tag_verifier import (
     DENY_ENFORCED_ACTIONS,
     _AUTH_FAILURE_CODES,
     _request_tags,
+    enforced_actions_from_policy,
     format_report,
     is_create_event,
     parse_tag_spec,
@@ -122,12 +123,13 @@ class TestReport:
         assert _tag_list_to_dict([{"Key": "A", "Value": "1"}, {"Key": "B"}]) == {"A": "1", "B": ""}
         assert _tag_list_to_dict(None) == {}
 
-    def test_report_surfaces_unverified_notes_even_when_passing(self):
+    def test_report_fails_when_any_category_is_unverified(self):
         r = VerificationResult(checked=3)
         r.unreadable.append("no LoadBalancer Services found; load balancer tags unverified")
         out = format_report(r, {"A": "1"})
-        assert "PASSED" in out
-        # A skipped category must be visible: otherwise "PASSED" overstates the coverage.
+        assert not r.ok
+        assert "PASSED" not in out
+        assert "VERIFICATION INCOMPLETE" in out
         assert "load balancer tags unverified" in out
 
     def test_report_lists_findings_and_fails(self):
@@ -268,7 +270,7 @@ class TestUntaggableExemptions:
     def test_repeated_notes_are_collapsed_with_a_count(self):
         r = VerificationResult(checked=1)
         for _ in range(21):
-            r.unreadable.append("RunInstances failed with Client.InvalidParameterValue")
+            r.notes.append("RunInstances failed with Client.InvalidParameterValue")
         out = format_report(r, {"A": "1"})
         assert "(x21)" in out
         assert out.count("RunInstances failed with Client.InvalidParameterValue") == 1
@@ -318,7 +320,9 @@ class TestOracleResilience:
         r = VerificationResult(checked=2)
         _run_oracle(r, "CloudTrail sweep", lambda: (_ for _ in ()).throw(ValueError("nope")))
         out = format_report(r, {"A": "1"})
-        # It may still say PASSED for what it checked, but the breakage must be visible.
+        assert not r.ok
+        assert "PASSED" not in out
+        assert "FAILED: 1 verification gap(s)" in out
         assert "CloudTrail sweep oracle failed" in out
 
     def test_successful_oracle_records_nothing(self):
@@ -375,7 +379,7 @@ class TestEnforcementReport:
     """The report must not claim enforcement the IAM policy does not actually provide."""
 
     def test_deny_list_matches_the_bootstrap_policy(self):
-        """DENY_ENFORCED_ACTIONS must equal what enforce_tags_on_cluster_role() denies.
+        """DENY_ENFORCED_ACTIONS must equal what enforce_tags_on_cluster_role_for_tests() denies.
 
         If they drift, the report tells the reader an untagged create would have been refused when
         nothing would have stopped it -- the worst possible failure for this tool, because it
@@ -385,7 +389,7 @@ class TestEnforcementReport:
         from pathlib import Path
         repo = Path(__file__).parent.parent.parent.parent
         script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
-        body = script[script.index("enforce_tags_on_cluster_role() {"):]
+        body = script[script.index("enforce_tags_on_cluster_role_for_tests() {"):]
         body = body[:body.index('\n}\n')]
         in_policy = set(re.findall(r'"((?:ec2|elasticloadbalancing):Create[A-Za-z]+|ec2:RunInstances)"',
                                    body))
@@ -395,17 +399,50 @@ class TestEnforcementReport:
 
     def test_report_separates_enforced_from_merely_observed(self):
         r = VerificationResult(checked=3)
+        r.enforcement_checked = True
+        r.enforced_actions.add("ec2:RunInstances")
         r.observed_tagged["RunInstances"] = 4       # enforced
         r.observed_tagged["CreateSecurityGroup"] = 1  # observed only
         out = format_report(r, {"A": "1"})
-        assert "Enforced by IAM" in out
+        assert "Enforced by the TEST-ONLY IAM policy" in out
         assert "ec2:RunInstances  (4 create(s) observed)" in out
-        assert "NOT enforced" in out
+        assert "NOT test-enforced" in out
         assert "CreateSecurityGroup  (1)" in out
 
     def test_enforced_actions_with_nothing_seen_are_marked(self):
-        out = format_report(VerificationResult(checked=1), {"A": "1"})
+        r = VerificationResult(checked=1, enforcement_checked=True)
+        r.enforced_actions.add("ec2:RunInstances")
+        out = format_report(r, {"A": "1"})
         assert "(none seen)" in out
+
+    def test_no_policy_means_observational_not_enforced(self):
+        r = VerificationResult(checked=1, enforcement_checked=True)
+        r.observed_tagged["RunInstances"] = 1
+        out = format_report(r, {"A": "1"})
+        assert "Test-only IAM enforcement was not enabled" in out
+        assert "Enforced by the TEST-ONLY IAM policy" not in out
+
+    def test_policy_requires_every_expected_key_per_action(self):
+        policy = {"Statement": [
+            {
+                "Effect": "Deny",
+                "Action": ["ec2:RunInstances"],
+                "Condition": {"Null": {"aws:RequestTag/A": "true"}},
+            },
+            {
+                "Effect": "Deny",
+                "Action": ["ec2:RunInstances"],
+                "Condition": {"Null": {"aws:RequestTag/B": "true"}},
+            },
+            {
+                "Effect": "Deny",
+                "Action": ["ec2:CreateVolume"],
+                "Condition": {"Null": {"aws:RequestTag/A": "true"}},
+            },
+        ]}
+        assert enforced_actions_from_policy(policy, {"A": "1", "B": "2"}) == {
+            "ec2:RunInstances",
+        }
 
 
 class TestEphemeralLoadBalancerReporting:
