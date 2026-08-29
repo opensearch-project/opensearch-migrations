@@ -379,61 +379,85 @@ class TestLoadBalancerDiscovery:
 
 class TestBootstrapNodeRoleRecovery:
     @staticmethod
-    def _resolver_function() -> str:
+    def _script() -> str:
         repo = Path(__file__).parent.parent.parent.parent
-        script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
-        body = script[script.index("resolve_auto_mode_node_role_arn() {"):]
-        return body[:body.index("\n}\n") + 3]
+        return (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
 
-    def test_first_run_keeps_compute_config_role_without_aws_or_kubectl_lookup(self):
+    @classmethod
+    def _role_selection(cls) -> str:
+        body = cls._script()
+        body = body[body.index("configure_tagged_auto_mode_compute() {"):]
+        start = body.index('  if [[ -z "$node_role_arn"')
+        end = body.index('\n\n  echo "  Node role:', start)
+        return body[start:end]
+
+    def test_first_run_uses_compute_config_arn_and_ensures_access(self):
         harness = """
 set -euo pipefail
 AUTO_MODE_TAGGED_NODE_CLASS=migrations-tagged
 KUBE_CONTEXT=ctx
+node_role_arn=arn:aws:iam::123456789012:role/path/AutoNodeRole
+node_role_name=
 kubectl() { echo "unexpected kubectl call" >&2; return 99; }
-aws() { echo "unexpected aws call" >&2; return 99; }
-""" + self._resolver_function() + """
-resolve_auto_mode_node_role_arn arn:aws:iam::123456789012:role/AutoNodeRole
+ensure_auto_node_access_entry() { ensured_arn="$1"; }
+""" + self._role_selection() + """
+printf '%s|%s' "$node_role_name" "$ensured_arn"
 """
         completed = subprocess.run(
             ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
         assert completed.returncode == 0
-        assert completed.stdout == "arn:aws:iam::123456789012:role/AutoNodeRole"
+        assert completed.stdout == (
+            "AutoNodeRole|arn:aws:iam::123456789012:role/path/AutoNodeRole")
         assert "unexpected" not in completed.stderr
 
-    def test_rerun_recovers_role_arn_from_existing_tagged_nodeclass(self):
+    def test_rerun_reuses_nodeclass_role_without_iam_or_access_lookup(self):
         harness = """
 set -euo pipefail
 AUTO_MODE_TAGGED_NODE_CLASS=migrations-tagged
 KUBE_CONTEXT=ctx
+node_role_arn=NONE
+node_role_name=
 kubectl() {
   [[ "$1" == "--context=ctx" && "$2" == "get" &&
      "$3" == "nodeclass" && "$4" == "migrations-tagged" ]]
   printf '%s' ExistingNodeRole
 }
-aws() {
-  [[ "$1" == "iam" && "$2" == "get-role" &&
-     "$3" == "--role-name" && "$4" == "ExistingNodeRole" ]]
-  printf '%s' arn:aws:iam::123456789012:role/ExistingNodeRole
-}
-""" + self._resolver_function() + """
-resolve_auto_mode_node_role_arn NONE
+ensure_auto_node_access_entry() { echo "unexpected access lookup" >&2; return 99; }
+""" + self._role_selection() + """
+printf '%s' "$node_role_name"
 """
         completed = subprocess.run(
             ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
         assert completed.returncode == 0
-        assert completed.stdout == "arn:aws:iam::123456789012:role/ExistingNodeRole"
-        assert "Recovered node role from existing NodeClass migrations-tagged" in completed.stderr
+        assert completed.stdout.endswith("ExistingNodeRole")
+        assert "Reusing node role from existing NodeClass migrations-tagged" in completed.stdout
+        assert "unexpected" not in completed.stderr
 
-    def test_configure_uses_recovery_before_rejecting_an_empty_compute_role(self):
+    def test_rerun_path_does_not_resolve_the_role_through_iam(self):
+        script = self._script()
+        assert "resolve_auto_mode_node_role_arn" not in script
+        assert "aws iam get-role" not in script
+
+
+class TestBootstrapTagYaml:
+    def test_shared_renderer_quotes_keys_and_values(self):
         repo = Path(__file__).parent.parent.parent.parent
         script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
-        body = script[script.index("configure_tagged_auto_mode_compute() {"):]
-        body = body[:body.index("\n}\n")]
-        recovery = 'node_role_arn=$(resolve_auto_mode_node_role_arn "$node_role_arn")'
-        rejection = 'if [[ -z "$node_role_arn"'
-        assert recovery in body
-        assert body.index(recovery) < body.index(rejection)
+        body = script[script.index("emit_resource_tags_yaml() {"):]
+        function = body[:body.index("\n}\n") + 3]
+        harness = """
+set -euo pipefail
+tag_keys=("owner/team" "Cost Center")
+tag_values=("migration dev" "1234")
+""" + function + """
+emit_resource_tags_yaml
+"""
+        completed = subprocess.run(
+            ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
+        assert completed.returncode == 0
+        assert completed.stdout == (
+            '    "owner/team": "migration dev"\n'
+            '    "Cost Center": "1234"\n')
 
 
 class TestEnforcementReport:

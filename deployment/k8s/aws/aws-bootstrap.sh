@@ -999,6 +999,14 @@ if [[ ${#tag_keys[@]} -eq 0 && -n "$cfn_stack_name" ]]; then
   fi
 fi
 
+emit_resource_tags_yaml() {
+  local i
+  for i in "${!tag_keys[@]}"; do
+    # Quote both sides: keys routinely contain '.', '/' and ':', and values may contain spaces.
+    printf '    "%s": "%s"\n' "${tag_keys[$i]}" "${tag_values[$i]}"
+  done
+}
+
 # Write the tags into a Helm values file. The chart uses them for the StorageClass's
 # tagSpecification parameters and for load balancer annotations, and needs nodeClassName so its
 # NodePools bind to the NodeClass created below rather than to "default".
@@ -1009,11 +1017,7 @@ emit_tag_helm_values() {
     echo "aws:"
     echo "  nodeClassName: \"${auto_mode_node_class}\""
     echo "  resourceTags:"
-    local i
-    for i in "${!tag_keys[@]}"; do
-      # Quote both sides: keys routinely contain '.', '/' and ':', and values may contain spaces.
-      printf '    "%s": "%s"\n' "${tag_keys[$i]}" "${tag_values[$i]}"
-    done
+    emit_resource_tags_yaml
   } > "$values_file"
   printf '%s' "$values_file"
 }
@@ -1103,13 +1107,16 @@ enforce_tags_on_cluster_role_for_tests() {
   # a create carrying one tag but not another would pass. Deny statements are OR-ed instead, so a
   # separate statement per key is what makes each key independently mandatory.
   # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_multi-value-conditions.html
-  local stmts=()
+  local statements=""
+  local statement_count=0
   for i in "${!group_sids[@]}"; do
     for j in "${!tag_keys[@]}"; do
       key="${tag_keys[$j]}"
       # Sids permit only alphanumerics, and tag keys may contain dots or slashes.
       sid="Deny${group_sids[$i]}$(printf '%s' "$key" | tr -cd '[:alnum:]')"
-      stmts+=("{\"Sid\":\"${sid}\",\"Effect\":\"Deny\",\"Action\":[${group_actions[$i]}],\"Resource\":[${group_resources[$i]}],\"Condition\":{\"Null\":{\"aws:RequestTag/${key}\":\"true\"}}}")
+      [[ -n "$statements" ]] && statements+=","
+      statements+="{\"Sid\":\"${sid}\",\"Effect\":\"Deny\",\"Action\":[${group_actions[$i]}],\"Resource\":[${group_resources[$i]}],\"Condition\":{\"Null\":{\"aws:RequestTag/${key}\":\"true\"}}}"
+      statement_count=$((statement_count + 1))
     done
   done
 
@@ -1119,13 +1126,7 @@ enforce_tags_on_cluster_role_for_tests() {
   # exercised with two tags in CI. A sufficiently large tag set can exceed the role's remaining
   # inline-policy quota; in that case put-role-policy fails and the caller must use fewer test tags.
   local policy_document
-  local chunk=""
-  local st
-  for st in "${stmts[@]}"; do
-    [[ -n "$chunk" ]] && chunk+=","
-    chunk+="$st"
-  done
-  policy_document="{\"Version\":\"2012-10-17\",\"Statement\":[${chunk}]}"
+  policy_document="{\"Version\":\"2012-10-17\",\"Statement\":[${statements}]}"
   if [[ ${#policy_document} -gt 10240 ]]; then
     echo "Error: the generated test-only tag-enforcement policy is ${#policy_document} characters," >&2
     echo "  exceeding IAM's 10,240-character aggregate inline-policy quota for a role." >&2
@@ -1134,14 +1135,15 @@ enforce_tags_on_cluster_role_for_tests() {
   fi
 
   echo "  Enforcing tags on create for TESTS on cluster role ${cluster_role_name}:"
-  echo "    ${#stmts[@]} deny statement(s): each of ${#tag_keys[@]} tag key(s) (${tag_keys[*]})"
+  echo "    ${statement_count} deny statement(s): each of ${#tag_keys[@]} tag key(s) (${tag_keys[*]})"
   echo "    required independently on 6 action group(s)."
 
-  # Remove the previous generation first, so a re-run with fewer keys cannot leave stale statements
-  # enforcing a tag that is no longer requested. Only policies this script named are touched.
+  # Remove legacy split-policy parts, but leave the current policy in place until put-role-policy
+  # replaces it so a failed update does not create an avoidable enforcement gap.
   local stale
   for stale in $(aws iam list-role-policies --role-name "$cluster_role_name" \
       --query "PolicyNames[?starts_with(@, '${DENY_POLICY_PREFIX}')]" --output text 2>/dev/null); do
+    [[ "$stale" == "$DENY_POLICY_NAME" ]] && continue
     aws iam delete-role-policy --role-name "$cluster_role_name" --policy-name "$stale" >/dev/null \
       2>&1 || true
   done
@@ -1183,35 +1185,6 @@ ensure_auto_node_access_entry() {
     --region "${AWS_CFN_REGION}" >/dev/null 2>&1 || true
 }
 
-# The first tagged run gets the node role from EKS computeConfig. Disabling every built-in NodePool
-# deliberately clears that field, because EKS rejects nodeRoleArn alongside nodePools: []. On a
-# re-run the role still exists on the custom NodeClass, so recover its name there and resolve the ARN
-# through IAM instead of treating the already-configured cluster as if Auto Mode were unavailable.
-resolve_auto_mode_node_role_arn() {
-  local node_role_arn="$1"
-  local existing_role_name
-  if [[ -n "$node_role_arn" && "$node_role_arn" != "NONE" && "$node_role_arn" != "None" ]]; then
-    printf '%s' "$node_role_arn"
-    return 0
-  fi
-
-  existing_role_name=$(kubectl --context="${KUBE_CONTEXT}" \
-    get nodeclass "${AUTO_MODE_TAGGED_NODE_CLASS}" \
-    -o jsonpath='{.spec.role}' 2>/dev/null || true)
-  if [[ -z "$existing_role_name" ]]; then
-    printf '%s' "$node_role_arn"
-    return 0
-  fi
-
-  node_role_arn=$(aws iam get-role \
-    --role-name "$existing_role_name" \
-    --query 'Role.Arn' --output text 2>/dev/null || true)
-  if [[ -n "$node_role_arn" && "$node_role_arn" != "None" ]]; then
-    echo "  Recovered node role from existing NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS}." >&2
-  fi
-  printf '%s' "$node_role_arn"
-}
-
 configure_tagged_auto_mode_compute() {
   echo ""
   echo "Configuring EKS Auto Mode to tag the resources it creates..."
@@ -1225,26 +1198,35 @@ configure_tagged_auto_mode_compute() {
     --output text)
   IFS='|' read -r node_role_arn cluster_sg subnet_ids_text builtin_pools <<< "$described"
   subnet_ids_text="${subnet_ids_text//,/ }"
-  node_role_arn=$(resolve_auto_mode_node_role_arn "$node_role_arn")
 
-  if [[ -z "$node_role_arn" || "$node_role_arn" == "NONE" || "$node_role_arn" == "None" ]]; then
-    echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no Auto Mode node role in computeConfig" >&2
-    echo "  and no usable role could be recovered from NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS}." >&2
-    echo "  --tags can only propagate to nodes on an EKS Auto Mode cluster." >&2
-    exit 1
-  fi
   if [[ -z "$subnet_ids_text" || -z "$cluster_sg" || "$cluster_sg" == "NONE" ]]; then
     echo "Error: could not read subnets / cluster security group from ${MIGRATIONS_EKS_CLUSTER_NAME}." >&2
     exit 1
   fi
-  # NodeClass takes the role *name*, not the ARN. Roles may carry a path, so take the last segment.
-  node_role_name="${node_role_arn##*/}"
+  if [[ -z "$node_role_arn" || "$node_role_arn" == "NONE" || "$node_role_arn" == "None" ]]; then
+    # A successful first run created the access entry before disabling the built-in NodePools.
+    # That update clears computeConfig.nodeRoleArn, so on a re-run only the role name remains on
+    # the custom NodeClass. Reuse it directly; no IAM lookup or access-entry reconciliation is
+    # needed for state this script has already established.
+    node_role_name=$(kubectl --context="${KUBE_CONTEXT}" \
+      get nodeclass "${AUTO_MODE_TAGGED_NODE_CLASS}" \
+      -o jsonpath='{.spec.role}' 2>/dev/null || true)
+    if [[ -z "$node_role_name" ]]; then
+      echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no Auto Mode node role in computeConfig" >&2
+      echo "  and NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS} does not contain one." >&2
+      echo "  --tags can only propagate to nodes on an EKS Auto Mode cluster." >&2
+      exit 1
+    fi
+    echo "  Reusing node role from existing NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS}."
+  else
+    # NodeClass takes the role *name*, not the ARN. Roles may carry a path, so take the last segment.
+    node_role_name="${node_role_arn##*/}"
+    ensure_auto_node_access_entry "$node_role_arn"
+  fi
 
   echo "  Node role:       $node_role_name"
   echo "  Subnets:         $subnet_ids_text"
   echo "  Security group:  $cluster_sg"
-
-  ensure_auto_node_access_entry "$node_role_arn"
 
   if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
     enforce_tags_on_cluster_role_for_tests
@@ -1257,20 +1239,9 @@ configure_tagged_auto_mode_compute() {
   # Only two parts of the manifest need building: one subnet term per cluster subnet, and one line
   # per --tags entry. Both are assembled first so the YAML itself can be a heredoc and stay readable
   # as YAML rather than as a wall of quoted echo lines.
-  local manifest subnet_terms tag_lines sid i
-  subnet_terms=""
-  for sid in $subnet_ids_text; do
-    subnet_terms+="    - id: ${sid}"$'\n'
-  done
-  tag_lines=""
-  for i in "${!tag_keys[@]}"; do
-    tag_lines+=$(printf '    "%s": "%s"' "${tag_keys[$i]}" "${tag_values[$i]}")$'\n'
-  done
-  # Trim the trailing newline here, not in the heredoc: a heredoc performs parameter expansion but
-  # not ANSI-C quoting, so ${var%$'\n'} inside one matches the literal characters $'\n' and strips
-  # nothing, leaving a blank line in the YAML.
-  subnet_terms="${subnet_terms%$'\n'}"
-  tag_lines="${tag_lines%$'\n'}"
+  local manifest subnet_terms tag_lines sid
+  subnet_terms=$(for sid in $subnet_ids_text; do printf '    - id: %s\n' "$sid"; done)
+  tag_lines=$(emit_resource_tags_yaml)
 
   # The bootstrap pool is deliberately small: it only has to hold whatever the chart's own pools do
   # not claim (pre-install hook Jobs, add-on pods). The chart's general-work-pool outranks it at
@@ -1375,37 +1346,37 @@ if [[ ${#tag_keys[@]} -gt 0 ]]; then
   fi
 fi
 
-# Check if general-purpose pool is disabled and re-enable if needed for installation
-# Skip this if building images locally, since we'll pre-create general-work-pool
-# Also skip when --tags is in play: the built-in pools were just disabled on purpose, because
-# their nodes cannot carry tags, and the bootstrap NodePool above covers scheduling instead.
-CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
-  --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
-if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]] && [[ ${#tag_keys[@]} -eq 0 ]]; then
-  echo "general-purpose nodepool is currently disabled."
-  echo "Re-enabling it temporarily to allow pod scheduling during installation..."
-  NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
-    --query 'cluster.computeConfig.nodeRoleArn' --output text)
-  # A cluster previously bootstrapped with --tags has no compute-level node role, because EKS
-  # requires nodeRoleArn to be empty when nodePools is. Re-enabling a built-in pool needs one back,
-  # and EKS reports that as a confusing parameter error, so explain the situation instead.
-  if [[ -z "$NODE_ROLE_ARN" || "$NODE_ROLE_ARN" == "None" ]]; then
-    echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no computeConfig.nodeRoleArn, so the" >&2
-    echo "  built-in NodePools cannot be re-enabled. This is what --tags leaves behind: its nodes" >&2
-    echo "  come from a custom NodeClass instead. Re-run with --tags to keep using that path." >&2
-    exit 1
-  fi
-  aws eks update-cluster-config \
-    --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-    --region "${AWS_CFN_REGION}" \
-    --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
-    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
-    --storage-config '{"blockStorage":{"enabled": true}}'
-  echo "Waiting for cluster update to complete..."
-  aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
-  echo "general-purpose nodepool re-enabled"
-  if [[ "$disable_general_purpose_pool" == "true" ]]; then
-    echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+# Check if general-purpose pool is disabled and re-enable if needed for installation. The tagged
+# path already created its replacement pool, so it needs neither this check nor another API call.
+if [[ ${#tag_keys[@]} -eq 0 ]]; then
+  CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
+  if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]; then
+    echo "general-purpose nodepool is currently disabled."
+    echo "Re-enabling it temporarily to allow pod scheduling during installation..."
+    NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+      --query 'cluster.computeConfig.nodeRoleArn' --output text)
+    # A cluster previously bootstrapped with --tags has no compute-level node role, because EKS
+    # requires nodeRoleArn to be empty when nodePools is. Re-enabling a built-in pool needs one back,
+    # and EKS reports that as a confusing parameter error, so explain the situation instead.
+    if [[ -z "$NODE_ROLE_ARN" || "$NODE_ROLE_ARN" == "None" ]]; then
+      echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no computeConfig.nodeRoleArn, so the" >&2
+      echo "  built-in NodePools cannot be re-enabled. This is what --tags leaves behind: its nodes" >&2
+      echo "  come from a custom NodeClass instead. Re-run with --tags to keep using that path." >&2
+      exit 1
+    fi
+    aws eks update-cluster-config \
+      --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
+      --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
+      --storage-config '{"blockStorage":{"enabled": true}}'
+    echo "Waiting for cluster update to complete..."
+    aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
+    echo "general-purpose nodepool re-enabled"
+    if [[ "$disable_general_purpose_pool" == "true" ]]; then
+      echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+    fi
   fi
 fi
 
