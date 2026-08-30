@@ -501,6 +501,16 @@ async function preflightResource(
 
     const candidate = candidateForAdmission(resource, existing, namespace);
     const plannedAction = deploymentAction(resource, existing);
+    const currentConfigChecksum = typeof existing?.status?.configChecksum === "string"
+        ? existing.status.configChecksum
+        : undefined;
+    if (
+        existing
+        && resource.desiredConfigChecksum
+        && currentConfigChecksum === resource.desiredConfigChecksum
+    ) {
+        return {issues: []};
+    }
     try {
         await client.dryRun(candidate, existing !== undefined);
         return {

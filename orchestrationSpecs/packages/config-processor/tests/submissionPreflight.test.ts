@@ -239,6 +239,7 @@ describe("submission preflight", () => {
             ...impossibleResource,
             desiredConfigChecksum: "same-checksum",
         };
+        const dryRun = jest.fn(async () => undefined);
         const client: SubmissionAdmissionClient = {
             read: async () => ({
                 ...resource.manifest,
@@ -251,7 +252,7 @@ describe("submission preflight", () => {
                     configChecksum: "same-checksum",
                 },
             }),
-            dryRun: async () => undefined,
+            dryRun,
         };
 
         const report = await preflightSubmissionResources(
@@ -260,6 +261,8 @@ describe("submission preflight", () => {
         );
 
         expect(report.deploymentActions).toEqual([]);
+        expect(report.issues).toEqual([]);
+        expect(dryRun).not.toHaveBeenCalled();
     });
 
     it("blocks a proven impossible update and returns a structured reset target", async () => {

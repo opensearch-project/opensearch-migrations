@@ -173,6 +173,24 @@ describe("resolved migration resources", () => {
             .toBe("broker-b:9092");
     });
 
+    it("isolates replay speed changes from snapshot resources", async () => {
+        const before = await transformAndResolve(sampleConfig());
+        const afterConfig = sampleConfig();
+        afterConfig.traffic!.replayers!.replay.replayerConfig!.speedupFactor = 12;
+        const after = await transformAndResolve(afterConfig);
+
+        expect(after.workflowConfig.trafficReplays[0].configChecksum)
+            .not.toBe(before.workflowConfig.trafficReplays[0].configChecksum);
+        expect(after.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum)
+            .toBe(before.workflowConfig.snapshots[0].createSnapshotConfig[0].configChecksum);
+        expect(after.workflowConfig.snapshotMigrations[0].configChecksum)
+            .toBe(before.workflowConfig.snapshotMigrations[0].configChecksum);
+        expect(after.singleResource("DataSnapshot").parameters)
+            .toEqual(before.singleResource("DataSnapshot").parameters);
+        expect(after.singleResource("SnapshotMigration").parameters)
+            .toEqual(before.singleResource("SnapshotMigration").parameters);
+    });
+
     it("isolates source auth changes to DataSnapshot resources", async () => {
         const withoutAuth = await transformAndResolve(sampleConfig());
 
@@ -255,6 +273,7 @@ describe("resolved migration resources", () => {
 
         const dataSnapshot = singleResource("DataSnapshot");
         expect(dataSnapshot.parameters.otelTraceCollectorEndpoint).toBe("");
+        expect(dataSnapshot.parameters.solrTopology).toBe("");
 
         const snapshotMigration = singleResource("SnapshotMigration");
         expect(snapshotMigration.parameters.metadataMigrationOtelTraceCollectorEndpoint).toBe("");
@@ -408,7 +427,7 @@ describe("resolved migration resources", () => {
         }));
     });
 
-    it("loosely projects implicit default kafka refs without inventing a missing explicit cluster", async () => {
+    it("loosely projects a referenced implicit default kafka cluster as an effective resource", async () => {
         const config = sampleConfig();
         (config as any).traffic.kafkaClusters = {
             kafka: {autoCreate: {}},
@@ -419,15 +438,13 @@ describe("resolved migration resources", () => {
         const topic = resolved.resources.find(resource =>
             resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic");
 
-        expect(resolved.projectionComplete).toBe(false);
-        expect(kafkaClusters.map(resource => resource.name)).toEqual(["kafka"]);
+        expect(resolved.projectionComplete).toBe(true);
+        expect(kafkaClusters.map(resource => resource.name)).toEqual([
+            "kafka",
+            "default",
+        ]);
         expect(topic?.parameters.kafkaClusterName).toBe("default");
-        expect(topic?.diagnostics).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                path: ["traffic", "proxies", "source-proxy", "kafka"],
-                message: expect.stringContaining("unknown kafka cluster 'default'"),
-            }),
-        ]));
+        expect(topic?.diagnostics).toBeUndefined();
     });
 
     it("dry-runs VAP-style decisions for safe, gated, impossible, and invariant changes", () => {
