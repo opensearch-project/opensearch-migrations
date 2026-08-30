@@ -24,7 +24,6 @@ export const server = setupServer(
         state: "unsupported",
         summary: "Resource-specific runtime status is not implemented yet.",
         source: "not available",
-        details: [],
       }],
     }),
   ),

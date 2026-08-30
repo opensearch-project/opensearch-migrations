@@ -10,7 +10,7 @@ import signal
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 from kubernetes.client.rest import ApiException
 
@@ -35,13 +35,56 @@ class ConsoleCommandResult:
 
 
 @dataclass(frozen=True)
+class RuntimeStatusMetric:
+    key: str
+    label: str
+    value: Union[str, int, float, bool]
+    unit: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RuntimeStatusMetrics:
+    metrics: Tuple[RuntimeStatusMetric, ...]
+
+
+@dataclass(frozen=True)
+class RuntimeStatusNameList:
+    items: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RuntimeStatusTopicPartition:
+    topic: str
+    partition: int
+    records: int
+
+
+@dataclass(frozen=True)
+class RuntimeStatusTopicPartitions:
+    partitions: Tuple[RuntimeStatusTopicPartition, ...]
+
+
+@dataclass(frozen=True)
+class RuntimeStatusText:
+    lines: Tuple[str, ...]
+
+
+RuntimeStatusContent = Union[
+    RuntimeStatusMetrics,
+    RuntimeStatusNameList,
+    RuntimeStatusTopicPartitions,
+    RuntimeStatusText,
+]
+
+
+@dataclass(frozen=True)
 class RuntimeStatusSection:
     key: str
     title: str
     state: str
     summary: str
     source: str
-    details: Tuple[str, ...] = ()
+    content: Optional[RuntimeStatusContent] = None
 
 
 @dataclass(frozen=True)
@@ -248,7 +291,7 @@ class RuntimeStatusService:
             state=_phase_state(phase),
             summary=headline,
             source="console snapshot status watcher",
-            details=_status_details(creation),
+            content=_status_metrics(creation),
         )
 
     def _backfill_section(
@@ -285,7 +328,7 @@ class RuntimeStatusService:
             state=_phase_state(phase),
             summary=headline,
             source="console backfill status --deep-check watcher",
-            details=_status_details(backfill),
+            content=_status_metrics(backfill),
         )
 
     def _kafka_cluster_sections(
@@ -298,24 +341,27 @@ class RuntimeStatusService:
                 "Kafka topics",
                 ["kafka", "list-topics", "--kafka", cluster_name],
                 "console kafka list-topics",
+                "topic",
             ),
             (
                 "consumer-groups",
                 "Kafka consumer groups",
                 ["kafka", "list-consumer-groups", "--kafka", cluster_name],
                 "console kafka list-consumer-groups",
+                "consumer group",
             ),
         )
         with ThreadPoolExecutor(max_workers=len(checks)) as executor:
             futures = [
                 executor.submit(
-                    self._console_section,
+                    self._name_list_section,
                     key,
                     title,
                     command,
                     source,
+                    item_label,
                 )
-                for key, title, command, source in checks
+                for key, title, command, source, item_label in checks
             ]
             return tuple(future.result() for future in futures)
 
@@ -334,50 +380,71 @@ class RuntimeStatusService:
                 summary="The Kafka topic name is not available yet.",
                 source="console kafka describe-topic-records",
             )
-        return self._console_section(
-            "topic-records",
-            "Captured topic records",
-            [
-                "kafka",
-                "describe-topic-records",
-                "--kafka",
-                cluster,
-                str(topic),
-            ],
-            "console kafka describe-topic-records",
+        result = self.console_runner.run([
+            "kafka",
+            "describe-topic-records",
+            "--kafka",
+            cluster,
+            str(topic),
+        ])
+        if not result.success:
+            return _command_error_section(
+                "topic-records",
+                "Captured topic records",
+                "console kafka describe-topic-records",
+                result,
+            )
+        partitions = _topic_partitions(result.output)
+        total_records = sum(item.records for item in partitions)
+        summary = (
+            f"{total_records} record{'' if total_records == 1 else 's'} "
+            f"across {len(partitions)} "
+            f"partition{'' if len(partitions) == 1 else 's'}."
+            if partitions
+            else "No topic partitions were reported."
+        )
+        return RuntimeStatusSection(
+            key="topic-records",
+            title="Captured topic records",
+            state="ok",
+            summary=summary,
+            source="console kafka describe-topic-records",
+            content=(
+                RuntimeStatusTopicPartitions(partitions)
+                if partitions
+                else _text_content(result.output)
+            ),
         )
 
-    def _console_section(
+    def _name_list_section(
         self,
         key: str,
         title: str,
         command: Sequence[str],
         source: str,
+        item_label: str,
     ) -> RuntimeStatusSection:
         result = self.console_runner.run(command)
-        details = _detail_lines(result.output)
-        if result.success:
-            return RuntimeStatusSection(
-                key=key,
-                title=title,
-                state="ok",
-                summary=(
-                    f"{len(details)} result line"
-                    f"{'' if len(details) == 1 else 's'}."
-                    if details
-                    else "The command completed with no results."
-                ),
-                source=source,
-                details=details,
+        if not result.success:
+            return _command_error_section(
+                key,
+                title,
+                source,
+                result,
             )
-        error = result.error or result.output or "The status command failed."
+        items = _detail_lines(result.output)
         return RuntimeStatusSection(
             key=key,
             title=title,
-            state="error",
-            summary=error.splitlines()[-1],
+            state="ok",
+            summary=(
+                f"{len(items)} {item_label}"
+                f"{'' if len(items) == 1 else 's'}."
+                if items
+                else f"No {item_label}s were reported."
+            ),
             source=source,
-            details=details,
+            content=RuntimeStatusNameList(items),
         )
 
     @staticmethod
@@ -395,6 +462,84 @@ class RuntimeStatusService:
         )
 
 
+def _command_error_section(
+    key: str,
+    title: str,
+    source: str,
+    result: ConsoleCommandResult,
+) -> RuntimeStatusSection:
+    error = result.error or result.output or "The status command failed."
+    return RuntimeStatusSection(
+        key=key,
+        title=title,
+        state="error",
+        summary=error.splitlines()[-1],
+        source=source,
+        content=_text_content(result.output),
+    )
+
+
+def _text_content(value: str) -> Optional[RuntimeStatusText]:
+    lines = _detail_lines(value)
+    return RuntimeStatusText(lines) if lines else None
+
+
+def _topic_partitions(
+    value: str,
+) -> Tuple[RuntimeStatusTopicPartition, ...]:
+    partitions = []
+    for line in _detail_lines(value):
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        try:
+            partition = int(fields[-2])
+            records = int(fields[-1])
+        except ValueError:
+            continue
+        partitions.append(RuntimeStatusTopicPartition(
+            topic=" ".join(fields[:-2]),
+            partition=partition,
+            records=records,
+        ))
+    return tuple(partitions)
+
+
+def _status_metrics(
+    status: Mapping[str, Any],
+) -> Optional[RuntimeStatusMetrics]:
+    metrics = []
+    phase = status.get("phase")
+    if phase:
+        metrics.append(RuntimeStatusMetric(
+            key="phase",
+            label="Phase",
+            value=str(phase),
+        ))
+    for key, value in (status.get("summary") or {}).items():
+        if value is not None:
+            metrics.append(RuntimeStatusMetric(
+                key=key,
+                label=_humanize(key),
+                value=_metric_value(value),
+                unit="percent" if key == "percentageCompleted" else None,
+            ))
+    updated_at = status.get("updatedAt")
+    if updated_at:
+        metrics.append(RuntimeStatusMetric(
+            key="updatedAt",
+            label="Updated at",
+            value=str(updated_at),
+        ))
+    return RuntimeStatusMetrics(tuple(metrics)) if metrics else None
+
+
+def _metric_value(value: Any) -> Union[str, int, float, bool]:
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def _phase_state(phase: str) -> str:
     normalized = phase.lower()
     if normalized in {"completed", "succeeded", "ready"}:
@@ -404,20 +549,6 @@ def _phase_state(phase: str) -> str:
     if normalized in {"running", "starting", "terminating"}:
         return "running"
     return "pending"
-
-
-def _status_details(status: Mapping[str, Any]) -> Tuple[str, ...]:
-    details = []
-    phase = status.get("phase")
-    if phase:
-        details.append(f"Phase: {phase}")
-    for key, value in (status.get("summary") or {}).items():
-        if value is not None:
-            details.append(f"{_humanize(key)}: {value}")
-    updated_at = status.get("updatedAt")
-    if updated_at:
-        details.append(f"Updated at: {updated_at}")
-    return tuple(details)
 
 
 def _humanize(value: str) -> str:

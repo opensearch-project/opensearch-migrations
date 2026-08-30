@@ -4,7 +4,10 @@ import threading
 
 from console_link.workflow.application.runtime_status import (
     ConsoleCommandResult,
+    RuntimeStatusMetrics,
+    RuntimeStatusNameList,
     RuntimeStatusService,
+    RuntimeStatusTopicPartitions,
 )
 
 
@@ -65,7 +68,16 @@ def test_snapshot_status_uses_canonical_console_watcher_result():
     assert result.poll_after_ms == 10_000
     assert result.sections[0].state == "running"
     assert result.sections[0].source == "console snapshot status watcher"
-    assert "Shards total: 8" in result.sections[0].details
+    assert isinstance(result.sections[0].content, RuntimeStatusMetrics)
+    assert {
+        metric.key: metric.value
+        for metric in result.sections[0].content.metrics
+    } == {
+        "phase": "Running",
+        "shardsSuccessful": 4,
+        "shardsTotal": 8,
+        "updatedAt": "2026-08-30T13:59:00Z",
+    }
 
 
 def test_backfill_status_uses_deep_check_watcher_result():
@@ -118,7 +130,11 @@ def test_kafka_cluster_runs_bounded_inventory_commands():
         ("kafka", "list-consumer-groups", "--kafka", "default"),
     }
     assert [section.state for section in result.sections] == ["ok", "ok"]
-    assert result.sections[0].details == ("capture", "__consumer_offsets")
+    assert result.sections[0].summary == "2 topics."
+    assert result.sections[0].content == RuntimeStatusNameList((
+        "capture",
+        "__consumer_offsets",
+    ))
 
 
 def test_captured_traffic_checks_the_exact_topic():
@@ -151,7 +167,16 @@ def test_captured_traffic_checks_the_exact_topic():
     )
 
     assert console.calls == [list(command)]
-    assert result.sections[0].details[-1] == "capture 0 125"
+    assert result.sections[0].summary == "125 records across 1 partition."
+    content = result.sections[0].content
+    assert isinstance(content, RuntimeStatusTopicPartitions)
+    assert len(content.partitions) == 1
+    partition = content.partitions[0]
+    assert (partition.topic, partition.partition, partition.records) == (
+        "capture",
+        0,
+        125,
+    )
 
 
 def test_proxy_and_replayer_return_explicit_placeholders():

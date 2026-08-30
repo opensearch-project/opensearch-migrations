@@ -18,6 +18,7 @@ import type {
   ManageNode,
   ManageRelationship,
   Operation,
+  RuntimeStatus,
 } from "../../api/client";
 import { getRuntimeStatus } from "../../api/client";
 import { OutputPanel } from "../output/OutputPanel";
@@ -51,6 +52,79 @@ function observedTime(value: string): string {
       minute: "2-digit",
       second: "2-digit",
     });
+}
+
+
+type RuntimeStatusContentValue = NonNullable<
+  RuntimeStatus["sections"][number]["content"]
+>;
+
+
+function metricValue(
+  metric: Extract<
+    RuntimeStatusContentValue,
+    { kind: "metrics" }
+  >["metrics"][number],
+): string {
+  const value = String(metric.value);
+  return metric.unit === "percent" ? `${value}%` : value;
+}
+
+
+function RuntimeStatusContent({
+  content,
+  title,
+}: Readonly<{
+  content: RuntimeStatusContentValue;
+  title: string;
+}>) {
+  if (content.kind === "metrics") {
+    return (
+      <dl className="runtime-status-metrics">
+        {content.metrics.map((metric) => (
+          <div key={metric.key}>
+            <dt>{metric.label}</dt>
+            <dd>{metricValue(metric)}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  if (content.kind === "name-list") {
+    return (
+      <ul aria-label={`${title} values`} className="runtime-status-names">
+        {content.items.map((item) => (
+          <li key={item}><code>{item}</code></li>
+        ))}
+      </ul>
+    );
+  }
+  if (content.kind === "topic-partitions") {
+    return (
+      <table className="runtime-status-table">
+        <caption>{title}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Topic</th>
+            <th scope="col">Partition</th>
+            <th scope="col">Records</th>
+          </tr>
+        </thead>
+        <tbody>
+          {content.partitions.map((partition) => (
+            <tr key={`${partition.topic}-${partition.partition}`}>
+              <td><code>{partition.topic}</code></td>
+              <td>{partition.partition}</td>
+              <td>{partition.records.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+  return (
+    <pre className="runtime-status-text">{content.lines.join("\n")}</pre>
+  );
 }
 
 
@@ -126,12 +200,11 @@ function RuntimeStatusPanel({ node }: Readonly<{ node: ManageNode }>) {
           <div>
             <strong>{section.title}</strong>
             <p>{section.summary}</p>
-            {(section.details?.length ?? 0) > 0 ? (
-              <ul>
-                {section.details?.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
+            {section.content ? (
+              <RuntimeStatusContent
+                content={section.content}
+                title={section.title}
+              />
             ) : null}
             <small>{section.source}</small>
           </div>

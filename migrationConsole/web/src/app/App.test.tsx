@@ -480,17 +480,56 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
           nodeId: params.nodeId,
           observedAt: "2026-08-30T14:00:00Z",
           pollAfterMs: null,
-          sections: [{
-            key: "snapshot",
-            title: "Snapshot progress",
-            state: "running",
-            summary: "Snapshot is 50% complete",
-            source: "console snapshot status watcher",
-            details: [
-              "Shards successful: 4",
-              "Shards total: 8",
-            ],
-          }],
+          sections: [
+            {
+              key: "snapshot",
+              title: "Snapshot progress",
+              state: "running",
+              summary: "Snapshot is 50% complete",
+              source: "console snapshot status watcher",
+              content: {
+                kind: "metrics",
+                metrics: [
+                  {
+                    key: "shardsSuccessful",
+                    label: "Shards successful",
+                    value: 4,
+                  },
+                  {
+                    key: "shardsTotal",
+                    label: "Shards total",
+                    value: 8,
+                  },
+                ],
+              },
+            },
+            {
+              key: "topics",
+              title: "Kafka topics",
+              state: "ok",
+              summary: "2 topics.",
+              source: "console kafka list-topics",
+              content: {
+                kind: "name-list",
+                items: ["capture", "__consumer_offsets"],
+              },
+            },
+            {
+              key: "topic-records",
+              title: "Captured topic records",
+              state: "ok",
+              summary: "125 records across 1 partition.",
+              source: "console kafka describe-topic-records",
+              content: {
+                kind: "topic-partitions",
+                partitions: [{
+                  topic: "capture",
+                  partition: 0,
+                  records: 125,
+                }],
+              },
+            },
+          ],
         });
       },
     ),
@@ -509,9 +548,20 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
   });
   expect(within(runtime).getByText("Snapshot is 50% complete"))
     .toBeInTheDocument();
-  expect(within(runtime).getByText("Shards successful: 4"))
+  expect(within(runtime).getByText("Shards successful"))
     .toBeInTheDocument();
+  expect(within(runtime).getByText("4")).toBeInTheDocument();
   expect(within(runtime).getByText("console snapshot status watcher"))
+    .toBeInTheDocument();
+  expect(within(runtime).getByRole("list", {
+    name: "Kafka topics values",
+  })).toHaveTextContent("capture");
+  const partitions = within(runtime).getByRole("table", {
+    name: "Captured topic records",
+  });
+  expect(within(partitions).getByRole("columnheader", { name: "Records" }))
+    .toBeInTheDocument();
+  expect(within(partitions).getByRole("cell", { name: "125" }))
     .toBeInTheDocument();
   expect(forceValues).toEqual(["false"]);
 

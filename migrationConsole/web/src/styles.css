@@ -3011,21 +3011,99 @@ button {
   line-height: 17px;
 }
 
-.runtime-status-section ul {
+.runtime-status-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px 14px;
   margin: 6px 0 0;
   padding: 0;
+}
+
+.runtime-status-metrics > div {
+  min-width: 0;
+}
+
+.runtime-status-metrics dt {
   color: var(--text-muted);
   font-size: 10px;
-  line-height: 15px;
+}
+
+.runtime-status-metrics dd {
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.runtime-status-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  margin: 6px 0 0;
+  padding: 0;
   list-style: none;
 }
 
-.runtime-status-section li {
+.runtime-status-names li {
   min-width: 0;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.runtime-status-names code,
+.runtime-status-table code {
   overflow-wrap: anywhere;
+  font-size: inherit;
+}
+
+.runtime-status-table {
+  width: 100%;
+  margin-top: 7px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.runtime-status-table caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.runtime-status-table th,
+.runtime-status-table td {
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.runtime-status-table th {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.runtime-status-table th:nth-child(n + 2),
+.runtime-status-table td:nth-child(n + 2) {
+  text-align: right;
+}
+
+.runtime-status-text {
+  margin: 6px 0 0;
+  padding: 7px 9px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 15px;
+  white-space: pre-wrap;
 }
 
 .runtime-status-section small {

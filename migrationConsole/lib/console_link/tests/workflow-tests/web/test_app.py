@@ -58,6 +58,8 @@ from console_link.workflow.application.resets import (
 )
 from console_link.workflow.application.runtime_status import (
     RuntimeStatus,
+    RuntimeStatusMetric,
+    RuntimeStatusMetrics,
     RuntimeStatusSection,
 )
 from console_link.workflow.web.app import create_app
@@ -355,7 +357,18 @@ class _RuntimeStatus:
                     state="running",
                     summary="Snapshot is 50% complete",
                     source="console snapshot status watcher",
-                    details=("Shards successful: 4", "Shards total: 8"),
+                    content=RuntimeStatusMetrics((
+                        RuntimeStatusMetric(
+                            key="shardsSuccessful",
+                            label="Shards successful",
+                            value=4,
+                        ),
+                        RuntimeStatusMetric(
+                            key="shardsTotal",
+                            label="Shards total",
+                            value=8,
+                        ),
+                    )),
                 ),
             ),
         )
@@ -401,7 +414,21 @@ def test_runtime_status_resolves_the_observed_resource_node(tmp_path):
             "state": "running",
             "summary": "Snapshot is 50% complete",
             "source": "console snapshot status watcher",
-            "details": ["Shards successful: 4", "Shards total: 8"],
+            "content": {
+                "kind": "metrics",
+                "metrics": [
+                    {
+                        "key": "shardsSuccessful",
+                        "label": "Shards successful",
+                        "value": 4,
+                    },
+                    {
+                        "key": "shardsTotal",
+                        "label": "Shards total",
+                        "value": 8,
+                    },
+                ],
+            },
         }],
     }
     assert status.calls == [

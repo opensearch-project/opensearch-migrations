@@ -48,7 +48,17 @@ from ..application.logs import (
     LogTarget,
     LogTargetInventory,
 )
-from ..application.runtime_status import RuntimeStatus, RuntimeStatusSection
+from ..application.runtime_status import (
+    RuntimeStatus,
+    RuntimeStatusContent,
+    RuntimeStatusMetric,
+    RuntimeStatusMetrics,
+    RuntimeStatusNameList,
+    RuntimeStatusSection,
+    RuntimeStatusText,
+    RuntimeStatusTopicPartition,
+    RuntimeStatusTopicPartitions,
+)
 
 
 class WebModel(BaseModel):
@@ -667,13 +677,92 @@ class AdmissionPreflightV1(WebModel):
         )
 
 
+class RuntimeStatusMetricV1(WebModel):
+    key: str
+    label: str
+    value: Union[str, int, float, bool]
+    unit: Optional[str] = None
+
+    @classmethod
+    def from_domain(cls, metric: RuntimeStatusMetric) -> "RuntimeStatusMetricV1":
+        return cls.model_validate(metric.__dict__)
+
+
+class RuntimeStatusMetricsV1(WebModel):
+    kind: Literal["metrics"] = "metrics"
+    metrics: List[RuntimeStatusMetricV1]
+
+
+class RuntimeStatusNameListV1(WebModel):
+    kind: Literal["name-list"] = "name-list"
+    items: List[str]
+
+
+class RuntimeStatusTopicPartitionV1(WebModel):
+    topic: str
+    partition: int
+    records: int
+
+    @classmethod
+    def from_domain(
+        cls,
+        partition: RuntimeStatusTopicPartition,
+    ) -> "RuntimeStatusTopicPartitionV1":
+        return cls.model_validate(partition.__dict__)
+
+
+class RuntimeStatusTopicPartitionsV1(WebModel):
+    kind: Literal["topic-partitions"] = "topic-partitions"
+    partitions: List[RuntimeStatusTopicPartitionV1]
+
+
+class RuntimeStatusTextV1(WebModel):
+    kind: Literal["text"] = "text"
+    lines: List[str]
+
+
+RuntimeStatusContentV1 = Annotated[
+    Union[
+        RuntimeStatusMetricsV1,
+        RuntimeStatusNameListV1,
+        RuntimeStatusTopicPartitionsV1,
+        RuntimeStatusTextV1,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+def _runtime_status_content(
+    content: Optional[RuntimeStatusContent],
+) -> Optional[RuntimeStatusContentV1]:
+    if isinstance(content, RuntimeStatusMetrics):
+        return RuntimeStatusMetricsV1(
+            metrics=[
+                RuntimeStatusMetricV1.from_domain(metric)
+                for metric in content.metrics
+            ],
+        )
+    if isinstance(content, RuntimeStatusNameList):
+        return RuntimeStatusNameListV1(items=list(content.items))
+    if isinstance(content, RuntimeStatusTopicPartitions):
+        return RuntimeStatusTopicPartitionsV1(
+            partitions=[
+                RuntimeStatusTopicPartitionV1.from_domain(partition)
+                for partition in content.partitions
+            ],
+        )
+    if isinstance(content, RuntimeStatusText):
+        return RuntimeStatusTextV1(lines=list(content.lines))
+    return None
+
+
 class RuntimeStatusSectionV1(WebModel):
     key: str
     title: str
     state: Literal["ok", "running", "pending", "error", "unsupported"]
     summary: str
     source: str
-    details: List[str] = Field(default_factory=list)
+    content: Optional[RuntimeStatusContentV1] = None
 
     @classmethod
     def from_domain(
@@ -686,7 +775,7 @@ class RuntimeStatusSectionV1(WebModel):
             state=section.state,
             summary=section.summary,
             source=section.source,
-            details=list(section.details),
+            content=_runtime_status_content(section.content),
         )
 
 
