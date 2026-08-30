@@ -1207,6 +1207,7 @@ test("starts pauses and explicitly stops bounded resource logs", async () => {
 
 test("renders managed logs as a dedicated full-window route", async () => {
   const startRequests: unknown[] = [];
+  const stoppedStreams: string[] = [];
   server.use(
     http.post("*/api/v1/log-streams", async ({ request }) => {
       const startRequest = await request.json() as {
@@ -1249,6 +1250,17 @@ test("renders managed logs as a dedicated full-window route", async () => {
         },
       }, { status: 201 });
     }),
+    http.delete(
+      "*/api/v1/log-streams/:streamId",
+      ({ params }) => {
+        stoppedStreams.push(String(params.streamId));
+        return HttpResponse.json({
+          id: params.streamId,
+          state: "stopped",
+          message: null,
+        });
+      },
+    ),
   );
   window.history.pushState(
     {},
@@ -1286,6 +1298,23 @@ test("renders managed logs as a dedicated full-window route", async () => {
     follow: true,
     pageSize: 500,
   }), { timeout: 5000 });
+
+  const follow = screen.getByRole("checkbox", { name: "Follow" });
+  await userEvent.click(follow);
+  await waitFor(() => expect(stoppedStreams).toContain(
+    "standalone-log-stream",
+  ));
+  expect(follow).not.toBeChecked();
+
+  await userEvent.click(follow);
+  await waitFor(() => expect(startRequests).toHaveLength(3));
+  expect(startRequests.at(-1)).toEqual({
+    targetId: "log-target-all",
+    tailLines: 500,
+    follow: true,
+    pageSize: 500,
+  });
+  expect(follow).toBeChecked();
 
   window.history.replaceState({}, "", "/");
 });

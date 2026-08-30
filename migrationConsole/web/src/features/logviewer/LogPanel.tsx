@@ -228,6 +228,9 @@ export function LogPanel({
     sourceRef.current?.close();
     try {
       const status = await stopLogStream(stream.id);
+      if (streamIdRef.current === stream.id) {
+        streamIdRef.current = null;
+      }
       setStream((current) => (
         current ? { ...current, state: status.state } : current
       ));
@@ -562,7 +565,6 @@ export function LogPanel({
                   } else if (
                     nextFollow
                     && stream
-                    && stream.state !== "following"
                   ) {
                     void start(true);
                   }
