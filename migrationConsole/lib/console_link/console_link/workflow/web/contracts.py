@@ -267,6 +267,9 @@ class ResourceNavigationHintV1(WebModel):
     group_id: str
     group_label: str
     group_order: int
+    parent_group_id: Optional[str] = None
+    parent_group_label: Optional[str] = None
+    parent_group_order: Optional[int] = None
     add_control_id: Optional[str] = None
 
 
@@ -350,6 +353,7 @@ class EditNodeV1(WebModel):
     presence: Optional[Literal["required", "optional"]] = None
     expert: Optional[bool] = None
     essential: Optional[bool] = None
+    implicit: Optional[bool] = None
     description: Optional[str] = None
     required: Optional[bool] = None
     removable: Optional[bool] = None
@@ -366,6 +370,7 @@ class EditNodeV1(WebModel):
     diagnostics: List[EditDiagnosticV1] = Field(default_factory=list)
     collapsed: Optional[bool] = None
     reference_target_id: Optional[str] = None
+    reference_label: Optional[str] = None
     variants: List[EditVariantV1] = Field(default_factory=list)
     command: Optional[EditCommandV1] = None
     children: List["EditNodeV1"] = Field(default_factory=list)
@@ -915,23 +920,33 @@ class LogTargetV1(WebModel):
 
 class LogTargetInventoryV1(WebModel):
     node_id: str
+    subject_label: str
+    subject_kind: str
     capability_target_id: str
     targets: List[LogTargetV1]
     message: Optional[str] = None
+    external_logs_url: Optional[str] = None
 
     @classmethod
     def from_domain(
         cls,
         inventory: LogTargetInventory,
+        *,
+        subject_label: str,
+        subject_kind: str,
+        external_logs_url: Optional[str] = None,
     ) -> "LogTargetInventoryV1":
         return cls(
             node_id=inventory.node_id,
+            subject_label=subject_label,
+            subject_kind=subject_kind,
             capability_target_id=inventory.capability_target_id,
             targets=[
                 LogTargetV1.from_domain(target)
                 for target in inventory.targets
             ],
             message=inventory.message,
+            external_logs_url=external_logs_url,
         )
 
 

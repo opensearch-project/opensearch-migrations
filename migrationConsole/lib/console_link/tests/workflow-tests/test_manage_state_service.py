@@ -4,6 +4,7 @@ import copy
 import json
 from datetime import datetime, timezone
 
+import requests
 from kubernetes.client.rest import ApiException
 
 from console_link.workflow.application.manage_state import ManageStateService
@@ -89,6 +90,41 @@ def test_no_workflow_still_returns_cluster_resources_without_presentation_markup
     assert "[green]" not in serialized
     assert "✓" not in serialized
     assert "▶" not in serialized
+
+
+def test_absent_argo_workflow_is_an_empty_state_not_a_problem():
+    response = requests.Response()
+    response.status_code = 404
+    argo = type("AbsentArgo", (), {
+        "get_workflow": lambda self, _name, _namespace: (
+            (_ for _ in ()).throw(requests.HTTPError(response=response))
+        ),
+    })()
+    service = ManageStateService(
+        namespace="ma",
+        workflow_name="migration",
+        argo_service=argo,
+        resource_loader=lambda _namespace: [],
+    )
+
+    snapshot = service.observe()
+
+    assert snapshot.workflow is None
+    assert snapshot.problems == ()
+
+
+def test_empty_resource_sections_remain_available_for_navigation():
+    snapshot = _service({}).observe()
+
+    assert snapshot.root_ids == (
+        "section:Sources",
+        "section:Targets",
+        "section:Snapshot Migration",
+        "section:Live Traffic Migration",
+    )
+    live_traffic = snapshot.nodes["section:Live Traffic Migration"]
+    assert live_traffic.child_ids == ()
+    assert _capabilities(live_traffic)["edit"].target_id == "edit:traffic"
 
 
 def test_resource_activity_uses_the_latest_status_or_workflow_timestamp():
@@ -595,6 +631,54 @@ def test_saved_resource_removal_has_an_explicit_navigation_summary():
         "pending": False,
     }
     assert source.value_summary == "Removal pending submission"
+
+
+def test_buffer_resources_are_grouped_by_cluster_and_topic():
+    sections = [
+        ResourceSection(
+            name="Live Traffic Migration",
+            groups=[
+                ResourceGroup(
+                    plural="kafkaclusters",
+                    display_name="Buffer",
+                    resources=[
+                        ResourceNode(
+                            name="default",
+                            plural="kafkaclusters",
+                            phase="Ready",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        ),
+                        ResourceNode(
+                            name="capture-topic",
+                            plural="capturedtraffics",
+                            phase="Ready",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+    snapshot = _service({}).build_snapshot(sections)
+
+    buffer = snapshot.nodes["group:Live Traffic Migration:Buffer"]
+    assert buffer.child_ids == (
+        "group:Live Traffic Migration:Buffer:Kafka Clusters",
+        "group:Live Traffic Migration:Buffer:Kafka Topics",
+    )
+    clusters = snapshot.nodes[buffer.child_ids[0]]
+    topics = snapshot.nodes[buffer.child_ids[1]]
+    assert clusters.label == "Kafka Clusters"
+    assert clusters.child_ids == ("resource:kafkaclusters:default",)
+    assert topics.label == "Kafka Topics"
+    assert topics.child_ids == (
+        "resource:capturedtraffics:capture-topic",
+    )
 
 
 def test_deployed_resource_removed_from_pending_config_will_be_orphaned():

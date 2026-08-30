@@ -153,7 +153,12 @@ def test_kubernetes_source_resolves_workflow_step_by_argo_node_annotation():
 
     selections = source.resolve("logs:workflow-step:node-123")
 
-    assert all(selection.pod_name == "wanted" for selection in selections)
+    assert selections[0].kind == "aggregate"
+    assert selections[0].label == "All containers for this step"
+    assert all(
+        selection.pod_name == "wanted"
+        for selection in selections[1:]
+    )
     assert core.selector == "workflows.argoproj.io/workflow=migration"
 
 
@@ -187,6 +192,48 @@ def test_kubernetes_history_decodes_stringified_bytes_from_client():
     assert [record.message for record in records] == [
         "first line",
         "second line",
+    ]
+
+
+def test_kubernetes_history_combines_distinct_log_sources():
+    core = _Core([])
+    source = KubernetesLogSource(
+        namespace="ma",
+        workflow_name="migration",
+        core_api=core,
+        custom_api=_CustomObjects({}),
+    )
+    selections = tuple(
+        LogSelection(
+            kind="container",
+            label=f"{container}-pod / {container}",
+            selector=None,
+            pod_name=f"{container}-pod",
+            pod_uid=f"{container}-uid",
+            container=container,
+            restart_count=0,
+            previous=False,
+        )
+        for container in ("main", "wait")
+    )
+    combined = LogSelection(
+        kind="aggregate",
+        label="All sources",
+        selector=None,
+        pod_name=None,
+        pod_uid=None,
+        container=None,
+        restart_count=None,
+        previous=False,
+        members=selections,
+    )
+
+    records = source.history(combined, 20)
+
+    assert {record.container for record in records} == {"main", "wait"}
+    assert [request["container"] for request in core.log_requests] == [
+        "main",
+        "wait",
     ]
 
 
@@ -283,3 +330,26 @@ def test_log_stream_pages_are_bounded_cursor_based_and_cancellable():
     assert stopped.state == "stopped"
     assert source.follow_stopped is True
     service.shutdown()
+
+
+def test_log_stream_service_issues_composite_target_from_opaque_targets():
+    source = _Source()
+    service = LogStreamService(source)
+    first = service.list_targets(
+        "resource:captureproxies:p2",
+        "logs:captureproxies:p2",
+    ).targets[0]
+    second = service.list_targets(
+        "resource:captureproxies:p2",
+        "logs:captureproxies:p2",
+    ).targets[0]
+
+    combined = service.combine_targets(
+        (first.id, second.id),
+        label="All sources",
+    )
+
+    assert combined.label == "All sources"
+    assert combined.kind == "aggregate"
+    assert combined.supports_follow is True
+    assert combined.id not in {first.id, second.id}

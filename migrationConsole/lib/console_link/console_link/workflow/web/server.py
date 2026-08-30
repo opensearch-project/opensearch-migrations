@@ -1,9 +1,12 @@
 """Production ASGI runner for the native workflow manage application."""
 
 import argparse
+import os
 from pathlib import Path
 from typing import Optional, Sequence
+from urllib.parse import quote
 
+import requests
 import uvicorn
 
 from ..application.manage_state import ManageStateService
@@ -14,6 +17,7 @@ from ..application.logs import KubernetesLogSource, LogStreamService
 from ..application.operations import OperationManager
 from ..application.actions import ApprovalService
 from ..application.resets import ResetService
+from ..commands.argo_utils import DEFAULT_ARGO_SERVER_URL
 from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from ..models.secret_store import SecretStore
 from ..models.workflow_config_store import WorkflowConfigStore
@@ -23,6 +27,42 @@ from ..services.config_edit_service import ConfigEditService
 from ..services.script_runner import ScriptRunner
 from .app import create_app
 from .kubernetes import pin_kubernetes_runtime
+
+
+def cloudwatch_log_group_url(
+    region: Optional[str],
+    log_group: Optional[str],
+) -> Optional[str]:
+    """Build a console deep link only for explicitly configured log storage."""
+    if not region or not log_group:
+        return None
+    encoded_group = quote(log_group, safe="").replace("%", "$25")
+    return (
+        "https://console.aws.amazon.com/cloudwatch/home"
+        f"?region={quote(region, safe='')}"
+        f"#logsV2:log-groups/log-group/{encoded_group}"
+    )
+
+
+def load_workflow_for_approvals(
+    argo_service,
+    workflow_name: str,
+    namespace: str,
+):
+    try:
+        result, workflow = argo_service.get_workflow(
+            workflow_name,
+            namespace,
+        )
+    except requests.HTTPError as error:
+        if error.response is not None and error.response.status_code == 404:
+            return {}
+        raise
+    if not result.get("success"):
+        raise RuntimeError(
+            str(result.get("error") or "Workflow is unavailable")
+        )
+    return workflow
 
 
 def run_server(
@@ -85,15 +125,11 @@ def run_server(
         )
 
         def load_workflow():
-            result, workflow = argo_service.get_workflow(
+            return load_workflow_for_approvals(
+                argo_service,
                 workflow_name,
                 namespace,
             )
-            if not result.get("success"):
-                raise RuntimeError(
-                    str(result.get("error") or "Workflow is unavailable")
-                )
-            return workflow
 
         app = create_app(
             static_dir=static_dir,
@@ -116,6 +152,10 @@ def run_server(
                 custom_api=k8s.custom_api,
             ),
             logs=log_streams,
+            external_logs_url=cloudwatch_log_group_url(
+                os.environ.get("WORKFLOW_CLOUDWATCH_REGION"),
+                os.environ.get("WORKFLOW_CLOUDWATCH_LOG_GROUP"),
+            ),
         )
         uvicorn.run(
             app,
@@ -131,7 +171,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument("--workflow-name", default=DEFAULT_WORKFLOW_NAME)
     parser.add_argument(
         "--argo-server",
-        default="http://argo-server:2746",
+        default=DEFAULT_ARGO_SERVER_URL,
     )
     parser.add_argument("--insecure", action="store_true", default=True)
     parser.add_argument("--token")

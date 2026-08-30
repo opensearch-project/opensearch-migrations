@@ -44,6 +44,7 @@ def load_slim_workflow(
         response.close()
         raise requests.HTTPError(
             f"Request failed with status {response.status_code}",
+            response=response,
         )
 
     slim_nodes = {}

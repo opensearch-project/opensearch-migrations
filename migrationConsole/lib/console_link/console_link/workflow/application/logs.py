@@ -55,9 +55,12 @@ class LogSelection:
     restart_count: Optional[int]
     previous: bool
     node_id: Optional[str] = None
+    members: Tuple["LogSelection", ...] = ()
 
     @property
     def supports_follow(self) -> bool:
+        if self.members:
+            return any(member.supports_follow for member in self.members)
         return not self.previous
 
 
@@ -181,7 +184,18 @@ class KubernetesLogSource:
                 raise LogUnavailable(
                     "No pod is available for this workflow step."
                 )
-            return tuple(
+            aggregate = LogSelection(
+                kind="aggregate",
+                label="All containers for this step",
+                selector=selector,
+                pod_name=None,
+                pod_uid=None,
+                container=None,
+                restart_count=None,
+                previous=False,
+                node_id=node_id,
+            )
+            exact = tuple(
                 selection
                 for pod in pods
                 for selection in self._container_selections(
@@ -190,6 +204,7 @@ class KubernetesLogSource:
                     node_id=node_id,
                 )
             )
+            return (aggregate,) + exact
 
         parts = capability_target_id.split(":", 2)
         if len(parts) != 3 or parts[0] != "logs" or not all(parts[1:]):
@@ -240,11 +255,7 @@ class KubernetesLogSource:
         selection: LogSelection,
         tail_lines: int,
     ) -> Tuple[LogRecord, ...]:
-        selections = (
-            self._current_container_selections(selection)
-            if selection.kind == "aggregate"
-            else (selection,)
-        )
+        selections = self._history_container_selections(selection)
         if not selections:
             return ()
         per_container = max(1, tail_lines // len(selections))
@@ -371,6 +382,14 @@ class KubernetesLogSource:
         self,
         selection: LogSelection,
     ) -> Tuple[LogSelection, ...]:
+        if selection.members:
+            return _unique_selections(
+                exact
+                for member in selection.members
+                for exact in self._current_container_selections(member)
+            )
+        if selection.kind != "aggregate":
+            return () if selection.previous else (selection,)
         if not selection.selector:
             return ()
         pods = self._list_pods(selection.selector)
@@ -392,6 +411,20 @@ class KubernetesLogSource:
                 include_previous=False,
             )
         )
+
+    def _history_container_selections(
+        self,
+        selection: LogSelection,
+    ) -> Tuple[LogSelection, ...]:
+        if selection.members:
+            return _unique_selections(
+                exact
+                for member in selection.members
+                for exact in self._history_container_selections(member)
+            )
+        if selection.kind != "aggregate":
+            return (selection,)
+        return self._current_container_selections(selection)
 
     def _list_pods(self, selector: str) -> Tuple[Any, ...]:
         result = self.core_api.list_namespaced_pod(
@@ -530,6 +563,59 @@ class LogStreamService:
             capability_target_id=capability_target_id,
             targets=tuple(issued),
         )
+
+    def combine_targets(
+        self,
+        target_ids: Iterable[str],
+        *,
+        label: str = "All sources",
+    ) -> LogTarget:
+        """Issue one aggregate target from existing opaque targets."""
+        unique_ids = tuple(dict.fromkeys(target_ids))
+        if not unique_ids:
+            raise LogUnavailable("At least one log target is required.")
+        now = time.monotonic()
+        with self._lock:
+            self._prune_targets(now)
+            issued_members = []
+            for target_id in unique_ids:
+                issued = self._targets.get(target_id)
+                if issued is None or issued.expires_at < now:
+                    raise LogTargetStale(
+                        "A log target expired. Refresh the target list."
+                    )
+                issued_members.append(issued)
+            selection = LogSelection(
+                kind="aggregate",
+                label=label,
+                selector=None,
+                pod_name=None,
+                pod_uid=None,
+                container=None,
+                restart_count=None,
+                previous=False,
+                members=tuple(
+                    issued.selection for issued in issued_members
+                ),
+            )
+            target_id = f"log-target-{secrets.token_urlsafe(18)}"
+            target = LogTarget(
+                id=target_id,
+                label=label,
+                kind="aggregate",
+                pod_name=None,
+                pod_uid=None,
+                container=None,
+                restart_count=None,
+                previous=False,
+                supports_follow=selection.supports_follow,
+            )
+            self._targets[target_id] = _IssuedTarget(
+                selection=selection,
+                target=target,
+                expires_at=now + self.target_ttl,
+            )
+        return target
 
     def start(
         self,
@@ -775,6 +861,21 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
         camel = parts[0] + "".join(part.title() for part in parts[1:])
         return value.get(camel, default)
     return getattr(value, name, default)
+
+
+def _unique_selections(
+    selections: Iterable[LogSelection],
+) -> Tuple[LogSelection, ...]:
+    unique: Dict[Tuple[str, str, int, bool], LogSelection] = {}
+    for selection in selections:
+        key = (
+            selection.pod_uid or selection.pod_name or "",
+            selection.container or "",
+            selection.restart_count or 0,
+            selection.previous,
+        )
+        unique.setdefault(key, selection)
+    return tuple(unique.values())
 
 
 def _nested(value: Any, *names: str) -> Any:

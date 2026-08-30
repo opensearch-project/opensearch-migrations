@@ -2,6 +2,9 @@ import io
 import json
 from unittest.mock import Mock
 
+import pytest
+import requests
+
 from console_link.workflow.services.argo_observation_service import (
     load_slim_workflow,
 )
@@ -60,4 +63,28 @@ def test_slim_workflow_preserves_retry_group_context():
             "value": "CapturedTraffic: p2-topic",
         }],
     }
+    response.close.assert_called_once()
+
+
+def test_slim_workflow_http_error_preserves_response_status():
+    response = Mock(status_code=404)
+    service = Mock()
+    service.get_workflow_status.return_value = {
+        "success": False,
+        "error": "not found",
+    }
+
+    with pytest.raises(requests.HTTPError) as raised:
+        load_slim_workflow(
+            service,
+            "migration-workflow",
+            "ma",
+            argo_url="https://argo",
+            token=None,
+            insecure=True,
+            request_get=lambda *_args, **_kwargs: response,
+        )
+
+    assert raised.value.response is response
+    assert raised.value.response.status_code == 404
     response.close.assert_called_once()

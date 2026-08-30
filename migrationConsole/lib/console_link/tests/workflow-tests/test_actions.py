@@ -262,6 +262,29 @@ def test_approval_inventory_classifies_upcoming_preapproved_blocking_and_passed(
     assert recovery.reason == "Impossible: serviceType cannot change"
 
 
+def test_approval_inventory_lists_gates_before_workflow_exists():
+    service = ApprovalService(
+        namespace="ma",
+        workflow_name="migration",
+        workflow_loader=lambda: {},
+        gate_inventory_loader=lambda: [_gate(phase="Approved")],
+        resolved_config_loader=lambda: {
+            "snapshotMigrations": [{
+                "resourceName": "migration-0",
+                "metadataMigrationConfig": {
+                    "skipEvaluateApproval": False,
+                },
+            }],
+        },
+    )
+
+    inventory = service.inventory()
+
+    assert inventory.workflow_name == "migration"
+    assert len(inventory.gates) == 1
+    assert inventory.gates[0].state == "preapproved"
+
+
 def test_preapproval_can_only_toggle_an_unreached_enabled_checkpoint():
     phases = []
     gate = {

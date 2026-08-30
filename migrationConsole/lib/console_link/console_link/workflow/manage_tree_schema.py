@@ -21,6 +21,8 @@ BACKFILL_GROUP = "Backfill"
 CAPTURE_GROUP = "Capture"
 BUFFER_GROUP = "Buffer"
 REPLAY_GROUP = "Replay"
+KAFKA_CLUSTERS_GROUP = "Kafka Clusters"
+KAFKA_TOPICS_GROUP = "Kafka Topics"
 
 
 RESOURCE_SECTIONS: List[Tuple[str, List[Tuple[List[str], str]]]] = [
@@ -62,16 +64,40 @@ RESOURCE_TYPE_LABELS: Dict[str, str] = {
     "trafficreplays": "Traffic replay",
 }
 
+BUFFER_SUBGROUP_BY_PLURAL: Dict[str, str] = {
+    "kafkaconfigs": KAFKA_CLUSTERS_GROUP,
+    "kafkaclusters": KAFKA_CLUSTERS_GROUP,
+    "capturedtraffics": KAFKA_TOPICS_GROUP,
+}
+
 EDIT_ID_BY_TREE_ID: Dict[str, str] = {
     f"section:{WORKFLOW_CONFIGURATION_SECTION}": "edit:workflowConfiguration",
+    f"section:{SOURCES_GROUP}": "edit:sourceClusters",
+    f"section:{TARGETS_GROUP}": "edit:targetClusters",
     f"section:{SNAPSHOT_MIGRATION_SECTION}": "edit:snapshotMigration",
     f"section:{LIVE_TRAFFIC_MIGRATION_SECTION}": "edit:traffic",
-    f"group:{SOURCES_GROUP}": "edit:sourceClusters",
-    f"group:{TARGETS_GROUP}": "edit:targetClusters",
-    f"group:{BACKFILL_GROUP}": "edit:snapshotMigrationConfigs",
-    f"group:{CAPTURE_GROUP}": "edit:traffic.proxies",
-    f"group:{BUFFER_GROUP}": "edit:traffic.buffer",
-    f"group:{REPLAY_GROUP}": "edit:traffic.replayers",
+    f"group:{SOURCES_GROUP}:{SOURCES_GROUP}": "edit:sourceClusters",
+    f"group:{TARGETS_GROUP}:{TARGETS_GROUP}": "edit:targetClusters",
+    (
+        f"group:{SNAPSHOT_MIGRATION_SECTION}:{BACKFILL_GROUP}"
+    ): "edit:snapshotMigrationConfigs",
+    (
+        f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{CAPTURE_GROUP}"
+    ): "edit:traffic.proxies",
+    (
+        f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{BUFFER_GROUP}"
+    ): "edit:traffic.buffer",
+    (
+        f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{BUFFER_GROUP}:"
+        f"{KAFKA_CLUSTERS_GROUP}"
+    ): "edit:traffic.kafkaClusters",
+    (
+        f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{BUFFER_GROUP}:"
+        f"{KAFKA_TOPICS_GROUP}"
+    ): "edit:traffic.s3Sources",
+    (
+        f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{REPLAY_GROUP}"
+    ): "edit:traffic.replayers",
 }
 
 EDIT_RESOURCE_COLLECTION_PATHS: Tuple[Tuple[str, ...], ...] = (
@@ -95,3 +121,7 @@ def group_plurals_for(primary_plural: str) -> List[str]:
 
 def resource_type_label_for_plural(plural: str) -> Optional[str]:
     return RESOURCE_TYPE_LABELS.get(plural)
+
+
+def buffer_subgroup_for_plural(plural: str) -> Optional[str]:
+    return BUFFER_SUBGROUP_BY_PLURAL.get(plural)

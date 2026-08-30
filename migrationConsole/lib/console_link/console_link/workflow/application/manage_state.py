@@ -7,11 +7,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+import requests
 from kubernetes.client.rest import ApiException
 
 from .. import resource_tree as resource_tree_module
 from ..commands.crd_utils import RESETTABLE_PLURALS
-from ..manage_tree_schema import group_plurals_for, resource_type_label_for_plural
+from ..manage_tree_schema import (
+    EDIT_ID_BY_TREE_ID,
+    buffer_subgroup_for_plural,
+    group_plurals_for,
+    resource_type_label_for_plural,
+)
 from ..manage_tree_status import same_value_state
 from ..resource_tree import (
     PENDING_CONFIG_PHASE,
@@ -221,6 +227,18 @@ class ManageStateService:
                 self.workflow_name,
                 self.namespace,
             )
+        except requests.HTTPError as error:
+            if (
+                error.response is not None
+                and error.response.status_code == 404
+            ):
+                return {}
+            if problems is not None:
+                problems.append(ManageProblem(
+                    source="argo",
+                    message=str(error),
+                ))
+            return {}
         except Exception as error:
             if problems is not None:
                 problems.append(ManageProblem(source="argo", message=str(error)))
@@ -304,8 +322,6 @@ class ManageStateService:
                 group for group in section.groups
                 if group.resources or group.not_configured
             ]
-            if not visible_groups:
-                continue
             section_id = f"section:{section.name}"
             root_ids.append(section_id)
             section_draft = _NodeDraft(
@@ -313,6 +329,10 @@ class ManageStateService:
                 kind="section",
                 label=section.name,
                 status="ok",
+                capabilities=_configuration_capabilities(
+                    section_id,
+                    section.name,
+                ),
             )
             drafts[section_id] = section_draft
 
@@ -326,6 +346,10 @@ class ManageStateService:
                     label=group.display_name,
                     status="unknown" if group.not_configured else "ok",
                     description="Not configured" if group.not_configured else None,
+                    capabilities=_configuration_capabilities(
+                        group_id,
+                        group.display_name,
+                    ),
                 )
                 drafts[group_id] = group_draft
                 plural_order = {
@@ -343,13 +367,35 @@ class ManageStateService:
                     ),
                 )
                 for resource in resources:
+                    resource_parent = group_draft
+                    subgroup_label = buffer_subgroup_for_plural(
+                        resource.plural
+                    )
+                    if subgroup_label is not None:
+                        subgroup_id = f"{group_id}:{subgroup_label}"
+                        subgroup = drafts.get(subgroup_id)
+                        if subgroup is None:
+                            subgroup = _NodeDraft(
+                                id=subgroup_id,
+                                parent_id=group_id,
+                                kind="group",
+                                label=subgroup_label,
+                                status="ok",
+                                capabilities=_configuration_capabilities(
+                                    subgroup_id,
+                                    subgroup_label,
+                                ),
+                            )
+                            drafts[subgroup_id] = subgroup
+                            group_draft.child_ids.append(subgroup_id)
+                        resource_parent = subgroup
                     resource_id = self._add_resource(
                         drafts,
                         resource,
-                        group_id,
+                        resource_parent.id,
                         output_refs,
                     )
-                    group_draft.child_ids.append(resource_id)
+                    resource_parent.child_ids.append(resource_id)
 
         _attach_reverse_relationships(drafts)
         nodes = _finalize_nodes(drafts)
@@ -1127,6 +1173,22 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
 
 def _highest_status(statuses: Iterable[str]) -> str:
     return max(statuses, key=lambda status: _STATUS_RANK.get(status, 0), default="ok")
+
+
+def _configuration_capabilities(
+    node_id: str,
+    label: str,
+) -> List[ManageCapability]:
+    target_id = EDIT_ID_BY_TREE_ID.get(node_id)
+    if target_id is None:
+        return []
+    return [
+        ManageCapability(
+            kind="edit",
+            target_id=target_id,
+            label=f"Edit {label}",
+        )
+    ]
 
 
 def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
