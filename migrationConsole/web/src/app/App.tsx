@@ -25,6 +25,7 @@ import {
   setGatePreapproval,
   type ApprovalGateSummary,
   type ConfigDraft,
+  type ManageNode,
   type ManageSnapshot,
 } from "../api/client";
 import { useManageEvents } from "../api/useManageEvents";
@@ -58,6 +59,7 @@ import {
   type ResourceViewMode,
 } from "../features/tree/resourceView";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
+import { LogPanel } from "../features/logviewer/LogPanel";
 import { StatusIndicator } from "../features/status/StatusIndicator";
 import {
   activeResetTargetIds,
@@ -95,6 +97,27 @@ function firstSelectableId(snapshot: ManageSnapshot): string | null {
     (node) => node.kind === "resource",
   );
   return resource?.id ?? snapshot.rootIds[0] ?? null;
+}
+
+
+function workflowStepDescendants(
+  snapshot: ManageSnapshot | null | undefined,
+  node: ManageNode | null,
+): ManageNode[] {
+  if (!snapshot || !node) return [];
+  const result: ManageNode[] = [];
+  const pending = [...node.childIds];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const childId = pending.shift();
+    if (!childId || visited.has(childId)) continue;
+    visited.add(childId);
+    const child = snapshot.nodes[childId];
+    if (!child || child.kind !== "workflow-step") continue;
+    result.push(child);
+    pending.push(...child.childIds);
+  }
+  return result;
 }
 
 
@@ -209,7 +232,7 @@ function promptedApprovalKeys(): Set<string> {
 }
 
 
-export function App() {
+function ManageApp() {
   const queryClient = useQueryClient();
   const health = useQuery({
     queryKey: ["system-health"],
@@ -436,6 +459,13 @@ export function App() {
         : null
     ),
     [observedState, selectedId],
+  );
+  const selectedWorkflowSteps = useMemo(
+    () => workflowStepDescendants(
+      observedState,
+      observedSelectedNode,
+    ),
+    [observedSelectedNode, observedState],
   );
   const submitActive = operations.data?.some((operation) => (
     operation.kind === "submit"
@@ -1187,7 +1217,7 @@ export function App() {
               </button>
             </section>
           ) : null}
-          {displayedState.rootIds.length === 0 ? (
+          {!editContext && displayedState.rootIds.length === 0 ? (
             <main className="empty-state">
               <Activity aria-hidden="true" />
               <h2>No migration resources found</h2>
@@ -1295,6 +1325,7 @@ export function App() {
                   operations={operations.data ?? []}
                   pendingPreapprovalNames={pendingApprovalNames}
                   resetInProgress={resetTargetIds.has(selectedNode.id)}
+                  workflowSteps={selectedWorkflowSteps}
                 />
               ) : (
                 <section className="workspace empty-state">
@@ -1316,4 +1347,31 @@ export function App() {
       ) : null}
     </div>
   );
+}
+
+
+function StandaloneLogs({ nodeId }: Readonly<{ nodeId: string }>) {
+  return (
+    <main className="standalone-log-page">
+      <LogPanel
+        nodeId={nodeId}
+        onClose={() => globalThis.close()}
+        standalone
+      />
+    </main>
+  );
+}
+
+
+export function App() {
+  const params = new URLSearchParams(globalThis.location.search);
+  const standaloneNodeId = (
+    globalThis.location.pathname === "/logs"
+      ? params.get("nodeId")
+      : null
+  );
+  if (standaloneNodeId) {
+    return <StandaloneLogs nodeId={standaloneNodeId} />;
+  }
+  return <ManageApp />;
 }

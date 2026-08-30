@@ -775,7 +775,11 @@ test("surfaces failed prerequisites in navigation and workflow activity", async 
     valueSummary: null,
     diagnostics: [],
     capabilities: [],
-    details: [],
+    details: [{
+      label: "Message",
+      value: "LoadBalancer endpoint was not assigned",
+      kind: "message",
+    }],
     relationships: [],
     comparisons: [],
     resourcePlural: null,
@@ -806,6 +810,25 @@ test("surfaces failed prerequisites in navigation and workflow activity", async 
     name: "Open capture, Error",
   }));
   expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Diagnostics" })).toBeNull();
+  expect(screen.queryByText("No diagnostics for this resource.")).toBeNull();
+
+  const failedSteps = screen.getByRole("region", {
+    name: "Failed workflow steps",
+  });
+  expect(within(failedSteps).getByText(
+    "LoadBalancer endpoint was not assigned",
+  )).toBeInTheDocument();
+  await userEvent.click(within(failedSteps).getByRole("button", {
+    name: (
+      "Inspect failed workflow step waitForProxyEndpointReady, Failed"
+    ),
+  }));
+  expect(screen.getByRole("heading", {
+    name: "waitForProxyEndpointReady",
+  })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Back to capture" }))
+    .toBeInTheDocument();
 });
 
 
@@ -1035,7 +1058,7 @@ test("starts pauses and explicitly stops bounded resource logs", async () => {
             container: "capture-proxy",
             restartCount: 0,
             previous: false,
-            message: "waitForProxyEndpointReady timed out",
+            message: "Timed out waiting for proxy endpoint readiness",
             kind: "error",
           }],
           beforeCursor: "cursor-4",
@@ -1066,20 +1089,55 @@ test("starts pauses and explicitly stops bounded resource logs", async () => {
   }));
   expect(await screen.findByRole("region", { name: "Managed logs" }))
     .toBeInTheDocument();
+  expect(screen.getByRole("link", {
+    name: "Open logs in new tab",
+  })).toHaveAttribute(
+    "href",
+    "/logs?nodeId=resource%3Acaptureproxies%3Acapture",
+  );
+  expect(screen.getByRole("link", {
+    name: "Open logs in new tab",
+  })).toHaveAttribute("target", "_blank");
   expect(screen.getByRole("combobox", { name: "Log target" }))
     .toHaveValue("log-target-all");
+  const managedLogs = screen.getByRole("region", { name: "Managed logs" });
+  expect(within(managedLogs).getByRole("heading", { name: "capture" }))
+    .toBeInTheDocument();
+  expect(screen.getByText("Managed logs for resource"))
+    .toBeInTheDocument();
+  expect(screen.getByText("Target: All matching containers"))
+    .toBeInTheDocument();
+  expect(screen.getByRole("note")).toHaveTextContent(
+    "Kubernetes logs are temporary",
+  );
+  expect(screen.getByRole("link", {
+    name: "Open CloudWatch log group",
+  })).toHaveAttribute("target", "_blank");
 
   await userEvent.click(screen.getByRole("button", {
     name: "Start logs",
   }));
-  expect(await screen.findByText(
-    "waitForProxyEndpointReady timed out",
-  )).toBeInTheDocument();
+  const timeout = await screen.findByText(
+    "Timed out waiting for proxy endpoint readiness",
+  );
+  expect(timeout.closest(".log-line")).toHaveClass("log-line-error");
+  expect(screen.getByText("1 error")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", {
+    name: "Next highlighted line",
+  }));
+  expect(timeout.closest(".log-line")).toHaveClass("log-line-active");
+
+  const sourceDivider = screen.getByRole("separator", {
+    name: "Resize source column",
+  });
+  expect(sourceDivider).toHaveAttribute("aria-valuenow", "420");
+  fireEvent.keyDown(sourceDivider, { key: "ArrowRight" });
+  expect(sourceDivider).toHaveAttribute("aria-valuenow", "436");
   expect(startRequest).toEqual({
     targetId: "log-target-all",
     tailLines: 500,
     follow: true,
-    pageSize: 200,
+    pageSize: 500,
   });
 
   await userEvent.click(screen.getByRole("button", { name: "Pause" }));
@@ -1088,6 +1146,92 @@ test("starts pauses and explicitly stops bounded resource logs", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Stop" }));
   await waitFor(() => expect(stoppedStream).toBe("log-stream-test"));
   expect(screen.getByRole("button", { name: "Start logs" })).toBeEnabled();
+});
+
+
+test("renders managed logs as a dedicated full-window route", async () => {
+  const startRequests: unknown[] = [];
+  server.use(
+    http.post("*/api/v1/log-streams", async ({ request }) => {
+      const startRequest = await request.json() as {
+        follow: boolean;
+      };
+      startRequests.push(startRequest);
+      return HttpResponse.json({
+        id: "standalone-log-stream",
+        target: {
+          id: "log-target-all",
+          label: "All matching containers",
+          kind: "aggregate",
+          podName: null,
+          podUid: null,
+          container: null,
+          restartCount: null,
+          previous: false,
+          supportsFollow: true,
+        },
+        state: startRequest.follow ? "following" : "ended",
+        page: {
+          events: [{
+            sequence: 1,
+            receivedAt: "2026-08-13T20:00:01Z",
+            timestamp: "2026-08-13T20:00:00Z",
+            podName: "capture-0",
+            podUid: "pod-uid",
+            container: "capture-proxy",
+            restartCount: 0,
+            previous: false,
+            message: "proxy is ready",
+            kind: "log",
+          }],
+          beforeCursor: "cursor-1",
+          afterCursor: "cursor-1",
+          atAvailableStart: true,
+          atBufferEnd: true,
+          historyTruncated: false,
+          state: startRequest.follow ? "following" : "ended",
+        },
+      }, { status: 201 });
+    }),
+  );
+  window.history.pushState(
+    {},
+    "",
+    "/logs?nodeId=resource%3Acaptureproxies%3Acapture",
+  );
+  renderApp();
+
+  expect(await screen.findByRole("region", { name: "Managed logs" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Close log window" }))
+    .toBeInTheDocument();
+  expect(screen.queryByRole("link", {
+    name: "Open logs in new tab",
+  })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Workflow Manage" }))
+    .toBeNull();
+  expect(await screen.findByRole("heading", { name: "capture" }))
+    .toBeInTheDocument();
+  expect(screen.getByText("Target: All matching containers"))
+    .toBeInTheDocument();
+  expect(await screen.findByText("proxy is ready")).toBeInTheDocument();
+  expect(startRequests[0]).toEqual({
+    targetId: "log-target-all",
+    tailLines: 500,
+    follow: false,
+    pageSize: 500,
+  });
+  expect(screen.getByRole("checkbox", { name: "Follow" })).toBeChecked();
+  expect(screen.getByText("Follow starts in 3 seconds"))
+    .toBeInTheDocument();
+  await waitFor(() => expect(startRequests.at(-1)).toEqual({
+    targetId: "log-target-all",
+    tailLines: 500,
+    follow: true,
+    pageSize: 500,
+  }), { timeout: 5000 });
+
+  window.history.replaceState({}, "", "/");
 });
 
 
@@ -2027,6 +2171,9 @@ test("opens a generic configuration editor and explains generated values", async
   expect(screen.getByRole("checkbox", {
     name: "Show field documentation",
   })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", {
+    name: "Show optional fields",
+  })).toBeChecked();
   const credentials = within(configTree).getByRole("row", {
     name: /Credentials secret/,
   });
@@ -2043,15 +2190,7 @@ test("opens a generic configuration editor and explains generated values", async
   expect(within(credentials).getByText("Authored"))
     .toBe(credentialsLabel?.querySelector(".property-flags span"));
   expect(configTree.querySelector(".status-dot")).toBeNull();
-  expect(
-    within(configTree).queryByRole("row", { name: /Timeout/ }),
-  ).toBeNull();
-
-  await userEvent.click(
-    screen.getByRole("checkbox", { name: "Show optional fields" }),
-  );
   const timeout = within(configTree).getByRole("row", { name: /Timeout/ });
-  expect(timeout).toHaveClass("inserted");
   await userEvent.click(timeout);
 
   expect(within(timeout).getByText("Generated")).toBeInTheDocument();
@@ -2161,18 +2300,19 @@ test("expands authored expert sections and supports animated collapse and expand
   expect(within(config).getByRole("row", { name: /Expert mode/ }))
     .toBeInTheDocument();
   expect(document.querySelector(".config-scroll-space")).toBeInTheDocument();
-  expect(within(config).getByRole("button", { name: "Expand Optional group" }))
+  expect(screen.getByRole("checkbox", {
+    name: "Show optional fields",
+  })).toBeChecked();
+  expect(within(config).getByRole("row", { name: /Optional group/ }))
+    .toBeInTheDocument();
+  const expandOptional = within(config).getByRole("button", {
+    name: "Expand Optional group",
+  });
+  expect(expandOptional)
     .toBeInTheDocument();
   expect(within(config).queryByRole("row", { name: /Optional child/ }))
     .toBeNull();
-
-  await userEvent.click(screen.getByRole("checkbox", {
-    name: "Show optional fields",
-  }));
-  expect(within(config).getByRole("row", { name: /Optional group/ }))
-    .toBeInTheDocument();
-  expect(within(config).getByRole("button", { name: "Collapse Optional group" }))
-    .toBeInTheDocument();
+  await userEvent.click(expandOptional);
   expect(within(config).getByRole("row", { name: /Optional child/ }))
     .toBeInTheDocument();
 
@@ -2294,6 +2434,109 @@ test("clears a selected runtime group when entering workflow-level editing", asy
 });
 
 
+test("renders an empty selected configuration group with its add action", async () => {
+  const draft = structuredClone(configDraft);
+  draft.editState.nodes.push({
+    id: "edit:targetClusters",
+    path: ["targetClusters"],
+    label: "Targets",
+    valueKind: "record",
+    status: "ok",
+    statusCounts: {
+      required: 0,
+      errors: 0,
+      warnings: 0,
+      changed: 0,
+      gated: 0,
+      blocked: 0,
+    },
+    diagnostics: [],
+    inputHint: {
+      kind: "record",
+      addLabel: "target cluster",
+      resourceCollection: {
+        navigation: {
+          sectionId: "section:Targets",
+          sectionLabel: "Targets",
+          sectionOrder: 1,
+          groupId: "group:Targets:Targets",
+          groupLabel: "Targets",
+          groupOrder: 0,
+        },
+        resource: {
+          kind: "TargetConfig",
+          plural: "targetconfigs",
+          typeLabel: "Target cluster",
+          identity: { kind: "named" },
+        },
+      },
+    },
+    children: [{
+      id: "edit:targetClusters:add",
+      path: ["targetClusters"],
+      label: "+ Add target cluster",
+      valueKind: "command",
+      status: "ok",
+      statusCounts: {
+        required: 0,
+        errors: 0,
+        warnings: 0,
+        changed: 0,
+        gated: 0,
+        blocked: 0,
+      },
+      diagnostics: [],
+      command: {
+        requiresName: true,
+        editAdded: true,
+        autoEditAdded: true,
+      },
+      children: [],
+    }],
+  });
+  const navigation = setNavigation(draft);
+  ensureNavigationGroup(navigation, {
+    sectionId: "section:Targets",
+    sectionLabel: "Targets",
+    groupId: "group:Targets:Targets",
+    groupLabel: "Targets",
+  });
+  navigation.nodes["section:Targets"].capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:targetClusters",
+    label: "Edit Targets",
+  }];
+  navigation.nodes["group:Targets:Targets"].capabilities = [{
+    kind: "edit",
+    editTargetId: "edit:targetClusters",
+    label: "Edit Targets",
+  }];
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  const targetGroup = within(tree).getAllByRole("treeitem", {
+    name: /^Targets$/,
+  }).find((item) => item.getAttribute("aria-level") === "2");
+  if (!targetGroup) throw new Error("Missing target configuration group");
+  await userEvent.click(targetGroup);
+
+  const table = await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(within(table).getByRole("row", { name: /^Targets/ }))
+    .toBeInTheDocument();
+  expect(within(table).getByRole("button", {
+    name: "Add target cluster",
+  })).toBeInTheDocument();
+});
+
+
 test("opens nested definitions from navigation and referenced fields", async () => {
   const draft = addLegacySourceNavigation(structuredClone(configDraft));
   const source = draft.editState.nodes[0]?.children?.[0];
@@ -2368,6 +2611,7 @@ test("opens nested definitions from navigation and referenced fields", async () 
           removable: true,
           referenceTargetId:
             "edit:sourceClusters.legacy.snapshotInfo.snapshots.nightly",
+          referenceLabel: "Source Snapshot 'nightly'",
           status: "ok",
           diagnostics: [],
           children: [{
@@ -2432,6 +2676,9 @@ test("opens nested definitions from navigation and referenced fields", async () 
 
   expect(await screen.findByRole("heading", { name: "Edit nightly" }))
     .toBeInTheDocument();
+  expect(screen.getByRole("button", {
+    name: "From Source Snapshot 'nightly'",
+  })).toBeInTheDocument();
   const config = screen.getByRole("table", {
     name: "Configuration fields",
   });
@@ -2446,7 +2693,7 @@ test("opens nested definitions from navigation and referenced fields", async () 
     name: /^nightly/,
   });
   await userEvent.click(within(snapshotRow).getByRole("button", {
-    name: "Open nightly",
+    name: "Open Source Snapshot 'nightly'",
   }));
   expect(await screen.findByRole("heading", { name: "Edit nightly" }))
     .toBeInTheDocument();
@@ -2750,12 +2997,14 @@ test("highlights unsaved resources and fields with previous values", async () =>
 });
 
 
-test("identifies resources within a mixed-type navigation group", async () => {
+test("groups Kafka clusters and topics without repeating resource types", async () => {
   const snapshot = structuredClone(manageSnapshot);
   const section = snapshot.nodes["section:Live Traffic Migration"];
   const captureGroup = snapshot.nodes["group:Live Traffic Migration:Capture"];
   const capture = snapshot.nodes["resource:captureproxies:capture"];
   const bufferGroupId = "group:Live Traffic Migration:Buffer";
+  const clusterGroupId = `${bufferGroupId}:Kafka Clusters`;
+  const topicGroupId = `${bufferGroupId}:Kafka Topics`;
   const kafkaId = "resource:kafkaclusters:default";
   const s3Id = "resource:capturedtraffics:proxy-topic";
   section.childIds = [bufferGroupId, ...section.childIds];
@@ -2763,14 +3012,30 @@ test("identifies resources within a mixed-type navigation group", async () => {
     ...captureGroup,
     id: bufferGroupId,
     revision: "buffer-group-1",
-    childIds: [kafkaId, s3Id],
+    childIds: [clusterGroupId, topicGroupId],
     label: "Buffer",
+  };
+  snapshot.nodes[clusterGroupId] = {
+    ...captureGroup,
+    id: clusterGroupId,
+    revision: "cluster-group-1",
+    parentId: bufferGroupId,
+    childIds: [kafkaId],
+    label: "Kafka Clusters",
+  };
+  snapshot.nodes[topicGroupId] = {
+    ...captureGroup,
+    id: topicGroupId,
+    revision: "topic-group-1",
+    parentId: bufferGroupId,
+    childIds: [s3Id],
+    label: "Kafka Topics",
   };
   snapshot.nodes[kafkaId] = {
     ...capture,
     id: kafkaId,
     revision: "kafka-1",
-    parentId: bufferGroupId,
+    parentId: clusterGroupId,
     label: "default",
     valueSummary: "Configured",
     diagnostics: [],
@@ -2783,7 +3048,7 @@ test("identifies resources within a mixed-type navigation group", async () => {
     ...capture,
     id: s3Id,
     revision: "s3-1",
-    parentId: bufferGroupId,
+    parentId: topicGroupId,
     label: "proxy-topic",
     valueSummary: "Configured",
     diagnostics: [],
@@ -2798,18 +3063,234 @@ test("identifies resources within a mixed-type navigation group", async () => {
   renderApp();
 
   const tree = await screen.findByRole("tree", { name: "Workflow resources" });
+  expect(within(tree).getByRole("treeitem", {
+    name: /^Kafka Clusters,/,
+  })).toBeInTheDocument();
+  expect(within(tree).getByRole("treeitem", {
+    name: /^Kafka Topics,/,
+  })).toBeInTheDocument();
   const kafka = within(tree).getByRole("treeitem", {
-    name: /^default, Kafka cluster, Ready$/,
+    name: /^default, Ready$/,
   });
   const s3 = within(tree).getByRole("treeitem", {
-    name: /^proxy-topic, Captured traffic, Ready$/,
+    name: /^proxy-topic, Ready$/,
   });
-  expect(within(kafka).getByText("Kafka cluster")).toBeInTheDocument();
+  expect(within(kafka).queryByText("Kafka cluster")).toBeNull();
   expect(within(kafka).getByText("Ready")).toBeInTheDocument();
   expect(within(kafka).getByText("Configured")).toBeInTheDocument();
-  expect(within(s3).getByText("Captured traffic")).toBeInTheDocument();
+  expect(within(s3).queryByText("Captured traffic")).toBeNull();
   expect(within(s3).getByText("Ready")).toBeInTheDocument();
   expect(within(s3).getByText("Configured")).toBeInTheDocument();
+});
+
+
+test("describes an implicit Kafka default without reporting a missing reference", async () => {
+  const draft = structuredClone(configDraft);
+  const traffic = draft.editState.nodes.find(
+    (node) => node.id === "edit:traffic",
+  );
+  if (!traffic) throw new Error("Missing traffic edit node");
+  traffic.children.unshift({
+    id: "edit:traffic.kafka",
+    path: ["traffic", "kafka"],
+    label: "Kafka cluster",
+    value: "default",
+    valueKind: "scalar",
+    valueType: "string",
+    presence: "required",
+    required: true,
+    status: "ok",
+    inputHint: {
+      kind: "reference",
+      sourcePath: ["traffic", "kafkaClusters"],
+      allowCustom: false,
+      options: [],
+      emptyMeansDefault: "default",
+      message: "A Kafka cluster with default settings will be provided.",
+    },
+    diagnostics: [],
+    children: [],
+  });
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+  );
+  renderApp();
+  await enterEditMode();
+
+  expect(screen.getByLabelText("Kafka cluster")).toBeDisabled();
+  const message = screen.getByText(
+    "A Kafka cluster with default settings will be provided.",
+  );
+  expect(message).toHaveClass("field-help");
+  expect(message).not.toHaveClass("field-error");
+});
+
+
+test("edits the implicit Kafka default without offering rename or removal", async () => {
+  const draft = structuredClone(configDraft);
+  const traffic = draft.editState.nodes.find(
+    (node) => node.id === "edit:traffic",
+  );
+  if (!traffic) throw new Error("Missing traffic edit node");
+  traffic.children.unshift({
+    id: "edit:traffic.kafkaClusters",
+    path: ["traffic", "kafkaClusters"],
+    label: "Kafka Clusters",
+    valueKind: "record",
+    presence: "optional",
+    essential: true,
+    status: "ok",
+    inputHint: {
+      kind: "record",
+      addLabel: "Kafka cluster",
+      resourceCollection: {
+        navigation: {
+          sectionId: "section:Live Traffic Migration",
+          sectionLabel: "Live Traffic Migration",
+          sectionOrder: 3,
+          groupId: "group:Live Traffic Migration:Kafka Clusters",
+          groupLabel: "Kafka Clusters",
+          groupOrder: 0,
+        },
+        resource: {
+          kind: "Kafka",
+          plural: "kafkaclusters",
+          typeLabel: "Kafka cluster",
+          identity: { kind: "named" },
+        },
+      },
+    },
+    diagnostics: [],
+    children: [{
+      id: "edit:traffic.kafkaClusters.default",
+      path: ["traffic", "kafkaClusters", "default"],
+      label: "default",
+      valueKind: "object",
+      presence: "required",
+      implicit: true,
+      removable: false,
+      valueDefaulted: true,
+      status: "ok",
+      diagnostics: [],
+      children: [{
+        id: "edit:traffic.kafkaClusters.default.autoCreate",
+        path: ["traffic", "kafkaClusters", "default", "autoCreate"],
+        label: "Create a managed cluster",
+        valueKind: "object",
+        presence: "required",
+        status: "ok",
+        diagnostics: [],
+        children: [{
+          id: "edit:traffic.kafkaClusters.default.autoCreate.auth",
+          path: [
+            "traffic",
+            "kafkaClusters",
+            "default",
+            "autoCreate",
+            "auth",
+          ],
+          label: "Authentication: < scram-sha-512 >",
+          value: "scram-sha-512",
+          valueDefaulted: true,
+          valueKind: "union",
+          presence: "optional",
+          status: "ok",
+          variants: [
+            { label: "none", value: "none" },
+            { label: "scram-sha-512", value: "scram-sha-512" },
+          ],
+          diagnostics: [],
+          children: [],
+        }],
+      }],
+    }, {
+      id: "edit:traffic.kafkaClusters:add",
+      path: ["traffic", "kafkaClusters"],
+      label: "+ Add Kafka cluster",
+      valueKind: "command",
+      status: "ok",
+      command: {
+        requiresName: true,
+        editAdded: true,
+        autoEditAdded: true,
+      },
+      diagnostics: [],
+      children: [],
+    }],
+  });
+  const navigation = setNavigation(draft);
+  ensureNavigationGroup(navigation, {
+    sectionId: "section:Live Traffic Migration",
+    sectionLabel: "Live Traffic Migration",
+    groupId: "group:Live Traffic Migration:Kafka Clusters",
+    groupLabel: "Kafka Clusters",
+  });
+  addConfigNavigationResource(navigation, {
+    id: "resource:kafkaclusters:default",
+    groupId: "group:Live Traffic Migration:Kafka Clusters",
+    label: "default",
+    editTargetId: "edit:traffic.kafkaClusters.default",
+    resourcePlural: "kafkaclusters",
+    resourceType: "Kafka cluster",
+    status: "ok",
+    valueSummary: "Available when referenced",
+  });
+  const implicit = navigation.nodes["resource:kafkaclusters:default"];
+  implicit.phase = "Implicit default";
+  implicit.configPresence = { deployed: false, pending: false };
+
+  const operations: unknown[] = [];
+  server.use(
+    http.get("*/api/v1/config", () => HttpResponse.json(draft)),
+    http.post("*/api/v1/config/operations", async ({ request }) => {
+      const body = await request.json() as { operation: unknown };
+      operations.push(body.operation);
+      return HttpResponse.json({
+        ...draft,
+        dirty: true,
+        draftRevision: "config-draft-explicit-default",
+      });
+    }),
+  );
+  renderApp();
+  await enterEditMode();
+
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  const defaultResource = within(tree).getByRole("treeitem", {
+    name: /^default/,
+  });
+  expect(defaultResource).not.toHaveAccessibleName(
+    /Addition pending submission/,
+  );
+  expect(within(defaultResource).queryByRole("button", {
+    name: "Rename default",
+  })).toBeNull();
+  await userEvent.click(defaultResource);
+
+  const fields = await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  expect(within(fields).queryByRole("button", {
+    name: "Remove default",
+  })).toBeNull();
+  await userEvent.selectOptions(
+    within(fields).getByRole("combobox", { name: "Authentication" }),
+    "none",
+  );
+
+  await waitFor(() => expect(operations).toEqual([{
+    op: "set",
+    path: [
+      "traffic",
+      "kafkaClusters",
+      "default",
+      "autoCreate",
+      "auth",
+    ],
+    value: "none",
+  }]));
 });
 
 
@@ -3113,7 +3594,7 @@ test("adds a snapshot migration from its section without naming it first", async
     }, {
       id: "edit:snapshotMigrationConfigs.0.perSnapshotConfig",
       path: ["snapshotMigrationConfigs", "0", "perSnapshotConfig"],
-      label: "perSnapshotConfig: 1 configured, 0 unconfigured",
+      label: "Source snapshot migrations: 1 configured, 0 unconfigured",
       valueKind: "record",
       status: "required",
       statusCounts: { ...counts, required: 1 },
@@ -3462,6 +3943,42 @@ test("repairs raw YAML and returns to the structured editor", async () => {
     name: "Configuration fields",
   })).toBeInTheDocument();
   expect(screen.queryByRole("textbox", { name: "Workflow YAML" })).toBeNull();
+});
+
+
+test("opens raw repair when runtime and configuration navigation are empty", async () => {
+  const emptySnapshot = structuredClone(manageSnapshot);
+  emptySnapshot.workflow = null;
+  emptySnapshot.rootIds = [];
+  emptySnapshot.nodes = {};
+  const rawDraft = rawRepairDraft();
+  rawDraft.navigation = {
+    ...structuredClone(emptySnapshot),
+    revision: "empty-raw-navigation",
+  };
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(emptySnapshot),
+    ),
+    http.get("*/api/v1/config", () => HttpResponse.json(rawDraft)),
+  );
+  renderApp();
+
+  expect(await screen.findByRole("heading", {
+    name: "No migration resources found",
+  })).toBeInTheDocument();
+  await enterEditMode();
+
+  expect(await screen.findByRole("textbox", {
+    name: "Workflow YAML",
+  })).toHaveValue(rawDraft.rawYaml);
+  expect(screen.getByText(
+    "Flow sequence in block collection must be closed",
+  )).toBeInTheDocument();
+  expect(screen.queryByRole("heading", {
+    name: "No migration resources found",
+  })).toBeNull();
 });
 
 
@@ -4494,7 +5011,7 @@ test("abandons inline resource naming when focus moves elsewhere", async () => {
   });
   await userEvent.click(optional);
 
-  expect(optional).toBeChecked();
+  expect(optional).not.toBeChecked();
   expect(within(tree).queryByRole("textbox", {
     name: "source cluster name",
   })).toBeNull();
@@ -4993,6 +5510,13 @@ test("reviews and tracks submission while leaving edit mode", async () => {
   const dialog = await screen.findByRole("dialog", {
     name: "Submit configuration?",
   });
+  expect(dialog).toHaveClass("submission-dialog");
+  expect(dialog.querySelector(":scope > .submission-dialog-body"))
+    .toBeInTheDocument();
+  expect(dialog.querySelector(":scope > footer"))
+    .toContainElement(within(dialog).getByRole("button", {
+      name: "Confirm submit",
+    }));
   expect(within(dialog).getByText("capture")).toBeInTheDocument();
   expect(within(dialog).getByText("Service type")).toBeInTheDocument();
   await userEvent.click(within(dialog).getByRole("button", {

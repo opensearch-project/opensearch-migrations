@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
   FileOutput,
   LoaderCircle,
   Logs,
@@ -29,7 +28,6 @@ interface PendingAction {
   kind: "reset";
   targetId: string;
 }
-
 
 function displayValue(value: { present: boolean; value?: unknown }): string {
   if (!value.present) return "Not set";
@@ -385,46 +383,105 @@ function ResourcePreapproval({
 }
 
 
-function Diagnostics({
-  node,
-  suppressEmpty = false,
-}: Readonly<{
-  node: ManageNode;
-  suppressEmpty?: boolean;
-}>) {
+function Findings({ node }: Readonly<{ node: ManageNode }>) {
   const diagnostics = node.diagnostics.filter((diagnostic) => (
     diagnostic.source !== "workflow-apply"
     && diagnostic.source !== "workflow-step"
   ));
-  if (diagnostics.length === 0 && node.diagnostics.length > 0) return null;
-  if (diagnostics.length === 0 && suppressEmpty) return null;
+  if (diagnostics.length === 0) return null;
   return (
     <section className="workspace-section">
-      <h3>Diagnostics</h3>
-      {diagnostics.length === 0 ? (
-        <div className="inline-empty">
-          <CheckCircle2 aria-hidden="true" />
-          No diagnostics for this resource.
+      <h3>Findings</h3>
+      <div className="diagnostic-list">
+        {diagnostics.map((diagnostic, index) => (
+          <details className={`diagnostic diagnostic-${diagnostic.severity}`} key={`${diagnostic.message}-${index}`}>
+            <summary>
+              <TriangleAlert aria-hidden="true" />
+              <span>{diagnostic.title ?? diagnostic.message}</span>
+              <strong>{diagnostic.severity}</strong>
+            </summary>
+            <div>
+              {diagnostic.path.length > 0 ? (
+                <code>{diagnostic.path.join(".")}</code>
+              ) : null}
+              {diagnostic.source ? <span>Source: {diagnostic.source}</span> : null}
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+function FailedWorkflowSteps({
+  onSelect,
+  steps,
+}: Readonly<{
+  onSelect: (nodeId: string) => void;
+  steps: ManageNode[];
+}>) {
+  const failed = steps
+    .filter((step) => (
+      step.status === "error"
+      || step.status === "blocked"
+      || step.phase === "Failed"
+      || step.phase === "Error"
+      || step.phase === "Blocked"
+    ))
+    .sort((left, right) => (
+      (right.activityAt ?? "").localeCompare(left.activityAt ?? "")
+    ));
+  if (failed.length === 0) return null;
+  return (
+    <section
+      aria-label="Failed workflow steps"
+      className="workspace-section failed-workflow-steps"
+    >
+      <header>
+        <div>
+          <h3>Failed workflow steps</h3>
+          <span>
+            {failed.length} step{failed.length === 1 ? "" : "s"} need
+            attention
+          </span>
         </div>
-      ) : (
-        <div className="diagnostic-list">
-          {diagnostics.map((diagnostic, index) => (
-            <details className={`diagnostic diagnostic-${diagnostic.severity}`} key={`${diagnostic.message}-${index}`}>
-              <summary>
-                <TriangleAlert aria-hidden="true" />
-                <span>{diagnostic.title ?? diagnostic.message}</span>
-                <strong>{diagnostic.severity}</strong>
-              </summary>
-              <div>
-                {diagnostic.path.length > 0 ? (
-                  <code>{diagnostic.path.join(".")}</code>
+      </header>
+      <div className="failed-workflow-step-list">
+        {failed.map((step) => {
+          const message = step.details.find(
+            (detail) => detail.kind === "message",
+          );
+          return (
+            <button
+              aria-label={`Inspect failed workflow step ${step.label}, ${
+                step.phase ?? step.status
+              }`}
+              key={step.id}
+              onClick={() => onSelect(step.id)}
+              type="button"
+            >
+              <StatusIndicator status={step.phase ?? step.status} />
+              <span>
+                <strong>{step.label}</strong>
+                <small>
+                  {message
+                    ? String(message.value)
+                    : step.phase ?? step.status}
+                </small>
+              </span>
+              <span>
+                {step.activityAt ? (
+                  <time dateTime={step.activityAt}>
+                    {new Date(step.activityAt).toLocaleString()}
+                  </time>
                 ) : null}
-                {diagnostic.source ? <span>Source: {diagnostic.source}</span> : null}
-              </div>
-            </details>
-          ))}
-        </div>
-      )}
+                <ArrowRight aria-hidden="true" />
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -565,6 +622,7 @@ export function ResourceWorkspace({
   operations = [],
   pendingPreapprovalNames = new Set<string>(),
   resetInProgress = false,
+  workflowSteps = [],
 }: Readonly<{
   node: ManageNode;
   navigationBackLabel?: string | null;
@@ -582,6 +640,7 @@ export function ResourceWorkspace({
   operations?: Operation[];
   pendingPreapprovalNames?: Set<string>;
   resetInProgress?: boolean;
+  workflowSteps?: ManageNode[];
 }>) {
   const [outputTarget, setOutputTarget] = useState<string | null>(null);
   const [logTarget, setLogTarget] = useState<string | null>(null);
@@ -595,13 +654,6 @@ export function ResourceWorkspace({
   const cleanupRequired = (
     node.valueSummary === "Orphaned; cleanup required"
   );
-  const nodeIds = new Set([node.id, ...node.childIds]);
-  const latestRelatedOperation = [...operations]
-    .filter((operation) => (
-      operation.targetIds.some((targetId) => nodeIds.has(targetId))
-    ))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-  const operationFailed = latestRelatedOperation?.status === "failed";
   return (
     <article className="workspace">
       <header className="workspace-header">
@@ -696,6 +748,7 @@ export function ResourceWorkspace({
         onReviewApproval={onRequestApproval}
       />
       <RecentOperationFailure node={node} operations={operations} />
+      <FailedWorkflowSteps onSelect={onSelect} steps={workflowSteps} />
       <Relationships node={node} onSelect={onSelect} />
       {logTarget ? (
         <LogPanel
@@ -740,7 +793,7 @@ export function ResourceWorkspace({
           </div>
           ))}
       </dl>
-      <Diagnostics node={node} suppressEmpty={operationFailed} />
+      <Findings node={node} />
       <Comparisons node={node} />
     </article>
   );

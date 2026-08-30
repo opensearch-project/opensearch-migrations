@@ -1,4 +1,7 @@
 import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -7,9 +10,13 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  CircleAlert,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clipboard,
   Download,
+  ExternalLink,
   LoaderCircle,
   Logs,
   Pause,
@@ -30,10 +37,16 @@ import {
   type LogStreamStatus,
 } from "../../api/client";
 import { useEscapeCancel } from "../../hooks/useEscapeCancel";
+import { classifyLogSeverity } from "./logSeverity";
 
 
 type ConnectionState =
   "idle" | "connecting" | "live" | "reconnecting" | "ended" | "stopped";
+
+const DEFAULT_SOURCE_WIDTH = 420;
+const MIN_SOURCE_WIDTH = 140;
+const MIN_MESSAGE_WIDTH = 320;
+const TIME_COLUMN_WIDTH = 82;
 
 
 function mergeEvents(
@@ -56,12 +69,23 @@ function eventText(event: LogEvent): string {
 }
 
 
+function logLineClassName(event: LogEvent): string {
+  const severity = classifyLogSeverity(event.message, event.kind);
+  return [
+    "log-line",
+    severity ? `log-line-${severity}` : "",
+  ].filter(Boolean).join(" ");
+}
+
+
 export function LogPanel({
   nodeId,
   onClose,
+  standalone = false,
 }: Readonly<{
   nodeId: string;
   onClose: () => void;
+  standalone?: boolean;
 }>) {
   const inventory = useQuery({
     queryKey: ["log-targets", nodeId],
@@ -78,14 +102,26 @@ export function LogPanel({
   const [historyTruncated, setHistoryTruncated] = useState(false);
   const [connection, setConnection] =
     useState<ConnectionState>("idle");
+  const [autoFollowPending, setAutoFollowPending] = useState(false);
   const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sourceWidth, setSourceWidth] = useState(DEFAULT_SOURCE_WIDTH);
+  const [activeIssueSequence, setActiveIssueSequence] =
+    useState<number | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const pinToBottomRef = useRef(true);
   const sourceRef = useRef<EventSource | null>(null);
   const streamIdRef = useRef<string | null>(null);
+  const autoStartedRef = useRef(false);
+  const autoFollowTimerRef = useRef<number | null>(null);
+  const followRef = useRef(follow);
+  const sourceResizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
 
   const selected = useMemo(
     () => inventory.data?.targets.find(
@@ -93,6 +129,20 @@ export function LogPanel({
     ) ?? null,
     [inventory.data, selectedId],
   );
+  const issues = useMemo(
+    () => events.flatMap((event) => {
+      const severity = classifyLogSeverity(event.message, event.kind);
+      return severity ? [{ event, severity }] : [];
+    }),
+    [events],
+  );
+  const errorCount = issues.filter(
+    ({ severity }) => severity === "error",
+  ).length;
+  const warningCount = issues.length - errorCount;
+  const logViewerStyle = {
+    "--log-source-width": `${sourceWidth}px`,
+  } as CSSProperties;
 
   useEffect(() => {
     const targets = inventory.data?.targets ?? [];
@@ -111,7 +161,14 @@ export function LogPanel({
     streamIdRef.current = stream?.id ?? null;
   }, [stream?.id]);
 
+  useEffect(() => {
+    followRef.current = follow;
+  }, [follow]);
+
   useEffect(() => () => {
+    if (autoFollowTimerRef.current !== null) {
+      globalThis.clearTimeout(autoFollowTimerRef.current);
+    }
     sourceRef.current?.close();
     if (streamIdRef.current) {
       void stopLogStream(streamIdRef.current);
@@ -182,17 +239,24 @@ export function LogPanel({
     }
   };
 
-  const start = async () => {
-    if (!selected) return;
-    if (stream && stream.state === "following") await stop();
+  const start = async (
+    requestedFollow = follow,
+    requestedTarget = selected,
+  ) => {
+    if (!requestedTarget) return;
+    if (streamIdRef.current) {
+      await stopLogStream(streamIdRef.current);
+      streamIdRef.current = null;
+    }
     setBusy(true);
     setError(null);
     setPaused(false);
     pinToBottomRef.current = true;
     try {
-      const next = await startLogStream(selected.id, {
+      const next = await startLogStream(requestedTarget.id, {
         tailLines,
-        follow: follow && selected.supportsFollow,
+        follow: requestedFollow && requestedTarget.supportsFollow,
+        pageSize: Math.min(tailLines, 1000),
       });
       setStream(next);
       setEvents(next.page.events);
@@ -200,12 +264,39 @@ export function LogPanel({
       setAtAvailableStart(next.page.atAvailableStart);
       setHistoryTruncated(next.page.historyTruncated);
       setConnection(next.state === "following" ? "connecting" : "ended");
+      return next;
     } catch (startError) {
       setError((startError as Error).message);
+      return undefined;
     } finally {
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      !standalone
+      || !selected
+      || autoStartedRef.current
+    ) {
+      return;
+    }
+    autoStartedRef.current = true;
+    setAutoFollowPending(true);
+    void start(false).then((initialStream) => {
+      if (!initialStream) {
+        setAutoFollowPending(false);
+        return;
+      }
+      autoFollowTimerRef.current = globalThis.setTimeout(() => {
+        autoFollowTimerRef.current = null;
+        setAutoFollowPending(false);
+        if (followRef.current) void start(true);
+      }, 3000);
+    });
+    // The standalone viewer starts once for the inventory's initial target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, standalone]);
 
   const loadOlder = async () => {
     if (!stream || !beforeCursor) return;
@@ -228,6 +319,75 @@ export function LogPanel({
   };
 
   const rendered = events.map(eventText).join("\n");
+
+  const clampSourceWidth = (value: number) => {
+    const viewerWidth = viewerRef.current?.clientWidth || 1000;
+    const maximum = Math.max(
+      MIN_SOURCE_WIDTH,
+      viewerWidth - TIME_COLUMN_WIDTH - MIN_MESSAGE_WIDTH,
+    );
+    return Math.min(maximum, Math.max(MIN_SOURCE_WIDTH, value));
+  };
+
+  const beginSourceResize = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    sourceResizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: sourceWidth,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+
+  const continueSourceResize = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const resize = sourceResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    setSourceWidth(clampSourceWidth(
+      resize.startWidth + event.clientX - resize.startX,
+    ));
+  };
+
+  const endSourceResize = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (sourceResizeRef.current?.pointerId !== event.pointerId) return;
+    sourceResizeRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const resizeSourceWithKeyboard = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      setSourceWidth(clampSourceWidth(DEFAULT_SOURCE_WIDTH));
+      return;
+    }
+    setSourceWidth((current) => clampSourceWidth(
+      current + (event.key === "ArrowRight" ? 16 : -16),
+    ));
+  };
+
+  const jumpToIssue = (direction: 1 | -1) => {
+    if (issues.length === 0) return;
+    const current = issues.findIndex(
+      ({ event }) => event.sequence === activeIssueSequence,
+    );
+    const next = current < 0
+      ? (direction > 0 ? 0 : issues.length - 1)
+      : (current + direction + issues.length) % issues.length;
+    const sequence = issues[next].event.sequence;
+    setActiveIssueSequence(sequence);
+    pinToBottomRef.current = false;
+    viewerRef.current
+      ?.querySelector<HTMLElement>(`[data-log-sequence="${sequence}"]`)
+      ?.scrollIntoView?.({ block: "center" });
+  };
 
   const copy = async () => {
     await navigator.clipboard.writeText(rendered);
@@ -265,15 +425,34 @@ export function LogPanel({
         <div>
           <Logs aria-hidden="true" />
           <span>
-            <small>Managed logs</small>
-            <h3>{selected?.label ?? "Select a target"}</h3>
+            <small>
+              Managed logs for {
+                (inventory.data?.subjectKind ?? "item").replaceAll("-", " ")
+              }
+            </small>
+            <h3>{inventory.data?.subjectLabel ?? "Loading log context"}</h3>
+            <strong className="log-subject">
+              Target: {selected?.label ?? "Select a target"}
+            </strong>
           </span>
         </div>
+        {!standalone ? (
+          <a
+            aria-label="Open logs in new tab"
+            className="icon-button"
+            href={`/logs?${new URLSearchParams({ nodeId }).toString()}`}
+            rel="noopener noreferrer"
+            target="_blank"
+            title="Open logs in new tab"
+          >
+            <ExternalLink aria-hidden="true" />
+          </a>
+        ) : null}
         <button
-          aria-label="Close logs"
+          aria-label={standalone ? "Close log window" : "Close logs"}
           className="icon-button"
           onClick={close}
-          title="Close logs"
+          title={standalone ? "Close log window" : "Close logs"}
           type="button"
         >
           <X aria-hidden="true" />
@@ -297,13 +476,49 @@ export function LogPanel({
         <div className="output-state">No pod containers are available.</div>
       ) : (
         <>
+          <div className="log-retention-notice" role="note">
+            <CircleAlert aria-hidden="true" />
+            <span>
+              Kubernetes logs are temporary. Logs disappear when Kubernetes
+              removes or replaces pods, Jobs, or CronJobs.
+            </span>
+            {inventory.data.externalLogsUrl ? (
+              <a
+                href={inventory.data.externalLogsUrl}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                Open CloudWatch log group
+                <ExternalLink aria-hidden="true" />
+              </a>
+            ) : null}
+          </div>
+          {inventory.data.message ? (
+            <p className="log-inventory-message">
+              {inventory.data.message}
+            </p>
+          ) : null}
           <div className="log-setup">
             <label>
               <span>Target</span>
               <select
                 aria-label="Log target"
-                disabled={stream?.state === "following"}
-                onChange={(event) => setSelectedId(event.target.value)}
+                disabled={busy}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  const nextTarget = inventory.data.targets.find(
+                    (target) => target.id === nextId,
+                  );
+                  setSelectedId(nextId);
+                  if (autoFollowTimerRef.current !== null) {
+                    globalThis.clearTimeout(autoFollowTimerRef.current);
+                    autoFollowTimerRef.current = null;
+                    setAutoFollowPending(false);
+                  }
+                  if (stream && nextTarget) {
+                    void start(followRef.current, nextTarget);
+                  }
+                }}
                 value={selectedId}
               >
                 {inventory.data.targets.map((target) => (
@@ -332,9 +547,26 @@ export function LogPanel({
                 checked={follow && (selected?.supportsFollow ?? false)}
                 disabled={
                   !selected?.supportsFollow
-                  || stream?.state === "following"
+                  || busy
                 }
-                onChange={(event) => setFollow(event.target.checked)}
+                onChange={(event) => {
+                  const nextFollow = event.target.checked;
+                  setFollow(nextFollow);
+                  if (!nextFollow && autoFollowTimerRef.current !== null) {
+                    globalThis.clearTimeout(autoFollowTimerRef.current);
+                    autoFollowTimerRef.current = null;
+                    setAutoFollowPending(false);
+                  }
+                  if (!nextFollow && stream?.state === "following") {
+                    void stop();
+                  } else if (
+                    nextFollow
+                    && stream
+                    && stream.state !== "following"
+                  ) {
+                    void start(true);
+                  }
+                }}
                 type="checkbox"
               />
               <span>Follow</span>
@@ -352,9 +584,49 @@ export function LogPanel({
           {stream ? (
             <>
               <div className="log-toolbar">
-                <span className={`log-connection state-${connection}`}>
-                  {paused ? "Paused" : connection}
-                </span>
+                <div className="log-toolbar-status">
+                  <span className={`log-connection state-${connection}`}>
+                    {autoFollowPending
+                      ? "Follow starts in 3 seconds"
+                      : paused ? "Paused" : connection}
+                  </span>
+                  {issues.length > 0 ? (
+                    <div
+                      aria-label="Highlighted log lines"
+                      className="log-issue-summary"
+                      role="status"
+                    >
+                      <CircleAlert aria-hidden="true" />
+                      {errorCount > 0 ? (
+                        <span className="log-error-count">
+                          {errorCount} error{errorCount === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
+                      {warningCount > 0 ? (
+                        <span className="log-warning-count">
+                          {warningCount} warning
+                          {warningCount === 1 ? "" : "s"}
+                        </span>
+                      ) : null}
+                      <button
+                        aria-label="Previous highlighted line"
+                        onClick={() => jumpToIssue(-1)}
+                        title="Previous highlighted line"
+                        type="button"
+                      >
+                        <ChevronUp aria-hidden="true" />
+                      </button>
+                      <button
+                        aria-label="Next highlighted line"
+                        onClick={() => jumpToIssue(1)}
+                        title="Next highlighted line"
+                        type="button"
+                      >
+                        <ChevronDown aria-hidden="true" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 <button
                   disabled={busy || atAvailableStart || !beforeCursor}
                   onClick={() => void loadOlder()}
@@ -421,12 +693,43 @@ export function LogPanel({
                 }}
                 ref={viewerRef}
                 role="log"
+                style={logViewerStyle}
               >
+                <div className="log-column-header">
+                  <span>Time</span>
+                  <span>Source</span>
+                  <span>Message</span>
+                  <div
+                    aria-label="Resize source column"
+                    aria-orientation="vertical"
+                    aria-valuemax={1000}
+                    aria-valuemin={MIN_SOURCE_WIDTH}
+                    aria-valuenow={sourceWidth}
+                    className="log-source-resizer"
+                    onDoubleClick={() => {
+                      setSourceWidth(clampSourceWidth(DEFAULT_SOURCE_WIDTH));
+                    }}
+                    onKeyDown={resizeSourceWithKeyboard}
+                    onPointerCancel={endSourceResize}
+                    onPointerDown={beginSourceResize}
+                    onPointerMove={continueSourceResize}
+                    onPointerUp={endSourceResize}
+                    role="separator"
+                    tabIndex={0}
+                    title="Drag to resize the source column; double-click to reset"
+                  />
+                </div>
                 {events.length === 0 ? (
                   <div className="log-empty">No log lines in this tail.</div>
                 ) : events.map((event) => (
                   <div
-                    className={`log-line log-line-${event.kind}`}
+                    className={[
+                      logLineClassName(event),
+                      activeIssueSequence === event.sequence
+                        ? "log-line-active"
+                        : "",
+                    ].filter(Boolean).join(" ")}
+                    data-log-sequence={event.sequence}
                     key={event.sequence}
                   >
                     <time>{event.timestamp

@@ -326,14 +326,15 @@ function GraphNode({
       onFocus={() => onActivate(graphNode.id)}
       onMouseEnter={() => onActivate(graphNode.id)}
       onMouseLeave={onDeactivate}
-      ref={(element) => register(graphNode.id, element)}
     >
       <button
         aria-current={selected ? "true" : undefined}
         aria-label={`Open ${graphNode.label}, ${state}`}
         className="workflow-graph-node-main"
+        data-dependency-anchor="true"
         disabled={!graphNode.node}
         onClick={() => onSelectNode(graphNode.id)}
+        ref={(element) => register(graphNode.id, element)}
         type="button"
       >
         <StatusIndicator status={graphNode.status} />

@@ -163,7 +163,7 @@ export function SubmitConfigDialog({
       <section
         aria-labelledby="submit-dialog-title"
         aria-modal="true"
-        className="confirmation-dialog"
+        className="confirmation-dialog submission-dialog"
         data-escape-cancel-layer
         ref={dialogRef}
         role="dialog"
@@ -177,183 +177,185 @@ export function SubmitConfigDialog({
             </h2>
           </div>
         </header>
-        {loading ? (
-          <div className="submit-review-state" role="status">
-            <LoaderCircle className="spin" aria-hidden="true" />
-            Preparing change review
-          </div>
-        ) : loadError ? (
-          <div className="submit-review-invalid" role="alert">
-            <AlertTriangle aria-hidden="true" />
-            <span>{loadError.message}</span>
-            <button onClick={retry} type="button">Retry</button>
-          </div>
-        ) : review.data ? (
-          <div className="submit-review">
-            {resubmitting ? (
-              <>
+        <div className="submission-dialog-body">
+          {loading ? (
+            <div className="submit-review-state" role="status">
+              <LoaderCircle className="spin" aria-hidden="true" />
+              Preparing change review
+            </div>
+          ) : loadError ? (
+            <div className="submit-review-invalid" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <span>{loadError.message}</span>
+              <button onClick={retry} type="button">Retry</button>
+            </div>
+          ) : review.data ? (
+            <div className="submit-review">
+              {resubmitting ? (
+                <>
+                  <p>
+                    The saved configuration will be submitted again to recreate
+                    missing resources or retry failed workflow work.
+                  </p>
+                  {reason ? (
+                    <p className="submit-review-empty">{reason}</p>
+                  ) : null}
+                </>
+              ) : (
                 <p>
-                  The saved configuration will be submitted again to recreate
-                  missing resources or retry failed workflow work.
+                  The current pending configuration will be saved and workflow
+                  replacement will continue as a tracked operation.
                 </p>
-                {reason ? (
-                  <p className="submit-review-empty">{reason}</p>
-                ) : null}
-              </>
-            ) : (
-              <p>
-                The current pending configuration will be saved and workflow
-                replacement will continue as a tracked operation.
-              </p>
-            )}
-            {review.data.changes.length > 0 ? (
-              <ul className="submit-change-list">
-                {review.data.changes.map((change) => (
-                  <li key={`${change.resourceId ?? "config"}-${change.path}`}>
-                    <strong>
-                      {change.resourceLabel ?? change.label}
-                    </strong>
-                    <span>{change.resourceLabel
-                      ? change.label
-                      : change.path}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {!review.data.valid ? (
-              <div className="submit-review-invalid" role="alert">
-                <AlertTriangle aria-hidden="true" />
-                <span>
-                  {review.data.validationMessages.join(" ")
-                    || "Resolve validation errors before submitting."}
-                </span>
-              </div>
-            ) : null}
-            {deploymentActions.length > 0 ? (
-              <section
-                aria-label="Deployment impact"
-                className="submit-preflight deployment-impact"
-              >
-                <header>
-                  <RefreshCw aria-hidden="true" />
-                  <div>
-                    <strong>Deployment impact</strong>
-                    <span>
-                      {deploymentActions.length} {
-                        deploymentActions.length === 1
-                          ? "resource will change"
-                          : "resources will change"
-                      }
-                    </span>
-                  </div>
-                </header>
-                <ul>
-                  {deploymentActions.map((action) => (
-                    <li key={`${action.kind}-${action.name}-${action.reason}`}>
-                      <div>
-                        <strong>{action.name}</strong>
-                        <span>{action.kind}</span>
-                      </div>
-                      <p>{action.message}</p>
-                      <small>
-                        {action.reason === "checksum-only"
-                          ? "Checksum-only reconcile"
-                          : action.reason === "resource-missing"
-                            ? "Create missing resource"
-                            : action.reason === "resource-not-ready"
-                              ? "Retry incomplete resource"
-                              : "Configuration reconcile"}
-                      </small>
+              )}
+              {review.data.changes.length > 0 ? (
+                <ul className="submit-change-list">
+                  {review.data.changes.map((change) => (
+                    <li key={`${change.resourceId ?? "config"}-${change.path}`}>
+                      <strong>
+                        {change.resourceLabel ?? change.label}
+                      </strong>
+                      <span>{change.resourceLabel
+                        ? change.label
+                        : change.path}</span>
                     </li>
                   ))}
                 </ul>
-              </section>
-            ) : null}
-            {preflight.data ? (
-              <section
-                aria-label="Admission preflight"
-                className="submit-preflight"
-              >
-                <header>
-                  {preflight.data.issues.length === 0
-                    ? <CheckCircle2 aria-hidden="true" />
-                    : <AlertTriangle aria-hidden="true" />}
-                  <div>
-                    <strong>Cluster admission preflight</strong>
-                    <span>
-                      {preflight.data.checkedResources} {
-                        preflight.data.checkedResources === 1
-                          ? "resource checked"
-                          : "resources checked"
-                      }
-                    </span>
-                  </div>
-                </header>
-                {preflight.data.issues.length === 0 ? (
-                  <p>No admission conflicts were found.</p>
-                ) : (
+              ) : null}
+              {!review.data.valid ? (
+                <div className="submit-review-invalid" role="alert">
+                  <AlertTriangle aria-hidden="true" />
+                  <span>
+                    {review.data.validationMessages.join(" ")
+                      || "Resolve validation errors before submitting."}
+                  </span>
+                </div>
+              ) : null}
+              {deploymentActions.length > 0 ? (
+                <section
+                  aria-label="Deployment impact"
+                  className="submit-preflight deployment-impact"
+                >
+                  <header>
+                    <RefreshCw aria-hidden="true" />
+                    <div>
+                      <strong>Deployment impact</strong>
+                      <span>
+                        {deploymentActions.length} {
+                          deploymentActions.length === 1
+                            ? "resource will change"
+                            : "resources will change"
+                        }
+                      </span>
+                    </div>
+                  </header>
                   <ul>
-                    {preflight.data.issues.map((issue) => (
-                      <li key={`${issue.kind}-${issue.name}-${issue.message}`}>
+                    {deploymentActions.map((action) => (
+                      <li key={`${action.kind}-${action.name}-${action.reason}`}>
                         <div>
-                          <strong>{issue.name}</strong>
-                          <span>{issue.kind}</span>
+                          <strong>{action.name}</strong>
+                          <span>{action.kind}</span>
                         </div>
-                        <p>{issue.message}</p>
+                        <p>{action.message}</p>
                         <small>
-                          {issue.classification === "recreate-required"
-                            ? "Reset required"
-                            : issue.classification === "invalid"
-                              ? "Submission blocked"
-                              : issue.classification === "approval-required"
-                                ? "The workflow can request approval"
-                                : "Preflight warning"}
+                          {action.reason === "checksum-only"
+                            ? "Checksum-only reconcile"
+                            : action.reason === "resource-missing"
+                              ? "Create missing resource"
+                              : action.reason === "resource-not-ready"
+                                ? "Retry incomplete resource"
+                                : "Configuration reconcile"}
                         </small>
                       </li>
                     ))}
                   </ul>
-                )}
-                {resetTargetIds.length > 0 ? (
-                  <div className="submit-reset-plan">
-                    {resetPlan.isPending ? (
+                </section>
+              ) : null}
+              {preflight.data ? (
+                <section
+                  aria-label="Admission preflight"
+                  className="submit-preflight"
+                >
+                  <header>
+                    {preflight.data.issues.length === 0
+                      ? <CheckCircle2 aria-hidden="true" />
+                      : <AlertTriangle aria-hidden="true" />}
+                    <div>
+                      <strong>Cluster admission preflight</strong>
                       <span>
-                        <LoaderCircle className="spin" aria-hidden="true" />
-                        Building dependency-safe reset plan
+                        {preflight.data.checkedResources} {
+                          preflight.data.checkedResources === 1
+                            ? "resource checked"
+                            : "resources checked"
+                        }
                       </span>
-                    ) : resetPlan.isError ? (
-                      <span className="submit-reset-error">
-                        {resetPlan.error.message}
-                      </span>
-                    ) : resetPlan.data ? (
-                      <>
-                        <strong>
-                          Reset plan: {resetPlan.data.targets.length} {
-                            resetPlan.data.targets.length === 1
-                              ? "resource"
-                              : "resources"
-                          }
-                        </strong>
-                        <ol>
-                          {resetPlan.data.targets.map((target) => (
-                            <li key={`${target.plural}-${target.name}`}>
-                              {target.path}
-                            </li>
-                          ))}
-                        </ol>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-          </div>
-        ) : null}
-        {problem ? (
-          <div className="submit-review-invalid" role="alert">
-            <AlertTriangle aria-hidden="true" />
-            <span>{problem}</span>
-          </div>
-        ) : null}
+                    </div>
+                  </header>
+                  {preflight.data.issues.length === 0 ? (
+                    <p>No admission conflicts were found.</p>
+                  ) : (
+                    <ul>
+                      {preflight.data.issues.map((issue) => (
+                        <li key={`${issue.kind}-${issue.name}-${issue.message}`}>
+                          <div>
+                            <strong>{issue.name}</strong>
+                            <span>{issue.kind}</span>
+                          </div>
+                          <p>{issue.message}</p>
+                          <small>
+                            {issue.classification === "recreate-required"
+                              ? "Reset required"
+                              : issue.classification === "invalid"
+                                ? "Submission blocked"
+                                : issue.classification === "approval-required"
+                                  ? "The workflow can request approval"
+                                  : "Preflight warning"}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {resetTargetIds.length > 0 ? (
+                    <div className="submit-reset-plan">
+                      {resetPlan.isPending ? (
+                        <span>
+                          <LoaderCircle className="spin" aria-hidden="true" />
+                          Building dependency-safe reset plan
+                        </span>
+                      ) : resetPlan.isError ? (
+                        <span className="submit-reset-error">
+                          {resetPlan.error.message}
+                        </span>
+                      ) : resetPlan.data ? (
+                        <>
+                          <strong>
+                            Reset plan: {resetPlan.data.targets.length} {
+                              resetPlan.data.targets.length === 1
+                                ? "resource"
+                                : "resources"
+                            }
+                          </strong>
+                          <ol>
+                            {resetPlan.data.targets.map((target) => (
+                              <li key={`${target.plural}-${target.name}`}>
+                                {target.path}
+                              </li>
+                            ))}
+                          </ol>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+            </div>
+          ) : null}
+          {problem ? (
+            <div className="submit-review-invalid" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <span>{problem}</span>
+            </div>
+          ) : null}
+        </div>
         <footer>
           <button disabled={submitting} onClick={onClose} type="button">
             Cancel

@@ -50,6 +50,28 @@ test("dims unrelated paths only while a graph node is hovered", async () => {
 });
 
 
+test("anchors dependencies to the stable resource header", () => {
+  const { container } = render(
+    <WorkflowDependencyGraph
+      approvals={[]}
+      onReviewApproval={() => undefined}
+      onSelectNode={() => undefined}
+      operations={[]}
+      selectedNodeId={null}
+      snapshot={structuredClone(manageSnapshot)}
+    />,
+  );
+
+  const nodes = container.querySelectorAll(".workflow-graph-node");
+  expect(nodes.length).toBeGreaterThan(0);
+  nodes.forEach((node) => {
+    expect(node).not.toHaveAttribute("data-dependency-anchor");
+    expect(node.querySelector(":scope > .workflow-graph-node-main"))
+      .toHaveAttribute("data-dependency-anchor", "true");
+  });
+});
+
+
 test("shows active steps and discloses completed steps on their resource", async () => {
   const snapshot = structuredClone(manageSnapshot);
   const replayId = "resource:trafficreplays:replay";

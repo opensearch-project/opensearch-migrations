@@ -127,6 +127,8 @@ export const server = setupServer(
   http.get("*/api/v1/nodes/:nodeId/log-targets", ({ params }) =>
     HttpResponse.json({
       nodeId: params.nodeId,
+      subjectLabel: "capture",
+      subjectKind: "resource",
       capabilityTargetId: "logs:captureproxies:capture",
       targets: [{
         id: "log-target-all",
@@ -150,6 +152,11 @@ export const server = setupServer(
         supportsFollow: false,
       }],
       message: null,
+      externalLogsUrl: (
+        "https://console.aws.amazon.com/cloudwatch/home?region=us-east-2"
+        + "#logsV2:log-groups/log-group/"
+        + "$252Fmigration-assistant-dev-us-east-2$252Flogs"
+      ),
     }),
   ),
   http.post("*/api/v1/log-streams", () =>
