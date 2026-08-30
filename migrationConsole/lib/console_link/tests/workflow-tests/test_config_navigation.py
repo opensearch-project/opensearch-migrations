@@ -24,8 +24,10 @@ def _collection(
     resource_type,
     children,
     identity=None,
+    parent_group=None,
+    draft_change_count=None,
 ):
-    return {
+    result = {
         "id": f"edit:{'.'.join(path)}",
         "path": path,
         "label": group_label,
@@ -40,6 +42,14 @@ def _collection(
                     "groupId": group_id,
                     "groupLabel": group_label,
                     "groupOrder": group_order,
+                    **(
+                        {
+                            "parentGroupId": parent_group["id"],
+                            "parentGroupLabel": parent_group["label"],
+                            "parentGroupOrder": parent_group["order"],
+                        }
+                        if parent_group else {}
+                    ),
                 },
                 "resource": {
                     "kind": resource_type.replace(" ", ""),
@@ -53,12 +63,16 @@ def _collection(
         "diagnostics": [],
         "children": children,
     }
+    if draft_change_count is not None:
+        result["draftChangeCount"] = draft_change_count
+    return result
 
 
 def _resource_edit(
     path,
     *,
     status="ok",
+    implicit=False,
     status_counts=None,
     draft_change_count=None,
     diagnostics=None,
@@ -75,6 +89,8 @@ def _resource_edit(
     }
     if status_counts is not None:
         result["statusCounts"] = status_counts
+    if implicit:
+        result["implicit"] = True
     if draft_change_count is not None:
         result["draftChangeCount"] = draft_change_count
     return result
@@ -210,6 +226,7 @@ def test_project_config_navigation_uses_collection_hints_for_draft_resources():
         group_order=0,
         plural="sourceconfigs",
         resource_type="Source cluster",
+        draft_change_count=1,
         children=[
             _resource_edit(
                 ["sourceClusters", "modern"],
@@ -267,6 +284,233 @@ def test_project_config_navigation_uses_collection_hints_for_draft_resources():
     assert target.parent_id == "group:Targets:Targets"
     assert projected.nodes["section:Targets"].child_ids == (
         "group:Targets:Targets",
+    )
+    assert projected.nodes["section:Targets"].capabilities[0].target_id == (
+        "edit:targetClusters"
+    )
+    assert projected.nodes["group:Targets:Targets"].capabilities[0].target_id == (
+        "edit:targetClusters"
+    )
+
+
+def test_project_config_navigation_keeps_generated_pending_resource():
+    snapshot = _runtime_snapshot()
+    generated = ManageNode(
+        id="resource:kafkaclusters:default",
+        revision="kafka-1",
+        parent_id=(
+            "group:Live Traffic Migration:Buffer:Kafka Clusters"
+        ),
+        kind="resource",
+        label="default",
+        status="ok",
+        capabilities=(
+            ManageCapability(
+                kind="edit",
+                target_id="edit:traffic.kafkaClusters.default",
+                label="Edit default",
+            ),
+        ),
+        resource_plural="kafkaclusters",
+        resource_name="default",
+        resource_type="Kafka cluster",
+        config_presence={
+            "deployed": True,
+            "submitted": True,
+            "pending": True,
+        },
+    )
+    snapshot = replace(
+        snapshot,
+        root_ids=(
+            *snapshot.root_ids,
+            "section:Live Traffic Migration",
+        ),
+        nodes={
+            **snapshot.nodes,
+            "section:Live Traffic Migration": ManageNode(
+                id="section:Live Traffic Migration",
+                revision="traffic-section-1",
+                child_ids=("group:Live Traffic Migration:Buffer",),
+                kind="section",
+                label="Live Traffic Migration",
+                status="ok",
+            ),
+            "group:Live Traffic Migration:Buffer": ManageNode(
+                id="group:Live Traffic Migration:Buffer",
+                revision="buffer-group-1",
+                parent_id="section:Live Traffic Migration",
+                child_ids=(
+                    "group:Live Traffic Migration:Buffer:Kafka Clusters",
+                ),
+                kind="group",
+                label="Buffer",
+                status="ok",
+            ),
+            (
+                "group:Live Traffic Migration:Buffer:Kafka Clusters"
+            ): ManageNode(
+                id=(
+                    "group:Live Traffic Migration:Buffer:Kafka Clusters"
+                ),
+                revision="kafka-group-1",
+                parent_id="group:Live Traffic Migration:Buffer",
+                child_ids=(generated.id,),
+                kind="group",
+                label="Kafka Clusters",
+                status="ok",
+            ),
+            generated.id: generated,
+        },
+    )
+    kafka = _collection(
+        ["traffic", "kafkaClusters"],
+        section_id="section:Live Traffic Migration",
+        section_label="Live Traffic Migration",
+        section_order=3,
+        group_id=(
+            "group:Live Traffic Migration:Buffer:Kafka Clusters"
+        ),
+        group_label="Kafka Clusters",
+        group_order=0,
+        parent_group={
+            "id": "group:Live Traffic Migration:Buffer",
+            "label": "Buffer",
+            "order": 0,
+        },
+        plural="kafkaclusters",
+        resource_type="Kafka cluster",
+        children=[],
+    )
+
+    projected = project_config_navigation(
+        snapshot,
+        _draft([kafka], dirty=True),
+    )
+
+    node = projected.nodes[generated.id]
+    assert node.status == "ok"
+    assert node.value_summary is None
+    assert node.config_presence == {
+        "deployed": True,
+        "submitted": True,
+        "pending": True,
+    }
+
+
+def test_project_config_navigation_exposes_implicit_default_without_addition():
+    snapshot = ManageSnapshot(
+        format_version=1,
+        revision="runtime-empty",
+        observed_at="2026-08-23T12:00:00+00:00",
+        namespace="ma",
+        workflow_name="migration-workflow",
+        workflow=None,
+        root_ids=(),
+        nodes={},
+    )
+    kafka = _collection(
+        ["traffic", "kafkaClusters"],
+        section_id="section:Live Traffic Migration",
+        section_label="Live Traffic Migration",
+        section_order=3,
+        group_id=(
+            "group:Live Traffic Migration:Buffer:Kafka Clusters"
+        ),
+        group_label="Kafka Clusters",
+        group_order=0,
+        parent_group={
+            "id": "group:Live Traffic Migration:Buffer",
+            "label": "Buffer",
+            "order": 0,
+        },
+        plural="kafkaclusters",
+        resource_type="Kafka cluster",
+        children=[
+            _resource_edit(
+                ["traffic", "kafkaClusters", "default"],
+                implicit=True,
+            ),
+        ],
+    )
+
+    projected = project_config_navigation(
+        snapshot,
+        _draft([kafka], dirty=False),
+    )
+
+    node = projected.nodes["resource:kafkaclusters:default"]
+    assert node.status == "ok"
+    assert node.phase == "Implicit default"
+    assert node.value_summary == "Available when referenced"
+    assert node.config_presence == {
+        "deployed": False,
+        "pending": False,
+    }
+    assert node.capabilities[0].target_id == (
+        "edit:traffic.kafkaClusters.default"
+    )
+
+
+def test_project_config_navigation_builds_nested_resource_groups():
+    snapshot = ManageSnapshot(
+        format_version=1,
+        revision="runtime-empty",
+        observed_at="2026-08-23T12:00:00+00:00",
+        namespace="ma",
+        workflow_name="migration-workflow",
+        workflow=None,
+        root_ids=(),
+        nodes={},
+    )
+    kafka = _collection(
+        ["traffic", "kafkaClusters"],
+        section_id="section:Live Traffic Migration",
+        section_label="Live Traffic Migration",
+        section_order=3,
+        group_id=(
+            "group:Live Traffic Migration:Buffer:Kafka Clusters"
+        ),
+        group_label="Kafka Clusters",
+        group_order=0,
+        parent_group={
+            "id": "group:Live Traffic Migration:Buffer",
+            "label": "Buffer",
+            "order": 0,
+        },
+        plural="kafkaclusters",
+        resource_type="Kafka cluster",
+        children=[],
+    )
+    topics = _collection(
+        ["traffic", "s3Sources"],
+        section_id="section:Live Traffic Migration",
+        section_label="Live Traffic Migration",
+        section_order=3,
+        group_id="group:Live Traffic Migration:Buffer:Kafka Topics",
+        group_label="Kafka Topics",
+        group_order=1,
+        parent_group={
+            "id": "group:Live Traffic Migration:Buffer",
+            "label": "Buffer",
+            "order": 0,
+        },
+        plural="capturedtraffics",
+        resource_type="Kafka topic",
+        children=[],
+    )
+
+    projected = project_config_navigation(
+        snapshot,
+        _draft([kafka, topics], dirty=False),
+    )
+
+    section = projected.nodes["section:Live Traffic Migration"]
+    assert section.child_ids == ("group:Live Traffic Migration:Buffer",)
+    buffer = projected.nodes["group:Live Traffic Migration:Buffer"]
+    assert buffer.child_ids == (
+        "group:Live Traffic Migration:Buffer:Kafka Clusters",
+        "group:Live Traffic Migration:Buffer:Kafka Topics",
     )
 
 

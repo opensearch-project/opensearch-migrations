@@ -25,6 +25,7 @@ import {
     PROXY_TLS_CONFIG,
     REPLAYER_CONFIG,
     S3_CAPTURED_TRAFFIC_SOURCE,
+    snapshotRepoRequiresAwsRegion,
     SOLR_SNAPSHOT_INFO,
     SOURCE_CLUSTER_CONFIG,
     SOURCE_CLUSTERS_MAP,
@@ -40,6 +41,11 @@ import {z} from "zod";
 import {parse, stringify} from "yaml";
 import {parseYaml, readYamlText} from "./userConfigReader";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
+import {
+    DEFAULT_AUTO_CREATE_CONFIG,
+    DEFAULT_KAFKA_CLUSTER_NAME,
+    looseKafkaEntriesForConfig,
+} from "./kafkaConfigResolution";
 import {formatInputValidationError, InputValidationError, stripComments} from "./streamSchemaTransformer";
 import {
     EditApplyResultV1,
@@ -50,6 +56,7 @@ import {
     EditStateV1,
     SchemaEditContext,
     addRow,
+    applyUniqueReferenceDefaults,
     applyValidationDiagnostics,
     childSchemaAtPath,
     defaultJsonValueForSchema,
@@ -179,7 +186,7 @@ function recordGroupNode(spec: RecordGroupSpec): EditNode {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([name, value]) => {
             const node = spec.itemNode(name, value);
-            node.removable = true;
+            node.removable = node.implicit !== true;
             return node;
         });
     children.push(addRow(
@@ -383,6 +390,48 @@ function applySnapshotRepoConstraints(children: EditNode[], path: string[], info
     }
 }
 
+function applySourceSnapshotReferences(children: EditNode[]): void {
+    const snapshotsNode = children.find(child =>
+        child.path[child.path.length - 1] === "snapshots");
+    for (const snapshotNode of snapshotsNode?.children ?? []) {
+        if (snapshotNode.valueKind === "command") {
+            continue;
+        }
+        const snapshotName = snapshotNode.path.at(-1) ?? "snapshot";
+        const configNode = snapshotNode.children?.find(child =>
+            child.path.at(-1) === "config");
+        const createSnapshotNode = configNode?.children?.find(child =>
+            child.path.at(-1) === "createSnapshotConfig");
+        if (!createSnapshotNode) {
+            continue;
+        }
+        createSnapshotNode.label = "Create source snapshot";
+        createSnapshotNode.referenceTargetId = snapshotNode.id;
+        createSnapshotNode.referenceLabel = `Source Snapshot Definition (${snapshotName})`;
+        createSnapshotNode.description = [
+            createSnapshotNode.description,
+            `These settings belong to the source snapshot definition '${snapshotName}'.`,
+        ].filter(Boolean).join(" ");
+    }
+}
+
+function applySnapshotRepoRegionRequirements(children: EditNode[], info: Record<string, any>): void {
+    const reposNode = children.find(child =>
+        child.path[child.path.length - 1] === "repos");
+    for (const repoNode of reposNode?.children ?? []) {
+        const repoName = repoNode.path[repoNode.path.length - 1] ?? "";
+        if (!snapshotRepoRequiresAwsRegion(info.repos?.[repoName] ?? {})) {
+            continue;
+        }
+        const awsRegionNode = repoNode.children?.find(child =>
+            child.path[child.path.length - 1] === "awsRegion");
+        if (awsRegionNode) {
+            awsRegionNode.presence = "required";
+            awsRegionNode.required = true;
+        }
+    }
+}
+
 function sourceVersionIsSolr(version: unknown): boolean {
     return typeof version === "string" && version.startsWith("SOLR ");
 }
@@ -418,7 +467,9 @@ function snapshotInfoNode(
             child.diagnostics = [];
         }
     }
+    applySnapshotRepoRegionRequirements(children, info);
     applySnapshotRepoConstraints(children, path, info);
+    applySourceSnapshotReferences(children);
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -460,16 +511,37 @@ function kafkaClusterNode(name: string, value: any): EditNode {
     });
 }
 
-function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
+function kafkaGroupNode(traffic: Record<string, any> | undefined): EditNode {
     const path = ["traffic", "kafkaClusters"];
+    const authored = isPlainObject(traffic?.kafkaClusters)
+        ? traffic.kafkaClusters
+        : {};
+    const effective = Object.fromEntries(
+        looseKafkaEntriesForConfig({traffic: traffic ?? {}}),
+    );
+    if (!Object.hasOwn(effective, DEFAULT_KAFKA_CLUSTER_NAME)) {
+        effective[DEFAULT_KAFKA_CLUSTER_NAME] =
+            structuredClone(DEFAULT_AUTO_CREATE_CONFIG);
+    }
     return recordGroupNode({
         path,
         label: "Kafka Clusters",
         description: KAFKA_CLUSTERS_DESCRIPTION,
         inputHint: TRAFFIC_KAFKA_RECORD_HINT,
         essential: true,
-        config,
-        itemNode: kafkaClusterNode,
+        config: effective,
+        itemNode: (name, value) => {
+            const node = kafkaClusterNode(name, value);
+            if (!Object.hasOwn(authored, name)) {
+                node.implicit = true;
+                node.valueDefaulted = true;
+                node.description = [
+                    "This cluster is implicit until you change one of its settings.",
+                    node.description,
+                ].filter(Boolean).join(" ");
+            }
+            return node;
+        },
         addLabel: "Kafka cluster",
         addDescription: "Create a Kafka cluster configuration in pending workflow YAML.",
         addInputHint: recordKeyHint(TRAFFIC_KAFKA_RECORD_HINT),
@@ -606,7 +678,7 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
         description: "Kafka clusters and optional pre-recorded traffic sources used as live-traffic buffers.",
         status: "ok",
         children: [
-            kafkaGroupNode(traffic?.kafkaClusters),
+            kafkaGroupNode(traffic),
             recordGroupNode({
                 path: ["traffic", "s3Sources"],
                 label: "S3 Captured Traffic Sources",
@@ -743,7 +815,7 @@ function snapshotPerConfigNode(path: string[], value: unknown, ctx: EditContext,
         description: schemaFieldDescription(
             NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
             "perSnapshotConfig",
-            "Per-snapshot migration configurations.",
+            "Migration passes grouped by the separately defined source snapshots they consume.",
         ),
         required: false,
         inputHint: SNAPSHOT_PER_CONFIG_HINT,
@@ -755,13 +827,13 @@ function snapshotPerConfigNode(path: string[], value: unknown, ctx: EditContext,
 
 function snapshotPerConfigLabel(missing: boolean, configuredCount: number, availableCount: number): string {
     if (availableCount === 0) {
-        return "perSnapshotConfig: no source snapshots";
+        return "Source snapshot migrations: no source snapshots";
     }
     if (missing) {
-        return `perSnapshotConfig: <unset>, ${availableCount} available`;
+        return `Source snapshot migrations: none configured, ${availableCount} available`;
     }
     const unconfiguredCount = Math.max(availableCount - configuredCount, 0);
-    return `perSnapshotConfig: ${configuredCount} configured, ${unconfiguredCount} unconfigured`;
+    return `Source snapshot migrations: ${configuredCount} configured, ${unconfiguredCount} unconfigured`;
 }
 
 function snapshotConfigureSlotNode(
@@ -772,12 +844,13 @@ function snapshotConfigureSlotNode(
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
         path,
-        label: `${snapshotName}: not configured`,
+        label: `Migration passes for ${snapshotName}: not configured`,
         valueKind: "command",
         presence: "optional",
         essential: true,
-        description: `Configure migration passes for source snapshot '${snapshotName}'.`,
+        description: `Configure migration passes that consume the separately defined source snapshot '${snapshotName}'.`,
         referenceTargetId,
+        referenceLabel: `Source Snapshot '${snapshotName}'`,
         command: {requiresName: false, editAdded: false, autoEditAdded: false},
         status: "ok",
     });
@@ -806,13 +879,14 @@ function snapshotMigrationPassArrayNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${snapshotName}: ${arrayValue.length} item${arrayValue.length === 1 ? "" : "s"}`,
+        label: `Migration passes for ${snapshotName}: ${arrayValue.length} item${arrayValue.length === 1 ? "" : "s"}`,
         value,
         valueKind: "array",
         presence: "required",
         essential: true,
-        description: "Migration passes to run for this snapshot.",
+        description: `Migration passes that consume the separately defined source snapshot '${snapshotName}'.`,
         referenceTargetId,
+        referenceLabel: `Source Snapshot '${snapshotName}'`,
         required: true,
         status: "ok",
         children,
@@ -1062,7 +1136,16 @@ function actionableZodIssues(
             .sort((left, right) =>
                 right.presentValues - left.presentValues
                 || left.branch.length - right.branch.length);
-        return ranked[0]?.presentValues ? ranked[0].branch : [issue];
+        if (ranked[0]?.presentValues) {
+            return ranked[0].branch;
+        }
+        const sharedIssues = (candidates[0] ?? []).filter(candidate =>
+            candidates.every(branch => branch.some(other =>
+                other.code === candidate.code
+                && other.message === candidate.message
+                && JSON.stringify(other.path) === JSON.stringify(candidate.path)
+            )));
+        return sharedIssues.length ? sharedIssues : [issue];
     });
 }
 
@@ -1971,6 +2054,12 @@ function addAtPath(config: any, path: string[], value: unknown): void {
             config.snapshotMigrationConfigs = [];
         }
         config.snapshotMigrationConfigs.push(defaultConfigForPath(path));
+        applyUniqueReferenceDefaults(
+            NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
+            config.snapshotMigrationConfigs.at(-1),
+            [...path, String(config.snapshotMigrationConfigs.length - 1)],
+            {rootConfig: config},
+        );
         return;
     }
 
@@ -1982,6 +2071,13 @@ function addAtPath(config: any, path: string[], value: unknown): void {
         }
         const itemSchema = resolveJsonSchemaRef(arraySchema?.items);
         parent[key].push(defaultJsonValueForSchema(itemSchema));
+        const addedIndex = parent[key].length - 1;
+        applyUniqueReferenceDefaults(
+            schemaForConfigPath([...path, String(addedIndex)]),
+            parent[key][addedIndex],
+            [...path, String(addedIndex)],
+            {rootConfig: config},
+        );
         return;
     }
 
@@ -1993,6 +2089,13 @@ function addAtPath(config: any, path: string[], value: unknown): void {
             parent[key] = [];
         }
         parent[key].push(defaultConfigValueForSchema(itemSchema));
+        const addedIndex = parent[key].length - 1;
+        applyUniqueReferenceDefaults(
+            itemSchema,
+            parent[key][addedIndex],
+            [...path, String(addedIndex)],
+            {rootConfig: config},
+        );
         return;
     }
 
@@ -2007,6 +2110,7 @@ function addAtPath(config: any, path: string[], value: unknown): void {
                 throw new Error(`Config entry already exists at ${path.join(".")}`);
             }
             parent[key] = defaultConfigValueForSchema(schema);
+            applyUniqueReferenceDefaults(schema, parent[key], path, {rootConfig: config});
             return;
         }
         throw new Error("Add operation requires a non-empty name");
@@ -2016,6 +2120,13 @@ function addAtPath(config: any, path: string[], value: unknown): void {
         throw new Error(`Config entry already exists at ${[...path, name].join(".")}`);
     }
     parent[key] = defaultConfigForPath(path);
+    const addedPath = [...path, name];
+    applyUniqueReferenceDefaults(
+        schemaForConfigPath(addedPath),
+        parent[key],
+        addedPath,
+        {rootConfig: config},
+    );
 }
 
 export function applyEditOperation(config: any, operation: EditOperation): any {
@@ -2095,7 +2206,9 @@ export async function main() {
     const yamlContents = await readYamlText(pendingConfigPath);
     let config: unknown;
     try {
-        config = parse(yamlContents);
+        // A missing saved configuration is an empty structured draft, not an
+        // authored YAML null. Keep explicit null values on the repair path.
+        config = yamlContents.trim() === "" ? {} : parse(yamlContents);
     } catch (error) {
         if (subcommand === "state" && args.length === 0) {
             process.stdout.write(JSON.stringify(rawRepairState(

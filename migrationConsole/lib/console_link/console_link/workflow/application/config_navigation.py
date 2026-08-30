@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple, cast
 
+from ..manage_tree_schema import EDIT_ID_BY_TREE_ID
 from .config_drafts import ConfigDraft
 from .models import (
     ManageCapability,
@@ -31,6 +32,9 @@ class _Placement:
     group_id: str
     group_label: str
     group_order: int
+    parent_group_id: Optional[str]
+    parent_group_label: Optional[str]
+    parent_group_order: Optional[int]
     resource_plural: str
     resource_type: str
     identity: _Identity
@@ -150,9 +154,15 @@ def _project_existing_node(
         )
     )
     removed_from_draft = (
-        target_id is not None
+        draft.dirty
+        and target_id is not None
         and _is_resource_target(target_id, placements)
         and target_id not in edit_nodes
+        and _resource_collection_changed(
+            target_id,
+            edit_nodes,
+            placements,
+        )
     )
     if not explicit_removal and not removed_from_draft:
         return cast(ManageNode, replace(node, config_state=config_state))
@@ -193,6 +203,28 @@ def _is_resource_target(
         or path.startswith(f"{'.'.join(placement.collection_path)}.")
         for placement in placements
     )
+
+
+def _resource_collection_changed(
+    target_id: str,
+    edit_nodes: Mapping[str, Mapping[str, Any]],
+    placements: Tuple[_Placement, ...],
+) -> bool:
+    path = (
+        target_id[len("edit:"):]
+        if target_id.startswith("edit:")
+        else target_id
+    )
+    for placement in placements:
+        collection_path = ".".join(placement.collection_path)
+        if not path.startswith(f"{collection_path}."):
+            continue
+        collection = edit_nodes.get(f"edit:{collection_path}")
+        return (
+            collection is not None
+            and _draft_change_count(collection) > 0
+        )
+    return False
 
 
 def _edit_nodes(
@@ -308,6 +340,18 @@ def _placement(node: Mapping[str, Any]) -> Optional[_Placement]:
         or identity.get("kind") not in {"named", "indexed-config"}
     ):
         return None
+    parent_values = (
+        navigation.get("parentGroupId"),
+        navigation.get("parentGroupLabel"),
+        navigation.get("parentGroupOrder"),
+    )
+    has_parent = any(value is not None for value in parent_values)
+    if has_parent and (
+        not isinstance(parent_values[0], str)
+        or not isinstance(parent_values[1], str)
+        or not isinstance(parent_values[2], int)
+    ):
+        return None
     return _Placement(
         collection_path=tuple(path),
         section_id=navigation["sectionId"],
@@ -316,6 +360,9 @@ def _placement(node: Mapping[str, Any]) -> Optional[_Placement]:
         group_id=navigation["groupId"],
         group_label=navigation["groupLabel"],
         group_order=navigation["groupOrder"],
+        parent_group_id=parent_values[0] if has_parent else None,
+        parent_group_label=parent_values[1] if has_parent else None,
+        parent_group_order=parent_values[2] if has_parent else None,
         resource_plural=resource["plural"],
         resource_type=resource["typeLabel"],
         identity=_Identity(
@@ -353,6 +400,14 @@ def _ensure_navigation(
         placement.group_id: placement.group_order
         for placement in placements
     }
+    group_order.update({
+        placement.parent_group_id: placement.parent_group_order
+        for placement in placements
+        if (
+            placement.parent_group_id is not None
+            and placement.parent_group_order is not None
+        )
+    })
     for placement in placements:
         section = nodes.get(placement.section_id)
         if section is None:
@@ -363,32 +418,98 @@ def _ensure_navigation(
                 label=placement.section_label,
                 status="ok",
             )
-            nodes[section.id] = section
+        section = _with_edit_capability(
+            section,
+            EDIT_ID_BY_TREE_ID.get(section.id),
+        )
+        nodes[section.id] = section
         if section.id not in root_ids:
             root_ids.append(section.id)
+
+        parent_id = section.id
+        if (
+            placement.parent_group_id is not None
+            and placement.parent_group_label is not None
+        ):
+            parent_group = nodes.get(placement.parent_group_id)
+            if parent_group is None:
+                parent_group = ManageNode(
+                    id=placement.parent_group_id,
+                    revision=(
+                        f"{revision}:{placement.parent_group_id}"
+                    ),
+                    parent_id=section.id,
+                    kind="group",
+                    label=placement.parent_group_label,
+                    status="ok",
+                )
+            parent_group = _with_edit_capability(
+                parent_group,
+                EDIT_ID_BY_TREE_ID.get(parent_group.id),
+            )
+            nodes[parent_group.id] = parent_group
+            if parent_group.id not in section.child_ids:
+                nodes[section.id] = replace(
+                    nodes[section.id],
+                    revision=f"{nodes[section.id].revision}:{revision}",
+                    child_ids=tuple(_ordered_ids(
+                        (*nodes[section.id].child_ids, parent_group.id),
+                        group_order,
+                    )),
+                )
+            parent_id = parent_group.id
 
         group = nodes.get(placement.group_id)
         if group is None:
             group = ManageNode(
                 id=placement.group_id,
                 revision=f"{revision}:{placement.group_id}",
-                parent_id=section.id,
+                parent_id=parent_id,
                 kind="group",
                 label=placement.group_label,
                 status="ok",
             )
-            nodes[group.id] = group
-        if group.id not in section.child_ids:
-            nodes[section.id] = replace(
-                section,
-                revision=f"{section.revision}:{revision}",
+        group = _with_edit_capability(
+            group,
+            EDIT_ID_BY_TREE_ID.get(group.id),
+        )
+        nodes[group.id] = group
+        parent = nodes[parent_id]
+        if group.id not in parent.child_ids:
+            nodes[parent_id] = replace(
+                parent,
+                revision=f"{parent.revision}:{revision}",
                 child_ids=tuple(_ordered_ids(
-                    (*section.child_ids, group.id),
+                    (*parent.child_ids, group.id),
                     group_order,
                 )),
             )
 
     root_ids[:] = _ordered_ids(root_ids, section_order)
+
+
+def _with_edit_capability(
+    node: ManageNode,
+    target_id: Optional[str],
+) -> ManageNode:
+    if target_id is None:
+        return node
+    capabilities = tuple(
+        capability
+        for capability in node.capabilities
+        if capability.kind != "edit"
+    )
+    return cast(ManageNode, replace(
+        node,
+        capabilities=(
+            *capabilities,
+            ManageCapability(
+                kind="edit",
+                target_id=target_id,
+                label=f"Edit {node.label}",
+            ),
+        ),
+    ))
 
 
 def _ordered_ids(
@@ -431,23 +552,35 @@ def _new_draft_resource(
     if identity is None or identity[0] in existing_node_ids:
         return None
     node_id, resource_name = identity
+    implicit = child.get("implicit") is True
     status_value = child.get("status")
     status = (
         status_value
-        if isinstance(status_value, str) and status_value != "ok"
+        if isinstance(status_value, str)
+        and (implicit or status_value != "ok")
         else "changed"
+    )
+    phase = "Implicit default" if implicit else "Pending Config"
+    value_summary = (
+        "Available when referenced"
+        if implicit
+        else "Addition pending submission"
     )
     return (
         ManageNode(
             id=node_id,
-            revision=f"{revision}:{target_id}:added",
+            revision=(
+                f"{revision}:{target_id}:implicit"
+                if implicit
+                else f"{revision}:{target_id}:added"
+            ),
             parent_id=placement.group_id,
             kind="resource",
             label=resource_name,
             description=f"{placement.resource_plural}/{resource_name}",
             status=status,
-            phase="Pending Config",
-            value_summary="Addition pending submission",
+            phase=phase,
+            value_summary=value_summary,
             diagnostics=_diagnostics(child),
             capabilities=(
                 ManageCapability(
@@ -459,7 +592,7 @@ def _new_draft_resource(
             details=(
                 ManageDetail(
                     label="Phase",
-                    value="Pending Config",
+                    value=phase,
                     kind="phase",
                 ),
             ),
@@ -468,7 +601,7 @@ def _new_draft_resource(
             resource_type=placement.resource_type,
             config_presence={
                 "deployed": False,
-                "pending": True,
+                "pending": not implicit,
             },
             config_state=_config_state(child, dirty),
         ),

@@ -36,6 +36,8 @@ export interface EditNode {
     presence?: "required" | "optional";
     expert?: boolean;
     essential?: boolean;
+    // A navigable effective configuration that is not authored in YAML yet.
+    implicit?: boolean;
     description?: string;
     required?: boolean;
     removable?: boolean;
@@ -58,6 +60,7 @@ export interface EditNode {
     diagnostics?: EditDiagnostic[];
     collapsed?: boolean;
     referenceTargetId?: string;
+    referenceLabel?: string;
     variants?: {
         label: string;
         value: unknown;
@@ -429,7 +432,7 @@ function resolveReferenceSourcePaths(
     return paths;
 }
 
-function resolveReferenceOptions(
+export function resolveReferenceOptions(
     inputHint: EditInputHint | undefined,
     currentPath: string[],
     context?: SchemaEditContext,
@@ -449,6 +452,66 @@ function resolveReferenceOptions(
         }
     }
     return [...optionsByValue.values()].sort((a, b) => a.value.localeCompare(b.value));
+}
+
+function blankReferenceValue(value: unknown): boolean {
+    return value === undefined || value === null || value === "";
+}
+
+/**
+ * Fills reference fields only when the current configuration offers one choice.
+ *
+ * This mutates an object that has just been explicitly added. It does not create
+ * optional containers, and it never replaces an authored value. Traversal uses
+ * the schema field order so one filled reference can resolve a dependent
+ * reference later in the same object (for example source, then snapshot).
+ */
+export function applyUniqueReferenceDefaults(
+    schema: any,
+    value: unknown,
+    currentPath: string[],
+    context: SchemaEditContext,
+): void {
+    if (Array.isArray(value)) {
+        const itemSchema = schemaArrayElement(schema);
+        if (!itemSchema) {
+            return;
+        }
+        value.forEach((item, index) =>
+            applyUniqueReferenceDefaults(itemSchema, item, [...currentPath, String(index)], context));
+        return;
+    }
+    if (!isPlainObject(value)) {
+        return;
+    }
+
+    const visited = new Set<string>();
+    for (const [key, fieldSchema] of Object.entries(schemaShape(schema) ?? {})) {
+        visited.add(key);
+        const fieldPath = [...currentPath, key];
+        const inputHint = uiHintOf(fieldSchema);
+        if (inputHint?.kind === "reference" && blankReferenceValue(value[key])) {
+            const options = resolveReferenceOptions(inputHint, fieldPath, context);
+            if (options?.length === 1) {
+                value[key] = options[0].value;
+            }
+        }
+        if (Object.hasOwn(value, key)) {
+            applyUniqueReferenceDefaults(fieldSchema, value[key], fieldPath, context);
+        }
+    }
+
+    // Records and selected union branches expose their child schemas through
+    // path lookup rather than a direct object shape.
+    for (const [key, childValue] of Object.entries(value)) {
+        if (visited.has(key)) {
+            continue;
+        }
+        const childSchema = childSchemaAtPath(schema, [key]);
+        if (childSchema) {
+            applyUniqueReferenceDefaults(childSchema, childValue, [...currentPath, key], context);
+        }
+    }
 }
 
 function resolveInputHint(

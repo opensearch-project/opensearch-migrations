@@ -7,7 +7,8 @@
       "snapshotInfo": {
         "repos": {
           "default": {
-            "repoPathUri": "s3://snapshot-bucket"
+            "repoPathUri": "s3://snapshot-bucket",
+            "awsRegion": "us-east-1"
           }
         },
         "snapshots": {

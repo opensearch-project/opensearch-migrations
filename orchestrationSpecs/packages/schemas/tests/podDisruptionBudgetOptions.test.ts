@@ -13,10 +13,14 @@ describe("minPodReplicas validation", () => {
 
     test.each([
         ["proxy", USER_PROXY_OPTIONS, {listenPort: 9201, podReplicas: 2, minPodReplicas: 1}],
-        ["replayer", USER_REPLAYER_OPTIONS, {podReplicas: 2, minPodReplicas: 1}],
         ["rfs", USER_RFS_OPTIONS, {podReplicas: 2, minPodReplicas: 1, maxShardSizeBytes: 1024}],
     ])("accepts %s minPodReplicas less than podReplicas", (_name, schema, data) => {
         expect(schema.safeParse(data).success).toBe(true);
+    });
+
+    test("requires exactly one replayer pod replica", () => {
+        expect(USER_REPLAYER_OPTIONS.safeParse({podReplicas: 1, minPodReplicas: 1}).success).toBe(true);
+        expect(USER_REPLAYER_OPTIONS.safeParse({podReplicas: 2, minPodReplicas: 1}).success).toBe(false);
     });
 
     test.each([

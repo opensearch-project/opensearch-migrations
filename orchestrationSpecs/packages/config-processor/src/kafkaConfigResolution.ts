@@ -53,7 +53,26 @@ function addReferencedKafkaClusters(
     }
 }
 
-/** Resolve traffic.kafkaClusters, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
+function referencedKafkaClusterNames(userConfig: {
+    traffic?: {
+        proxies?: Record<string, {kafka?: string | null | undefined}>,
+        s3Sources?: Record<string, {kafka?: string | null | undefined}>,
+    },
+}): Set<string> {
+    const names = new Set<string>();
+    for (const source of Object.values(userConfig.traffic?.proxies ?? {})) {
+        names.add(kafkaClusterNameForReference(source));
+    }
+    for (const source of Object.values(userConfig.traffic?.s3Sources ?? {})) {
+        names.add(kafkaClusterNameForReference(source));
+    }
+    return names;
+}
+
+/**
+ * Resolve traffic.kafkaClusters, inferring referenced clusters when no map was
+ * authored and preserving the implicit "default" beside explicit clusters.
+ */
 export function resolveKafkaClusters(userConfig: {
     traffic?: {
         kafkaClusters?: Record<string, KafkaClusterConfig>,
@@ -62,13 +81,18 @@ export function resolveKafkaClusters(userConfig: {
     },
 }): Record<string, KafkaClusterConfig> {
     const explicit = userConfig.traffic?.kafkaClusters ?? {};
-    if (Object.keys(explicit).length > 0) {
-        return explicit;
+    const resolved = {...explicit};
+    const referenced = referencedKafkaClusterNames(userConfig);
+    if (Object.keys(explicit).length === 0) {
+        addReferencedKafkaClusters(resolved, Object.values(userConfig.traffic?.proxies ?? {}));
+        addReferencedKafkaClusters(resolved, Object.values(userConfig.traffic?.s3Sources ?? {}));
+    } else if (
+        referenced.has(DEFAULT_KAFKA_CLUSTER_NAME)
+        && !(DEFAULT_KAFKA_CLUSTER_NAME in resolved)
+    ) {
+        resolved[DEFAULT_KAFKA_CLUSTER_NAME] = DEFAULT_AUTO_CREATE_CONFIG;
     }
-    const clusters: Record<string, KafkaClusterConfig> = {};
-    addReferencedKafkaClusters(clusters, Object.values(userConfig.traffic?.proxies ?? {}));
-    addReferencedKafkaClusters(clusters, Object.values(userConfig.traffic?.s3Sources ?? {}));
-    return clusters;
+    return resolved;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -96,16 +120,37 @@ export function looseKafkaEntriesForConfig(config: Record<string, unknown>): [st
     const traffic = asRecord(config.traffic);
     const explicit = recordEntries(traffic.kafkaClusters);
     if (explicit.length > 0) {
+        const referenced = referencedKafkaClusterNames({
+            traffic: {
+                proxies: Object.fromEntries(recordEntries(traffic.proxies)),
+                s3Sources: Object.fromEntries(recordEntries(traffic.s3Sources)),
+            },
+        });
+        if (
+            referenced.has(DEFAULT_KAFKA_CLUSTER_NAME)
+            && !explicit.some(([name]) => name === DEFAULT_KAFKA_CLUSTER_NAME)
+        ) {
+            return [
+                ...explicit,
+                [
+                    DEFAULT_KAFKA_CLUSTER_NAME,
+                    structuredClone(DEFAULT_AUTO_CREATE_CONFIG) as Record<string, unknown>,
+                ],
+            ];
+        }
         return explicit;
     }
 
-    const names = new Set<string>();
-    for (const [, proxy] of recordEntries(traffic.proxies)) {
-        names.add(kafkaClusterNameForReference({kafka: asString(proxy.kafka)}));
-    }
-    for (const [, s3] of recordEntries(traffic.s3Sources)) {
-        names.add(kafkaClusterNameForReference({kafka: asString(s3.kafka)}));
-    }
+    const names = referencedKafkaClusterNames({
+        traffic: {
+            proxies: Object.fromEntries(recordEntries(traffic.proxies).map(
+                ([name, proxy]) => [name, {kafka: asString(proxy.kafka)}],
+            )),
+            s3Sources: Object.fromEntries(recordEntries(traffic.s3Sources).map(
+                ([name, source]) => [name, {kafka: asString(source.kafka)}],
+            )),
+        },
+    });
     return [...names].sort().map(name =>
         [name, structuredClone(DEFAULT_AUTO_CREATE_CONFIG) as Record<string, unknown>] as [string, Record<string, unknown>]
     );

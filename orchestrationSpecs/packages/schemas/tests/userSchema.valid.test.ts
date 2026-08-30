@@ -25,7 +25,6 @@ describe("valid configs parse successfully", () => {
                 },
             },
             targetClusters: {},
-            snapshotMigrationConfigs: [],
             traffic: {
                 proxies: {
                     capture: {
@@ -42,6 +41,7 @@ describe("valid configs parse successfully", () => {
             throw new Error(result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("\n"));
         }
         expect(result.data.traffic?.replayers).toEqual({});
+        expect(result.data.snapshotMigrationConfigs).toEqual([]);
     });
 
     it("rejects replay names that cannot become Kubernetes resource names", () => {

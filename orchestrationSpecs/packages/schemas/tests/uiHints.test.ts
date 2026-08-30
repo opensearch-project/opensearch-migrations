@@ -35,6 +35,16 @@ describe("workflow schema UI hints", () => {
             kind: "record",
             addLabel: "Kafka cluster",
             keyFormat: "k8s-name",
+            resourceCollection: {
+                navigation: {
+                    groupId: "group:Live Traffic Migration:Buffer:Kafka Clusters",
+                    groupLabel: "Kafka Clusters",
+                    groupOrder: 0,
+                    parentGroupId: "group:Live Traffic Migration:Buffer",
+                    parentGroupLabel: "Buffer",
+                    parentGroupOrder: 0,
+                },
+            },
         });
         expect(schema.properties.snapshotMigrationConfigs["x-ui-hint"]).toMatchObject({
             kind: "array",
@@ -62,6 +72,12 @@ describe("workflow schema UI hints", () => {
         expect(schema.properties.traffic.properties.replayers.additionalProperties.properties.toTarget["x-ui-hint"]).toMatchObject({
             kind: "reference",
             sourcePath: ["targetClusters"],
+        });
+        expect(schema.properties.traffic.properties.proxies.additionalProperties.properties.kafka["x-ui-hint"]).toMatchObject({
+            kind: "reference",
+            sourcePath: ["traffic", "kafkaClusters"],
+            emptyMeansDefault: "default",
+            message: "A Kafka cluster with default settings will be provided.",
         });
     });
 
@@ -161,9 +177,33 @@ describe("workflow schema UI hints", () => {
 
     it("exports expert field hints from authored schema descriptions", () => {
         const proxyConfig = schema.properties.traffic.properties.proxies.additionalProperties.properties.proxyConfig;
+        const replayerConfig = schema.properties.traffic.properties.replayers.additionalProperties.properties.replayerConfig;
+        const snapshotMigration = schema.properties.snapshotMigrationConfigs.items;
+        const perSnapshotPass = snapshotMigration.properties.perSnapshotConfig.additionalProperties.items;
+        const metadataConfig = perSnapshotPass.properties.metadataMigrationConfig;
+        const documentBackfillConfig = perSnapshotPass.properties.documentBackfillConfig;
 
         expect(proxyConfig.properties.serviceType["x-expert"]).toBe(true);
         expect(proxyConfig.properties.podReplicas["x-expert"]).toBeUndefined();
+        expect(proxyConfig.properties.minPodReplicas["x-expert"]).toBeUndefined();
+        expect(proxyConfig.properties.loggingConfigurationOverrideConfigMap["x-expert"]).toBe(true);
+        expect(proxyConfig.properties.otelTraceCollectorEndpoint["x-expert"]).toBe(true);
+        expect(proxyConfig.properties.otelMetricsCollectorEndpoint["x-expert"]).toBe(true);
+
+        expect(replayerConfig.properties.podReplicas["x-expert"]).toBe(true);
+        expect(replayerConfig.properties.podReplicas["x-ui-hint"]).toMatchObject({
+            kind: "text",
+            readOnly: true,
+        });
+        expect(replayerConfig.properties.minPodReplicas["x-expert"]).toBe(true);
+        expect(replayerConfig.properties.loggingConfigurationOverrideConfigMap["x-expert"]).toBe(true);
+        expect(replayerConfig.properties.useLocalStack["x-expert"]).toBe(true);
+        expect(replayerConfig.properties.kafkaTrafficEnableMSKAuth["x-expert"]).toBe(true);
+        expect(replayerConfig.properties.numClientThreads["x-expert"]).toBe(true);
+
+        expect(metadataConfig.properties.loggingConfigurationOverrideConfigMap["x-expert"]).toBe(true);
+        expect(documentBackfillConfig.properties.minPodReplicas["x-expert"]).toBe(true);
+        expect(documentBackfillConfig.properties.loggingConfigurationOverrideConfigMap["x-expert"]).toBe(true);
     });
 
     it("exports effective defaults for fields resolved outside the raw schema", () => {

@@ -185,6 +185,7 @@ function resourceRenameOptions(nodes: EditNode[]): ResourceRenameOption[] {
       propertyChildren(node).forEach((child) => {
         if (
           child.path.length !== collectionDepth + 1
+          || child.implicit === true
         ) {
           return;
         }
@@ -529,7 +530,16 @@ function ScalarEditor({
   const hint = hintRecord(node.inputHint);
   const isReference = hint.kind === "reference";
   const allowCustom = hint.allowCustom === true;
-  const noReferenceChoices = isReference && !allowCustom && options.length === 0;
+  const referenceUnavailable = (
+    isReference && !allowCustom && options.length === 0
+  );
+  const usesImplicitReferenceDefault = (
+    referenceUnavailable && typeof hint.emptyMeansDefault === "string"
+  );
+  const noReferenceChoices = (
+    referenceUnavailable && !usesImplicitReferenceDefault
+  );
+  const readOnly = hint.readOnly === true;
   const [value, setValue] = useState(authoredValue);
   const [applying, setApplying] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -581,7 +591,7 @@ function ScalarEditor({
   }
 
   const syncValue = async () => {
-    if (applying || noReferenceChoices) return false;
+    if (applying || referenceUnavailable || readOnly) return false;
     if (value === authoredValue) {
       onLocalDirtyChange(false);
       return true;
@@ -612,7 +622,7 @@ function ScalarEditor({
         <input
           aria-label={name}
           aria-busy={applying}
-          disabled={noReferenceChoices || applying}
+          disabled={referenceUnavailable || readOnly || applying}
           list={options.length > 0 || examples.length > 0
             ? `${node.id}-choices`
             : undefined}
@@ -650,7 +660,13 @@ function ScalarEditor({
       {showDocumentation && selectedOption?.description
         ? <p className="field-help">{selectedOption.description}</p>
         : null}
-      {noReferenceChoices ? (
+      {usesImplicitReferenceDefault ? (
+        <p className="field-help">
+          {typeof hint.message === "string"
+            ? hint.message
+            : `A ${String(hint.emptyMeansDefault)} configuration will be provided.`}
+        </p>
+      ) : noReferenceChoices ? (
         <p className="field-error">
           {typeof hint.message === "string"
             ? hint.message
@@ -998,7 +1014,7 @@ function ConfigPropertyRow({
   const addingCommand = commands.find(
     (candidate) => candidate.id === addingCommandId,
   ) ?? null;
-  const canRename = renameableConfigPath(node.path);
+  const canRename = renameableConfigPath(node.path) && node.implicit !== true;
   const canUnset = (
     node.presence === "optional"
     && node.required !== true
@@ -1038,7 +1054,8 @@ function ConfigPropertyRow({
   );
   const referenceTargetId = node.referenceTargetId
     ?? selectedReference?.editTargetId;
-  const referenceLabel = selectedReference?.label
+  const referenceLabel = node.referenceLabel
+    ?? selectedReference?.label
     ?? node.path.at(-1)
     ?? "definition";
   const fieldDescription = node.description ?? selectedDescription;
@@ -1453,10 +1470,10 @@ export function ConfigEditor({
   const [activeTargetId, setActiveTargetId] = useState<string | null>(
     initialTargetId ?? null,
   );
-  const [showOptional, setShowOptional] = useState(false);
+  const [showOptional, setShowOptional] = useState(true);
   const [showExpert, setShowExpert] = useState(false);
   const [showDocumentation, setShowDocumentation] = useState(false);
-  const [renderOptional, setRenderOptional] = useState(false);
+  const [renderOptional, setRenderOptional] = useState(true);
   const [renderExpert, setRenderExpert] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
@@ -1542,11 +1559,14 @@ export function ConfigEditor({
   const expansionScopeId = scope?.id
     ?? (globalTarget ? "edit:workflowConfiguration" : "edit:root");
   const scopedNodes = useMemo(
-    () => (
-      activeTargetId && !target && !globalTarget
-        ? []
-        : scope ? propertyChildren(scope) : nodes
-    ),
+    () => {
+      if (activeTargetId && !target && !globalTarget) return [];
+      if (!scope) return nodes;
+      const children = propertyChildren(scope);
+      // Keep an empty selected collection visible so its add command remains
+      // available instead of rendering an unexplained blank editor.
+      return children.length > 0 ? children : [scope];
+    },
     [activeTargetId, globalTarget, nodes, scope, target],
   );
   const topLevelAdds = useMemo(
@@ -2560,6 +2580,18 @@ export function ConfigEditor({
               <span>{rows.length} visible settings</span>
             </div>
             <div className="config-outline-actions">
+              {scope?.referenceTargetId ? (
+                <button
+                  className="inline-reference-link"
+                  onClick={() =>
+                    onNavigateEditTarget(scope.referenceTargetId ?? "")}
+                  title={`Go to ${scope.referenceLabel ?? "referenced definition"}`}
+                  type="button"
+                >
+                  <Link2 aria-hidden="true" />
+                  From {scope.referenceLabel ?? "referenced definition"}
+                </button>
+              ) : null}
               <button
                 className="secondary-button"
                 onClick={expandAll}

@@ -1,5 +1,6 @@
 import {
     ELASTICSEARCH_SNAPSHOT_INFO,
+    REPO_CONFIG as SNAPSHOT_REPO_CONFIG,
     SNAPSHOT_REPOSITORY_NAME,
     SNAPSHOT_REPOSITORY_NAME_MESSAGE,
 } from "../src/userSchemas";
@@ -95,5 +96,29 @@ describe("Elasticsearch/OpenSearch snapshot repository names", () => {
                 }),
             ]));
         }
+    });
+});
+
+describe("snapshot repository regions", () => {
+    it("requires an AWS region for S3 repositories", () => {
+        const result = SNAPSHOT_REPO_CONFIG.safeParse({
+            repoPathUri: "s3://somebucket/snapshots",
+        });
+
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error.issues).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    message: "AWS region is required for s3:// snapshot repositories.",
+                    path: ["awsRegion"],
+                }),
+            ]));
+        }
+    });
+
+    it("does not require an AWS region for GCS repositories", () => {
+        expect(SNAPSHOT_REPO_CONFIG.safeParse({
+            repoPathUri: "gs://somebucket/snapshots",
+        }).success).toBe(true);
     });
 });

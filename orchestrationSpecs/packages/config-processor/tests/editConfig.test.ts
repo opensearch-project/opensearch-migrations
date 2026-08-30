@@ -171,11 +171,16 @@ describe("editConfig state", () => {
             resourceCollection: {
                 navigation: {
                     sectionId: "section:Live Traffic Migration",
-                    groupId: "group:Live Traffic Migration:Buffer",
+                    groupId: "group:Live Traffic Migration:Buffer:Kafka Topics",
+                    groupLabel: "Kafka Topics",
+                    groupOrder: 1,
+                    parentGroupId: "group:Live Traffic Migration:Buffer",
+                    parentGroupLabel: "Buffer",
+                    parentGroupOrder: 0,
                 },
                 resource: {
                     plural: "capturedtraffics",
-                    typeLabel: "S3 source",
+                    typeLabel: "Kafka topic",
                     identity: {kind: "named", suffix: "-topic"},
                 },
             },
@@ -221,6 +226,72 @@ describe("editConfig state", () => {
                     message: expect.stringContaining("has no snapshots"),
                 }),
             ]),
+        });
+    });
+
+    it("exposes an implicit default Kafka cluster until it is configured", () => {
+        const config = {
+            sourceClusters: {},
+            targetClusters: {},
+            traffic: {
+                kafkaClusters: {},
+                proxies: {},
+                s3Sources: {},
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        };
+
+        const state = buildEditStateFromObject(config);
+        const implicit = findNode(
+            state.nodes,
+            "edit:traffic.kafkaClusters.default",
+        );
+
+        expect(implicit).toMatchObject({
+            implicit: true,
+            removable: false,
+            valueDefaulted: true,
+        });
+        expect(Object.hasOwn(config.traffic.kafkaClusters, "default"))
+            .toBe(false);
+
+        const configured = applyEditOperationToObject(config, {
+            op: "set",
+            path: [
+                "traffic",
+                "kafkaClusters",
+                "default",
+                "autoCreate",
+                "auth",
+            ],
+            value: "none",
+        });
+        expect(parse(configured.yaml).traffic.kafkaClusters.default).toEqual({
+            autoCreate: {auth: {type: "none"}},
+        });
+        expect(findNode(
+            configured.editState.nodes,
+            "edit:traffic.kafkaClusters.default",
+        )?.implicit).toBeUndefined();
+        expect(findNode(
+            configured.editState.nodes,
+            "edit:traffic.kafkaClusters.default",
+        )?.removable).toBe(true);
+
+        const removed = applyEditOperationToObject(parse(configured.yaml), {
+            op: "removeConfig",
+            path: ["traffic", "kafkaClusters", "default"],
+        });
+        expect(parse(removed.yaml).traffic.kafkaClusters.default)
+            .toBeUndefined();
+        expect(findNode(
+            removed.editState.nodes,
+            "edit:traffic.kafkaClusters.default",
+        )).toMatchObject({
+            implicit: true,
+            removable: false,
+            valueDefaulted: true,
         });
     });
 
@@ -422,6 +493,32 @@ describe("editConfig state", () => {
         expect(source?.status).toBe("ok");
     });
 
+    it("does not mark snapshot migration as required when live traffic is configured", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {},
+            traffic: {
+                proxies: {
+                    capture: {
+                        source: "source",
+                        proxyConfig: {listenPort: 9201},
+                    },
+                },
+            },
+        });
+
+        expect(state.validation.valid).toBe(true);
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs")).toMatchObject({
+            status: "ok",
+        });
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs")?.required).not.toBe(true);
+    });
+
     it("propagates whole-config validation diagnostics into visible tree status", () => {
         const state = buildEditStateFromObject({});
 
@@ -551,6 +648,41 @@ describe("editConfig state", () => {
         expect(state.validation).toEqual({
             valid: true,
             errors: [],
+        });
+    });
+
+    it("marks the AWS region as required for an S3 snapshot repository", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {
+                                repoPathUri: "s3://bucket/path",
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(state.validation.valid).toBe(false);
+        expect(findNode(
+            state.nodes,
+            "edit:sourceClusters.source.snapshotInfo.repos.repo.awsRegion",
+        )).toMatchObject({
+            presence: "required",
+            required: true,
+            status: "required",
+            diagnostics: expect.arrayContaining([
+                expect.objectContaining({
+                    message: "AWS region is required for s3:// snapshot repositories.",
+                }),
+            ]),
         });
     });
 
@@ -951,7 +1083,7 @@ describe("editConfig state", () => {
                     "--operation",
                     operationPath,
                 ],
-                {encoding: "utf8"}
+                {encoding: "utf8", maxBuffer: 10 * 1024 * 1024}
             );
 
             expect(result.status).toBe(0);
@@ -983,6 +1115,122 @@ describe("editConfig state", () => {
 
         expect(removed.yaml).not.toContain("legacy:");
         expect(findNode(removed.editState.nodes, "edit:sourceClusters.legacy")).toBeUndefined();
+    });
+
+    it("fills sole reference choices on newly added configurations", () => {
+        const baseConfig = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: {
+                            repo: {
+                                awsRegion: "us-east-1",
+                                repoPathUri: "s3://snapshots/source",
+                            },
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "repo",
+                                config: {externallyManagedSnapshotName: "snapshot-1"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            traffic: {
+                kafkaClusters: {default: {autoCreate: {}}},
+                proxies: {},
+                s3Sources: {},
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        };
+
+        const migrationAdded = applyEditOperationToObject(baseConfig, {
+            op: "add",
+            path: ["snapshotMigrationConfigs"],
+            value: {},
+        });
+        expect(parse(migrationAdded.yaml).snapshotMigrationConfigs).toEqual([{
+            fromSource: "source",
+            toTarget: "target",
+            perSnapshotConfig: {},
+        }]);
+
+        const proxyAdded = applyEditOperationToObject(parse(migrationAdded.yaml), {
+            op: "add",
+            path: ["traffic", "proxies"],
+            value: {name: "capture"},
+        });
+        expect(parse(proxyAdded.yaml).traffic.proxies.capture).toEqual({
+            source: "source",
+            proxyConfig: {},
+            kafka: "default",
+        });
+
+        const replayerAdded = applyEditOperationToObject(parse(proxyAdded.yaml), {
+            op: "add",
+            path: ["traffic", "replayers"],
+            value: {name: "replay"},
+        });
+        expect(parse(replayerAdded.yaml).traffic.replayers.replay).toEqual({
+            fromCapturedTraffic: "capture",
+            toTarget: "target",
+        });
+
+        const dependencyAdded = applyEditOperationToObject(parse(replayerAdded.yaml), {
+            op: "add",
+            path: ["traffic", "replayers", "replay", "dependsOnSnapshotMigrations"],
+            value: {},
+        });
+        expect(parse(dependencyAdded.yaml).traffic.replayers.replay.dependsOnSnapshotMigrations).toEqual([{
+            source: "source",
+            snapshot: "snap1",
+        }]);
+
+        const snapshotAdded = applyEditOperationToObject(parse(dependencyAdded.yaml), {
+            op: "add",
+            path: ["sourceClusters", "source", "snapshotInfo", "snapshots"],
+            value: {name: "snap2"},
+        });
+        expect(parse(snapshotAdded.yaml).sourceClusters.source.snapshotInfo.snapshots.snap2).toEqual({
+            repoName: "repo",
+        });
+    });
+
+    it("leaves new references empty when more than one choice is available", () => {
+        const added = applyEditOperationToObject({
+            sourceClusters: {
+                source1: {endpoint: "", version: "ES 7.10.2"},
+                source2: {endpoint: "", version: "ES 7.10.2"},
+            },
+            targetClusters: {
+                target1: {endpoint: "https://target1.example.com:9200"},
+                target2: {endpoint: "https://target2.example.com:9200"},
+            },
+            traffic: {
+                kafkaClusters: {
+                    kafka1: {autoCreate: {}},
+                    kafka2: {autoCreate: {}},
+                },
+                proxies: {},
+            },
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "add",
+            path: ["traffic", "proxies"],
+            value: {name: "capture"},
+        });
+
+        expect(parse(added.yaml).traffic.proxies.capture).toEqual({
+            source: "",
+            proxyConfig: {},
+        });
     });
 
     it("removes configs that depend on a deleted source cluster", () => {
@@ -1499,7 +1747,7 @@ describe("editConfig state", () => {
             valueKind: "record",
             presence: "optional",
             essential: true,
-            label: "perSnapshotConfig: 1 configured, 1 unconfigured",
+            label: "Source snapshot migrations: 1 configured, 1 unconfigured",
         });
         expect(findNode(state.nodes, "edit:sourceClusters.legacy.snapshotInfo")).toMatchObject({
             valueKind: "object",
@@ -1544,11 +1792,16 @@ describe("editConfig state", () => {
             valueKind: "array",
             presence: "required",
             essential: true,
+            label: "Migration passes for snap1: 1 item",
             referenceTargetId: "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap1",
+            referenceLabel: "Source Snapshot 'snap1'",
+            description: "Migration passes that consume the separately defined source snapshot 'snap1'.",
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.snap2:add")).toMatchObject({
             valueKind: "command",
-            label: "snap2: not configured",
+            label: "Migration passes for snap2: not configured",
+            referenceTargetId: "edit:sourceClusters.legacy.snapshotInfo.snapshots.snap2",
+            referenceLabel: "Source Snapshot 'snap2'",
             command: {requiresName: false},
         });
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toMatchObject({
@@ -1784,6 +2037,17 @@ describe("editConfig state", () => {
                 expect.objectContaining({value: "createSnapshotConfig"}),
             ]),
         });
+        expect(findNode(
+            result.editState.nodes,
+            "edit:sourceClusters.source.snapshotInfo.snapshots.s1.config.createSnapshotConfig",
+        )).toMatchObject({
+            label: "Create source snapshot",
+            referenceTargetId: "edit:sourceClusters.source.snapshotInfo.snapshots.s1",
+            referenceLabel: "Source Snapshot Definition (s1)",
+            description: expect.stringContaining(
+                "These settings belong to the source snapshot definition 's1'.",
+            ),
+        });
     });
 
     it("unsets a source snapshot config branch without deleting the snapshot", () => {
@@ -1998,7 +2262,7 @@ describe("editConfig state", () => {
             toTarget: "prod",
         });
         expect(findNode(result.editState.nodes, "edit:snapshotMigrationConfigs.0.perSnapshotConfig.auxsnap:add")).toMatchObject({
-            label: "auxsnap: not configured",
+            label: "Migration passes for auxsnap: not configured",
         });
     });
 
@@ -2586,13 +2850,13 @@ describe("editConfig state", () => {
         const config = parse(result.yaml);
 
         expect(config.traffic.replayers.replay).toEqual({
-            fromCapturedTraffic: "",
-            toTarget: "",
+            fromCapturedTraffic: "capture",
+            toTarget: "target",
         });
         expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay.fromCapturedTraffic"))
-            .toMatchObject({status: "required"});
+            .toMatchObject({status: "ok", value: "capture"});
         expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay.toTarget"))
-            .toMatchObject({status: "required"});
+            .toMatchObject({status: "ok", value: "target"});
         expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay.replayerConfig.speedupFactor"))
             .toMatchObject({
                 valueKind: "scalar",
@@ -3152,6 +3416,42 @@ describe("editConfig state", () => {
         expect(result.stdout.trimStart().startsWith("{")).toBe(true);
         expect(() => JSON.parse(result.stdout)).not.toThrow();
         expect(result.stderr).toBe("");
+    });
+
+    it("opens a blank saved configuration as an addable structured draft", () => {
+        const tempDir = mkdtempSync(path.join(tmpdir(), "edit-config-blank-"));
+        try {
+            const configPath = path.join(tempDir, "blank.yaml");
+            writeFileSync(configPath, "");
+            const cliPath = path.resolve(__dirname, "../src/cliRouter.ts");
+
+            const result = spawnSync(
+                process.execPath,
+                [
+                    "--import",
+                    "tsx",
+                    cliPath,
+                    "editConfig",
+                    "state",
+                    "--pending-config",
+                    configPath,
+                ],
+                {encoding: "utf8", maxBuffer: 10 * 1024 * 1024}
+            );
+
+            expect(result.status).toBe(0);
+            const state = JSON.parse(result.stdout);
+            expect(state.provenance).toMatchObject({
+                lossy: false,
+                mode: "structured",
+            });
+            expect(findNode(state.nodes, "edit:sourceClusters:add")).toBeDefined();
+            expect(findNode(state.nodes, "edit:targetClusters:add")).toBeDefined();
+            expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")).toBeDefined();
+            expect(findNode(state.nodes, "edit:traffic.proxies:add")).toBeDefined();
+        } finally {
+            rmSync(tempDir, {recursive: true, force: true});
+        }
     });
 
     it("returns raw repair state instead of failing for invalid YAML", () => {
