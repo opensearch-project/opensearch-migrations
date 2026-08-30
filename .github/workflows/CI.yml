@@ -140,6 +140,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test Jenkins kind setup scripts
         run: ./jenkins/tests/configureKindClusterTest.sh
+      - name: Test Workflow Web UI kubectl helper
+        run: ./deployment/k8s/tests/workflowWebScriptTest.sh
 
   generate-test-matrix:
     runs-on: ubuntu-22.04

@@ -277,6 +277,12 @@ spec:
               value: "/root/schema/workflowMigration.schema.json"
             - name: MIGRATION_SAMPLE_CONFIG_PATH
               value: "/root/schema/sample.yaml"
+            {{- if .Values.aws.configureAwsEksResources }}
+            - name: WORKFLOW_CLOUDWATCH_REGION
+              value: {{ .Values.aws.region | quote }}
+            - name: WORKFLOW_CLOUDWATCH_LOG_GROUP
+              value: {{ printf "/migration-assistant-%s-%s/logs" .Values.stageName .Values.aws.region | quote }}
+            {{- end }}
             {{- if or (eq .Values.cloudProvider "aws") (eq .Values.cloudProvider "") }}
             {{- if .Values.defaultBucketConfiguration.create }}
             {{- $s3Bucket := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
