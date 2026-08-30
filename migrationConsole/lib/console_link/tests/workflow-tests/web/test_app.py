@@ -56,6 +56,10 @@ from console_link.workflow.application.resets import (
     ResetPlanStale,
     ResetTarget,
 )
+from console_link.workflow.application.runtime_status import (
+    RuntimeStatus,
+    RuntimeStatusSection,
+)
 from console_link.workflow.web.app import create_app
 from console_link.workflow.web.openapi import main as generate_openapi
 
@@ -332,6 +336,94 @@ def test_manage_state_without_a_runtime_coordinator_is_unavailable(tmp_path):
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Workflow observation is not configured"
+
+
+class _RuntimeStatus:
+    def __init__(self):
+        self.calls = []
+
+    def inspect(self, node_id, plural, name, *, force=False):
+        self.calls.append((node_id, plural, name, force))
+        return RuntimeStatus(
+            node_id=node_id,
+            observed_at="2026-08-30T14:00:00+00:00",
+            poll_after_ms=10_000,
+            sections=(
+                RuntimeStatusSection(
+                    key="snapshot",
+                    title="Snapshot progress",
+                    state="running",
+                    summary="Snapshot is 50% complete",
+                    source="console snapshot status watcher",
+                    details=("Shards successful: 4", "Shards total: 8"),
+                ),
+            ),
+        )
+
+
+def test_runtime_status_resolves_the_observed_resource_node(tmp_path):
+    snapshot = _snapshot()
+    node_id = "resource:captureproxies:capture"
+    node = ManageNode(
+        **{
+            **snapshot.nodes[node_id].__dict__,
+            "resource_plural": "datasnapshots",
+            "resource_name": "source-snapshot",
+        }
+    )
+    snapshot = ManageSnapshot(
+        **{
+            **snapshot.__dict__,
+            "nodes": {node_id: node},
+        }
+    )
+    status = _RuntimeStatus()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        coordinator=_Coordinator(Observation(snapshot=snapshot)),
+        runtime_status=status,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/nodes/{node_id}/runtime-status",
+            params={"force": "true"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "nodeId": node_id,
+        "observedAt": "2026-08-30T14:00:00Z",
+        "pollAfterMs": 10_000,
+        "sections": [{
+            "key": "snapshot",
+            "title": "Snapshot progress",
+            "state": "running",
+            "summary": "Snapshot is 50% complete",
+            "source": "console snapshot status watcher",
+            "details": ["Shards successful: 4", "Shards total: 8"],
+        }],
+    }
+    assert status.calls == [
+        (node_id, "datasnapshots", "source-snapshot", True),
+    ]
+
+
+def test_runtime_status_rejects_nodes_without_a_resource_identity(tmp_path):
+    status = _RuntimeStatus()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        coordinator=_Coordinator(Observation(snapshot=_snapshot())),
+        runtime_status=status,
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/nodes/resource:captureproxies:capture/runtime-status"
+        )
+
+    assert response.status_code == 404
+    assert status.calls == []
 
 
 class _Outputs:

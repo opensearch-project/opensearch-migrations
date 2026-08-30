@@ -13,6 +13,21 @@ export const server = setupServer(
   http.get("*/api/v1/manage/state", () =>
     HttpResponse.json(manageSnapshot),
   ),
+  http.get("*/api/v1/nodes/:nodeId/runtime-status", ({ params }) =>
+    HttpResponse.json({
+      nodeId: params.nodeId,
+      observedAt: "2026-08-30T14:00:00Z",
+      pollAfterMs: null,
+      sections: [{
+        key: "fixture",
+        title: "Runtime status",
+        state: "unsupported",
+        summary: "Resource-specific runtime status is not implemented yet.",
+        source: "not available",
+        details: [],
+      }],
+    }),
+  ),
   http.get("*/api/v1/operations", () =>
     HttpResponse.json({ operations: [] }),
   ),

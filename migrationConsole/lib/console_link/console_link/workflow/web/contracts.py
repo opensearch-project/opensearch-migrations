@@ -48,6 +48,7 @@ from ..application.logs import (
     LogTarget,
     LogTargetInventory,
 )
+from ..application.runtime_status import RuntimeStatus, RuntimeStatusSection
 
 
 class WebModel(BaseModel):
@@ -663,6 +664,48 @@ class AdmissionPreflightV1(WebModel):
                 if report.deployment_actions
                 else None
             ),
+        )
+
+
+class RuntimeStatusSectionV1(WebModel):
+    key: str
+    title: str
+    state: Literal["ok", "running", "pending", "error", "unsupported"]
+    summary: str
+    source: str
+    details: List[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(
+        cls,
+        section: RuntimeStatusSection,
+    ) -> "RuntimeStatusSectionV1":
+        return cls(
+            key=section.key,
+            title=section.title,
+            state=section.state,
+            summary=section.summary,
+            source=section.source,
+            details=list(section.details),
+        )
+
+
+class RuntimeStatusV1(WebModel):
+    node_id: str
+    observed_at: datetime
+    poll_after_ms: Optional[int] = None
+    sections: List[RuntimeStatusSectionV1]
+
+    @classmethod
+    def from_domain(cls, status: RuntimeStatus) -> "RuntimeStatusV1":
+        return cls(
+            node_id=status.node_id,
+            observed_at=status.observed_at,
+            poll_after_ms=status.poll_after_ms,
+            sections=[
+                RuntimeStatusSectionV1.from_domain(section)
+                for section in status.sections
+            ],
         )
 
 

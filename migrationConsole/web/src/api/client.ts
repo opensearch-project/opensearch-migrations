@@ -6,6 +6,7 @@ import type { components, paths } from "./schema.generated";
 export type ManageSnapshot = components["schemas"]["ManageSnapshotV1"];
 export type ManageNode = components["schemas"]["ManageNodeV1"];
 export type ManageRelationship = components["schemas"]["RelationshipV1"];
+export type RuntimeStatus = components["schemas"]["RuntimeStatusV1"];
 export type ConfigDraft = components["schemas"]["ConfigDraftV1"];
 export type ConfigRemovalImpact =
   components["schemas"]["ConfigRemovalImpactV1"];
@@ -98,6 +99,26 @@ export async function getManageState(): Promise<ManageSnapshot> {
   );
   if (!response.ok || error || !data) {
     throw new Error("Workflow state is unavailable");
+  }
+  return data;
+}
+
+
+export async function getRuntimeStatus(
+  nodeId: string,
+  force = false,
+): Promise<RuntimeStatus> {
+  const { data, error, response } = await client.GET(
+    "/api/v1/nodes/{node_id}/runtime-status",
+    {
+      params: {
+        path: { node_id: nodeId },
+        query: { force },
+      },
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new Error("Runtime status is unavailable");
   }
   return data;
 }

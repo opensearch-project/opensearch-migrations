@@ -17,6 +17,7 @@ from ..application.logs import KubernetesLogSource, LogStreamService
 from ..application.operations import OperationManager
 from ..application.actions import ApprovalService
 from ..application.resets import ResetService
+from ..application.runtime_status import RuntimeStatusService
 from ..commands.argo_utils import DEFAULT_ARGO_SERVER_URL
 from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from ..models.secret_store import SecretStore
@@ -152,6 +153,10 @@ def run_server(
                 custom_api=k8s.custom_api,
             ),
             logs=log_streams,
+            runtime_status=RuntimeStatusService(
+                namespace=namespace,
+                custom_api=k8s.custom_api,
+            ),
             external_logs_url=cloudwatch_log_group_url(
                 os.environ.get("WORKFLOW_CLOUDWATCH_REGION"),
                 os.environ.get("WORKFLOW_CLOUDWATCH_LOG_GROUP"),

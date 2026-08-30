@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
@@ -6,6 +7,7 @@ import {
   LoaderCircle,
   Logs,
   Pencil,
+  RefreshCw,
   RotateCcw,
   ShieldCheck,
   TriangleAlert,
@@ -17,6 +19,7 @@ import type {
   ManageRelationship,
   Operation,
 } from "../../api/client";
+import { getRuntimeStatus } from "../../api/client";
 import { OutputPanel } from "../output/OutputPanel";
 import { LogPanel } from "../logviewer/LogPanel";
 import { ResetDialog } from "../actions/ResourceActionDialogs";
@@ -28,6 +31,116 @@ interface PendingAction {
   kind: "reset";
   targetId: string;
 }
+
+const RUNTIME_STATUS_PLURALS = new Set([
+  "datasnapshots",
+  "snapshotmigrations",
+  "kafkaclusters",
+  "capturedtraffics",
+  "captureproxies",
+  "trafficreplays",
+]);
+
+
+function observedTime(value: string): string {
+  const observed = new Date(value);
+  return Number.isNaN(observed.valueOf())
+    ? value
+    : observed.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+}
+
+
+function RuntimeStatusPanel({ node }: Readonly<{ node: ManageNode }>) {
+  const forceRefresh = useRef(false);
+  const supported = Boolean(
+    node.resourcePlural
+    && RUNTIME_STATUS_PLURALS.has(node.resourcePlural),
+  );
+  const status = useQuery({
+    queryKey: ["runtime-status", node.id],
+    queryFn: async () => {
+      const force = forceRefresh.current;
+      forceRefresh.current = false;
+      return getRuntimeStatus(node.id, force);
+    },
+    enabled: supported,
+    retry: false,
+    staleTime: 5_000,
+    refetchInterval: (query) => (
+      query.state.data?.pollAfterMs ?? false
+    ),
+  });
+  if (!supported) return null;
+
+  return (
+    <section
+      aria-label="Runtime status"
+      className="workspace-section runtime-status"
+    >
+      <header>
+        <div>
+          <h3>Runtime status</h3>
+          {status.data ? (
+            <span>Observed {observedTime(status.data.observedAt)}</span>
+          ) : null}
+        </div>
+        <button
+          aria-label="Refresh runtime status"
+          className="icon-button"
+          disabled={status.isFetching}
+          onClick={() => {
+            forceRefresh.current = true;
+            void status.refetch();
+          }}
+          title="Refresh runtime status"
+          type="button"
+        >
+          <RefreshCw
+            aria-hidden="true"
+            className={status.isFetching ? "spin" : ""}
+          />
+        </button>
+      </header>
+      {status.isPending ? (
+        <div className="runtime-status-loading">
+          <LoaderCircle aria-hidden="true" className="spin" />
+          <span>Reading runtime status</span>
+        </div>
+      ) : null}
+      {status.isError ? (
+        <div className="runtime-status-error">
+          <TriangleAlert aria-hidden="true" />
+          <span>{status.error.message}</span>
+        </div>
+      ) : null}
+      {status.data?.sections.map((section) => (
+        <article
+          className={`runtime-status-section status-${section.state}`}
+          key={section.key}
+        >
+          <StatusIndicator status={section.state} />
+          <div>
+            <strong>{section.title}</strong>
+            <p>{section.summary}</p>
+            {(section.details?.length ?? 0) > 0 ? (
+              <ul>
+                {section.details?.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+            <small>{section.source}</small>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 
 function displayValue(value: { present: boolean; value?: unknown }): string {
   if (!value.present) return "Not set";
@@ -750,6 +863,7 @@ export function ResourceWorkspace({
       <RecentOperationFailure node={node} operations={operations} />
       <FailedWorkflowSteps onSelect={onSelect} steps={workflowSteps} />
       <Relationships node={node} onSelect={onSelect} />
+      <RuntimeStatusPanel node={node} />
       {logTarget ? (
         <LogPanel
           nodeId={node.id}

@@ -2928,6 +2928,114 @@ button {
   font-size: 13px;
 }
 
+.runtime-status {
+  padding-top: 13px;
+  padding-bottom: 13px;
+}
+
+.runtime-status > header {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.runtime-status > header h3 {
+  margin: 0;
+}
+
+.runtime-status > header span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.runtime-status > header .icon-button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+}
+
+.runtime-status > header .icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.runtime-status-loading,
+.runtime-status-error {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.runtime-status-loading svg,
+.runtime-status-error svg {
+  width: 15px;
+  height: 15px;
+}
+
+.runtime-status-error {
+  color: var(--danger);
+}
+
+.runtime-status-section {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.runtime-status-section > .state-icon {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+}
+
+.runtime-status-section strong {
+  display: block;
+  font-size: 12px;
+}
+
+.runtime-status-section p {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.runtime-status-section ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 16px;
+  margin: 6px 0 0;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 15px;
+  list-style: none;
+}
+
+.runtime-status-section li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-status-section small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 9px;
+}
+
 .failed-workflow-steps {
   padding-top: 13px;
   padding-bottom: 13px;

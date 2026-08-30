@@ -38,6 +38,7 @@ from ..application.resets import (
     ResetPlanStale,
     ResetUnavailable,
 )
+from ..application.runtime_status import RuntimeStatusUnavailable
 from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from .contracts import (
     AdmissionPreflightV1,
@@ -68,6 +69,7 @@ from .contracts import (
     ReplaceRawConfigRequestV1,
     ResetPlanRequestV1,
     ResetPlanV1,
+    RuntimeStatusV1,
     SaveExternalResourceRequestV1,
     SelectExternalResourceRequestV1,
     SetPreapprovalRequestV1,
@@ -91,6 +93,7 @@ def create_app(
     approvals: Optional[Any] = None,
     resets: Optional[Any] = None,
     logs: Optional[Any] = None,
+    runtime_status: Optional[Any] = None,
     workflow_name: str = DEFAULT_WORKFLOW_NAME,
     external_logs_url: Optional[str] = None,
 ) -> FastAPI:
@@ -148,6 +151,52 @@ def create_app(
                 if observation.refresh_error else None
             ),
         )
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/runtime-status",
+        response_model=RuntimeStatusV1,
+        response_model_exclude_none=True,
+        tags=["manage"],
+    )
+    async def node_runtime_status(
+        node_id: str,
+        force: bool = False,
+    ) -> RuntimeStatusV1:
+        if coordinator is None:
+            raise HTTPException(
+                status_code=503,
+                detail=OBSERVATION_NOT_CONFIGURED,
+            )
+        if runtime_status is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Runtime status is not configured",
+            )
+        observation = await coordinator.get_observation()
+        node = observation.snapshot.nodes.get(node_id)
+        if (
+            node is None
+            or not node.resource_plural
+            or not node.resource_name
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="Runtime status is not available for this item.",
+            )
+        try:
+            status = await asyncio.to_thread(
+                runtime_status.inspect,
+                node.id,
+                node.resource_plural,
+                node.resource_name,
+                force=force,
+            )
+            return RuntimeStatusV1.from_domain(status)
+        except RuntimeStatusUnavailable as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except Exception as error:
+            logger.exception("Failed to inspect runtime status")
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
     def draft_service():
         if config_drafts is None:

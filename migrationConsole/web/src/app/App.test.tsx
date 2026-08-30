@@ -467,6 +467,62 @@ test("renders real manage state with exact-node details and capabilities", async
 });
 
 
+test("shows resource runtime status and forces an explicit refresh", async () => {
+  const forceValues: string[] = [];
+  server.use(
+    http.get(
+      "*/api/v1/nodes/:nodeId/runtime-status",
+      ({ params, request }) => {
+        forceValues.push(
+          new URL(request.url).searchParams.get("force") ?? "",
+        );
+        return HttpResponse.json({
+          nodeId: params.nodeId,
+          observedAt: "2026-08-30T14:00:00Z",
+          pollAfterMs: null,
+          sections: [{
+            key: "snapshot",
+            title: "Snapshot progress",
+            state: "running",
+            summary: "Snapshot is 50% complete",
+            source: "console snapshot status watcher",
+            details: [
+              "Shards successful: 4",
+              "Shards total: 8",
+            ],
+          }],
+        });
+      },
+    ),
+  );
+  renderApp();
+
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(
+    within(tree).getByRole("treeitem", { name: /^capture, Ready$/ }),
+  );
+
+  const runtime = await screen.findByRole("region", {
+    name: "Runtime status",
+  });
+  expect(within(runtime).getByText("Snapshot is 50% complete"))
+    .toBeInTheDocument();
+  expect(within(runtime).getByText("Shards successful: 4"))
+    .toBeInTheDocument();
+  expect(within(runtime).getByText("console snapshot status watcher"))
+    .toBeInTheDocument();
+  expect(forceValues).toEqual(["false"]);
+
+  await userEvent.click(within(runtime).getByRole("button", {
+    name: "Refresh runtime status",
+  }));
+
+  await waitFor(() => expect(forceValues).toEqual(["false", "true"]));
+});
+
+
 test("does not expose the internal manage-state revision", async () => {
   renderApp();
 
