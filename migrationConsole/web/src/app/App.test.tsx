@@ -546,6 +546,7 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
   const runtime = await screen.findByRole("region", {
     name: "Runtime status",
   });
+  expect(runtime).toBe(runtime.closest(".workspace")?.lastElementChild);
   expect(within(runtime).getByText("Snapshot is 50% complete"))
     .toBeInTheDocument();
   expect(within(runtime).getByText("Shards successful"))

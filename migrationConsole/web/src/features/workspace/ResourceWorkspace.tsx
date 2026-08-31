@@ -936,7 +936,6 @@ export function ResourceWorkspace({
       <RecentOperationFailure node={node} operations={operations} />
       <FailedWorkflowSteps onSelect={onSelect} steps={workflowSteps} />
       <Relationships node={node} onSelect={onSelect} />
-      <RuntimeStatusPanel node={node} />
       {logTarget ? (
         <LogPanel
           nodeId={node.id}
@@ -982,6 +981,7 @@ export function ResourceWorkspace({
       </dl>
       <Findings node={node} />
       <Comparisons node={node} />
+      <RuntimeStatusPanel node={node} />
     </article>
   );
 }
