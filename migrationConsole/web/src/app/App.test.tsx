@@ -1234,12 +1234,12 @@ test("starts pauses and explicitly stops bounded resource logs", async () => {
   }));
   expect(timeout.closest(".log-line")).toHaveClass("log-line-active");
 
-  const sourceDivider = screen.getByRole("separator", {
+  const sourceDivider = screen.getByRole("slider", {
     name: "Resize source column",
   });
-  expect(sourceDivider).toHaveAttribute("aria-valuenow", "420");
+  expect(sourceDivider).toHaveValue("420");
   fireEvent.keyDown(sourceDivider, { key: "ArrowRight" });
-  expect(sourceDivider).toHaveAttribute("aria-valuenow", "436");
+  expect(sourceDivider).toHaveValue("436");
   expect(startRequest).toEqual({
     targetId: "log-target-all",
     tailLines: 500,

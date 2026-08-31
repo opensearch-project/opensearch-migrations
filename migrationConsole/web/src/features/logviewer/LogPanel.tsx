@@ -333,7 +333,7 @@ export function LogPanel({
   };
 
   const beginSourceResize = (
-    event: ReactPointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLInputElement>,
   ) => {
     sourceResizeRef.current = {
       pointerId: event.pointerId,
@@ -345,7 +345,7 @@ export function LogPanel({
   };
 
   const continueSourceResize = (
-    event: ReactPointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLInputElement>,
   ) => {
     const resize = sourceResizeRef.current;
     if (!resize || resize.pointerId !== event.pointerId) return;
@@ -355,7 +355,7 @@ export function LogPanel({
   };
 
   const endSourceResize = (
-    event: ReactPointerEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLInputElement>,
   ) => {
     if (sourceResizeRef.current?.pointerId !== event.pointerId) return;
     sourceResizeRef.current = null;
@@ -363,7 +363,7 @@ export function LogPanel({
   };
 
   const resizeSourceWithKeyboard = (
-    event: ReactKeyboardEvent<HTMLDivElement>,
+    event: ReactKeyboardEvent<HTMLInputElement>,
   ) => {
     if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
     event.preventDefault();
@@ -701,13 +701,16 @@ export function LogPanel({
                   <span>Time</span>
                   <span>Source</span>
                   <span>Message</span>
-                  <button
+                  <input
                     aria-label="Resize source column"
-                    aria-orientation="vertical"
-                    aria-valuemax={1000}
-                    aria-valuemin={MIN_SOURCE_WIDTH}
-                    aria-valuenow={sourceWidth}
                     className="log-source-resizer"
+                    max={1000}
+                    min={MIN_SOURCE_WIDTH}
+                    onChange={(event) => {
+                      setSourceWidth(clampSourceWidth(
+                        Number(event.currentTarget.value),
+                      ));
+                    }}
                     onDoubleClick={() => {
                       setSourceWidth(clampSourceWidth(DEFAULT_SOURCE_WIDTH));
                     }}
@@ -716,9 +719,13 @@ export function LogPanel({
                     onPointerDown={beginSourceResize}
                     onPointerMove={continueSourceResize}
                     onPointerUp={endSourceResize}
-                    role="separator"
                     title="Drag to resize the source column; double-click to reset"
-                    type="button"
+                    type="range"
+                    value={sourceWidth}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="log-source-resizer-line"
                   />
                 </div>
                 {events.length === 0 ? (

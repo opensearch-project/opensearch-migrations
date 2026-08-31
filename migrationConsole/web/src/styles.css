@@ -2571,6 +2571,7 @@ button {
 }
 
 .log-source-resizer {
+  appearance: none;
   padding: 0;
   border: 0;
   background: transparent;
@@ -2585,32 +2586,23 @@ button {
   touch-action: none;
 }
 
-.log-source-resizer::before,
-.log-source-resizer::after {
+.log-source-resizer-line {
   position: absolute;
-  left: 4px;
-  width: 1px;
-  content: "";
-  background: #526574;
-}
-
-.log-source-resizer::before {
+  z-index: 3;
   top: 0;
-  bottom: 0;
-}
-
-.log-source-resizer::after {
-  top: 100%;
+  left: calc(82px + var(--log-source-width));
+  width: 1px;
   height: 100vh;
+  pointer-events: none;
+  background: #526574;
   opacity: 0.55;
 }
 
-.log-source-resizer:hover::before,
-.log-source-resizer:focus-visible::before,
-.log-source-resizer:hover::after,
-.log-source-resizer:focus-visible::after {
+.log-source-resizer:hover + .log-source-resizer-line,
+.log-source-resizer:focus-visible + .log-source-resizer-line {
   width: 2px;
   background: #70b8c2;
+  opacity: 1;
 }
 
 .log-line {
@@ -2693,6 +2685,10 @@ button {
 
   .log-source-resizer {
     left: calc(70px + var(--log-source-width) - 5px);
+  }
+
+  .log-source-resizer-line {
+    left: calc(70px + var(--log-source-width));
   }
 
   .log-toolbar {
