@@ -21,6 +21,8 @@ DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 DEFAULT_CACHE_SECONDS = 10
 MAX_DETAIL_LINES = 60
 MAX_DETAIL_CHARACTERS = 12_000
+CAPTURED_TOPIC_RECORDS_TITLE = "Captured topic records"
+DESCRIBE_TOPIC_RECORDS_SOURCE = "console kafka describe-topic-records"
 
 
 class RuntimeStatusUnavailable(RuntimeError):
@@ -38,7 +40,7 @@ class ConsoleCommandResult:
 class RuntimeStatusMetric:
     key: str
     label: str
-    value: Union[str, int, float, bool]
+    value: str | int | float | bool
     unit: Optional[str] = None
 
 
@@ -375,10 +377,10 @@ class RuntimeStatusService:
         if not topic:
             return RuntimeStatusSection(
                 key="topic-records",
-                title="Captured topic records",
+                title=CAPTURED_TOPIC_RECORDS_TITLE,
                 state="pending",
                 summary="The Kafka topic name is not available yet.",
-                source="console kafka describe-topic-records",
+                source=DESCRIBE_TOPIC_RECORDS_SOURCE,
             )
         result = self.console_runner.run([
             "kafka",
@@ -390,25 +392,26 @@ class RuntimeStatusService:
         if not result.success:
             return _command_error_section(
                 "topic-records",
-                "Captured topic records",
-                "console kafka describe-topic-records",
+                CAPTURED_TOPIC_RECORDS_TITLE,
+                DESCRIBE_TOPIC_RECORDS_SOURCE,
                 result,
             )
         partitions = _topic_partitions(result.output)
         total_records = sum(item.records for item in partitions)
-        summary = (
-            f"{total_records} record{'' if total_records == 1 else 's'} "
-            f"across {len(partitions)} "
-            f"partition{'' if len(partitions) == 1 else 's'}."
-            if partitions
-            else "No topic partitions were reported."
-        )
+        record_suffix = "" if total_records == 1 else "s"
+        partition_suffix = "" if len(partitions) == 1 else "s"
+        summary = "No topic partitions were reported."
+        if partitions:
+            summary = (
+                f"{total_records} record{record_suffix} "
+                f"across {len(partitions)} partition{partition_suffix}."
+            )
         return RuntimeStatusSection(
             key="topic-records",
-            title="Captured topic records",
+            title=CAPTURED_TOPIC_RECORDS_TITLE,
             state="ok",
             summary=summary,
-            source="console kafka describe-topic-records",
+            source=DESCRIBE_TOPIC_RECORDS_SOURCE,
             content=(
                 RuntimeStatusTopicPartitions(partitions)
                 if partitions
@@ -433,16 +436,15 @@ class RuntimeStatusService:
                 result,
             )
         items = _detail_lines(result.output)
+        item_suffix = "" if len(items) == 1 else "s"
+        summary = f"No {item_label}s were reported."
+        if items:
+            summary = f"{len(items)} {item_label}{item_suffix}."
         return RuntimeStatusSection(
             key=key,
             title=title,
             state="ok",
-            summary=(
-                f"{len(items)} {item_label}"
-                f"{'' if len(items) == 1 else 's'}."
-                if items
-                else f"No {item_label}s were reported."
-            ),
+            summary=summary,
             source=source,
             content=RuntimeStatusNameList(items),
         )
@@ -534,7 +536,7 @@ def _status_metrics(
     return RuntimeStatusMetrics(tuple(metrics)) if metrics else None
 
 
-def _metric_value(value: Any) -> Union[str, int, float, bool]:
+def _metric_value(value: Any) -> str | int | float | bool:
     if isinstance(value, (str, int, float, bool)):
         return value
     return str(value)

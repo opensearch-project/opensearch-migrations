@@ -8267,9 +8267,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "sectionId": "section:Live Traffic Migration",
                 "sectionLabel": "Live Traffic Migration",
                 "sectionOrder": 3,
-                "groupId": "group:Live Traffic Migration:Buffer",
-                "groupLabel": "Buffer",
-                "groupOrder": 0
+                "groupId": "group:Live Traffic Migration:Buffer:Kafka Clusters",
+                "groupLabel": "Kafka Clusters",
+                "groupOrder": 0,
+                "parentGroupId": "group:Live Traffic Migration:Buffer",
+                "parentGroupLabel": "Buffer",
+                "parentGroupOrder": 0
               },
               "resource": {
                 "kind": "Kafka",
@@ -9513,14 +9516,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "sectionId": "section:Live Traffic Migration",
                 "sectionLabel": "Live Traffic Migration",
                 "sectionOrder": 3,
-                "groupId": "group:Live Traffic Migration:Buffer",
-                "groupLabel": "Buffer",
-                "groupOrder": 0
+                "groupId": "group:Live Traffic Migration:Buffer:Kafka Topics",
+                "groupLabel": "Kafka Topics",
+                "groupOrder": 1,
+                "parentGroupId": "group:Live Traffic Migration:Buffer",
+                "parentGroupLabel": "Buffer",
+                "parentGroupOrder": 0
               },
               "resource": {
                 "kind": "CapturedTraffic",
                 "plural": "capturedtraffics",
-                "typeLabel": "S3 source",
+                "typeLabel": "Kafka topic",
                 "identity": {
                   "kind": "named",
                   "suffix": "-topic"

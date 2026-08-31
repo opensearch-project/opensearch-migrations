@@ -680,7 +680,7 @@ class AdmissionPreflightV1(WebModel):
 class RuntimeStatusMetricV1(WebModel):
     key: str
     label: str
-    value: Union[str, int, float, bool]
+    value: str | int | float | bool
     unit: Optional[str] = None
 
     @classmethod

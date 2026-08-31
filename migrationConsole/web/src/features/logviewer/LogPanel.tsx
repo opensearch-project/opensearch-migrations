@@ -701,7 +701,7 @@ export function LogPanel({
                   <span>Time</span>
                   <span>Source</span>
                   <span>Message</span>
-                  <div
+                  <button
                     aria-label="Resize source column"
                     aria-orientation="vertical"
                     aria-valuemax={1000}
@@ -717,8 +717,8 @@ export function LogPanel({
                     onPointerMove={continueSourceResize}
                     onPointerUp={endSourceResize}
                     role="separator"
-                    tabIndex={0}
                     title="Drag to resize the source column; double-click to reset"
+                    type="button"
                   />
                 </div>
                 {events.length === 0 ? (

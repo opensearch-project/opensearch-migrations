@@ -14,6 +14,8 @@ from .models import (
     ManageSnapshot,
 )
 
+EDIT_TARGET_PREFIX = "edit:"
+
 
 @dataclass(frozen=True)
 class _Identity:
@@ -194,8 +196,8 @@ def _is_resource_target(
     placements: Tuple[_Placement, ...],
 ) -> bool:
     path = (
-        target_id[len("edit:"):]
-        if target_id.startswith("edit:")
+        target_id[len(EDIT_TARGET_PREFIX):]
+        if target_id.startswith(EDIT_TARGET_PREFIX)
         else target_id
     )
     return any(
@@ -211,15 +213,15 @@ def _resource_collection_changed(
     placements: Tuple[_Placement, ...],
 ) -> bool:
     path = (
-        target_id[len("edit:"):]
-        if target_id.startswith("edit:")
+        target_id[len(EDIT_TARGET_PREFIX):]
+        if target_id.startswith(EDIT_TARGET_PREFIX)
         else target_id
     )
     for placement in placements:
         collection_path = ".".join(placement.collection_path)
         if not path.startswith(f"{collection_path}."):
             continue
-        collection = edit_nodes.get(f"edit:{collection_path}")
+        collection = edit_nodes.get(f"{EDIT_TARGET_PREFIX}{collection_path}")
         return (
             collection is not None
             and _draft_change_count(collection) > 0
@@ -306,7 +308,7 @@ def _definition_placement(
     owner_path = path[:-owner_ancestor_levels]
     return _DefinitionPlacement(
         collection_path=tuple(path),
-        owner_target_id=f"edit:{'.'.join(owner_path)}",
+        owner_target_id=f"{EDIT_TARGET_PREFIX}{'.'.join(owner_path)}",
         group_id=group_id,
         group_label=navigation["groupLabel"],
         group_order=navigation["groupOrder"],
@@ -409,83 +411,135 @@ def _ensure_navigation(
         )
     })
     for placement in placements:
-        section = nodes.get(placement.section_id)
-        if section is None:
-            section = ManageNode(
-                id=placement.section_id,
-                revision=f"{revision}:{placement.section_id}",
-                kind="section",
-                label=placement.section_label,
-                status="ok",
-            )
-        section = _with_edit_capability(
+        section = _ensure_section(
+            nodes,
+            root_ids,
+            placement,
+            revision,
+        )
+        parent_id = _ensure_parent_group(
+            nodes,
             section,
-            EDIT_ID_BY_TREE_ID.get(section.id),
+            placement,
+            revision,
+            group_order,
         )
-        nodes[section.id] = section
-        if section.id not in root_ids:
-            root_ids.append(section.id)
-
-        parent_id = section.id
-        if (
-            placement.parent_group_id is not None
-            and placement.parent_group_label is not None
-        ):
-            parent_group = nodes.get(placement.parent_group_id)
-            if parent_group is None:
-                parent_group = ManageNode(
-                    id=placement.parent_group_id,
-                    revision=(
-                        f"{revision}:{placement.parent_group_id}"
-                    ),
-                    parent_id=section.id,
-                    kind="group",
-                    label=placement.parent_group_label,
-                    status="ok",
-                )
-            parent_group = _with_edit_capability(
-                parent_group,
-                EDIT_ID_BY_TREE_ID.get(parent_group.id),
-            )
-            nodes[parent_group.id] = parent_group
-            if parent_group.id not in section.child_ids:
-                nodes[section.id] = replace(
-                    nodes[section.id],
-                    revision=f"{nodes[section.id].revision}:{revision}",
-                    child_ids=tuple(_ordered_ids(
-                        (*nodes[section.id].child_ids, parent_group.id),
-                        group_order,
-                    )),
-                )
-            parent_id = parent_group.id
-
-        group = nodes.get(placement.group_id)
-        if group is None:
-            group = ManageNode(
-                id=placement.group_id,
-                revision=f"{revision}:{placement.group_id}",
-                parent_id=parent_id,
-                kind="group",
-                label=placement.group_label,
-                status="ok",
-            )
-        group = _with_edit_capability(
-            group,
-            EDIT_ID_BY_TREE_ID.get(group.id),
+        _ensure_group(
+            nodes,
+            parent_id,
+            placement,
+            revision,
+            group_order,
         )
-        nodes[group.id] = group
-        parent = nodes[parent_id]
-        if group.id not in parent.child_ids:
-            nodes[parent_id] = replace(
-                parent,
-                revision=f"{parent.revision}:{revision}",
-                child_ids=tuple(_ordered_ids(
-                    (*parent.child_ids, group.id),
-                    group_order,
-                )),
-            )
 
     root_ids[:] = _ordered_ids(root_ids, section_order)
+
+
+def _ensure_section(
+    nodes: Dict[str, ManageNode],
+    root_ids: list[str],
+    placement: _Placement,
+    revision: str,
+) -> ManageNode:
+    section = nodes.get(placement.section_id) or ManageNode(
+        id=placement.section_id,
+        revision=f"{revision}:{placement.section_id}",
+        kind="section",
+        label=placement.section_label,
+        status="ok",
+    )
+    section = _with_edit_capability(
+        section,
+        EDIT_ID_BY_TREE_ID.get(section.id),
+    )
+    nodes[section.id] = section
+    if section.id not in root_ids:
+        root_ids.append(section.id)
+    return section
+
+
+def _ensure_parent_group(
+    nodes: Dict[str, ManageNode],
+    section: ManageNode,
+    placement: _Placement,
+    revision: str,
+    group_order: Mapping[str, int],
+) -> str:
+    if (
+        placement.parent_group_id is None
+        or placement.parent_group_label is None
+    ):
+        return section.id
+    parent_group = nodes.get(placement.parent_group_id) or ManageNode(
+        id=placement.parent_group_id,
+        revision=f"{revision}:{placement.parent_group_id}",
+        parent_id=section.id,
+        kind="group",
+        label=placement.parent_group_label,
+        status="ok",
+    )
+    parent_group = _with_edit_capability(
+        parent_group,
+        EDIT_ID_BY_TREE_ID.get(parent_group.id),
+    )
+    nodes[parent_group.id] = parent_group
+    _append_ordered_child(
+        nodes,
+        section.id,
+        parent_group.id,
+        revision,
+        group_order,
+    )
+    return parent_group.id
+
+
+def _ensure_group(
+    nodes: Dict[str, ManageNode],
+    parent_id: str,
+    placement: _Placement,
+    revision: str,
+    group_order: Mapping[str, int],
+) -> None:
+    group = nodes.get(placement.group_id) or ManageNode(
+        id=placement.group_id,
+        revision=f"{revision}:{placement.group_id}",
+        parent_id=parent_id,
+        kind="group",
+        label=placement.group_label,
+        status="ok",
+    )
+    group = _with_edit_capability(
+        group,
+        EDIT_ID_BY_TREE_ID.get(group.id),
+    )
+    nodes[group.id] = group
+    _append_ordered_child(
+        nodes,
+        parent_id,
+        group.id,
+        revision,
+        group_order,
+    )
+
+
+def _append_ordered_child(
+    nodes: Dict[str, ManageNode],
+    parent_id: str,
+    child_id: str,
+    revision: str,
+    order: Mapping[str, int],
+) -> None:
+    parent = nodes[parent_id]
+    if child_id in parent.child_ids:
+        return
+    nodes[parent_id] = replace(
+        parent,
+        revision=f"{parent.revision}:{revision}",
+        child_ids=tuple(_ordered_ids(
+            (*parent.child_ids, child_id),
+            order,
+        )),
+    )
 
 
 def _with_edit_capability(
@@ -638,7 +692,9 @@ def _add_draft_resources(
         if (target := _edit_target(node)) is not None
     }
     for placement in placements:
-        collection_id = f"edit:{'.'.join(placement.collection_path)}"
+        collection_id = (
+            f"{EDIT_TARGET_PREFIX}{'.'.join(placement.collection_path)}"
+        )
         collection = edit_nodes.get(collection_id)
         if collection is None:
             continue
@@ -717,7 +773,9 @@ def _definition_group(
             )
         ) is not None
     )
-    collection_id = f"edit:{'.'.join(placement.collection_path)}"
+    collection_id = (
+        f"{EDIT_TARGET_PREFIX}{'.'.join(placement.collection_path)}"
+    )
     group = ManageNode(
         id=placement.group_id,
         revision=f"{revision}:{collection_id}",
@@ -756,7 +814,9 @@ def _add_draft_definitions(
         group_order: Dict[str, int] = {}
         child_ids = list(owner.child_ids)
         for placement in owner_placements:
-            collection_id = f"edit:{'.'.join(placement.collection_path)}"
+            collection_id = (
+                f"{EDIT_TARGET_PREFIX}{'.'.join(placement.collection_path)}"
+            )
             collection = edit_nodes.get(collection_id)
             if collection is None:
                 continue

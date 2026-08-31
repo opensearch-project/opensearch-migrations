@@ -1313,7 +1313,7 @@ test("renders managed logs as a dedicated full-window route", async () => {
       },
     ),
   );
-  window.history.pushState(
+  globalThis.history.pushState(
     {},
     "",
     "/logs?nodeId=resource%3Acaptureproxies%3Acapture",
@@ -1367,7 +1367,7 @@ test("renders managed logs as a dedicated full-window route", async () => {
   });
   expect(follow).toBeChecked();
 
-  window.history.replaceState({}, "", "/");
+  globalThis.history.replaceState({}, "", "/");
 });
 
 

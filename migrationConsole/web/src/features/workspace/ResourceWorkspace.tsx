@@ -143,7 +143,7 @@ function RuntimeStatusPanel({ node }: Readonly<{ node: ManageNode }>) {
     },
     enabled: supported,
     retry: false,
-    staleTime: 5_000,
+    staleTime: 5000,
     refetchInterval: (query) => (
       query.state.data?.pollAfterMs ?? false
     ),

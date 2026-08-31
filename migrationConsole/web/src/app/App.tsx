@@ -106,7 +106,7 @@ function workflowStepDescendants(
 ): ManageNode[] {
   if (!snapshot || !node) return [];
   const result: ManageNode[] = [];
-  const pending = [...node.childIds];
+  const pending: string[] = [...(node.childIds ?? [])];
   const visited = new Set<string>();
   while (pending.length > 0) {
     const childId = pending.shift();

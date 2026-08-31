@@ -2571,6 +2571,9 @@ button {
 }
 
 .log-source-resizer {
+  padding: 0;
+  border: 0;
+  background: transparent;
   position: absolute;
   z-index: 4;
   top: 0;
