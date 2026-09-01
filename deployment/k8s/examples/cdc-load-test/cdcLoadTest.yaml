@@ -1,4 +1,4 @@
-# CDC (capture-and-replay) migration config — the default input to deployCdcLoadTestConfig.sh.
+# CDC (capture-and-replay) migration config for the adjacent example script.
 #
 # An ordinary migration config: the same thing you would write by hand and feed to
 # `workflow configure edit`. Endpoints, versions, ports and names are all literal — edit them, or

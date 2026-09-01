@@ -180,7 +180,7 @@ installs this chart alongside it, so the proxy, Kafka and replayer come up the s
 a real migration:
 
 ```bash
-./deployment/k8s/deployCdcLoadTestConfig.sh up      # CDC pipeline + k6 chart
+./deployment/k8s/examples/cdc-load-test/deployCdcLoadTestConfig.sh up      # CDC pipeline + k6 chart
 ```
 
 Summing up, there are three ways the chart lands on a cluster - pick by context:
@@ -188,7 +188,7 @@ Summing up, there are three ways the chart lands on a cluster - pick by context:
 | Route | Command | Use when |
 |---|---|---|
 | **Manual (any cluster)** | `helm upgrade --install k6-load-test deployment/k8s/charts/components/k6LoadTest …` (full flags below) | A standalone / already-running cluster, incl. EKS. Run this **before** any `k6-run.sh` / `loadtest` command. |
-| **Local CDC pipeline** | `./deployment/k8s/deployCdcLoadTestConfig.sh up` | Local kind/minikube dev — submits a capture-and-replay migration config and installs k6 alongside it. |
+| **Local CDC pipeline** | `./deployment/k8s/examples/cdc-load-test/deployCdcLoadTestConfig.sh up` | Local kind/minikube dev — submits a capture-and-replay migration config and installs k6 alongside it. |
 | **Integration tests** | `pipenv run app --test-ids 0080 …` (the test runner) | Only to run a `008x` load-test case. It installs the chart after the migration stack is healthy. |
 
 All three end in the same `helm upgrade --install k6-load-test <chart-path>`; the manual route is the
@@ -302,7 +302,7 @@ PROXY="https://$(kubectl -n ma get captureproxy capture-proxy \
 # → https://capture-proxy.ma.svc.cluster.local:9201 with the default config
 
 # deployCdcLoadTestConfig.sh prints the same value, and `status` re-prints it later:
-./deployment/k8s/deployCdcLoadTestConfig.sh status
+./deployment/k8s/examples/cdc-load-test/deployCdcLoadTestConfig.sh status
 ```
 (k6 uses `insecureSkipTLSVerify`, matching the self-signed proxy cert.)
 
@@ -713,7 +713,7 @@ endpoint the dashboard reads.
 ```bash
 helm uninstall k6-load-test -n ma        # removes operator + WorkflowTemplates + RBAC
 # or, if you brought it up via the data-plane script:
-./deployment/k8s/deployCdcLoadTestConfig.sh down
+./deployment/k8s/examples/cdc-load-test/deployCdcLoadTestConfig.sh down
 ```
 
 ---
