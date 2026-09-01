@@ -90,17 +90,3 @@ def get_workflow(namespace, name):
         if e.status == 404:
             return None
         raise
-
-
-def list_workflows(namespace):
-    """List all Argo workflows in the namespace."""
-    custom = client.CustomObjectsApi()
-    try:
-        return custom.list_namespaced_custom_object(
-            group=ARGO_GROUP,
-            version=ARGO_VERSION,
-            namespace=namespace,
-            plural='workflows',
-        ).get('items', [])
-    except ApiException:
-        return []

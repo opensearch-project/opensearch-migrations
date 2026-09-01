@@ -48,6 +48,17 @@ images, so independent Docker image builds run concurrently while preserving
 the required dependency ordering between images that build on top of each
 other.
 
+Two image sets stay out of it, and each has its own aggregate task
+(`multi-arch`, plus `_amd64` and `_arm64` variants):
+
+| Task | Images |
+|---|---|
+| `buildKitTestAll` | test-only images: the custom Elasticsearch and Solr images |
+| `buildKitLoadTestAll` | load-test-only images: `migrations/k6_scripts` |
+
+Name them next to the general task when the registry needs them, e.g.
+`./gradlew buildImagesToRegistry_arm64 buildKitLoadTestAll_arm64`.
+
 Or customized to use a specific registry endpoint
 ```shell
 ./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-east-2.amazonaws.com/my-ecr-repo
