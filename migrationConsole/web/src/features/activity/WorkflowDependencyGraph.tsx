@@ -2,7 +2,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
-  FileOutput,
   LoaderCircle,
   ShieldCheck,
 } from "lucide-react";
@@ -269,7 +268,6 @@ function GraphNode({
   operation,
   approval,
   onReviewApproval,
-  onViewApprovalOutput,
   onSelectNode,
   onActivate,
   onDeactivate,
@@ -282,7 +280,6 @@ function GraphNode({
   operation: Operation | undefined;
   approval: ApprovalCandidate | undefined;
   onReviewApproval: (targetId: string) => void;
-  onViewApprovalOutput: (approval: ApprovalCandidate) => void;
   onSelectNode: (nodeId: string) => void;
   onActivate: (nodeId: string) => void;
   onDeactivate: () => void;
@@ -360,16 +357,6 @@ function GraphNode({
       </button>
       {approval ? (
         <div className="workflow-graph-actions">
-          {approval.outputTargetId ? (
-            <button
-              className="workflow-graph-action"
-              onClick={() => onViewApprovalOutput(approval)}
-              type="button"
-            >
-              <FileOutput aria-hidden="true" />
-              View output
-            </button>
-          ) : null}
           <button
             className="workflow-graph-action"
             onClick={() => onReviewApproval(approval.targetId)}
@@ -478,7 +465,6 @@ export function WorkflowDependencyGraph({
   approvals,
   operations,
   onReviewApproval,
-  onViewApprovalOutput,
   onSelectNode,
   selectedNodeId,
   snapshot,
@@ -486,7 +472,6 @@ export function WorkflowDependencyGraph({
   approvals: ApprovalCandidate[];
   operations: Operation[];
   onReviewApproval: (targetId: string) => void;
-  onViewApprovalOutput: (approval: ApprovalCandidate) => void;
   onSelectNode: (nodeId: string) => void;
   selectedNodeId: string | null;
   snapshot: ManageSnapshot;
@@ -675,7 +660,6 @@ export function WorkflowDependencyGraph({
             onActivate={setHoveredNodeId}
             onDeactivate={() => setHoveredNodeId(null)}
             onReviewApproval={onReviewApproval}
-            onViewApprovalOutput={onViewApprovalOutput}
             onSelectNode={onSelectNode}
             operation={operationForNode(operations, [
               graphNode.id,

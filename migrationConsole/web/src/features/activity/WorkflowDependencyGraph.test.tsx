@@ -172,3 +172,36 @@ test("discloses failed operation details on the affected resource", async () => 
     "captureproxies.migrations.opensearch.org capture was not found",
   )).toBeInTheDocument();
 });
+
+
+test("shows blocking approval actions without output links", async () => {
+  const onReviewApproval = vi.fn();
+  render(
+    <WorkflowDependencyGraph
+      approvals={[{
+        disabledReason: null,
+        editTargetId: null,
+        immutable: false,
+        immutableReason: null,
+        label: "Approve metadata",
+        nodeId: "resource:captureproxies:capture",
+        nodeLabel: "capture",
+        outputTargetId: "output:migration:metadataEvaluate",
+        resetTargetId: null,
+        resourcePresent: true,
+        targetId: "approval:metadataEvaluate",
+      }]}
+      onReviewApproval={onReviewApproval}
+      onSelectNode={() => undefined}
+      operations={[]}
+      selectedNodeId={null}
+      snapshot={manageSnapshot}
+    />,
+  );
+
+  expect(screen.queryByRole("button", { name: "View output" })).toBeNull();
+  const review = screen.getByRole("button", { name: "Review approval" });
+  expect(review).toBeInTheDocument();
+  await userEvent.click(review);
+  expect(onReviewApproval).toHaveBeenCalledWith("approval:metadataEvaluate");
+});

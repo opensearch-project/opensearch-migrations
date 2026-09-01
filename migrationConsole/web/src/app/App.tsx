@@ -1337,7 +1337,6 @@ function ManageApp() {
                 operations={operations.data ?? []}
                 onReviewApproval={setApprovalDialogTargetId}
                 onSelectNode={selectNode}
-                onViewApprovalOutput={setApprovalOutput}
                 selectedNode={observedSelectedNode}
                 snapshot={observedState ?? state.data}
               />
