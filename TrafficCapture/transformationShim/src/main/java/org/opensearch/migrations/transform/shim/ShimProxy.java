@@ -2,6 +2,7 @@ package org.opensearch.migrations.transform.shim;
 
 import javax.net.ssl.SSLEngine;
 
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -198,6 +199,13 @@ public class ShimProxy {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw e;
         }
+    }
+
+    public int getBoundPort() {
+        if (serverChannel == null) {
+            throw new IllegalStateException("ShimProxy has not been started");
+        }
+        return ((InetSocketAddress) serverChannel.localAddress()).getPort();
     }
 
     /** Start a health check HTTP server on a separate port. Returns 200 for GET /health. */
