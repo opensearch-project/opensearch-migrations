@@ -506,15 +506,19 @@ ensure_auto_node_access_entry arn:aws:iam::123456789012:role/AutoNodeRole
 
 
 class TestBootstrapTagYaml:
-    def test_shared_renderer_quotes_keys_and_values(self):
+    @staticmethod
+    def _script() -> str:
         repo = Path(__file__).parent.parent.parent.parent
-        script = (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+        return (repo / "deployment/k8s/aws/aws-bootstrap.sh").read_text()
+
+    def test_shared_renderer_escapes_keys_and_values_as_json_scalars(self):
+        script = self._script()
         body = script[script.index("emit_resource_tags_yaml() {"):]
         function = body[:body.index("\n}\n") + 3]
         harness = """
 set -euo pipefail
-tag_keys=("owner/team" "Cost Center")
-tag_values=("migration dev" "1234")
+tag_keys=('owner/team' 'Cost "Center"' 'multiline')
+tag_values=('migration dev' 'a"b\\c' $'line 1\\nline 2')
 """ + function + """
 emit_resource_tags_yaml
 """
@@ -523,7 +527,60 @@ emit_resource_tags_yaml
         assert completed.returncode == 0
         assert completed.stdout == (
             '    "owner/team": "migration dev"\n'
-            '    "Cost Center": "1234"\n')
+            '    "Cost \\"Center\\"": "a\\"b\\\\c"\n'
+            '    "multiline": "line 1\\nline 2"\n')
+
+    @classmethod
+    def _tag_helpers(cls) -> str:
+        script = cls._script()
+        start = script.index("validate_and_add_tag() {")
+        end = script.index("\n\nparse_tags", start)
+        return script[start:end] + "\n"
+
+    @classmethod
+    def _inheritance_block(cls) -> str:
+        script = cls._script()
+        start = script.index(
+            'if [[ ${#tag_keys[@]} -eq 0 && -n "$cfn_stack_name" ]]; then')
+        end = script.index("\n\nemit_resource_tags_yaml", start)
+        return script[start:end]
+
+    def test_rerun_without_tags_inherits_and_validates_stack_tags(self):
+        harness = """
+set -euo pipefail
+tag_keys=()
+tag_values=()
+RESERVED_TAG_PREFIXES=('aws:' 'eks:' 'eks.amazonaws.com/' 'karpenter.sh/' 'kubernetes.io/cluster/')
+cfn_stack_name=migration-stack
+region=us-east-1
+aws() {
+  printf '%s\\t%s\\n' Owner 'a"b'
+  printf '%s\\t%s\\n' CostCenter 1234
+}
+""" + self._tag_helpers() + self._inheritance_block() + """
+printf '%s\\n' "${tag_keys[0]}=${tag_values[0]}" "${tag_keys[1]}=${tag_values[1]}"
+"""
+        completed = subprocess.run(
+            ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
+        assert completed.returncode == 0, completed.stderr
+        assert "Inherited 2 tag(s) from stack migration-stack" in completed.stdout
+        assert completed.stdout.endswith('Owner=a"b\nCostCenter=1234\n')
+
+    def test_rerun_rejects_reserved_inherited_stack_tag(self):
+        harness = """
+set -euo pipefail
+tag_keys=()
+tag_values=()
+RESERVED_TAG_PREFIXES=('aws:' 'eks:' 'eks.amazonaws.com/' 'karpenter.sh/' 'kubernetes.io/cluster/')
+cfn_stack_name=migration-stack
+region=us-east-1
+aws() { printf '%s\\t%s\\n' karpenter.sh/nodepool owned; }
+""" + self._tag_helpers() + self._inheritance_block()
+        completed = subprocess.run(
+            ["/bin/bash", "-c", harness], check=False, capture_output=True, text=True)
+        assert completed.returncode == 1
+        assert "inherited stack tag key 'karpenter.sh/nodepool' uses the reserved prefix" in (
+            completed.stderr)
 
 
 class TestBootstrapTagPropagationPolicy:

@@ -288,8 +288,28 @@ trim() {
   printf '%s' "${s%"${s##*[![:space:]]}"}"
 }
 
+validate_and_add_tag() {
+  local key="$1"
+  local value="$2"
+  local source="$3"
+  local prefix
+  if [[ -z "$key" ]]; then
+    echo "Error: ${source} has an empty key." >&2
+    exit 1
+  fi
+  for prefix in "${RESERVED_TAG_PREFIXES[@]}"; do
+    if [[ "$key" == "$prefix"* ]]; then
+      echo "Error: ${source} key '$key' uses the reserved prefix '$prefix'." >&2
+      echo "  These prefixes are owned by AWS, EKS or Karpenter and cannot be set by a deployer." >&2
+      exit 1
+    fi
+  done
+  tag_keys+=("$key")
+  tag_values+=("$value")
+}
+
 parse_tags() {
-  local spec entry key value prefix
+  local spec entry key value
   # `set -u` makes an unquoted expansion of an empty array an error on bash 3.2 (macOS), so
   # bail out before touching it rather than relying on `${arr[@]+...}` gymnastics.
   [[ ${#tags_raw[@]} -eq 0 ]] && return 0
@@ -303,19 +323,7 @@ parse_tags() {
       fi
       key="$(trim "${entry%%=*}")"
       value="$(trim "${entry#*=}")"
-      if [[ -z "$key" ]]; then
-        echo "Error: --tags entry '$entry' has an empty key." >&2
-        exit 1
-      fi
-      for prefix in "${RESERVED_TAG_PREFIXES[@]}"; do
-        if [[ "$key" == "$prefix"* ]]; then
-          echo "Error: --tags key '$key' uses the reserved prefix '$prefix'." >&2
-          echo "  These prefixes are owned by AWS, EKS or Karpenter and cannot be set by a deployer." >&2
-          exit 1
-        fi
-      done
-      tag_keys+=("$key")
-      tag_values+=("$value")
+      validate_and_add_tag "$key" "$value" "--tags entry '$entry'"
       # Trailing newline matters: without it `read` returns non-zero on the final entry and the
       # loop body is skipped, silently dropping the last tag.
     done < <(printf '%s\n' "$spec" | tr ',' '\n')
@@ -990,8 +998,7 @@ AUTO_MODE_BOOTSTRAP_NODE_POOL="migrations-bootstrap-pool"
 if [[ ${#tag_keys[@]} -eq 0 && -n "$cfn_stack_name" ]]; then
   while IFS=$'\t' read -r _tag_key _tag_value; do
     [[ -z "$_tag_key" ]] && continue
-    tag_keys+=("$_tag_key")
-    tag_values+=("$_tag_value")
+    validate_and_add_tag "$_tag_key" "$_tag_value" "inherited stack tag"
   done < <(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
              --query 'Stacks[0].Tags[].[Key,Value]' --output text 2>/dev/null || true)
   if [[ ${#tag_keys[@]} -gt 0 ]]; then
@@ -1000,10 +1007,13 @@ if [[ ${#tag_keys[@]} -eq 0 && -n "$cfn_stack_name" ]]; then
 fi
 
 emit_resource_tags_yaml() {
-  local i
+  local i yaml_key yaml_value
   for i in "${!tag_keys[@]}"; do
-    # Quote both sides: keys routinely contain '.', '/' and ':', and values may contain spaces.
-    printf '    "%s": "%s"\n' "${tag_keys[$i]}" "${tag_values[$i]}"
+    # A JSON string is also a valid YAML double-quoted scalar. Let jq escape quotes, backslashes,
+    # newlines and other control characters rather than interpolating external tag text into YAML.
+    yaml_key=$(jq -Rn --arg text "${tag_keys[$i]}" '$text')
+    yaml_value=$(jq -Rn --arg text "${tag_values[$i]}" '$text')
+    printf '    %s: %s\n' "$yaml_key" "$yaml_value"
   done
 }
 
