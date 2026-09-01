@@ -47,7 +47,25 @@ SPARK = "▁▂▃▄▅▆▇█"
 def _score_color(j: Optional[float]) -> str:
     if j is None:
         return "dim"
-    return "green" if j >= 0.95 else ("yellow" if j >= 0.80 else "red")
+    if j >= 0.95:
+        return "green"
+    if j >= 0.80:
+        return "yellow"
+    return "red"
+
+
+def _running_avg(st: Dict) -> Optional[float]:
+    """Running average of an accumulated stat bucket, or None if nothing in it scored."""
+    return (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+
+
+def _score_cell(j: Optional[float]) -> str:
+    """A score rendered in the fixed 7-wide column the score tables share."""
+    return "   -   " if j is None else f"{j:>7.3f}"
+
+
+def _score_style(j: Optional[float]) -> str:
+    return "bold" if j is None else _score_color(j)
 
 
 def _type_key(label: str) -> str:
@@ -418,7 +436,7 @@ class JaccardApp(App):
         table.clear()
         row_keys: List[str] = []
         for type_key, st in ranked:
-            avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+            avg = _running_avg(st)
             avg_cell = (Text("-", style="dim") if avg is None
                         else Text(f"{avg:.3f}", style=f"bold {_score_color(avg)}"))
             min_cell = "-" if st["min"] is None else f"{st['min']:.3f}"
@@ -543,9 +561,8 @@ class JaccardApp(App):
             text.append("(no data)", style="dim")
         else:
             for label, st in sorted(by_label.items(), key=lambda kv: -kv[1]["count"]):
-                avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
-                avg_text = "   -   " if avg is None else f"{avg:>7.3f}"
-                text.append(avg_text, style="bold" if avg is None else _score_color(avg))
+                avg = _running_avg(st)
+                text.append(_score_cell(avg), style=_score_style(avg))
                 text.append(f"  {label}   n={st['count']}")
                 if avg is not None:
                     text.append(f"   [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
@@ -592,8 +609,7 @@ class JaccardApp(App):
                     f"— select one below for detail\n\n", style="dim")
         for sq in subqueries:
             j, _ = self._effective_score(sq)
-            j_text = "   -   " if j is None else f"{j:>7.3f}"
-            text.append(j_text, style=f"bold {_score_color(j)}")
+            text.append(_score_cell(j), style=f"bold {_score_color(j)}")
             text.append(f"  {sq['label']}")
             sh, th = sq.get("src_hits"), sq.get("tgt_hits")
             if sh is not None or th is not None:
@@ -698,8 +714,8 @@ class JaccardApp(App):
             text.append("LIFETIME", style="bold")
             text.append(f" ({self._score_metric})  ", style="dim")
             for label, st in shown:
-                avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
-                text.append(f"{label}", style="bold" if avg is None else _score_color(avg))
+                avg = _running_avg(st)
+                text.append(f"{label}", style=_score_style(avg))
                 text.append(f" n={st['count']}", style="dim")
                 if avg is not None:
                     text.append(f" avg={avg:.3f} [{st['min']:.3f}–{st['max']:.3f}]", style="dim")

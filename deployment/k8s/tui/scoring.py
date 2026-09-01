@@ -90,34 +90,80 @@ def rbo_score(list_a: List[str], list_b: List[str], p: float = RBO_PERSISTENCE) 
     return (weighted_sum / weight_total) if weight_total > 0 else None
 
 
+def _ratio(a: float, b: float) -> float:
+    """Agreement between two single magnitudes — 1.0 when they match, including both zero."""
+    mx = max(a, b)
+    return (min(a, b) / mx) if mx > 0 else 1.0
+
+
+def _score_agg_buckets(sb: List[Dict], tb: List[Dict]) -> Tuple[Optional[float], str]:
+    """Weighted per-key bucket overlap — same idea as Jaccard, but weighted by doc_count so a
+    bucket with 10000 docs counts for more than one with 1."""
+    sc = {b['key']: b.get('doc_count', 0) for b in sb if 'key' in b}
+    tc = {b['key']: b.get('doc_count', 0) for b in tb if 'key' in b}
+    keys = set(sc) | set(tc)
+    if not keys:
+        return None, 'agg (buckets)'
+    n = sum(min(sc.get(k, 0), tc.get(k, 0)) for k in keys)
+    d = sum(max(sc.get(k, 0), tc.get(k, 0)) for k in keys)
+    return ((n / d) if d > 0 else 1.0), 'agg (buckets)'
+
+
 def score_agg(sa: Dict, ta: Dict) -> Tuple[Optional[float], str]:
     """Score ONE named aggregation — bucket-based (terms/date-histogram/...) or a single
-    metric (avg/sum/cardinality/...). Bucket comparison is a weighted per-key overlap, same
-    idea as Jaccard but weighted by doc_count so a bucket with 10000 docs counts for more
-    than one with 1."""
+    metric (avg/sum/cardinality/...)."""
     sa = sa if isinstance(sa, dict) else {}
     ta = ta if isinstance(ta, dict) else {}
     sb = sa.get('buckets', [])
     tb = ta.get('buckets', [])
     if sb or tb:
-        sc = {b['key']: b.get('doc_count', 0) for b in sb if 'key' in b}
-        tc = {b['key']: b.get('doc_count', 0) for b in tb if 'key' in b}
-        keys = set(sc) | set(tc)
-        if not keys:
-            return None, 'agg (buckets)'
-        n = sum(min(sc.get(k, 0), tc.get(k, 0)) for k in keys)
-        d = sum(max(sc.get(k, 0), tc.get(k, 0)) for k in keys)
-        return ((n / d) if d > 0 else 1.0), 'agg (buckets)'
+        return _score_agg_buckets(sb, tb)
     sdc, tdc = sa.get('doc_count'), ta.get('doc_count')
     if sdc is not None and tdc is not None:
-        mx = max(sdc, tdc)
-        return ((min(sdc, tdc) / mx) if mx > 0 else 1.0), 'agg (doc_count)'
-    if 'value' in sa or 'value' in ta:
-        sv, tv = sa.get('value'), ta.get('value')
-        if sv is not None and tv is not None:
-            mx = max(sv, tv)
-            return ((min(sv, tv) / mx) if mx > 0 else 1.0), 'agg (metric)'
+        return _ratio(sdc, tdc), 'agg (doc_count)'
+    sv, tv = sa.get('value'), ta.get('value')
+    if sv is not None and tv is not None:
+        return _ratio(sv, tv), 'agg (metric)'
     return None, 'agg'
+
+
+def _hits_item(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: str) -> Dict:
+    """The single scored item covering a response pair's hits — Jaccard over the hit IDs, plus
+    an independent RBO over the order they came back in."""
+    src_hit_list = hit_summaries(sb)
+    tgt_hit_list = hit_summaries(tb)
+    if missing_side:
+        j, lbl = None, missing_side
+        rbo_j, rbo_lbl = None, missing_side
+    else:
+        j, lbl = compute_hits_jaccard(sb, tb)
+        rbo_j = rbo_score([h['id'] for h in src_hit_list], [h['id'] for h in tgt_hit_list])
+        # rbo_j is None here specifically when there's no ranked list to compare at all —
+        # a size:0 query still has a 'hits' section (so it's still a "hits" item, and
+        # Jaccard's hit-count fallback still applies), but an empty hits.hits array means
+        # RBO has nothing to measure. Distinct from missing_side: the response is real and
+        # complete, RBO just doesn't apply to it.
+        rbo_lbl = f'RBO (p={RBO_PERSISTENCE})' if rbo_j is not None else 'RBO (no ranked hits)'
+    return {
+        'label': f'{label_prefix} · hits'.strip(' ·'), 'kind': 'hits', 'j': j, 'j_label': lbl,
+        'rbo_j': rbo_j, 'rbo_label': rbo_lbl,
+        'src_hits': hit_count(sb), 'tgt_hits': hit_count(tb),
+        'src_hit_list': src_hit_list, 'tgt_hit_list': tgt_hit_list,
+        'src_agg': None, 'tgt_agg': None,
+    }
+
+
+def _agg_item(name: str, sa: Optional[Dict], ta: Optional[Dict],
+              missing_side: Optional[str], label_prefix: str) -> Dict:
+    """One scored item for one named aggregation. RBO doesn't apply — buckets have no rank
+    order to compare — so its fields stay None."""
+    j, lbl = (None, missing_side) if missing_side else score_agg(sa, ta)
+    return {
+        'label': f'{label_prefix} · agg:{name}'.strip(' ·'), 'kind': 'agg', 'j': j, 'j_label': lbl,
+        'rbo_j': None, 'rbo_label': None,
+        'src_hits': None, 'tgt_hits': None, 'src_hit_list': [], 'tgt_hit_list': [],
+        'src_agg': sa, 'tgt_agg': ta,
+    }
 
 
 def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: str) -> List[Dict]:
@@ -130,38 +176,12 @@ def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefi
     items = []
 
     if 'hits' in sb or 'hits' in tb:
-        j, lbl = (None, missing_side) if missing_side else compute_hits_jaccard(sb, tb)
-        src_hit_list = hit_summaries(sb)
-        tgt_hit_list = hit_summaries(tb)
-        if missing_side:
-            rbo_j, rbo_lbl = None, missing_side
-        else:
-            rbo_j = rbo_score([h['id'] for h in src_hit_list], [h['id'] for h in tgt_hit_list])
-            # rbo_j is None here specifically when there's no ranked list to compare at all —
-            # a size:0 query still has a 'hits' section (so it's still a "hits" item, and
-            # Jaccard's hit-count fallback still applies), but an empty hits.hits array means
-            # RBO has nothing to measure. Distinct from missing_side: the response is real and
-            # complete, RBO just doesn't apply to it.
-            rbo_lbl = f'RBO (p={RBO_PERSISTENCE})' if rbo_j is not None else 'RBO (no ranked hits)'
-        items.append(dict(
-            label=f'{label_prefix} · hits'.strip(' ·'), kind='hits', j=j, j_label=lbl,
-            rbo_j=rbo_j, rbo_label=rbo_lbl,
-            src_hits=hit_count(sb), tgt_hits=hit_count(tb),
-            src_hit_list=src_hit_list, tgt_hit_list=tgt_hit_list,
-            src_agg=None, tgt_agg=None,
-        ))
+        items.append(_hits_item(sb, tb, missing_side, label_prefix))
 
     src_aggs = sb.get('aggregations', {}) or {}
     tgt_aggs = tb.get('aggregations', {}) or {}
     for name in sorted(set(src_aggs) | set(tgt_aggs)):
-        sa, ta = src_aggs.get(name), tgt_aggs.get(name)
-        j, lbl = (None, missing_side) if missing_side else score_agg(sa, ta)
-        items.append(dict(
-            label=f'{label_prefix} · agg:{name}'.strip(' ·'), kind='agg', j=j, j_label=lbl,
-            rbo_j=None, rbo_label=None,
-            src_hits=None, tgt_hits=None, src_hit_list=[], tgt_hit_list=[],
-            src_agg=sa, tgt_agg=ta,
-        ))
+        items.append(_agg_item(name, src_aggs.get(name), tgt_aggs.get(name), missing_side, label_prefix))
 
     return items
 
@@ -188,6 +208,46 @@ def _msearch_sub_labels(src_request: Dict, count: int) -> List[str]:
     return labels
 
 
+def _missing_side_label(src_resp: Dict, tgt: Dict) -> Optional[str]:
+    """A missing sourceResponse/targetResponse (e.g. the browser aborted the request before its
+    response arrived — this is real, observed capture data, not hypothetical) leaves src_body
+    or tgt_body as {}. Comparing real data against nothing would mathematically bottom out at
+    0.0 — indistinguishable from "genuinely diverged" in the display. Detected once here
+    (Status-Code is only absent when the response itself never arrived) and forced to an
+    explicit unscored label instead, for every item at once."""
+    no_src = 'Status-Code' not in src_resp
+    no_tgt = 'Status-Code' not in tgt
+    if no_src and no_tgt:
+        return 'no source or target data'
+    if no_src:
+        return 'no source data'
+    if no_tgt:
+        return 'no target data'
+    return None
+
+
+def _msearch_subqueries(src_request: Dict, tgt_request: Dict, src_body: Dict, tgt_body: Dict,
+                        missing_side: Optional[str]) -> List[Dict]:
+    """Every sub-response of an _msearch, decomposed and labeled with its NDJSON position."""
+    src_subs = src_body.get('responses', [])
+    tgt_subs = tgt_body.get('responses', [])
+    n = max(len(src_subs), len(tgt_subs))
+    labels = _msearch_sub_labels(src_request, n)
+    # Both sides' NDJSON pairs are carried separately, not assumed identical — a
+    # transformation plugin can legitimately rewrite the body on its way to the target.
+    src_sub_bodies = _msearch_sub_bodies(src_request, n)
+    tgt_sub_bodies = _msearch_sub_bodies(tgt_request, n)
+    subqueries = []
+    for i in range(n):
+        sb = src_subs[i] if i < len(src_subs) else {}
+        tb = tgt_subs[i] if i < len(tgt_subs) else {}
+        for item in _response_items(sb, tb, missing_side, labels[i]):
+            item['src_sub_ndjson'] = src_sub_bodies[i]
+            item['tgt_sub_ndjson'] = tgt_sub_bodies[i]
+            subqueries.append(item)
+    return subqueries
+
+
 def score_tuple(r: Dict) -> Dict:
     """Score one TrafficReplayer tuple record (already JSON-decoded).
 
@@ -203,8 +263,8 @@ def score_tuple(r: Dict) -> Dict:
     method = src_request.get('Method', '?')
     uri = src_request.get('Request-URI', '?')
     src_status = src_resp.get('Status-Code', '?')
-    base = dict(method=method, uri=uri, src_status=src_status,
-                src_request=src_request, tgt_request=tgt_request, src_response=src_resp)
+    base = {'method': method, 'uri': uri, 'src_status': src_status,
+            'src_request': src_request, 'tgt_request': tgt_request, 'src_response': src_resp}
     if method == 'OPTIONS':
         return dict(base, tgt_status=None, tgt_response=None,
                     j_label='preflight', replayed=False, subqueries=[])
@@ -215,36 +275,10 @@ def score_tuple(r: Dict) -> Dict:
     tgt_status = tgt.get('Status-Code', '?')
     src_body = src_resp.get('payload', {}).get('inlinedJsonBody', {})
     tgt_body = tgt.get('payload', {}).get('inlinedJsonBody', {})
-    # A missing sourceResponse/targetResponse (e.g. the browser aborted the request before its
-    # response arrived — this is real, observed capture data, not hypothetical) leaves src_body
-    # or tgt_body as {}. Comparing real data against nothing would mathematically bottom out at
-    # 0.0 — indistinguishable from "genuinely diverged" in the display. Detected once here
-    # (Status-Code is only absent when the response itself never arrived) and forced to an
-    # explicit unscored label instead, for every item at once.
-    missing_side = (
-        'no source or target data' if 'Status-Code' not in src_resp and 'Status-Code' not in tgt else
-        'no source data' if 'Status-Code' not in src_resp else
-        'no target data' if 'Status-Code' not in tgt else
-        None
-    )
+    missing_side = _missing_side_label(src_resp, tgt)
     is_msearch = ('_msearch' in uri or 'responses' in src_body)
     if is_msearch:
-        src_subs = src_body.get('responses', [])
-        tgt_subs = tgt_body.get('responses', [])
-        n = max(len(src_subs), len(tgt_subs))
-        labels = _msearch_sub_labels(src_request, n)
-        # Both sides' NDJSON pairs are carried separately, not assumed identical — a
-        # transformation plugin can legitimately rewrite the body on its way to the target.
-        src_sub_bodies = _msearch_sub_bodies(src_request, n)
-        tgt_sub_bodies = _msearch_sub_bodies(tgt_request, n)
-        subqueries = []
-        for i in range(n):
-            sb = src_subs[i] if i < len(src_subs) else {}
-            tb = tgt_subs[i] if i < len(tgt_subs) else {}
-            for item in _response_items(sb, tb, missing_side, labels[i]):
-                item['src_sub_ndjson'] = src_sub_bodies[i]
-                item['tgt_sub_ndjson'] = tgt_sub_bodies[i]
-                subqueries.append(item)
+        subqueries = _msearch_subqueries(src_request, tgt_request, src_body, tgt_body, missing_side)
     else:
         subqueries = _response_items(src_body, tgt_body, missing_side, '')
         for item in subqueries:
