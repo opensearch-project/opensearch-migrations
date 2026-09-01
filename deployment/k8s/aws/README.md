@@ -59,8 +59,53 @@ curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/
 
 The shim is a 30-line script that downloads the CLI tarball into
 `~/.opensearch-migrate/cli/<version>/` and execs the unpacked binary.
-Older releases that shipped the monolithic `aws-bootstrap.sh` keep
-working; this CLI is the new entry point.
+The Rust CLI is the operator-oriented entry point. Developers who need to
+build and deploy the currently checked-out source should use
+`aws-bootstrap.sh` directly, as described below.
+
+## Build and deploy the current checkout
+
+The repository's `aws-bootstrap.sh` workflow builds the CloudFormation
+templates, container images, Helm chart, and CloudWatch dashboards from the
+current checkout, pushes the images to the deployment's private ECR registry,
+and installs those locally built artifacts on EKS.
+
+In addition to the general prerequisites above, this workflow requires:
+
+- Java 21
+- Docker with the Buildx plugin
+- `kubectl` and Helm
+- Network access from the EKS build nodes to the public base-image registries
+
+To create a development EKS deployment in a new VPC, run this from the
+repository root:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --deploy-create-vpc-cfn \
+  --build \
+  --base-dir "$(git rev-parse --show-toplevel)" \
+  --stack-name MA-Dev \
+  --stage dev \
+  --region us-east-2
+```
+
+To rebuild and reinstall the current checkout on an existing Migration
+Assistant CloudFormation/EKS deployment:
+
+```bash
+./deployment/k8s/aws/aws-bootstrap.sh \
+  --skip-cfn-deploy \
+  --build \
+  --base-dir "$(git rev-parse --show-toplevel)" \
+  --stage dev \
+  --region us-east-2
+```
+
+Use the same `--stage` and `--region` values as the existing deployment so the
+script resolves the correct CloudFormation exports. `--build` and `--version`
+are mutually exclusive. Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for
+the existing-VPC and other deployment options.
 
 ## Common subcommands
 
@@ -91,11 +136,11 @@ migration-assistant help
 the typical CI invocation. `--skip-console-exec` keeps the run
 non-interactive (no console handoff).
 
-Run `migration-assistant help` for the complete list including legacy
-`aws-bootstrap.sh` flags. A few legacy flags are not yet implemented in
-this CLI (`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`,
-`--vpc-id`, `--subnet-ids`, `--use-general-node-pool`, …); the CLI
-warns and ignores them rather than silently pretending to honor them.
+Run `migration-assistant help` for the complete list of accepted flags. Some
+`aws-bootstrap.sh` functionality is not implemented by this CLI, including
+`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`, `--vpc-id`,
+`--subnet-ids`, and `--use-general-node-pool`. The CLI warns and ignores these
+flags. Use `aws-bootstrap.sh` directly when you need that functionality.
 
 ## Adopting a stack you deployed elsewhere
 
