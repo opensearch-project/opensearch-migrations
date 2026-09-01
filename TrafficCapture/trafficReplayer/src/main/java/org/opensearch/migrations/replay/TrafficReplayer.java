@@ -923,6 +923,25 @@ public class TrafficReplayer {
         }
     }
 
+    private static IntFunction<TupleSink> combineTupleSinkFactories(
+        boolean hasS3,
+        boolean hasKafka,
+        IntFunction<TupleSink> s3Factory,
+        KafkaProducer<String, byte[]> kafkaProducer,
+        String kafkaTopic
+    ) {
+        if (hasS3 && hasKafka) {
+            return sinkIndex -> new MultiTupleSink(List.of(
+                s3Factory.apply(sinkIndex),
+                new KafkaTupleSink(kafkaProducer, kafkaTopic)
+            ));
+        }
+        if (hasS3) {
+            return s3Factory;
+        }
+        return sinkIndex -> new KafkaTupleSink(kafkaProducer, kafkaTopic);
+    }
+
     private static TupleWriterResources createS3TupleWriterIfConfigured(
         Parameters params,
         Supplier<IJsonTransformer> tupleTransformerSupplier
@@ -935,19 +954,7 @@ public class TrafficReplayer {
 
         var s3Factory = hasS3 ? buildS3TupleSinkFactory(params) : null;
         var kafkaProducer = hasKafka ? buildKafkaTupleProducer(params) : null;
-        var kafkaTopic = params.tupleKafkaTopic;
-
-        IntFunction<TupleSink> combinedFactory;
-        if (hasS3 && hasKafka) {
-            combinedFactory = sinkIndex -> new MultiTupleSink(List.of(
-                s3Factory.apply(sinkIndex),
-                new KafkaTupleSink(kafkaProducer, kafkaTopic)
-            ));
-        } else if (hasS3) {
-            combinedFactory = s3Factory;
-        } else {
-            combinedFactory = sinkIndex -> new KafkaTupleSink(kafkaProducer, kafkaTopic);
-        }
+        var combinedFactory = combineTupleSinkFactories(hasS3, hasKafka, s3Factory, kafkaProducer, params.tupleKafkaTopic);
 
         return new TupleWriterResources(
             new ThreadLocalTupleWriter(combinedFactory, tupleTransformerSupplier),
