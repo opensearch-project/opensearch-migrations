@@ -1,5 +1,5 @@
 /**
- * Shared document generation utilities used by all schema modules in lib/data/.
+ * Shared document generation utilities used by the flat schema modules (*_documents.js / *_queries.js).
  */
 
 export function randomElement(arr) {

@@ -137,7 +137,14 @@ def call(Map config = [:]) {
                                 connect_cluster_to_registry_network kind "${kind_nodes[@]}"
                             '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-kind-ma -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            // The load-test images are their own aggregate (see buildImages/build.gradle),
+                            // so buildImagesToRegistry_* does not build them. Only the 008x cases need
+                            // them, and those need explicit selection, so build them only on demand.
+                            // "008" must stay equal to LOAD_TEST_ID_PREFIX in test_runner.py.
+                            def selectedTestIds = testIds ?: params.TEST_IDS
+                            def loadTestTarget = selectedTestIds.split(',').any { it.trim().startsWith("008") }
+                                    ? " :buildImages:buildKitLoadTestAll_amd64" : ""
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64${loadTestTarget} -Pbuilder=builder-kind-ma -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
                             // Keep builder-kind-ma alive across runs so the buildkit cache persists.
                         }
                     }

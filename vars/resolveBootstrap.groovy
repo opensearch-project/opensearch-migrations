@@ -5,12 +5,17 @@
 //   1. build=true (default for source checkout): --build (builds everything from source)
 //   2. useReleaseBootstrap=true: downloads release bootstrap + artifacts for --version
 //   3. Explicit version without build: downloads artifacts for that version
+//
+// Optional 'loadTestImages: true' adds --with-load-test-images, which also builds
+// migrations/k6_scripts. Only the k6 load-test cases (Test008x) need it. It requires
+// build=true, because no release publishes that image.
 def call(Map config = [:]) {
     def bootstrapScript
     def version = config.containsKey('version') ? config.version : 'latest'
     def useRelease = config.containsKey('useReleaseBootstrap') ? config.useReleaseBootstrap : false
     def build = config.containsKey('build') ? config.build : false
     def skipTestImages = config.containsKey('skipTestImages') ? config.skipTestImages : false
+    def loadTestImages = config.containsKey('loadTestImages') ? config.loadTestImages : false
     def useGeneralNodePool = config.containsKey('useGeneralNodePool') ? config.useGeneralNodePool : false
 
     if (useRelease) {
@@ -31,7 +36,13 @@ def call(Map config = [:]) {
     if (build) {
         flags << '--build'
         if (skipTestImages) flags << '--skip-test-images'
+        // The load-test images (migrations/k6_scripts) are a separate gradle aggregate.
+        // --build alone does not build them, and no release publishes them.
+        if (loadTestImages) flags << '--with-load-test-images'
         // --build and --version are mutually exclusive; no --version needed
+    } else if (loadTestImages) {
+        error("resolveBootstrap: 'loadTestImages' requires 'build: true'. " +
+              "The load-test images are built from source only; no release publishes them.")
     } else {
         flags << "--version ${version}"
     }

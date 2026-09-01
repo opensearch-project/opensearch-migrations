@@ -13,6 +13,9 @@ def call(Map config = [:]) {
     def traceValuesFile = config.traceValuesFile ?: "../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceXray.yaml"
     def traceBackend = config.traceBackend ?: "xray"
     def clusterContextFilePath = "tmp/cluster-context-cdc-integ-${currentBuild.number}.json"
+    // Reserved test ID range for the k6 load-test cases. Keep it equal to
+    // LOAD_TEST_ID_PREFIX in libraries/testAutomation/testAutomation/test_runner.py.
+    def loadTestIdPrefix = "008"
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
@@ -78,6 +81,18 @@ def call(Map config = [:]) {
                     script {
                         def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
+
+                        // The load-test cases (008x) run on the k6LoadTest chart, which mounts the
+                        // migrations/k6_scripts data image. That image is not part of the standard
+                        // image set, so the bootstrap must be told to build it. The 008x prefix is
+                        // the same trigger that makes test_runner.py install the chart.
+                        env.needsLoadTestImages = params.TEST_IDS.split(',')
+                                .any { it.trim().startsWith(loadTestIdPrefix) }.toString()
+                        if (env.needsLoadTestImages == "true" && (!params.BUILD || params.USE_RELEASE_BOOTSTRAP)) {
+                            error("Test IDs ${params.TEST_IDS} include a load-test case (${loadTestIdPrefix}x), " +
+                                  "which needs the migrations/k6_scripts image. No release publishes that image, " +
+                                  "so it must be built from source. Set BUILD=true and USE_RELEASE_BOOTSTRAP=false.")
+                        }
                     }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     echo """
@@ -92,6 +107,7 @@ def call(Map config = [:]) {
     Source:                 ${params.SOURCE_VERSION}
     Target:                 ${params.TARGET_VERSION}
     Build:                  ${params.BUILD}
+    Load-test images:       ${env.needsLoadTestImages}
     Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
     Version:                ${params.VERSION}
     ================================================================
@@ -128,6 +144,7 @@ def call(Map config = [:]) {
                                 useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                 build: params.BUILD,
                                 skipTestImages: true,
+                                loadTestImages: env.needsLoadTestImages == "true",
                                 version: params.VERSION,
                                 useGeneralNodePool: true
                             )
@@ -263,8 +280,16 @@ def call(Map config = [:]) {
                                 if (traceTestIds != "") {
                                     traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
                                 }
+                                // The k6 scripts image (migrations/k6_scripts) is handed over as a
+                                // complete reference, the same way the transform images above are.
+                                // It is not part of the standard image set: only a bootstrap that
+                                // also gets --with-load-test-images pushes it to this run's private
+                                // ECR registry, under ECR's flattened tag layout. The flag is set
+                                // above when a load-test case (008x) is selected, and only those
+                                // cases consume the reference.
+                                def k6ScriptsImage = "${env.registryEndpoint}:migrations_k6_scripts_latest"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-scripts-image='${k6ScriptsImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
                                 }
                             }
                         }

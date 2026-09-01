@@ -8,6 +8,9 @@
 
 import { randomElement, randomInt, randomFloat, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
 
+// The index mapping this generator's documents are shaped for.
+export const mapping = open('./mapping.json');
+
 export const TRIP_TYPES      = ['1', '2'];
 export const PAYMENT_TYPES   = ['1', '2', '3', '4'];
 export const STORE_FWD_FLAGS = ['Y', 'N'];

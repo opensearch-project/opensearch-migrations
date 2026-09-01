@@ -21,11 +21,12 @@
  */
 
 import http from 'k6/http';
+import { CFG } from './config.js';
 
-const ENABLED    = (__ENV.REGISTRY_ENABLED || 'false').toLowerCase() === 'true';
-const WEBDIS_URL = __ENV.WEBDIS_URL  || 'http://webdis:7379';
-const RING_KEY   = __ENV.REGISTRY_KEY || 'recent_ids';
-const RING_CAP   = parseInt(__ENV.REGISTRY_CAP || '1000');
+const ENABLED    = (CFG.REGISTRY_ENABLED || 'false').toLowerCase() === 'true';
+const WEBDIS_URL = CFG.WEBDIS_URL  || 'http://webdis:7379';
+const RING_KEY   = CFG.REGISTRY_KEY || 'recent_ids';
+const RING_CAP   = parseInt(CFG.REGISTRY_CAP || '1000');
 
 // Tags used on registry HTTP calls so they appear separately in Prometheus and
 // are not confused with Capture Proxy traffic.
