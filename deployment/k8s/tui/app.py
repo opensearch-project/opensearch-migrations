@@ -52,8 +52,6 @@ def _score_color(j: Optional[float]) -> str:
     if j >= 0.80:
         return "yellow"
     return "red"
-
-
 def _running_avg(st: Dict) -> Optional[float]:
     """Running average of an accumulated stat bucket, or None if nothing in it scored."""
     return (st["sum"] / st["scored_count"]) if st["scored_count"] else None
@@ -541,6 +539,19 @@ class JaccardApp(App):
         src_pane.update(self._hit_list_text(f"SOURCE — {sq['label']}", sq.get("src_hits"), src_list, tgt_ids))
         tgt_pane.update(self._hit_list_text(f"TARGET — {sq['label']}", sq.get("tgt_hits"), tgt_list, src_ids))
 
+    @staticmethod
+    def _append_type_detail_row(text: Text, label: str, st: Dict) -> None:
+        """Append one scoring-method row ('doc IDs', 'RBO (p=0.9)', ...) to a by-type detail
+        breakdown — the average score (colored, or a dash if nothing was ever scored under
+        it), the sample count, and the min/max range when there's an average to bound."""
+        avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+        avg_text = "   -   " if avg is None else f"{avg:>7.3f}"
+        text.append(avg_text, style="bold" if avg is None else _score_color(avg))
+        text.append(f"  {label}   n={st['count']}")
+        if avg is not None:
+            text.append(f"   [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
+        text.append("\n")
+
     def _update_types_detail(self, src_pane: Static, tgt_pane: Static) -> None:
         """The selected type's breakdown by scoring method — e.g. 'hits' items are scored
         either 'doc IDs' or 'hit count ratio' depending on whether either side's response had
@@ -561,12 +572,7 @@ class JaccardApp(App):
             text.append("(no data)", style="dim")
         else:
             for label, st in sorted(by_label.items(), key=lambda kv: -kv[1]["count"]):
-                avg = _running_avg(st)
-                text.append(_score_cell(avg), style=_score_style(avg))
-                text.append(f"  {label}   n={st['count']}")
-                if avg is not None:
-                    text.append(f"   [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
-                text.append("\n")
+                self._append_type_detail_row(text, label, st)
         src_pane.update(text)
         tgt_pane.update("")
 
@@ -685,6 +691,29 @@ class JaccardApp(App):
     # the footnote panel growing without bound if that ever changes.
     _MAX_LIFETIME_LABELS_SHOWN = 8
 
+    @staticmethod
+    def _lifetime_meta_line(preflight: int, no_subq: Dict[str, int]) -> Optional[str]:
+        """The optional summary line above the per-label breakdown — OPTIONS preflight count
+        and a 'no score' breakdown by method, joined together when either is non-zero."""
+        parts = []
+        if preflight:
+            parts.append(f"{preflight}× OPTIONS preflight (skipped)")
+        if no_subq:
+            breakdown = ", ".join(f"{c}× {m}" for m, c in sorted(no_subq.items()))
+            parts.append(f"no score: {breakdown}")
+        return "  •  ".join(parts) if parts else None
+
+    @staticmethod
+    def _append_lifetime_label(text: Text, label: str, st: Dict) -> None:
+        """Append one label's rolled-up lifetime stat (average score, sample count, min/max
+        range) to the footnote line."""
+        avg = (st["sum"] / st["scored_count"]) if st["scored_count"] else None
+        text.append(f"{label}", style="bold" if avg is None else _score_color(avg))
+        text.append(f" n={st['count']}", style="dim")
+        if avg is not None:
+            text.append(f" avg={avg:.3f} [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
+        text.append("   ")
+
     def _update_footnote(self) -> None:
         """Lifetime, per-label running stats — unbounded, independent of the sliding window
         and of 'r' (which only clears what's on screen). A flat overall average would have
@@ -697,14 +726,9 @@ class JaccardApp(App):
             no_subq = dict(self._lifetime_no_subqueries)
 
         text = Text()
-        meta_parts = []
-        if preflight:
-            meta_parts.append(f"{preflight}× OPTIONS preflight (skipped)")
-        if no_subq:
-            breakdown = ", ".join(f"{c}× {m}" for m, c in sorted(no_subq.items()))
-            meta_parts.append(f"no score: {breakdown}")
-        if meta_parts:
-            text.append("  •  ".join(meta_parts) + "\n", style="dim")
+        meta_line = self._lifetime_meta_line(preflight, no_subq)
+        if meta_line:
+            text.append(meta_line + "\n", style="dim")
 
         if not stats:
             text.append("lifetime: (no scored items yet)", style="dim")
@@ -714,12 +738,7 @@ class JaccardApp(App):
             text.append("LIFETIME", style="bold")
             text.append(f" ({self._score_metric})  ", style="dim")
             for label, st in shown:
-                avg = _running_avg(st)
-                text.append(f"{label}", style=_score_style(avg))
-                text.append(f" n={st['count']}", style="dim")
-                if avg is not None:
-                    text.append(f" avg={avg:.3f} [{st['min']:.3f}–{st['max']:.3f}]", style="dim")
-                text.append("   ")
+                self._append_lifetime_label(text, label, st)
             if hidden:
                 text.append(f"+{len(hidden)} more label(s)", style="dim")
         self.query_one("#footnote", Static).update(text)

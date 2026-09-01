@@ -126,22 +126,17 @@ class S3TupleReader:
 
     # --- Streaming ---
 
-    def _decode_tuple(self, key: str, line: str) -> Optional[dict]:
-        try:
-            return json.loads(line)
-        except Exception:
-            self.errors += 1
-            logger.debug("Failed to decode tuple line from %s: %r", key, line[:200])
-            return None
-
-    def _tuples_from_key(self, key: str) -> Iterator[dict]:
-        """Yield one object's tuples. A file that can't be read, or a line that can't be
-        decoded, is counted in self.errors and skipped rather than ending the stream."""
+    def _process_key(self, key: str) -> Iterator[dict]:
+        """Yield decoded tuples from one .log.gz key, tracking (not raising) both S3 read
+        failures and individual malformed JSON lines so one bad key/line doesn't stop the
+        stream."""
         try:
             for line in self._gunzip_lines(key):
-                tup = self._decode_tuple(key, line)
-                if tup is not None:
-                    yield tup
+                try:
+                    yield json.loads(line)
+                except Exception:
+                    self.errors += 1
+                    logger.debug("Failed to decode tuple line from %s: %r", key, line[:200])
         except S3ReaderError:
             self.errors += 1
             logger.debug("Failed to read %s", key)
@@ -157,7 +152,7 @@ class S3TupleReader:
             new_keys = [k for k in all_keys if k not in self._seen_keys]
             for key in new_keys:
                 self._seen_keys.add(key)
-                yield from self._tuples_from_key(key)
+                yield from self._process_key(key)
                 if self._stop_event.is_set():
                     return
             self._stop_event.wait(self.poll_interval)

@@ -90,15 +90,13 @@ def rbo_score(list_a: List[str], list_b: List[str], p: float = RBO_PERSISTENCE) 
     return (weighted_sum / weight_total) if weight_total > 0 else None
 
 
-def _ratio(a: float, b: float) -> float:
-    """Agreement between two single magnitudes — 1.0 when they match, including both zero."""
-    mx = max(a, b)
-    return (min(a, b) / mx) if mx > 0 else 1.0
-
-
-def _score_agg_buckets(sb: List[Dict], tb: List[Dict]) -> Tuple[Optional[float], str]:
-    """Weighted per-key bucket overlap — same idea as Jaccard, but weighted by doc_count so a
-    bucket with 10000 docs counts for more than one with 1."""
+def _score_agg_buckets(sb: List[Dict], tb: List[Dict]) -> Optional[Tuple[Optional[float], str]]:
+    """Weighted per-key overlap for a bucket-based aggregation (terms/date-histogram/...),
+    weighted by doc_count so a bucket with 10000 docs counts for more than one with 1. Returns
+    None (not a result) when neither side has any buckets, so the caller falls through to the
+    next scoring mode."""
+    if not sb and not tb:
+        return None
     sc = {b['key']: b.get('doc_count', 0) for b in sb if 'key' in b}
     tc = {b['key']: b.get('doc_count', 0) for b in tb if 'key' in b}
     keys = set(sc) | set(tc)
@@ -109,34 +107,51 @@ def _score_agg_buckets(sb: List[Dict], tb: List[Dict]) -> Tuple[Optional[float],
     return ((n / d) if d > 0 else 1.0), 'agg (buckets)'
 
 
+def _score_agg_doc_count(sa: Dict, ta: Dict) -> Optional[Tuple[Optional[float], str]]:
+    """Ratio-based score for a single-value doc_count aggregation. Returns None when either
+    side lacks a doc_count, so the caller falls through to the next scoring mode."""
+    sdc, tdc = sa.get('doc_count'), ta.get('doc_count')
+    if sdc is None or tdc is None:
+        return None
+    mx = max(sdc, tdc)
+    return ((min(sdc, tdc) / mx) if mx > 0 else 1.0), 'agg (doc_count)'
+
+
+def _score_agg_metric(sa: Dict, ta: Dict) -> Optional[Tuple[Optional[float], str]]:
+    """Ratio-based score for a single-metric aggregation (avg/sum/cardinality/...). Returns
+    None when neither side even has a 'value' key, or when either side's value is missing."""
+    if 'value' not in sa and 'value' not in ta:
+        return None
+    sv, tv = sa.get('value'), ta.get('value')
+    if sv is None or tv is None:
+        return None
+    mx = max(sv, tv)
+    return ((min(sv, tv) / mx) if mx > 0 else 1.0), 'agg (metric)'
+
+
 def score_agg(sa: Dict, ta: Dict) -> Tuple[Optional[float], str]:
     """Score ONE named aggregation — bucket-based (terms/date-histogram/...) or a single
-    metric (avg/sum/cardinality/...)."""
+    metric (avg/sum/cardinality/...). Tries each scoring mode in turn and uses whichever one
+    actually applies to this aggregation's shape."""
     sa = sa if isinstance(sa, dict) else {}
     ta = ta if isinstance(ta, dict) else {}
     sb = sa.get('buckets', [])
     tb = ta.get('buckets', [])
-    if sb or tb:
-        return _score_agg_buckets(sb, tb)
-    sdc, tdc = sa.get('doc_count'), ta.get('doc_count')
-    if sdc is not None and tdc is not None:
-        return _ratio(sdc, tdc), 'agg (doc_count)'
-    sv, tv = sa.get('value'), ta.get('value')
-    if sv is not None and tv is not None:
-        return _ratio(sv, tv), 'agg (metric)'
+    for result in (_score_agg_buckets(sb, tb), _score_agg_doc_count(sa, ta), _score_agg_metric(sa, ta)):
+        if result is not None:
+            return result
     return None, 'agg'
 
 
-def _hits_item(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: str) -> Dict:
-    """The single scored item covering a response pair's hits — Jaccard over the hit IDs, plus
-    an independent RBO over the order they came back in."""
+def _score_hits_item(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: str) -> Dict:
+    """Build the single 'hits' item for one response pair — only called when either side has
+    a hits section."""
+    j, lbl = (None, missing_side) if missing_side else compute_hits_jaccard(sb, tb)
     src_hit_list = hit_summaries(sb)
     tgt_hit_list = hit_summaries(tb)
     if missing_side:
-        j, lbl = None, missing_side
         rbo_j, rbo_lbl = None, missing_side
     else:
-        j, lbl = compute_hits_jaccard(sb, tb)
         rbo_j = rbo_score([h['id'] for h in src_hit_list], [h['id'] for h in tgt_hit_list])
         # rbo_j is None here specifically when there's no ranked list to compare at all —
         # a size:0 query still has a 'hits' section (so it's still a "hits" item, and
@@ -153,17 +168,23 @@ def _hits_item(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: st
     }
 
 
-def _agg_item(name: str, sa: Optional[Dict], ta: Optional[Dict],
-              missing_side: Optional[str], label_prefix: str) -> Dict:
-    """One scored item for one named aggregation. RBO doesn't apply — buckets have no rank
-    order to compare — so its fields stay None."""
-    j, lbl = (None, missing_side) if missing_side else score_agg(sa, ta)
-    return {
-        'label': f'{label_prefix} · agg:{name}'.strip(' ·'), 'kind': 'agg', 'j': j, 'j_label': lbl,
-        'rbo_j': None, 'rbo_label': None,
-        'src_hits': None, 'tgt_hits': None, 'src_hit_list': [], 'tgt_hit_list': [],
-        'src_agg': sa, 'tgt_agg': ta,
-    }
+def _score_agg_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: str) -> List[Dict]:
+    """Build one item per named aggregation — the union of both sides' aggregation names, so
+    an agg-only query's N aggregations each get their own item instead of being blended into
+    one averaged score."""
+    src_aggs = sb.get('aggregations', {}) or {}
+    tgt_aggs = tb.get('aggregations', {}) or {}
+    items = []
+    for name in sorted(set(src_aggs) | set(tgt_aggs)):
+        sa, ta = src_aggs.get(name), tgt_aggs.get(name)
+        j, lbl = (None, missing_side) if missing_side else score_agg(sa, ta)
+        items.append({
+            'label': f'{label_prefix} · agg:{name}'.strip(' ·'), 'kind': 'agg', 'j': j, 'j_label': lbl,
+            'rbo_j': None, 'rbo_label': None,
+            'src_hits': None, 'tgt_hits': None, 'src_hit_list': [], 'tgt_hit_list': [],
+            'src_agg': sa, 'tgt_agg': ta,
+        })
+    return items
 
 
 def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefix: str) -> List[Dict]:
@@ -174,15 +195,9 @@ def _response_items(sb: Dict, tb: Dict, missing_side: Optional[str], label_prefi
     sb = sb if isinstance(sb, dict) else {}
     tb = tb if isinstance(tb, dict) else {}
     items = []
-
     if 'hits' in sb or 'hits' in tb:
-        items.append(_hits_item(sb, tb, missing_side, label_prefix))
-
-    src_aggs = sb.get('aggregations', {}) or {}
-    tgt_aggs = tb.get('aggregations', {}) or {}
-    for name in sorted(set(src_aggs) | set(tgt_aggs)):
-        items.append(_agg_item(name, src_aggs.get(name), tgt_aggs.get(name), missing_side, label_prefix))
-
+        items.append(_score_hits_item(sb, tb, missing_side, label_prefix))
+    items.extend(_score_agg_items(sb, tb, missing_side, label_prefix))
     return items
 
 
@@ -208,33 +223,34 @@ def _msearch_sub_labels(src_request: Dict, count: int) -> List[str]:
     return labels
 
 
-def _missing_side_label(src_resp: Dict, tgt: Dict) -> Optional[str]:
-    """A missing sourceResponse/targetResponse (e.g. the browser aborted the request before its
-    response arrived — this is real, observed capture data, not hypothetical) leaves src_body
-    or tgt_body as {}. Comparing real data against nothing would mathematically bottom out at
-    0.0 — indistinguishable from "genuinely diverged" in the display. Detected once here
-    (Status-Code is only absent when the response itself never arrived) and forced to an
-    explicit unscored label instead, for every item at once."""
-    no_src = 'Status-Code' not in src_resp
-    no_tgt = 'Status-Code' not in tgt
-    if no_src and no_tgt:
+def _missing_side(src_resp: Dict, tgt: Dict) -> Optional[str]:
+    """Detect a response that never arrived at all (e.g. the browser aborted the request
+    before its response arrived — this is real, observed capture data, not hypothetical).
+    Status-Code is only absent when the response itself never arrived; forced to an explicit
+    unscored label instead of comparing real data against nothing, which would mathematically
+    bottom out at 0.0 — indistinguishable from "genuinely diverged" in the display."""
+    src_missing = 'Status-Code' not in src_resp
+    tgt_missing = 'Status-Code' not in tgt
+    if src_missing and tgt_missing:
         return 'no source or target data'
-    if no_src:
+    if src_missing:
         return 'no source data'
-    if no_tgt:
+    if tgt_missing:
         return 'no target data'
     return None
 
 
-def _msearch_subqueries(src_request: Dict, tgt_request: Dict, src_body: Dict, tgt_body: Dict,
-                        missing_side: Optional[str]) -> List[Dict]:
-    """Every sub-response of an _msearch, decomposed and labeled with its NDJSON position."""
+def _msearch_subqueries(
+    src_request: Dict, tgt_request: Dict, src_body: Dict, tgt_body: Dict, missing_side: Optional[str],
+) -> List[Dict]:
+    """Decompose an _msearch response into one item-group per NDJSON sub-query, labeled with
+    its position (e.g. "1/2 (typefilter)") so each item stays traceable to which sub-query it
+    came from. Both sides' NDJSON pairs are carried separately, not assumed identical — a
+    transformation plugin can legitimately rewrite the body on its way to the target."""
     src_subs = src_body.get('responses', [])
     tgt_subs = tgt_body.get('responses', [])
     n = max(len(src_subs), len(tgt_subs))
     labels = _msearch_sub_labels(src_request, n)
-    # Both sides' NDJSON pairs are carried separately, not assumed identical — a
-    # transformation plugin can legitimately rewrite the body on its way to the target.
     src_sub_bodies = _msearch_sub_bodies(src_request, n)
     tgt_sub_bodies = _msearch_sub_bodies(tgt_request, n)
     subqueries = []
@@ -245,6 +261,16 @@ def _msearch_subqueries(src_request: Dict, tgt_request: Dict, src_body: Dict, tg
             item['src_sub_ndjson'] = src_sub_bodies[i]
             item['tgt_sub_ndjson'] = tgt_sub_bodies[i]
             subqueries.append(item)
+    return subqueries
+
+
+def _plain_search_subqueries(src_body: Dict, tgt_body: Dict, missing_side: Optional[str]) -> List[Dict]:
+    """A plain (non-_msearch) search's items — same decomposition as one _msearch sub-query,
+    just without a position label or NDJSON detail."""
+    subqueries = _response_items(src_body, tgt_body, missing_side, '')
+    for item in subqueries:
+        item['src_sub_ndjson'] = None
+        item['tgt_sub_ndjson'] = None
     return subqueries
 
 
@@ -263,26 +289,25 @@ def score_tuple(r: Dict) -> Dict:
     method = src_request.get('Method', '?')
     uri = src_request.get('Request-URI', '?')
     src_status = src_resp.get('Status-Code', '?')
-    base = {'method': method, 'uri': uri, 'src_status': src_status,
-            'src_request': src_request, 'tgt_request': tgt_request, 'src_response': src_resp}
+    base = {
+        'method': method, 'uri': uri, 'src_status': src_status,
+        'src_request': src_request, 'tgt_request': tgt_request, 'src_response': src_resp,
+    }
     if method == 'OPTIONS':
-        return dict(base, tgt_status=None, tgt_response=None,
-                    j_label='preflight', replayed=False, subqueries=[])
+        return {**base, 'tgt_status': None, 'tgt_response': None,
+                'j_label': 'preflight', 'replayed': False, 'subqueries': []}
     if not tgt_resps:
-        return dict(base, tgt_status=None, tgt_response=None,
-                    j_label=None, replayed=False, subqueries=[])
+        return {**base, 'tgt_status': None, 'tgt_response': None,
+                'j_label': None, 'replayed': False, 'subqueries': []}
     tgt = tgt_resps[0]
     tgt_status = tgt.get('Status-Code', '?')
     src_body = src_resp.get('payload', {}).get('inlinedJsonBody', {})
     tgt_body = tgt.get('payload', {}).get('inlinedJsonBody', {})
-    missing_side = _missing_side_label(src_resp, tgt)
-    is_msearch = ('_msearch' in uri or 'responses' in src_body)
+    missing_side = _missing_side(src_resp, tgt)
+    is_msearch = '_msearch' in uri or 'responses' in src_body
     if is_msearch:
         subqueries = _msearch_subqueries(src_request, tgt_request, src_body, tgt_body, missing_side)
     else:
-        subqueries = _response_items(src_body, tgt_body, missing_side, '')
-        for item in subqueries:
-            item['src_sub_ndjson'] = None
-            item['tgt_sub_ndjson'] = None
-    return dict(base, tgt_status=tgt_status, tgt_response=tgt,
-                j_label=None, replayed=True, subqueries=subqueries)
+        subqueries = _plain_search_subqueries(src_body, tgt_body, missing_side)
+    return {**base, 'tgt_status': tgt_status, 'tgt_response': tgt,
+            'j_label': None, 'replayed': True, 'subqueries': subqueries}
