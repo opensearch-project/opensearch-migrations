@@ -89,9 +89,75 @@ In JSON mode (`console --json backfill status --deep-check`) it adds `failed_doc
 }
 ```
 
-Each record includes the target index, document id, the OpenSearch `failureType` (e.g.
-`mapper_parsing_exception`), and the original document (`requestItem`) — enough to diagnose or re-submit a
-failure without returning to the source cluster.
+Each record includes the target index, document id, the OpenSearch `failureType` (for example
+`mapper_parsing_exception`), and the original document (`requestItem`), which is enough to diagnose a failure
+without returning to the source cluster and is also what a redrive resubmits.
+
+## Sealing a session
+
+A session can only be redriven once it has been sealed. Sealing publishes an immutable manifest listing every
+index, worker and object the session holds, and a redrive enumerates from that manifest rather than from a
+live listing, so the set of records cannot change while it is being read.
+
+RFS seals a session automatically when a backfill runs out of work, so a migration that ran to completion
+needs nothing here. Use this command when a backfill was aborted, or when its workers stopped before reaching
+that point.
+
+```
+console failed-document-stream seal
+```
+
+The command reports the indices the seal covers and a digest of the manifest. Running it again confirms the
+existing seal rather than replacing it, because a seal is permanent. If the session gained records after it
+was first sealed, the command fails rather than choosing between the two views, and the way forward is to
+copy the objects into a new session and seal that one.
+
+## Redriving failed documents
+
+Redriving resubmits a sealed session's failed documents to the target cluster. It is an ordinary backfill
+whose source is the failure stream instead of a snapshot, so it inherits the same work coordination, leases,
+retries, progress reporting and metrics, and any document that fails again is written to the redrive run's
+own failure stream, which can itself be sealed and redriven.
+
+Start with a preview, which reads the session and reports what would be written without submitting anything.
+
+```
+console failed-document-stream redrive --dry-run
+```
+
+Narrow what is redriven with `--index` and `--failure-class`, either of which may be repeated.
+
+```
+console failed-document-stream redrive --index orders-2024 --failure-class RETRYABLE_EXHAUSTED
+```
+
+`--preview-limit` caps how many records the preview lists and has no effect on a real redrive, which always
+submits every matching document. Reduce what is actually written with `--index` and `--failure-class`.
+
+The stream stores the document as it was read from the source index rather than the one that was sent, so the
+transforms configured for the migration run again at redrive time, and an operator who has since corrected a
+broken transform gets the corrected output.
+
+Because a redrive reuses the target and transforms of the run that produced the failures, it needs that run's
+own workflow configuration. The command reads the configuration session named by `--config-session`, which
+defaults to `default`, and checks that it declares the backfill the selected migration came from and still
+points at the same target cluster. A configuration that has been edited since the run, or that belongs to a
+different run, is rejected before anything is submitted.
+
+Redriven documents are written at their original document ids, so whatever those ids currently hold is
+replaced. The command names the indices it will write and asks for confirmation before submitting. If the
+migration combined several source indices into one target index, an id may now hold a document that came from
+a different index, and RFS has no way to detect that, so review the preview before confirming.
+
+Documents whose original write carried no document id are reported and skipped, because their ids were
+assigned by the server and resubmitting them would add a second document rather than replace the first. Pass
+`--allow-missing-document-ids` to send them anyway and accept the duplicate.
+
+For scripted use, `console --json failed-document-stream redrive` emits a single JSON document holding the
+counts, the per-index totals, the sampled records and the submission result. Submitting in this mode requires
+`--yes`, because there is no prompt to answer.
+
+Nothing is removed from the original session, since a seal is permanent and a redrive only reads.
 
 ## Deleting records
 
@@ -102,6 +168,9 @@ Add `--yes` to skip the confirmation prompt.
 ```
 console backfill reset --include-failed-document-stream
 ```
+
+Deleting a session removes its manifest along with its records, so a sealed session is never left partly
+deleted with a manifest describing objects that are gone.
 
 ## Configuration
 
@@ -128,3 +197,7 @@ documentBackfillConfig:
 The region and endpoint are still resolved for you when the bucket is set: the config processor takes your
 value if given, else the snapshot repo's, else the deployment default, and records the result in run
 history rather than leaving RFS to discover it at runtime.
+
+`console failed-document-stream redrive` sets `sourceKind` and `sourceConfig` on the backfill it submits, so
+there is normally no reason to write either by hand. The same is true of `allowMissingDocumentIds`, which the
+redrive command sets from its own `--allow-missing-document-ids` flag.

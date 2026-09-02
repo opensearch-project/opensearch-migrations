@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -76,7 +77,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 new Document("d3", "{\"title\":\"Third\"}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of())
             );
 
-            var cursor = sink.writeBatch("sink_docs", docs).block();
+            var cursor = sink.writeBatch("sink_docs", positioned(docs)).block();
 
             assertNotNull(cursor);
             assertEquals(3, cursor.docsInBatch());
@@ -101,12 +102,12 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 new Document("keep2", "{\"v\":2}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
                 new Document("to_delete", "{\"v\":3}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of())
             );
-            sink.writeBatch("sink_deletes", additions).block();
+            sink.writeBatch("sink_deletes", positioned(additions)).block();
 
             var deletions = List.of(
                 new Document("to_delete", null, Document.Operation.DELETE, Map.of(), Map.of())
             );
-            sink.writeBatch("sink_deletes", deletions).block();
+            sink.writeBatch("sink_deletes", positioned(deletions)).block();
 
             verifyDocCount(cluster, "sink_deletes", 2);
             log.info("Successfully wrote UPSERT + DELETE ops to {} via OpenSearchDocumentSink", targetVersion);
@@ -129,7 +130,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
                 new Document("r2", "{\"score\":20}".getBytes(), Document.Operation.UPSERT,
                     Map.of(Document.HINT_ROUTING, "shard_b"), Map.of())
             );
-            sink.writeBatch("sink_routing", docs).block();
+            sink.writeBatch("sink_routing", positioned(docs)).block();
 
             var restClient = createRestClient(cluster);
             var context = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -184,4 +185,12 @@ public class OpenSearchDocumentSinkEndToEndTest {
         assertEquals(expected, counts.getOrDefault(indexName, 0),
             "Expected " + expected + " docs in " + indexName);
     }
+
+    /** Pairs each document with a cursor; these tests assert on the target, not on cursors. */
+    private static List<PositionedDocument> positioned(List<Document> documents) {
+        return documents.stream()
+            .map(d -> new PositionedDocument(d, "cursor-after-" + d.id()))
+            .collect(java.util.stream.Collectors.toList());
+    }
+
 }

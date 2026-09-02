@@ -15,6 +15,9 @@ dependencies {
     implementation libs.slf4j.api
 
     testFixturesImplementation libs.reactor.core
+    // DocumentSourceContractTest is a JUnit base class every source implementation extends.
+    testFixturesApi libs.junit.jupiter.api
+    testFixturesApi libs.hamcrest
 
     testImplementation project(':RfsCommon')
     testImplementation libs.reactor.test

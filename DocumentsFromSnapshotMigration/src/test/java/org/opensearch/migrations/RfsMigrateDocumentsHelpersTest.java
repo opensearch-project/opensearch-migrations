@@ -157,7 +157,7 @@ class RfsMigrateDocumentsHelpersTest {
     void buildFailedDocumentStreamSink_fallsBackToS3RegionWhenFailedDocumentStreamRegionUnset() {
         var args = new RfsMigrateDocuments.Args();
         args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket = "b";
-        args.s3Region = "eu-west-2";   // failedDocumentStreamS3Region intentionally left null
+        args.legacySource.s3Region = "eu-west-2";   // failedDocumentStreamS3Region intentionally left null
         args.failedDocumentStreamArgs.failedDocumentStreamS3Prefix = "p/";
 
         var sink = RfsMigrateDocuments.buildFailedDocumentStreamSink(args, "w", "s");
@@ -296,14 +296,51 @@ class RfsMigrateDocumentsHelpersTest {
             () -> validator.validate("--session-name", "has_underscore"));
     }
 
+    // ---- LegacySourceArgs -----------------------------------------------
+
+    /** The flags moved into a delegate; the names callers pass must still land in the same places. */
+    @Test
+    void relocatedSourceFlagsStillParseFromTheCommandLine() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{
+                "--target-host", "http://target:9200",
+                "--repo-uri", "s3://bucket/repo",
+                "--snapshot-name", "nightly",
+                "--source-version", "ES 7.10.2",
+                "--max-shard-size-bytes", "4096",
+                "--use-recovery-source",
+                VersionStrictness.ALLOW_LOOSE_VERSION_MATCHING_PARAM_KEY});
+
+        assertThat(args.legacySource.repoUri, equalTo("s3://bucket/repo"));
+        assertThat(args.legacySource.snapshotName, equalTo("nightly"));
+        assertThat(args.legacySource.sourceVersion.getMajor(), equalTo(7));
+        assertThat(args.legacySource.maxShardSizeBytes, equalTo(4096L));
+        assertThat(args.legacySource.useRecoverySource, equalTo(true));
+        assertThat(args.legacySource.versionStrictness.allowLooseVersionMatches, equalTo(true));
+    }
+
+    @Test
+    void relocatedSourceFlagsStillParseFromInlineJson() {
+        var args = new RfsMigrateDocuments.Args();
+        JsonCommandLineParser.newBuilder().addObject(args).build()
+            .parse(new String[]{"---INLINE-JSON",
+                "{\"repoUri\": \"s3://bucket/repo\", \"snapshotName\": \"nightly\", "
+                    + "\"maxShardSizeBytes\": 4096}"});
+
+        assertThat(args.legacySource.repoUri, equalTo("s3://bucket/repo"));
+        assertThat(args.legacySource.snapshotName, equalTo("nightly"));
+        assertThat(args.legacySource.maxShardSizeBytes, equalTo(4096L));
+    }
+
     // ---- validateArgs ---------------------------------------------------
 
     private static RfsMigrateDocuments.Args validEsArgs() {
         var args = new RfsMigrateDocuments.Args();
-        args.snapshotName = "my-snap";
+        args.legacySource.snapshotName = "my-snap";
         args.luceneDir = "/tmp/lucene";
-        args.sourceVersion = Version.fromString("ES_7.10");
-        args.repoUri = "/tmp/snapshot";  // bare absolute path -> file:// repo
+        args.legacySource.sourceVersion = Version.fromString("ES_7.10");
+        args.legacySource.repoUri = "/tmp/snapshot";  // bare absolute path -> file:// repo
         return args;
     }
 
@@ -315,16 +352,16 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_acceptsS3RepoWithLocalDirAndRegion() {
         var args = validEsArgs();
-        args.repoUri = "s3://bucket/key";
+        args.legacySource.repoUri = "s3://bucket/key";
         args.localDir = "/tmp/s3";
-        args.s3Region = "us-east-1";
+        args.legacySource.s3Region = "us-east-1";
         assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
     }
 
     @Test
     void validateArgs_rejectsMissingSnapshotName() {
         var args = validEsArgs();
-        args.snapshotName = null;
+        args.legacySource.snapshotName = null;
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--snapshot-name"));
@@ -342,7 +379,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_rejectsMissingSourceVersion() {
         var args = validEsArgs();
-        args.sourceVersion = null;
+        args.legacySource.sourceVersion = null;
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--source-version"));
@@ -352,7 +389,7 @@ class RfsMigrateDocumentsHelpersTest {
     void validateArgs_rejectsS3RepoWithoutLocalDirOrRegion() {
         // An s3:// repo requires both --local-dir and --s3-region.
         var args = validEsArgs();
-        args.repoUri = "s3://bucket/key";  // neither --local-dir nor --s3-region set
+        args.legacySource.repoUri = "s3://bucket/key";  // neither --local-dir nor --s3-region set
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--local-dir"));
@@ -361,7 +398,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_rejectsMissingRepoUri() {
         var args = validEsArgs();
-        args.repoUri = null;
+        args.legacySource.repoUri = null;
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--repo-uri"));
@@ -370,7 +407,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_rejectsPreviousSnapshotWithoutDeltaMode() {
         var args = validEsArgs();
-        args.experimental.previousSnapshotName = "prev";
+        args.legacySource.previousSnapshotName = "prev";
         // delta mode intentionally left null
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
@@ -380,7 +417,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_rejectsDeltaModeWithoutPreviousSnapshot() {
         var args = validEsArgs();
-        args.experimental.experimentalDeltaMode = DeltaMode.values()[0];
+        args.legacySource.experimentalDeltaMode = DeltaMode.values()[0];
         // previousSnapshotName intentionally left null
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
@@ -393,8 +430,8 @@ class RfsMigrateDocumentsHelpersTest {
         // Solr-flavored runs always need a separate coordinator cluster because
         // the source itself isn't OpenSearch.
         var args = new RfsMigrateDocuments.Args();
-        args.sourceVersion = Version.fromString("SOLR_8.11");
-        args.repoUri = "/tmp/solr";
+        args.legacySource.sourceVersion = Version.fromString("SOLR_8.11");
+        args.legacySource.repoUri = "/tmp/solr";
         // coordinatorArgs.host left null
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
@@ -404,7 +441,7 @@ class RfsMigrateDocumentsHelpersTest {
     @Test
     void validateArgs_solr_rejectsMissingBackupSource() {
         var args = new RfsMigrateDocuments.Args();
-        args.sourceVersion = Version.fromString("SOLR_8.11");
+        args.legacySource.sourceVersion = Version.fromString("SOLR_8.11");
         // No --repo-uri set at all.
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
@@ -480,25 +517,24 @@ class RfsMigrateDocumentsHelpersTest {
     // ---- getSuccessorWorkItemIds ----------------------------------------
 
     @Test
-    void getSuccessorWorkItemIds_buildsSuccessorAtCurrentCheckpoint() {
-        // The successor work item keeps the same checkpoint number so the next
-        // worker resumes from where this one stopped — this also handles
-        // 1:many doc splits (re-processing the last cursor is intentional).
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 0L);
+    void getSuccessorWorkItemIds_buildsSuccessorAtCurrentCursor() {
+        // The successor carries the last committed cursor so the next worker resumes exactly
+        // where this one stopped.
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", "snap/movies/2", null);
         var workItemAndDuration = new IWorkCoordinator.WorkItemAndDuration(
             Instant.now().plusSeconds(60), workItem);
-        var cursor = new WorkItemCursor(42L);
+        var cursor = new WorkItemCursor("lucene:42");
 
         var successors = RfsMigrateDocuments.getSuccessorWorkItemIds(workItemAndDuration, cursor);
-        // Exactly one successor: same index/shard, restart from the cursor.
+        // Exactly one successor: same index/partition, restart from the cursor.
         assertThat(successors, contains(
-            new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", 2, 42L).toString()));
+            new IWorkCoordinator.WorkItemAndDuration.WorkItem("movies", "snap/movies/2", "lucene:42").toString()));
     }
 
     @Test
     void getSuccessorWorkItemIds_throwsWhenWorkItemNull() {
         assertThrows(IllegalStateException.class,
-            () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor(0L)));
+            () -> RfsMigrateDocuments.getSuccessorWorkItemIds(null, new WorkItemCursor("lucene:0")));
     }
 
     // ---- NoWorkLeftException ---------------------------------------------

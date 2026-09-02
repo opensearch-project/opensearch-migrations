@@ -255,7 +255,7 @@ class OpenSearchWorkCoodinatorTest {
     public void testCreateOrUpdateLeaseRetriesUnexpectedCoordinatorResponse(Version version) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var client = new SequenceMockHttpClient(getClockDriftResponse(), getCreatedResponse());
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", "shard0", null).toString();
 
         try (var workCoordinator = factory.get(client, 2, "testWorker")) {
             var result = workCoordinator.createOrUpdateLeaseForWorkItem(workItem, Duration.ofMinutes(5), () -> null);
@@ -269,7 +269,7 @@ class OpenSearchWorkCoodinatorTest {
     public void testCreateUnassignedWorkItemRetriesUnexpectedCoordinatorResponse(Version version) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var client = new SequenceMockHttpClient(getClockDriftResponse(), getCreatedResponse());
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", "shard0", null).toString();
 
         try (var workCoordinator = factory.get(client, 2, "testWorker")) {
             Assertions.assertTrue(workCoordinator.createUnassignedWorkItem(workItem, () -> null));
@@ -282,7 +282,7 @@ class OpenSearchWorkCoodinatorTest {
     public void testCreateUnassignedWorkItemConvertsInterruptedRetryToInterruptedIOException(Version version) throws Exception {
         var factory = new WorkCoordinatorFactory(version);
         var client = new MockHttpClient(getClockDriftResponse());
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", "shard0", null).toString();
 
         try (var workCoordinator = factory.get(client, 2, "testWorker")) {
             Thread.currentThread().interrupt();
@@ -299,7 +299,7 @@ class OpenSearchWorkCoodinatorTest {
     }
 
     static Stream<Arguments> makeConsumers() {
-        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0L).toString();
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", "shard0", null).toString();
 
 
         var functions = List.<Function<IWorkCoordinator, Exception>>of(

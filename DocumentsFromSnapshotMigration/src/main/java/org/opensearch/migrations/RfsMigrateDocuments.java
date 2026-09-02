@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -11,37 +12,36 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
-import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
-import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.GcsRepo;
-import org.opensearch.migrations.bulkload.common.GcsUri;
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
-import org.opensearch.migrations.bulkload.common.S3Repo;
-import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
-import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
-import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
-import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
-import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
-import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
+import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.provider.EsSnapshotSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.FailedDocumentStreamSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.provider.FailedDocumentStreamSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.provider.SolrBackupSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.CoordinationRequirement;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceProvider;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceRegistry;
+import org.opensearch.migrations.bulkload.pipeline.spi.DocumentSourceSpec;
+import org.opensearch.migrations.bulkload.pipeline.spi.SourceRuntime;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -54,11 +54,12 @@ import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.faileddocumentstream.FailedDocumentStreamSink;
 import org.opensearch.migrations.reindexer.faileddocumentstream.S3FailedDocumentStreamSink;
+import org.opensearch.migrations.reindexer.faileddocumentstream.source.S3FailedDocumentStreamObjectStore;
+import org.opensearch.migrations.reindexer.faileddocumentstream.source.SessionSealer;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -66,6 +67,7 @@ import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
@@ -77,6 +79,7 @@ import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -152,15 +155,8 @@ public class RfsMigrateDocuments {
             description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(required = false,
-            names = { "--snapshot-name", "--snapshotName" },
-            description = "The name of the snapshot to migrate. Required when --source-type is SNAPSHOT.")
-        public String snapshotName;
-
-        @Parameter(required = false,
-            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
-            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
-        public String repoUri = null;
+        @ParametersDelegate
+        public LegacySourceArgs legacySource = new LegacySourceArgs();
 
         @Parameter(required = false,
             names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
@@ -169,18 +165,8 @@ public class RfsMigrateDocuments {
         public String localDir = null;
 
         @Parameter(required = false,
-            names = { "--s3-region", "--s3Region" },
-            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
-        public String s3Region = null;
-
-        @Parameter(required = false,
-            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
-            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
-        public String endpoint = null;
-
-        @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
-            description = "The absolute path to the directory where we'll put the Lucene docs. Required when --source-type is SNAPSHOT.")
+            description = "The absolute path to the directory where we'll put the Lucene docs. Required for snapshot migrations.")
         public String luceneDir;
 
         @Parameter(required = false,
@@ -199,13 +185,6 @@ public class RfsMigrateDocuments {
             description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
                 "Default: all non-system indices (e.g. those not starting with '.')"))
         public List<String> indexAllowlist = List.of();
-
-        @Parameter(required = false,
-            names = { "--max-shard-size-bytes", "--maxShardSizeBytes" },
-            description = ("Optional. The maximum shard size, in bytes, to allow when " +
-                "performing the document migration.  " +
-                "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
-        public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
 
         @Parameter(required = false,
             names = { "--initial-lease-duration", "--initialLeaseDuration" },
@@ -258,10 +237,13 @@ public class RfsMigrateDocuments {
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
         @Parameter(required = false,
-            names = { "--source-version", "--sourceVersion" },
-            converter = VersionConverter.class,
-            description = ("Version of the source cluster. Required when --source-type is SNAPSHOT."))
-        public Version sourceVersion;
+            names = { "--allow-missing-document-ids", "--allowMissingDocumentIds" },
+            description = "Optional. Send operations that have no _id once transformation has run, rather "
+                + "than skipping and reporting them. Such an operation reproduces a write whose id the "
+                + "server assigned, so replaying it adds a document instead of replacing one — this flag "
+                + "acknowledges that duplicate. Distinct from --server-generated-ids, which strips the id "
+                + "from every operation.")
+        public boolean allowMissingDocumentIds = false;
 
         @Parameter(required = false,
             names = { "--session-name", "--sessionName" },
@@ -299,9 +281,6 @@ public class RfsMigrateDocuments {
         private DocParams docTransformationParams = new DocParams();
 
         @ParametersDelegate
-        private VersionStrictness versionStrictness = new VersionStrictness();
-
-        @ParametersDelegate
         ExperimentalArgs experimental = new ExperimentalArgs();
 
         @Parameter(required = false,
@@ -311,6 +290,18 @@ public class RfsMigrateDocuments {
                 "allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success " +
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
+
+        @Parameter(required = false,
+            names = { "--source-kind", "--sourceKind" },
+            description = "Which document source to open, e.g. es-snapshot or solr-backup. When unset, the "
+                + "kind is inferred from --source-version. Requires --source-config.")
+        public String sourceKind = null;
+
+        @Parameter(required = false,
+            names = { "--source-config", "--sourceConfig" },
+            description = "The source's own configuration as JSON, either inline or @/path/to/file.json. "
+                + "Requires --source-kind.")
+        public String sourceConfig = null;
 
         @ParametersDelegate
         public FailedDocumentStreamArgs failedDocumentStreamArgs = new FailedDocumentStreamArgs();
@@ -358,7 +349,54 @@ public class RfsMigrateDocuments {
         public long failedDocumentStreamMaxBufferBytes = S3FailedDocumentStreamSink.DEFAULT_MAX_BUFFER_BYTES;
     }
 
-    public static class ExperimentalArgs {
+    /**
+     * The flags whose values now live in {@code --source-config}, grouped so the conflict check reads
+     * the group rather than a hand-maintained list. Flags that also configure {@link SourceRuntime}
+     * stay out, since rejecting them would take their runtime meaning with them.
+     *
+     * <p>Every parameter here must default to null, booleans included: JSON and {@code RFS_} env vars
+     * can pass {@code false}, and a defaulted field would read that as "not given". Resolve effective
+     * defaults at the read site. {@code ExplicitSourceSelectionTest} enforces this.
+     */
+    public static class LegacySourceArgs {
+
+        @Parameter(required = false,
+            names = { "--snapshot-name", "--snapshotName" },
+            description = "The name of the snapshot to migrate. Required for snapshot migrations.")
+        public String snapshotName;
+
+        @Parameter(required = false,
+            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
+            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+        public String repoUri = null;
+
+        @Parameter(required = false,
+            names = { "--s3-region", "--s3Region" },
+            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
+        public String s3Region = null;
+
+        @Parameter(required = false,
+            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+        public String endpoint = null;
+
+        @Parameter(required = false,
+            names = { "--source-version", "--sourceVersion" },
+            converter = VersionConverter.class,
+            description = ("Version of the source cluster, for example: Elasticsearch 7.10, OS 1.3 or Solr 9. Required."))
+        public Version sourceVersion;
+
+        @Parameter(required = false,
+            names = { "--max-shard-size-bytes", "--maxShardSizeBytes" },
+            description = ("Optional. The maximum shard size, in bytes, to allow when " +
+                "performing the document migration.  " +
+                "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
+        public Long maxShardSizeBytes;
+
+        public long maxShardSizeBytesOrDefault() {
+            return maxShardSizeBytes != null ? maxShardSizeBytes : DEFAULT_MAX_SHARD_SIZE_BYTES;
+        }
+
         @Parameter(required = false,
             names = { "--experimental-previous-snapshot-name", "--experimentalPreviousSnapshotName" },
             description = "Optional. The name of the previous snapshot for delta migration (experimental feature)",
@@ -381,7 +419,11 @@ public class RfsMigrateDocuments {
                 "Without this flag, migration of sourceless indices will fail with an error.",
             arity = 0
         )
-        public boolean enableSourcelessMigrations = false;
+        public Boolean enableSourcelessMigrations;
+
+        public boolean enableSourcelessMigrationsOrDefault() {
+            return Boolean.TRUE.equals(enableSourcelessMigrations);
+        }
 
         @Parameter(required = false,
             names = { "--use-recovery-source" },
@@ -391,8 +433,52 @@ public class RfsMigrateDocuments {
                 "and stored fields is insufficient.",
             arity = 0
         )
-        public boolean useRecoverySource = false;
+        public Boolean useRecoverySource;
 
+        public boolean useRecoverySourceOrDefault() {
+            return Boolean.TRUE.equals(useRecoverySource);
+        }
+
+        @ParametersDelegate
+        public VersionStrictness versionStrictness = new VersionStrictness();
+
+        /**
+         * The flags in this group that the caller gave. Diffing against a pristine instance covers the
+         * command line, JSON and env vars alike; JCommander's assigned-bit would see only the first.
+         */
+        List<String> givenFlags() {
+            var given = new ArrayList<String>();
+            collectGivenFlags(this, new LegacySourceArgs(), given);
+            return given;
+        }
+
+        private static void collectGivenFlags(Object given, Object pristine, List<String> flags) {
+            for (var field : given.getClass().getDeclaredFields()) {
+                if (field.isSynthetic()) {
+                    continue;
+                }
+                field.setAccessible(true);
+                Object givenValue;
+                Object pristineValue;
+                try {
+                    givenValue = field.get(given);
+                    pristineValue = field.get(pristine);
+                } catch (IllegalAccessException e) {
+                    throw new IllegalStateException("Could not read " + field.getName(), e);
+                }
+                if (field.isAnnotationPresent(ParametersDelegate.class)) {
+                    collectGivenFlags(givenValue, pristineValue, flags);
+                    continue;
+                }
+                var parameter = field.getAnnotation(Parameter.class);
+                if (parameter != null && !Objects.equals(givenValue, pristineValue)) {
+                    flags.add(parameter.names()[0]);
+                }
+            }
+        }
+    }
+
+    public static class ExperimentalArgs {
         @Parameter(required = false,
             names = { "--position-gap-stopword", "--positionGapStopword" },
             description = "Optional. Token used to fill skipped Lucene positions when reconstructing analyzed-text " +
@@ -458,22 +544,124 @@ public class RfsMigrateDocuments {
         private String transformerConfigFile;
     }
 
+    static final long DEFAULT_MAX_SHARD_SIZE_BYTES = 80 * 1024 * 1024 * 1024L;
+
     public static class NoWorkLeftException extends Exception {
         public NoWorkLeftException(String message) {
             super(message);
         }
     }
 
+    /** Validates the pair and returns the chosen provider, or null when neither argument was given. */
+    static DocumentSourceProvider<?> validateSourceSelection(Args args) {
+        if (args.sourceKind == null && args.sourceConfig == null) {
+            return null;
+        }
+        if (args.sourceKind == null || args.sourceConfig == null) {
+            throw new ParameterException("--source-kind and --source-config must be given together.");
+        }
+        var conflicting = args.legacySource.givenFlags();
+        if (!conflicting.isEmpty()) {
+            throw new ParameterException("--source-kind supersedes " + String.join(", ", conflicting)
+                + "; put those settings in --source-config instead of passing both.");
+        }
+        try {
+            return DocumentSourceRegistry.getDefault().resolve(args.sourceKind);
+        } catch (IllegalArgumentException e) {
+            throw new ParameterException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Requirements that outlive the source spec, checked against what the provider declares rather
+     * than against its concrete type, so a source discovered at runtime is held to the same rules.
+     * The directory requirements depend on the spec, so this parses it before deciding.
+     */
+    static <S extends DocumentSourceSpec> void validateRuntimeArgs(
+        Args args,
+        DocumentSourceProvider<S> provider,
+        JsonNode config
+    ) {
+        if (provider.coordinationRequirement() == CoordinationRequirement.EXTERNAL_REQUIRED
+            && args.coordinatorArgs.host == null) {
+            throw new ParameterException("--coordinator-host is required for " + provider.kind()
+                + ", which cannot coordinate work on the target.");
+        }
+        S spec;
+        try {
+            spec = provider.parseSpec(config);
+        } catch (RuntimeException e) {
+            throw new ParameterException("--source-config is not valid for " + provider.kind()
+                + ": " + e.getMessage(), e);
+        }
+        if (provider.requiresScratchDirectory(spec) && args.localDir == null) {
+            throw new ParameterException("--local-dir is required for " + provider.kind()
+                + " with a remote repository, which downloads before it can read.");
+        }
+        if (provider.requiresWorkingDirectory(spec) && args.luceneDir == null && args.localDir == null) {
+            throw new ParameterException(
+                "--lucene-dir or --local-dir is required so unpacked documents have somewhere to go.");
+        }
+    }
+
+    /**
+     * Two things a source cannot check about itself, having no view of the sink's configuration:
+     * that the run does not read what it writes, and that its coordination is namespaced away from
+     * the backfill that produced the failures.
+     */
+    static void validateRedriveArgs(Args args, DocumentSourceProvider<?> provider, JsonNode config) {
+        if (!FailedDocumentStreamSourceProvider.KIND.equals(provider.kind())) {
+            return;
+        }
+        var spec = (FailedDocumentStreamSourceSpec) provider.parseSpec(config);
+        var outBucket = args.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
+        if (outBucket != null && !outBucket.isBlank()) {
+            var inUri = RepoUri.parse(spec.streamUri());
+            if (inUri instanceof RepoUri.S3RepoUri in
+                && outBucket.equals(in.s3Uri().bucketName)
+                && normalizeStreamPrefix(args.failedDocumentStreamArgs.failedDocumentStreamS3Prefix)
+                    .equals(normalizeStreamPrefix(in.s3Uri().key))
+                && spec.sessionId().equals(resolveSessionId(args, ""))) {
+                throw new ParameterException("This redrive would write its own failures back into the"
+                    + " session it is reading (" + spec.streamUri() + " session=" + spec.sessionId()
+                    + "), so it would never finish. Give the run a different"
+                    + " --failed-document-stream-s3-session-id or a different bucket/prefix.");
+            }
+        }
+        if (args.indexNameSuffix == null || args.indexNameSuffix.isBlank()) {
+            throw new ParameterException("--session-name is required for " + provider.kind()
+                + " so the redrive coordinates its work separately from the backfill that produced"
+                + " the failures. It changes only the coordination namespace, not which session is read.");
+        }
+    }
+
+    /** Ignores a trailing slash when comparing prefixes. */
+    private static String normalizeStreamPrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return "";
+        }
+        var trimmed = prefix.startsWith("/") ? prefix.substring(1) : prefix;
+        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+    }
+
     public static void validateArgs(Args args) {
+        var provider = validateSourceSelection(args);
+        if (provider != null) {
+            // The provider validates its own config; only the runtime requirements are ours to check.
+            var config = readSourceConfig(args.sourceConfig);
+            validateRuntimeArgs(args, provider, config);
+            validateRedriveArgs(args, provider, config);
+            return;
+        }
         // Solr backup path
-        if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
-            if (args.repoUri == null) {
+        if (args.legacySource.sourceVersion != null && args.legacySource.sourceVersion.getFlavor() == Flavor.SOLR) {
+            if (args.legacySource.repoUri == null) {
                 throw new ParameterException(
                     "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
             }
-            var parsedUri = RepoUri.parse(args.repoUri);
-            if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
+            var parsedUri = RepoUri.parse(args.legacySource.repoUri);
+            if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.legacySource.s3Region == null)) {
                 throw new ParameterException(
                     "For Solr backup migration with S3, --local-dir and --s3-region are required."
                 );
@@ -486,22 +674,22 @@ public class RfsMigrateDocuments {
             return;
         }
 
-        if (args.snapshotName == null) {
-            throw new ParameterException("--snapshot-name is required when --source-type is SNAPSHOT.");
+        if (args.legacySource.snapshotName == null) {
+            throw new ParameterException("--snapshot-name is required for snapshot migrations.");
         }
         if (args.luceneDir == null) {
-            throw new ParameterException("--lucene-dir is required when --source-type is SNAPSHOT.");
+            throw new ParameterException("--lucene-dir is required for snapshot migrations.");
         }
-        if (args.sourceVersion == null) {
-            throw new ParameterException("--source-version is required when --source-type is SNAPSHOT.");
+        if (args.legacySource.sourceVersion == null) {
+            throw new ParameterException("--source-version is required.");
         }
 
-        if (args.repoUri == null) {
+        if (args.legacySource.repoUri == null) {
             throw new ParameterException("--repo-uri is required.");
         }
 
-        var parsedUri = RepoUri.parse(args.repoUri);
-        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
+        var parsedUri = RepoUri.parse(args.legacySource.repoUri);
+        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.legacySource.s3Region == null)) {
             throw new ParameterException(
                 "If an s3 repo is being used, --s3-region and --local-dir must be set."
             );
@@ -513,16 +701,16 @@ public class RfsMigrateDocuments {
         }
         
         // Validate delta mode parameters
-        if (args.experimental.experimentalDeltaMode != null) {
-            if (args.experimental.previousSnapshotName == null) {
+        if (args.legacySource.experimentalDeltaMode != null) {
+            if (args.legacySource.previousSnapshotName == null) {
                 throw new ParameterException(
                     "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
                 );
             }
             log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
                     "This feature is experimental and should not be used in production.")
-                    .addArgument(args.experimental.experimentalDeltaMode).log();
-        } else if (args.experimental.previousSnapshotName != null) {
+                    .addArgument(args.legacySource.experimentalDeltaMode).log();
+        } else if (args.legacySource.previousSnapshotName != null) {
             log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
                 "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
@@ -623,18 +811,14 @@ public class RfsMigrateDocuments {
             : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
         boolean emitDocType = resolveEmitDocType(
-            arguments.emitDocType, arguments.sourceVersion, docTransformerConfig);
+            arguments.emitDocType, arguments.legacySource.sourceVersion, docTransformerConfig);
 
-        MigrationSourceFactory sourceFactory;
-        if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
-            sourceFactory = buildSolrSourceFactory(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
-        } else {
-            sourceFactory = buildElasticsearchSourceFactory(arguments, targetClient,
-                docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
-        }
+        var sourceFactory = buildSourceFactory(arguments, targetClient,
+            docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
-        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, failedDocumentStreamSink);
+        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory,
+            failedDocumentStreamSink, resolvedSessionId);
     }
 
     private static void runMigration(
@@ -643,7 +827,8 @@ public class RfsMigrateDocuments {
         CoordinatorInfo coordinatorInfo,
         RootDocumentMigrationContext context,
         MigrationSourceFactory sourceFactory,
-        FailedDocumentStreamSink failedDocumentStreamSink
+        FailedDocumentStreamSink failedDocumentStreamSink,
+        String failedDocumentStreamSessionId
     ) throws Exception {
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -725,6 +910,8 @@ public class RfsMigrateDocuments {
             }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire. Exiting with exit code " + NO_WORK_LEFT_EXIT_CODE).log();
+            // The moment the session stops changing. Several workers may race; the seal is conditional.
+            sealFailedDocumentStreamSession(arguments, failedDocumentStreamSink, failedDocumentStreamSessionId);
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
@@ -757,16 +944,104 @@ public class RfsMigrateDocuments {
         if (snapshotReadFailure == null) {
             return OptionalInt.empty();
         }
-        var repo = arguments.repoUri;
+        var repo = arguments.legacySource.repoUri;
         log.atError().setCause(e)
             .setMessage("{}")
             .addArgument(SnapshotReadFailures.describe(
-                snapshotReadFailure, arguments.snapshotName, repo, arguments.s3Region))
+                snapshotReadFailure, arguments.legacySource.snapshotName, repo, arguments.legacySource.s3Region))
             .log();
         return OptionalInt.of(SNAPSHOT_READ_FAILED_EXIT_CODE);
     }
 
-    private static MigrationSourceFactory buildElasticsearchSourceFactory(
+    /** Which source to open: a registered kind plus that provider's own config. */
+    record SourceSelection(String kind, JsonNode config) {}
+
+    /**
+     * Takes {@code --source-kind} and {@code --source-config} when given, else infers the selection
+     * from the per-source arguments so existing invocations keep working.
+     */
+    static SourceSelection selectSource(Args arguments, boolean emitDocType) {
+        if (arguments.sourceKind != null) {
+            return new SourceSelection(arguments.sourceKind, readSourceConfig(arguments.sourceConfig));
+        }
+        if (arguments.legacySource.sourceVersion != null && arguments.legacySource.sourceVersion.getFlavor() == Flavor.SOLR) {
+            return new SourceSelection(SolrBackupSourceProvider.KIND, new SolrBackupSourceSpec(
+                arguments.legacySource.repoUri,
+                arguments.legacySource.snapshotName,
+                arguments.legacySource.sourceVersion.getMajor(),
+                arguments.indexAllowlist,
+                arguments.legacySource.s3Region,
+                arguments.legacySource.endpoint
+            ).toJson());
+        }
+        return new SourceSelection(EsSnapshotSourceProvider.KIND, new EsSnapshotSourceSpec(
+            arguments.legacySource.repoUri,
+            arguments.legacySource.snapshotName,
+            arguments.legacySource.sourceVersion,
+            arguments.indexAllowlist,
+            arguments.legacySource.s3Region,
+            arguments.legacySource.endpoint,
+            arguments.legacySource.versionStrictness.allowsLooseVersionMatches(),
+            arguments.legacySource.maxShardSizeBytesOrDefault(),
+            arguments.legacySource.useRecoverySourceOrDefault(),
+            emitDocType,
+            arguments.legacySource.previousSnapshotName,
+            arguments.legacySource.experimentalDeltaMode,
+            arguments.legacySource.enableSourcelessMigrationsOrDefault()
+        ).toJson());
+    }
+
+    /** Reads {@code --source-config}, either inline JSON or {@code @path} naming a JSON file. */
+    static JsonNode readSourceConfig(String sourceConfig) {
+        if (sourceConfig == null) {
+            throw new ParameterException("--source-config is required when --source-kind is given.");
+        }
+        var mapper = ObjectMapperFactory.createDefaultMapper();
+        try {
+            if (sourceConfig.startsWith("@")) {
+                var path = Paths.get(sourceConfig.substring(1));
+                return mapper.readTree(Files.readString(path));
+            }
+            return mapper.readTree(sourceConfig);
+        } catch (IOException e) {
+            throw new ParameterException("--source-config could not be read as JSON: " + e.getMessage(), e);
+        }
+    }
+
+    static SourceRuntime buildSourceRuntime(Args arguments, RootDocumentMigrationContext context) {
+        return new SourceRuntime(
+            resolveWorkingDir(arguments.localDir, arguments.luceneDir),
+            resolveWorkingDir(arguments.luceneDir, arguments.localDir),
+            () -> new RfsContexts.DeltaStreamContext(context, null));
+    }
+
+    /**
+     * validateArgs already demands a directory from every provider whose spec declares it needs one
+     * for scratch or for work, so reaching the temp-dir fallback means this spec declared neither.
+     */
+    private static Path resolveWorkingDir(String preferred, String fallback) {
+        var chosen = preferred != null ? preferred : fallback;
+        return chosen != null ? Paths.get(chosen) : Paths.get(System.getProperty("java.io.tmpdir"));
+    }
+
+    /** Put a source's mandatory transform in front of the user's, if it declares one. */
+    static Supplier<IJsonTransformer> chainRequiredPreTransform(
+        DocumentSourceProvider<?> provider,
+        JsonNode config,
+        Supplier<IJsonTransformer> userTransformerSupplier
+    ) {
+        var required = provider.requiredPreTransform(config);
+        if (required.isEmpty()) {
+            return userTransformerSupplier;
+        }
+        var requiredSupplier = required.get();
+        if (userTransformerSupplier == null) {
+            return requiredSupplier;
+        }
+        return () -> new JsonCompositeTransformer(requiredSupplier.get(), userTransformerSupplier.get());
+    }
+
+    private static MigrationSourceFactory buildSourceFactory(
         Args arguments,
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
@@ -774,65 +1049,24 @@ public class RfsMigrateDocuments {
         boolean emitDocType,
         RootDocumentMigrationContext context
     ) {
+        var selection = selectSource(arguments, emitDocType);
+        var provider = DocumentSourceRegistry.getDefault().resolve(selection.kind());
+        var runtime = buildSourceRuntime(arguments, context);
+        var transformerSupplier = chainRequiredPreTransform(provider, selection.config(), docTransformerSupplier);
+
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
-            DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
-
-            var luceneDirPath = Paths.get(arguments.luceneDir);
-
-            var finder = SnapshotReaderRegistry.getSnapshotFileFinder(
-                    arguments.sourceVersion,
-                    arguments.versionStrictness.allowLooseVersionMatches);
-
-            var parsedUri = RepoUri.parse(arguments.repoUri);
-            SourceRepo sourceRepo = switch (parsedUri) {
-                case RepoUri.FileRepoUri f -> new FileSystemRepo(Paths.get(f.path()), finder);
-                case RepoUri.GcsRepoUri g -> GcsRepo.create(
-                    Paths.get(arguments.localDir),
-                    new GcsUri(g.rawUri()),
-                    arguments.endpoint,
-                    finder);
-                case RepoUri.S3RepoUri s -> S3Repo.create(
-                    Paths.get(arguments.localDir),
-                    s.s3Uri(),
-                    arguments.s3Region,
-                    Optional.ofNullable(arguments.endpoint).map(URI::create).orElse(null),
-                    finder);
-            };
-
-            var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(
-                arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
-
-            var extractor = SnapshotExtractor.create(
-                arguments.sourceVersion, sourceResourceProvider, sourceRepo);
-
-            var sourceBuilder = LuceneSnapshotSource.builder(extractor, arguments.snapshotName, luceneDirPath)
-                .maxShardSizeBytes(arguments.maxShardSizeBytes)
-                .useRecoverySource(arguments.experimental.useRecoverySource)
-                .emitDocType(emitDocType);
-            if (arguments.experimental.previousSnapshotName != null && arguments.experimental.experimentalDeltaMode != null) {
-                sourceBuilder.delta(arguments.experimental.previousSnapshotName,
-                    arguments.experimental.experimentalDeltaMode,
-                    () -> new RfsContexts.DeltaStreamContext(context, null));
+            // Skip an expensive setup when nothing is left, so a restarted pod doesn't redo it.
+            // The first run throws here (no coordination index yet) and falls through.
+            if (provider.deferUntilWorkAvailable() && isCoordinatorWorkAlreadyDone(workCoordinator, context)) {
+                throw new NoWorkLeftException("All work items already complete; skipping source setup.");
             }
-            if (arguments.experimental.enableSourcelessMigrations) {
-                var indexMetadataFactory = sourceResourceProvider.getIndexMetadata();
-                Map<String, Optional<FieldMappingContext>> cache = new java.util.concurrent.ConcurrentHashMap<>();
-                sourceBuilder.sourcelessMappingContextProvider(indexName -> cache.computeIfAbsent(indexName, name -> {
-                    try {
-                        var meta = indexMetadataFactory.fromRepo(arguments.snapshotName, name);
-                        if (!meta.needsSourceReconstruction()) return Optional.empty();
-                        return Optional.of(new FieldMappingContext(meta.getMappings()));
-                    } catch (Exception e) {
-                        throw new RuntimeException("Failed to read metadata for index " + name, e);
-                    }
-                }).orElse(null));
-            }
-            var documentSource = sourceBuilder.build();
+
+            var documentSource = provider.open(selection.config(), runtime);
 
             return prepareAndMigrate(documentSource,
-                workCoordinator, processManager, targetClient, docTransformerSupplier,
-                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
-                workItemTimeProvider, arguments, context);
+                workCoordinator, processManager, targetClient, transformerSupplier,
+                useServerGeneratedIds, buildDocumentExceptionAllowlist(arguments), progressCursor,
+                cancellationRunnableRef, workItemTimeProvider, arguments, context);
         };
     }
 
@@ -862,6 +1096,7 @@ public class RfsMigrateDocuments {
             .batchConcurrency(arguments.maxConnections)
             .transformerSupplier(docTransformerSupplier)
             .allowServerGeneratedIds(useServerGeneratedIds)
+            .allowMissingDocumentIds(arguments.allowMissingDocumentIds)
             .allowlist(allowlist)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)
@@ -917,6 +1152,44 @@ public class RfsMigrateDocuments {
     }
 
     /**
+     * Publish this run's failure-stream manifest so the session can be read back as a source.
+     *
+     * <p>Best-effort: the backfill has finished, and failing the migration over an unwritten seal
+     * would turn a re-runnable console command into a failed run.
+     */
+    static void sealFailedDocumentStreamSession(Args arguments, FailedDocumentStreamSink sink, String sessionId) {
+        if (sink == null) {
+            return;
+        }
+        var bucket = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Bucket;
+        var prefix = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Prefix;
+        var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
+            : arguments.legacySource.s3Region;
+        var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
+            ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
+            : arguments.legacySource.endpoint;
+        try (var store = S3FailedDocumentStreamObjectStore.create(bucket, region, endpoint)) {
+            var result = new SessionSealer(store).seal(prefix, sessionId);
+            log.atInfo()
+                .setMessage("Failure-stream session '{}' is sealed ({} by this worker); digest {}")
+                .addArgument(sessionId)
+                .addArgument(result.publishedByThisCaller() ? "published" : "already published")
+                .addArgument(result.digest())
+                .log();
+        } catch (SessionSealer.SessionSealMismatchException e) {
+            log.atError().setCause(e)
+                .setMessage("Failure-stream session '{}' could not be sealed consistently")
+                .addArgument(sessionId).log();
+        } catch (Exception e) {
+            log.atWarn().setCause(e)
+                .setMessage("Could not seal failure-stream session '{}'. Redriving it needs a seal; run"
+                    + " 'console failed-document-stream seal' before redriving.")
+                .addArgument(sessionId).log();
+        }
+    }
+
+    /**
      * Resolve the failed document stream session id, preferring an explicit CLI/env override, then the
      * Argo workflow UID, then a worker-scoped fallback. The result drives the S3
      * prefix that isolates this run's failed document stream entries from prior runs.
@@ -956,7 +1229,7 @@ public class RfsMigrateDocuments {
             return null;
         }
         var region = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region != null ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Region
-            : arguments.s3Region;
+            : arguments.legacySource.s3Region;
         if (region == null) {
             throw new ParameterException("--failed-document-stream-s3-region (or --s3-region) is required when --failed-document-stream-s3-bucket is set");
         }
@@ -970,7 +1243,7 @@ public class RfsMigrateDocuments {
         // go to the default AWS endpoint while snapshot reads use the override.
         var endpoint = arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint != null
             ? arguments.failedDocumentStreamArgs.failedDocumentStreamS3Endpoint
-            : arguments.endpoint;
+            : arguments.legacySource.endpoint;
         if (endpoint != null && !endpoint.isBlank()) {
             s3ClientBuilder.endpointOverride(URI.create(endpoint));
         }
@@ -1099,7 +1372,7 @@ public class RfsMigrateDocuments {
             return;
         }
         var workItemId = workItemAndDuration.getWorkItem().toString();
-        log.atInfo().setMessage("Marking progress: " + workItemId + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+        log.atInfo().setMessage("Marking progress: " + workItemId + ", at cursor " + progressCursor.get().getCursor()).log();
 
         // Don't checkmark the work item as done until the failed document stream stuff is written/flushed.
         // If the flush fails, refuse to mark complete so the lease naturally expires and a
@@ -1319,12 +1592,11 @@ public class RfsMigrateDocuments {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
         var workItem = workItemAndDuration.getWorkItem();
-        // Set successor as same last checkpoint Num, this will ensure we process every document fully in cases where there is a 1:many doc split
-        // Re-process same checkpoint to handle 1:many doc splits correctly
-        var successorStartingCheckpointNum = progressCursor.getProgressCheckpointNum();
+        // Hand the successor the last committed cursor. The source resumes strictly after it, so a
+        // 1:many doc split is still processed in full by whichever worker owns that position.
         var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
-                .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
-                successorStartingCheckpointNum);
+                .WorkItem(workItem.getIndexName(), workItem.getPartitionName(),
+                progressCursor.getCursor());
         ArrayList<String> successorWorkItemIds = new ArrayList<>();
         successorWorkItemIds.add(successorWorkItem.toString());
         return successorWorkItemIds;
@@ -1343,74 +1615,6 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-
-    private static MigrationSourceFactory buildSolrSourceFactory(
-        Args arguments,
-        OpenSearchClient targetClient,
-        Supplier<IJsonTransformer> docTransformerSupplier,
-        boolean useServerGeneratedIds,
-        RootDocumentMigrationContext context
-    ) {
-        return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
-            DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
-
-            // Check the coordinator for pending work before any S3 setup so a pod restart
-            // after the migration finishes doesn't redo the bucket-list + S3 client setup.
-            // The first run throws here because the coordination index doesn't exist yet;
-            // we swallow that and fall through to the normal flow, which creates the index
-            // via ShardWorkPreparer.
-            if (isCoordinatorWorkAlreadyDone(workCoordinator, context)) {
-                throw new NoWorkLeftException("All work items already complete; skipping Solr metadata download.");
-            }
-
-            Path backupDir;
-            S3Repo s3Repo = null;
-            var parsedUri = RepoUri.parse(arguments.repoUri);
-            switch (parsedUri) {
-                case RepoUri.FileRepoUri f -> {
-                    backupDir = Paths.get(f.path());
-                    log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
-                }
-                case RepoUri.S3RepoUri s -> {
-                    var backupS3Uri = SolrBackupLayout.buildBackupS3Uri(s.s3Uri(), arguments.snapshotName);
-                    log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
-                    s3Repo = S3Repo.createRaw(
-                        Paths.get(arguments.localDir),
-                        new S3Uri(backupS3Uri),
-                        arguments.s3Region,
-                        arguments.endpoint != null ? URI.create(arguments.endpoint) : null
-                    );
-                    backupDir = s3Repo.getRepoRootDir();
-                }
-                default -> throw new ParameterException(
-                    "When source version is SOLR, provide --repo-uri with a file:// or s3:// scheme."
-                );
-            }
-
-            var documentSource = buildSolrDocumentSource(arguments, backupDir, s3Repo);
-
-            return prepareAndMigrate(documentSource,
-                workCoordinator, processManager, targetClient, docTransformerSupplier,
-                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
-                workItemTimeProvider, arguments, context);
-        };
-    }
-
-    static SolrMultiCollectionSource buildSolrDocumentSource(Args arguments, Path backupDir, S3Repo s3Repo)
-        throws IOException {
-        var discovery = SolrBackupDiscovery.discover(
-            s3Repo, backupDir, arguments.indexAllowlist);
-        var schemas = discovery.schemas();
-        var dataDirByCollection = discovery.dataDirByCollection();
-
-        Consumer<String> collectionPreparer = discovery::prepareCollection;
-        Consumer<SolrShardPartition> shardPreparer = discovery.shardPreparationNeeded()
-            ? discovery::prepareShard : null;
-
-        var solrMajor = arguments.sourceVersion.getMajor();
-        return new SolrMultiCollectionSource(
-            backupDir, schemas, collectionPreparer, shardPreparer, solrMajor, dataDirByCollection);
-    }
 
     /**
      * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep
