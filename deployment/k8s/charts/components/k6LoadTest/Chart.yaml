@@ -1,0 +1,22 @@
+apiVersion: v2
+name: k6-load-test
+description: >-
+  Standalone k6 load-testing component. Installs the k6-operator and one Argo
+  WorkflowTemplate per scenario; a run instantiates one, and its single task creates
+  the TestRun and waits for it. The scenarios themselves are carried by the
+  migrations/k6_scripts data image and mounted at /scripts, not held by this chart.
+  Intentionally NOT a dependency of any migration aggregate — it is an opt-in,
+  separately-installed component so a normal migration deployment contains no k6.
+version: 0.1.0
+type: application
+appVersion: "latest"
+# The rendered TestRuns mount the scenarios with a Kubernetes `image:` volume source (ImageVolume),
+# enabled by default in Kubernetes 1.35 — the same requirement the migrationAssistant chart carries
+# for image-backed mountable transforms.
+kubeVersion: ">=1.35.0-0"
+
+dependencies:
+  - name: k6-operator
+    version: "4.5.0"
+    repository: "https://grafana.github.io/helm-charts"
+    condition: k6Operator.enabled

@@ -1,0 +1,146 @@
+{{- if .Values.registry.enabled }}
+# Redis + Webdis for the k6 mixed (write-then-read consistency ring buffer) and chaos
+# (pause/resume/set-rate control bus) scenarios. k6 talks to Webdis over plain HTTP (no Redis
+# client / xk6 build needed). Off by default; the scenarios degrade to flat searches when absent.
+# The default WEBDIS_URL (http://webdis:7379) resolves to the Webdis Service below.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: redis
+    component: k6-load-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: k6-load-test
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: redis
+    component: k6-load-test
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+# Config for the official nicolas/webdis image (it reads a JSON file).
+# Points Webdis at the redis Service, listens on all interfaces, and keeps the process in the
+# foreground logging to stdout so the container behaves well under Kubernetes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webdis-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: webdis
+    component: k6-load-test
+data:
+  webdis.json: |
+    {
+      "redis_host": "redis",
+      "redis_port": 6379,
+      "http_host": "0.0.0.0",
+      "http_port": 7379,
+      "threads": 5,
+      "daemonize": false,
+      "logfile": "/dev/stdout",
+      "verbosity": 3,
+      "acl": [ { "disabled": [], "enabled": ["*"] } ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webdis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: webdis
+    component: k6-load-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webdis
+  template:
+    metadata:
+      labels:
+        app: webdis
+        component: k6-load-test
+    spec:
+      containers:
+        - name: webdis
+          # Official webdis image
+          image: nicolas/webdis:0.1.25
+          # The official image is configured via a JSON file (not REDIS_HOST env vars).
+          command: ["/usr/local/bin/webdis", "/etc/webdis/webdis.json"]
+          ports:
+            - containerPort: 7379
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /PING
+              port: 7379
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: webdis-config
+              mountPath: /etc/webdis
+              readOnly: true
+      volumes:
+        - name: webdis-config
+          configMap:
+            name: webdis-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webdis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: webdis
+    component: k6-load-test
+spec:
+  selector:
+    app: webdis
+  ports:
+    - port: 7379
+      targetPort: 7379
+{{- end }}

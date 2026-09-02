@@ -15,6 +15,9 @@
 #   0050-0059  Observability tests (metrics/tracing backends)
 #   0060-0069  BYOC captured-traffic tests
 #   0070-0079  Solr backup tests
+#   0080-0089  Load tests (k6 traffic driven through the capture proxy). These need the
+#              standalone k6LoadTest chart, which the test runner installs when one of
+#              these IDs is selected. Explicit-selection only.
 #
 import json
 import os
@@ -42,6 +45,7 @@ from .test_cases.solr_tests import *
 from .test_cases.observability_tests import *
 from .test_cases.byoc_captured_traffic_tests import *
 from .test_cases.gcs_snapshot_tests import *
+from .test_cases.k6_load_test_tests import *
 
 logger = logging.getLogger(__name__)
 

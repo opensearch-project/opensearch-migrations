@@ -70,6 +70,7 @@ push_images_to_ecr=true
 ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
+with_load_test_images=false
 image_tag="latest"
 kubectl_context=""
 tags_raw=()
@@ -111,6 +112,7 @@ while [[ $# -gt 0 ]]; do
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --kubectl-context) kubectl_context="$2"; shift 2 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
+    --with-load-test-images) with_load_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
     --pca-arn) pca_arn="$2"; shift 2 ;;
@@ -190,6 +192,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
       echo "                                            Useful for CI systems that need a predictable context name."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
+      echo "  --with-load-test-images                   Also build the load-test images (migrations/k6_scripts)."
+      echo "                                            They are not part of the standard image set. Only the k6"
+      echo "                                            load-test cases (Test008x) need them. Requires --build."
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
       echo "Build options:"
@@ -472,6 +477,20 @@ validate_args() {
     echo "  --build builds everything from source (no version needed)." >&2
     echo "  --version downloads published artifacts for a specific release." >&2
     exit 1
+  fi
+  # Load-test images are built from source only. No release publishes them, and
+  # --ma-images-source has no entry for them in MA_IMAGES.
+  if [[ "$with_load_test_images" == "true" ]]; then
+    if [[ "$build" != "true" ]]; then
+      echo "Error: --with-load-test-images requires --build." >&2
+      echo "  The load-test images (migrations/k6_scripts) are not published in a release." >&2
+      exit 1
+    fi
+    if [[ -n "$ma_images_source" ]]; then
+      echo "Error: --with-load-test-images cannot be combined with --ma-images-source." >&2
+      echo "  Mirrored runs copy a fixed image set that does not include the load-test images." >&2
+      exit 1
+    fi
   fi
   if [[ -n "$create_vpc_endpoints" && "$deploy_import_vpc" != "true" ]]; then
     echo "Error: --create-vpc-endpoints is only valid with --deploy-import-vpc-cfn." >&2
@@ -917,6 +936,9 @@ echo ""
 echo "Resolved configuration:"
 if [[ "$RELEASE_VERSION" == "local-build" ]]; then
   echo "  Mode                   = Build from source (--build)"
+  if [[ "$with_load_test_images" == "true" ]]; then
+    echo "  Load-test images       = Included (--with-load-test-images)"
+  fi
 else
   echo "  Mode                   = Published artifacts"
   echo "  Version                = ${RELEASE_VERSION}"
@@ -1736,7 +1758,13 @@ fi
 if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
-  BUILD_TARGET="buildImagesToRegistry"
+  BUILD_TARGETS=":buildImages:buildImagesToRegistry"
+  # Load-test images are their own aggregate (see buildImages/build.gradle), so
+  # buildImagesToRegistry does not build them. Only the k6 load-test cases
+  # (Test008x) need migrations/k6_scripts in the registry.
+  if [[ "$with_load_test_images" == "true" ]]; then
+    BUILD_TARGETS="${BUILD_TARGETS} :buildImages:buildKitLoadTestAll"
+  fi
   export MULTI_ARCH_NATIVE
 
   # When mirroring, buildkit still pulls from public registries — building on
@@ -1776,9 +1804,9 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   skip_test_arg=""
   [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
+  "$base_dir/gradlew" -p "$base_dir" ${BUILD_TARGETS} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
     || { echo "Image build failed, retrying in 10s..."; sleep 10; \
-         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
+         "$base_dir/gradlew" -p "$base_dir" ${BUILD_TARGETS} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
     || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."

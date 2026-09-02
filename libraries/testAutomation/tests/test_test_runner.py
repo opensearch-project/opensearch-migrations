@@ -12,7 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'testAutomation
 
 # Both imports use bare module names (matching how test_runner.py imports k8s_service)
 # to ensure `except HelmCommandFailed` catches the same class identity.
-from test_runner import TestRunner, TestsFailed, TestReport, TestSummary, TestEntry
+from test_runner import (TestRunner, TestsFailed, TestReport, TestSummary, TestEntry,
+                         K6_RELEASE_NAME, MA_RELEASE_NAME)
 from k8s_service import HelmCommandFailed
 
 
@@ -240,7 +241,109 @@ class TestPytestCommand:
             assert mock_run.call_args.kwargs.get("skip_workflow_reset", False) is False
 
 
-from test_runner import get_version_combinations, parse_args, TargetType, VALID_SOURCE_VERSIONS, VALID_TARGET_VERSIONS
+class TestLoadTestChartSelection:
+    """The k6LoadTest chart follows the selected test IDs — a load-test case cannot submit
+    TestRuns without it, and every other run must stay free of the k6 operator."""
+
+    def _runner_with_ids(self, test_ids):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        runner.test_ids = test_ids
+        return runner
+
+    def test_load_test_id_requests_the_chart(self):
+        assert self._runner_with_ids(["0080"])._load_test_requested() is True
+
+    def test_load_test_id_among_others_requests_the_chart(self):
+        assert self._runner_with_ids(["0031", "0080"])._load_test_requested() is True
+
+    def test_ordinary_ids_do_not_request_the_chart(self):
+        assert self._runner_with_ids(["0031", "0042"])._load_test_requested() is False
+
+    def test_no_ids_do_not_request_the_chart(self):
+        assert self._runner_with_ids([])._load_test_requested() is False
+
+    def test_chart_is_installed_for_a_load_test_id(self):
+        runner = self._runner_with_ids(["0080"])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=1, failed=0)), \
+                patch.object(runner, "_install_load_test_chart") as mock_install:
+            runner.run(skip_delete=True)
+            mock_install.assert_called_once()
+
+    def test_chart_is_not_installed_for_an_ordinary_run(self):
+        runner = self._runner_with_ids(["0031"])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=1, failed=0)), \
+                patch.object(runner, "_install_load_test_chart") as mock_install:
+            runner.run(skip_delete=True)
+            mock_install.assert_not_called()
+
+
+class TestLoadTestChartTeardown:
+    """The k6 release comes down through the script that installed it, and a failed teardown must
+    name the release that actually failed."""
+
+    def _runner(self):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        runner.test_ids = ["0080"]
+        runner.k6_install_script = "/repo/deployment/k8s/installK6Chart.sh"
+        runner.k6_chart_path = "/repo/deployment/k8s/charts/components/k6LoadTest"
+        runner.k8s_service.namespace = "ma"
+        runner.k8s_service.kube_context = "kind-ma"
+        return runner
+
+    def test_install_and_uninstall_name_the_same_release(self):
+        """Both directions go through installK6Chart.sh with one release name, so the two cannot
+        drift apart."""
+        runner = self._runner()
+        with patch("test_runner.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            runner._install_load_test_chart()
+            install_cmd = mock_run.call_args.args[0]
+            runner._uninstall_load_test_chart()
+            uninstall_cmd = mock_run.call_args.args[0]
+
+        assert install_cmd[:2] == [runner.k6_install_script, "install"]
+        assert uninstall_cmd[:2] == [runner.k6_install_script, "uninstall"]
+        assert install_cmd[install_cmd.index("--release") + 1] == K6_RELEASE_NAME
+        assert uninstall_cmd[uninstall_cmd.index("--release") + 1] == K6_RELEASE_NAME
+
+    def test_uninstall_passes_no_install_only_options(self):
+        """installK6Chart.sh rejects the image and chart options on an uninstall."""
+        runner = self._runner()
+        runner.registry_prefix = "1234.dkr.ecr.us-east-1.amazonaws.com/repo"
+        runner.k6_scripts_image = "repo:migrations_k6_scripts_latest"
+        runner.load_test_image = "mirror.gcr.io/grafana/k6"
+        with patch("test_runner.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            runner._uninstall_load_test_chart()
+
+        cmd = set(mock_run.call_args.args[0])
+        assert not cmd & {"--chart", "--runner-image", "--scripts-image", "--registry-prefix"}
+
+    def test_k6_uninstall_failure_does_not_blame_the_ma_release(self):
+        runner = self._runner()
+        with patch.object(runner, "_uninstall_load_test_chart",
+                          side_effect=HelmCommandFailed("k6 uninstall failed")):
+            with pytest.raises(HelmCommandFailed) as excinfo:
+                runner.cleanup_deployment()
+
+        message = str(excinfo.value)
+        assert f"'{K6_RELEASE_NAME}'" in message
+        assert f"'{MA_RELEASE_NAME}'" not in message
+
+    def test_ma_uninstall_failure_names_the_ma_release(self):
+        runner = self._runner()
+        runner.k8s_service.helm_uninstall.side_effect = HelmCommandFailed("ma uninstall failed")
+        with patch.object(runner, "_uninstall_load_test_chart"):
+            with pytest.raises(HelmCommandFailed) as excinfo:
+                runner.cleanup_deployment()
+
+        message = str(excinfo.value)
+        assert f"'{MA_RELEASE_NAME}'" in message
+        assert f"'{K6_RELEASE_NAME}'" not in message
+
+
+from test_runner import (get_version_combinations, parse_args, TargetType, VALID_SOURCE_VERSIONS,
+                         VALID_TARGET_VERSIONS)
 
 
 class TestVersionCombinations:
