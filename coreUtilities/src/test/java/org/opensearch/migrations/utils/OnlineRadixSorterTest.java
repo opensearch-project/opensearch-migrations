@@ -3,6 +3,9 @@ package org.opensearch.migrations.utils;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -69,5 +72,80 @@ class OnlineRadixSorterTest {
             radixSorter.addFutureForWork(i, x -> x);
         }
         Assertions.assertEquals("slotsOutstanding: >19,8-7,5,3-1", radixSorter.getAwaitingText());
+    }
+
+    @Test
+    void failedWorkAllowsNextSlotToStart() throws Exception {
+        var sorter = new OnlineRadixSorter(0);
+        var activeWork = new TextTrackedFuture<Void>("active work");
+        var secondSlotStarted = new AtomicBoolean();
+
+        var firstResult = sorter.addFutureForWork(
+            0,
+            startSignal -> startSignal.thenCompose(ignored -> activeWork, () -> "starting active work")
+        );
+        var secondResult = sorter.addFutureForWork(
+            1,
+            startSignal -> startSignal.thenApply(ignored -> {
+                secondSlotStarted.set(true);
+                return null;
+            }, () -> "starting second slot")
+        );
+
+        var failure = new IllegalStateException("failed");
+        activeWork.future.completeExceptionally(failure);
+
+        var thrown = Assertions.assertThrows(ExecutionException.class, firstResult::get);
+        Assertions.assertSame(failure, thrown.getCause());
+        Assertions.assertTrue(secondSlotStarted.get(), "ordinary failure should not cancel later channel work");
+        Assertions.assertNull(secondResult.get());
+    }
+
+    @Test
+    void cancelledWorkDoesNotInvokeNextSlotCallback() {
+        var sorter = new OnlineRadixSorter(0);
+        var activeWork = new TextTrackedFuture<Void>("active work");
+        var secondSlotStarted = new AtomicBoolean();
+
+        sorter.addFutureForWork(
+            0,
+            startSignal -> startSignal.thenCompose(ignored -> activeWork, () -> "starting active work")
+        );
+        var secondResult = sorter.addFutureForWork(
+            1,
+            startSignal -> startSignal.thenApply(ignored -> {
+                secondSlotStarted.set(true);
+                return null;
+            }, () -> "starting second slot")
+        );
+
+        var cancellation = new CancellationException("cancelled");
+        activeWork.future.completeExceptionally(cancellation);
+
+        Assertions.assertFalse(secondSlotStarted.get(), "cancelled work must not start queued business callbacks");
+        var thrown = Assertions.assertThrows(ExecutionException.class, secondResult::get);
+        Assertions.assertSame(cancellation, thrown.getCause());
+        Assertions.assertTrue(sorter.isEmpty(), "cancelled slots should settle and leave the sorter");
+    }
+
+    @Test
+    void cancelAllWorkSettlesPlaceholdersWithoutInvokingQueuedCallback() {
+        var sorter = new OnlineRadixSorter(0);
+        var queuedSlotStarted = new AtomicBoolean();
+        var queuedResult = sorter.addFutureForWork(
+            2,
+            startSignal -> startSignal.thenApply(ignored -> {
+                queuedSlotStarted.set(true);
+                return null;
+            }, () -> "starting queued slot")
+        );
+
+        var cancellation = new CancellationException("terminal cancellation");
+        sorter.cancelAllWork(cancellation);
+
+        Assertions.assertFalse(queuedSlotStarted.get(), "sorter cancellation must not invoke queued callbacks");
+        var thrown = Assertions.assertThrows(ExecutionException.class, queuedResult::get);
+        Assertions.assertSame(cancellation, thrown.getCause());
+        Assertions.assertTrue(sorter.isEmpty(), "all placeholders should settle during cancellation");
     }
 }

@@ -1,8 +1,12 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
@@ -12,6 +16,7 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 
 import io.netty.buffer.Unpooled;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.junit.jupiter.api.AfterEach;
@@ -30,14 +35,16 @@ import org.junit.jupiter.api.Test;
 class CancelConnectionDrainTest extends InstrumentationTest {
 
     private NioEventLoopGroup eventLoopGroup;
+    private EmbeddedChannel channel;
     private ClientConnectionPool pool;
     private RequestSenderOrchestrator orchestrator;
 
     @BeforeEach
     void setUp() {
         eventLoopGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("test"));
+        channel = new EmbeddedChannel();
         pool = new ClientConnectionPool(
-            (el, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no-op channel"),
+            (el, ctx) -> TextTrackedFuture.completedFuture(channel.newSucceededFuture(), () -> "test channel"),
             "test-pool", 1
         );
         orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
@@ -46,6 +53,7 @@ class CancelConnectionDrainTest extends InstrumentationTest {
     @AfterEach
     void tearDown() throws Exception {
         pool.shutdownNow().get();
+        channel.finishAndReleaseAll();
         eventLoopGroup.shutdownGracefully();
     }
 
@@ -103,5 +111,49 @@ class CancelConnectionDrainTest extends InstrumentationTest {
         Assertions.assertTrue(session.scheduleSequencer.isEmpty(),
             "sorter must be empty after cancelConnection — orphaned scheduleFuture entries " +
             "leave requestWorkTracker entries and TrafficStreamLimiter slots unreleased");
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void closeChannelDrainsPendingWorkWithoutStartingQueuedCallbacks() throws Exception {
+        var sendStarted = new AtomicBoolean();
+        var closeOrchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> {
+            sendStarted.set(true);
+            return null;
+        });
+        var requestContext = rootContext.getTestConnectionRequestContext("conn-close", 0);
+        var channelKeyContext = requestContext.getChannelKeyContext();
+        var session = pool.getCachedSession(channelKeyContext, 0);
+        try (var targetRequestContext = requestContext.createTargetRequestContext()) {
+            session.getChannelFutureInActiveState(targetRequestContext).get();
+        }
+
+        var queuedResults = new ArrayList<org.opensearch.migrations.utils.TrackedFuture<String, ?>>();
+        for (int i = 0; i < 3; i++) {
+            var queuedContext = rootContext.getTestConnectionRequestContext("conn-close", i);
+            var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[]{1}));
+            queuedResults.add(closeOrchestrator.scheduleRequest(
+                queuedContext.getReplayerRequestKey(),
+                queuedContext,
+                java.time.Instant.now().plusSeconds(60),
+                Duration.ZERO,
+                ByteBufListProducer.of(packets),
+                new org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory.NoRetryVisitor()
+            ));
+        }
+
+        session.eventLoop.submit(() -> {}).sync();
+        Assertions.assertFalse(session.schedule.isEmpty(), "schedule should contain queued work before close");
+        Assertions.assertFalse(session.scheduleSequencer.isEmpty(), "sorter should contain queued work before close");
+
+        pool.closeChannelForSession(session).get();
+
+        Assertions.assertFalse(sendStarted.get(), "closing a channel must not start queued request callbacks");
+        Assertions.assertTrue(session.schedule.isEmpty(), "closing a channel must drain scheduled triggers");
+        Assertions.assertTrue(session.scheduleSequencer.isEmpty(), "closing a channel must settle sorter slots");
+        for (var result : queuedResults) {
+            var thrown = Assertions.assertThrows(ExecutionException.class, result::get);
+            Assertions.assertInstanceOf(CancellationException.class, thrown.getCause());
+        }
     }
 }

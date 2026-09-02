@@ -4,9 +4,12 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.StringJoiner;
+import java.util.concurrent.CancellationException;
 
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
+
+import lombok.NonNull;
 
 public class TimeToResponseFulfillmentFutureMap {
 
@@ -55,7 +58,7 @@ public class TimeToResponseFulfillmentFutureMap {
      * Must snapshot the deque before iterating because completeExceptionally triggers
      * synchronous whenComplete callbacks that call removeFirstItem() on this same deque.
      */
-    public void drainWithCancellation(java.util.concurrent.CancellationException cause) {
+    public void drainWithCancellation(@NonNull CancellationException cause) {
         var snapshot = new java.util.ArrayList<>(timeToRunnableMap);
         timeToRunnableMap.clear();
         snapshot.forEach(fwp -> fwp.scheduleFuture.future.completeExceptionally(cause));

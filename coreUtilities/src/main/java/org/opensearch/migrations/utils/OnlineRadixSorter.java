@@ -3,11 +3,13 @@ package org.opensearch.migrations.utils;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -31,19 +33,35 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class OnlineRadixSorter {
 
+    private static final class StartNextWorkVisitor<T> implements WorkOutcome.Visitor<T, Void> {
+        @Override
+        public Void onSucceeded(WorkOutcome.Succeeded<T> outcome) {
+            return null;
+        }
+
+        @Override
+        public Void onFailed(WorkOutcome.Failed<T> outcome) {
+            return null;
+        }
+
+        @Override
+        public Void onCancelled(WorkOutcome.Cancelled<T> outcome) {
+            throw outcome.cause();
+        }
+    }
+
     @AllArgsConstructor
     @Getter
     private static class IndexedWork {
         private final TrackedFuture<String, Void> signalingToStartFuture;
         private TrackedFuture<String, ? extends Object> workCompletedFuture;
-        private final TrackedFuture<String, Void> signalWorkCompletedFuture;
+        private final TrackedFuture<String, WorkOutcome<?>> workSettledFuture;
 
         public <T> TrackedFuture<String, T> addWorkFuture(FutureTransformer<T> processor, int index) {
             var rval = processor.apply(signalingToStartFuture)
-                .propagateCompletionToDependentFuture(
-                    signalWorkCompletedFuture,
-                    (processedCf, dependentCf) -> dependentCf.complete(null),
-                    () -> "Caller-task completion for idx=" + index
+                .whenSettled(
+                    workSettledFuture.future::complete,
+                    () -> "Caller-task settlement for idx=" + index
                 );
             workCompletedFuture = rval;
             return rval;
@@ -73,7 +91,7 @@ public class OnlineRadixSorter {
     public <T> TrackedFuture<String, T> addFutureForWork(final int index, FutureTransformer<T> processor) {
         if (cancelled) {
             return TextTrackedFuture.failedFuture(
-                new java.util.concurrent.CancellationException("sorter cancelled"),
+                cancellationCause,
                 () -> "cancelled sorter slot #" + index);
         }
         var workItem = items.get(index);
@@ -88,23 +106,15 @@ public class OnlineRadixSorter {
                  ++nextKey)
             {
                 int finalNextKey = nextKey;
-                var signalFuture = items.isEmpty()
-                    ? new TextTrackedFuture<Void>(
-                        CompletableFuture.completedFuture(null),
-                        "unlinked signaling future for slot #" + finalNextKey
-                    )
-                    : items.get(finalNextKey - 1).signalWorkCompletedFuture.thenAccept(
-                        v -> {},
-                        () -> "Kickoff for slot #" + finalNextKey
-                    );
+                var signalFuture = getStartSignal(finalNextKey);
                 workItem = new IndexedWork(
                     signalFuture,
                     null,
-                    new TextTrackedFuture<Void>(
-                        () -> "Work to finish for slot #" + finalNextKey + " is awaiting [" + getAwaitingText() + "]"
+                    new TextTrackedFuture<WorkOutcome<?>>(
+                        () -> "Work to settle for slot #" + finalNextKey + " is awaiting [" + getAwaitingText() + "]"
                     )
                 );
-                workItem.signalWorkCompletedFuture.whenComplete((v, t) -> {
+                workItem.workSettledFuture.whenComplete((v, t) -> {
                     ++currentOffset;
                     items.remove(finalNextKey);
                 }, () -> "cleaning up spent work for idx #" + finalNextKey);
@@ -114,6 +124,23 @@ public class OnlineRadixSorter {
                 "why there might have been an issue idx=" + index + " this=" + this;
         }
         return workItem.addWorkFuture(processor, index);
+    }
+
+    private TrackedFuture<String, Void> getStartSignal(int index) {
+        if (items.isEmpty()) {
+            return new TextTrackedFuture<>(
+                CompletableFuture.completedFuture(null),
+                "unlinked signaling future for slot #" + index
+            );
+        }
+        return items.get(index - 1).workSettledFuture.<Void>thenApply(
+            OnlineRadixSorter::visitStartNextWorkOutcome,
+            () -> "Kickoff for slot #" + index
+        );
+    }
+
+    private static <T> Void visitStartNextWorkOutcome(WorkOutcome<T> outcome) {
+        return outcome.visit(new StartNextWorkVisitor<>());
     }
 
     public String getAwaitingText() {
@@ -162,19 +189,19 @@ public class OnlineRadixSorter {
     }
 
     /**
-     * Cancels all pending work by completing each slot's signalWorkCompletedFuture with null.
-     * This cascades through the sorter chain, allowing all waiting slots to drain immediately
-     * rather than waiting for their scheduled work to complete naturally.
-     * Also sets a cancelled flag so new work added after this call is immediately drained too.
+     * Settles all sorter slots as cancelled. Queued start signals complete exceptionally, so
+     * their business callbacks are not invoked. The caller remains responsible for cancelling
+     * any active work that has already started.
+     *
      * Must be called from the event loop thread that owns this sorter.
      */
-    public void cancelAllWork() {
+    public void cancelAllWork(@NonNull CancellationException cause) {
+        cancellationCause = cause;
         cancelled = true;
-        // Complete all pending signalWorkCompletedFutures — this cascades through the chain
-        // since each slot's signalingToStartFuture is derived from the previous slot's signal
         new java.util.ArrayList<>(items.values()).forEach(item ->
-            item.signalWorkCompletedFuture.future.complete(null));
+            item.workSettledFuture.future.complete(new WorkOutcome.Cancelled<>(cause)));
     }
 
     private volatile boolean cancelled = false;
+    private CancellationException cancellationCause;
 }

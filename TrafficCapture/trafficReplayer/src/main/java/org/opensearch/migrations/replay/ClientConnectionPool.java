@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
@@ -154,11 +155,11 @@ public class ClientConnectionPool {
             // Drain send-schedule and sorter slots on the event loop thread.
             if (session.eventLoop.isShuttingDown()) {
                 session.schedule.drainWithCancellation(cancellationCause);
-                session.scheduleSequencer.cancelAllWork();
+                session.scheduleSequencer.cancelAllWork(cancellationCause);
             } else {
                 session.eventLoop.submit(() -> {
                     session.schedule.drainWithCancellation(cancellationCause);
-                    session.scheduleSequencer.cancelAllWork();
+                    session.scheduleSequencer.cancelAllWork(cancellationCause);
                 });
             }
             closeConnection(ctx, sessionNumber);
@@ -181,11 +182,15 @@ public class ClientConnectionPool {
         return session
             .getChannelFutureInAnyState() // this could throw, especially if the even loop has begun to shut down
             .thenCompose(channelFuture -> {
+                var cancellationCause = new CancellationException(
+                    "Connection closed with pending work for " + session.getChannelKeyContext()
+                );
                 if (channelFuture == null) {
                     log.atTrace().setMessage("Couldn't find the channel for {} to close it.  " +
                             "It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
+                    cancelPendingWork(session, cancellationCause);
                     session.onClose.accept(session);
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
@@ -208,10 +213,18 @@ public class ClientConnectionPool {
                                 .addArgument(session::calculateSizeSlowly)
                                 .log();
                         }
-                        session.schedule.clear();
+                        cancelPendingWork(session, cancellationCause);
                         session.onClose.accept(session);
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");
+    }
+
+    private static void cancelPendingWork(
+        @NonNull ConnectionReplaySession session,
+        @NonNull CancellationException cancellationCause
+    ) {
+        session.schedule.drainWithCancellation(cancellationCause);
+        session.scheduleSequencer.cancelAllWork(cancellationCause);
     }
 }
