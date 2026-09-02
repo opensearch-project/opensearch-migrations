@@ -104,6 +104,8 @@ spec:
         value: {{ $.Values.testRun.useSeparatePodPerTestInstance | quote }}
       - name: arguments
         value: ""
+      - name: authSecretName
+        value: {{ $.Values.authSecretName | quote }}
       - name: runnerImage
         value: {{ $image | quote }}
       - name: starterImage
@@ -168,6 +170,10 @@ spec:
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              envFrom:
+                - secretRef:
+                    name: "{{`{{workflow.parameters.authSecretName}}`}}"
+                    optional: true
               # One entry per parameter, in the same three groups as the parameter list above, so
               # the container env is a fixed list with no name stated twice — which of two
               # same-named entries wins is not something a load test should depend on. A unit test
