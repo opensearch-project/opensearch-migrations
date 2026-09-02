@@ -12,7 +12,6 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
-import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NonNull;
@@ -144,6 +143,22 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
+     * Same as above, carrying forward the shard's emitted-document total so the successor
+     * continues one running count.
+     *
+     * <p>{@code docsEmitted} must exclude the checkpoint batch, since successors re-process the
+     * checkpoint and would otherwise count it twice. Written absolutely so retries are idempotent.
+     */
+    void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        List<String> successorWorkItemIds,
+        int initialNextAcquisitionLeaseExponent,
+        Instant deadline,
+        long docsEmitted,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    /**
      * @return the number of items that are not yet complete.  This will include items with and without claimed leases.
      * @throws IOException
      * @throws InterruptedException
@@ -210,11 +225,22 @@ public interface IWorkCoordinator extends AutoCloseable {
      * able to acquire their own lease on this work item.
      */
     @Getter
-    @AllArgsConstructor
     @ToString
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final Instant leaseExpirationTime;
         final WorkItem workItem;
+        /** Emitted-document total inherited from previous lease generations; 0 when unknown. */
+        final long docsEmitted;
+
+        public WorkItemAndDuration(Instant leaseExpirationTime, WorkItem workItem) {
+            this(leaseExpirationTime, workItem, 0L);
+        }
+
+        public WorkItemAndDuration(Instant leaseExpirationTime, WorkItem workItem, long docsEmitted) {
+            this.leaseExpirationTime = leaseExpirationTime;
+            this.workItem = workItem;
+            this.docsEmitted = docsEmitted;
+        }
 
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
