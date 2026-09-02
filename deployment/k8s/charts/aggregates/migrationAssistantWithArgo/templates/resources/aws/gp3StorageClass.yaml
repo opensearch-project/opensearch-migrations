@@ -10,6 +10,18 @@ volumeBindingMode: WaitForFirstConsumer
 parameters:
   type: gp3
   encrypted: "true"
+{{- /*
+  The EKS Auto Mode block storage provisioner reads custom volume tags from numbered
+  `tagSpecification_N` parameters, each holding one `key=value` pair. Ranging over a map yields
+  keys in sorted order, so the numbering is stable across renders and an unchanged tag set does
+  not produce a spurious diff. Note that StorageClass `parameters` are immutable: changing
+  aws.resourceTags on an existing release requires deleting this StorageClass first.
+*/}}
+{{- $n := 0 }}
+{{- range $key, $value := .Values.aws.resourceTags }}
+{{- $n = add1 $n }}
+  tagSpecification_{{ $n }}: {{ printf "%s=%s" $key (toString $value) | quote }}
+{{- end }}
 reclaimPolicy: Delete
 allowVolumeExpansion: false
 {{- end }}

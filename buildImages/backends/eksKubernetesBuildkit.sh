@@ -40,6 +40,24 @@ require_eks_context() {
   fi
 }
 
+# A buildkit pod that never becomes Ready almost always means no node was provisioned for it, and
+# the reason lives on the Karpenter NodeClaim rather than on the pod. On an EKS Auto Mode cluster the
+# usual causes are a NodePool pointing at a NodeClass that does not exist, or the launch itself being
+# rejected -- e.g. an SCP or IAM policy that requires tags on ec2:RunInstances. Both show up here as
+# a NodeClaim stuck without a providerID and an AccessDenied in its events, so dump enough to name
+# the failing action instead of leaving "0 replicas ready" as the only evidence.
+dump_node_provisioning_state() {
+  echo "=== node provisioning state (why no node?) ===" >&2
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodes -o wide >&2 || true
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodepools,nodeclasses -o wide >&2 || true
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodeclaims -o wide >&2 || true
+  # The launch error text is in the NodeClaim's events/conditions.
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} describe nodeclaims >&2 || true
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get events -A \
+    --sort-by=.lastTimestamp >&2 2>/dev/null | tail -60 >&2 || true
+  echo "=== end node provisioning state ===" >&2
+}
+
 ensure_eks_buildkit_release() {
   set_k8s_context_args
   require_eks_context
@@ -135,6 +153,7 @@ ensure_eks_buildx_builder() {
           get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
         kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
           describe pods -n "${namespace}" >&2 || true
+        dump_node_provisioning_state
       }
     if docker buildx inspect --bootstrap; then
       break
@@ -146,6 +165,7 @@ ensure_eks_buildx_builder() {
         get all -n "${namespace}" >&2 || true
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
         describe pods -n "${namespace}" >&2 || true
+      dump_node_provisioning_state
       return 1
     fi
     attempt=$((attempt + 1))
