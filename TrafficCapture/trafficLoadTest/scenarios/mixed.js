@@ -11,9 +11,9 @@
  * Capture Proxy → Kafka pipeline.
  *
  * Key environment variables (see k6-config/mixed-steady.env for load-profile defaults):
- *   SCENARIO                — document schema to use: "nyc_taxis" (default) or "logs_data"
+ *   SCHEMA                — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL       — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME              — target OpenSearch index; defaults to the value of SCENARIO
+ *   INDEX_NAME              — target OpenSearch index; defaults to the value of SCHEMA
  *   INGEST_RATE             — target ingest requests/second (constant) or max stage target
  *   SEARCH_RATE             — target search requests/second (constant) or max stage target
  *   INGEST_VUS              — pre-allocated ingest VUs
@@ -34,7 +34,6 @@
  *   NO_CONNECTION_REUSE     — "true" to disable keep-alive at the k6 transport level for all VUs
  *                             (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
  *                             guaranteed per-request TCP teardown independent of server behaviour
- *   SEED_DOC_COUNT          — expected document count (informs seed sampling in setup)
  *   WEBDIS_URL              — Webdis HTTP-to-Redis proxy URL (default: http://webdis:7379)
  *   EXECUTOR                — "constant-arrival-rate" (default) or "ramping-arrival-rate"
  *   INGEST_RAMP_STAGES      — JSON stage array for the ingest stream when EXECUTOR=ramping-arrival-rate
@@ -48,7 +47,7 @@
  *   CONTROL_CMD_KEY         — Redis key polled for control commands (default: "control_cmd")
  */
 
-import http from 'k6/http';
+import http from '../lib/http-client.js';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
@@ -59,6 +58,7 @@ import { runSequence } from '../lib/sequences.js';
 import { pinned, spread } from '../lib/connection-control.js';
 import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
 import { checkControl } from '../lib/control.js';
+import { CFG } from '../lib/config.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends type suffixes; names here must NOT include them.
@@ -79,49 +79,43 @@ const consistencyMisses    = new Counter('mixed_search_consistency_misses');
 const searchErrors         = new Rate('mixed_search_errors');
 const idRegistryHits       = new Rate('mixed_id_registry_hits');
 
-// ── Scenario selection ──────────────────────────────────────────────────────
-// All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
-const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
-const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
+// ── Schema selection ────────────────────────────────────────────────────────
+const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
+const docs     = SCHEMA === 'logs_data' ? logsDocs    : nycTaxisDocs;
+const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
 const docFns   = { randomDocument: docs.randomDocument, randomUpdateBody: docs.randomUpdateBody };
-
-const MAPPINGS = {
-  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
-  logs_data: open('../data/logs_data/mapping.json'),
-};
-const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+const INDEX_MAPPING = docs.mapping;
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROXY_URL            = __ENV.CAPTURE_PROXY_URL        || 'https://capture-proxy:9200';
-const INDEX                = __ENV.INDEX_NAME               || SCENARIO;
-const INGEST_RATE          = parseInt(__ENV.INGEST_RATE      || '30');
-const SEARCH_RATE          = parseInt(__ENV.SEARCH_RATE      || '20');
-const INGEST_VUS           = parseInt(__ENV.INGEST_VUS       || '15');
-const INGEST_MAX_VUS       = parseInt(__ENV.INGEST_MAX_VUS   || '75');
-const SEARCH_VUS           = parseInt(__ENV.SEARCH_VUS       || '15');
-const SEARCH_MAX_VUS       = parseInt(__ENV.SEARCH_MAX_VUS   || '75');
-const DURATION             = __ENV.DURATION                 || '5m';
-const BATCH_SIZE           = parseInt(__ENV.BULK_BATCH_SIZE  || '20');
-const SEQ_FRACTION         = parseFloat(__ENV.SEQUENCE_FRACTION     || '0.15');
-const BULK_FRACTION        = parseFloat(__ENV.BULK_FRACTION         || '0.70');
-const CONSISTENCY_FRACTION = parseFloat(__ENV.CONSISTENCY_FRACTION  || '0.10');
-const FLAT_FRACTION        = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
-const AGG_FRACTION         = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
-const UPDATE_FRACTION      = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
+const PROXY_URL            = CFG.CAPTURE_PROXY_URL        || 'https://capture-proxy:9201';
+const INDEX                = CFG.INDEX_NAME               || SCHEMA;
+const INGEST_RATE          = parseInt(CFG.INGEST_RATE      || '30');
+const SEARCH_RATE          = parseInt(CFG.SEARCH_RATE      || '20');
+const INGEST_VUS           = parseInt(CFG.INGEST_VUS       || '15');
+const INGEST_MAX_VUS       = parseInt(CFG.INGEST_MAX_VUS   || '75');
+const SEARCH_VUS           = parseInt(CFG.SEARCH_VUS       || '15');
+const SEARCH_MAX_VUS       = parseInt(CFG.SEARCH_MAX_VUS   || '75');
+const DURATION             = CFG.DURATION                 || '5m';
+const BATCH_SIZE           = parseInt(CFG.BULK_BATCH_SIZE  || '20');
+const SEQ_FRACTION         = parseFloat(CFG.SEQUENCE_FRACTION     || '0.15');
+const BULK_FRACTION        = parseFloat(CFG.BULK_FRACTION         || '0.70');
+const CONSISTENCY_FRACTION = parseFloat(CFG.CONSISTENCY_FRACTION  || '0.10');
+const FLAT_FRACTION        = parseFloat(CFG.SEARCH_FLAT_FRACTION   || '0.60');
+const AGG_FRACTION         = parseFloat(CFG.SEARCH_AGG_FRACTION    || '0.20');
+const UPDATE_FRACTION      = parseFloat(CFG.SEARCH_UPDATE_FRACTION || '0.10');
 
 // Precomputed cumulative dispatch thresholds for the non-consistency search mix
 const S_AGG    = FLAT_FRACTION;
 const S_UPDATE = FLAT_FRACTION + AGG_FRACTION;
 const S_WRITE  = FLAT_FRACTION + AGG_FRACTION + UPDATE_FRACTION;
-const CONNECTION_MODE      = __ENV.CONNECTION_MODE          || 'pinned';
-const NO_CONNECTION_REUSE  = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
-const EXECUTOR             = __ENV.EXECUTOR                 || 'constant-arrival-rate';
-const INGEST_RAMP_STAGES   = __ENV.INGEST_RAMP_STAGES
-  ? JSON.parse(__ENV.INGEST_RAMP_STAGES)
+const CONNECTION_MODE      = CFG.CONNECTION_MODE          || 'pinned';
+const NO_CONNECTION_REUSE  = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const EXECUTOR             = CFG.EXECUTOR                 || 'constant-arrival-rate';
+const INGEST_RAMP_STAGES   = CFG.INGEST_RAMP_STAGES
+  ? JSON.parse(CFG.INGEST_RAMP_STAGES)
   : [{ duration: DURATION, target: INGEST_RATE }];
-const SEARCH_RAMP_STAGES   = __ENV.SEARCH_RAMP_STAGES
-  ? JSON.parse(__ENV.SEARCH_RAMP_STAGES)
+const SEARCH_RAMP_STAGES   = CFG.SEARCH_RAMP_STAGES
+  ? JSON.parse(CFG.SEARCH_RAMP_STAGES)
   : [{ duration: DURATION, target: SEARCH_RATE }];
 
 // ── Ring fill delay ────────────────────────────────────────────────────────
@@ -129,7 +123,7 @@ const SEARCH_RAMP_STAGES   = __ENV.SEARCH_RAMP_STAGES
 // at INGEST_RATE × (1 − SEQ_FRACTION) × (1 − BULK_FRACTION) per second. MIN_RING_FILL
 // converts a desired ID count into an estimated startTime delay for the search scenario,
 // so search VUs don't begin until the ring has enough entries to hit consistently.
-const MIN_RING_FILL     = parseInt(__ENV.MIN_RING_FILL || '0');
+const MIN_RING_FILL     = parseInt(CFG.MIN_RING_FILL || '0');
 const EST_ID_RATE       = INGEST_RATE * (1 - SEQ_FRACTION) * (1 - BULK_FRACTION);
 const RING_FILL_DELAY_S = MIN_RING_FILL > 0 && EST_ID_RATE > 0
   ? Math.ceil(MIN_RING_FILL / EST_ID_RATE)
@@ -227,7 +221,7 @@ export function setup() {
     if (createRes.status !== 200) {
       console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
     } else {
-      console.log(`setup: created index ${INDEX} with ${SCENARIO} mapping`);
+      console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
     }
   } else {
     console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);

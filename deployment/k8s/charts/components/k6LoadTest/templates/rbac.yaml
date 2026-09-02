@@ -1,0 +1,45 @@
+# Grants the ability to drive TestRun CRs to the accounts that need it: the migration-console pod's,
+# and the Argo workflow executor's. Because this lives in the separate load-test chart, they gain the
+# capability ONLY when this chart is installed — a normal migration deployment cannot submit runs.
+#
+# Submitting a run needs no grant here: it creates an Argo Workflow, which the console can already do.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k6-testrun-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+rules:
+  - apiGroups: ["k6.io"]
+    resources: ["testruns"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  # Read runner pod status/logs for `loadtest list` / `logs` / `health`. The health poll needs no
+  # grant of its own: it reads the pods to find their addresses and exit codes, then calls k6's
+  # REST API on 6565 over plain HTTP, which is not a Kubernetes API call.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k6-testrun-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: k6-load-test
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.console.serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+  # The Argo workflow that wraps a run creates and watches the TestRun on the console's behalf, so
+  # its executor account needs the same grant.
+  {{- range concat (list .Values.workflow.serviceAccountName) (.Values.workflow.extraServiceAccountNames | default list) }}
+  - kind: ServiceAccount
+    name: {{ . }}
+    namespace: {{ $.Release.Namespace }}
+  {{- end }}
+roleRef:
+  kind: Role
+  name: k6-testrun-manager
+  apiGroup: rbac.authorization.k8s.io

@@ -12,7 +12,7 @@
  * latency is visible in Grafana without any dashboard changes.
  */
 
-import http from 'k6/http';
+import http from './http-client.js';
 import { check } from 'k6';
 
 // __VU and __ITER are k6 built-in globals; unique per VU + iteration combination.

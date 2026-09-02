@@ -18,9 +18,11 @@ welcome feedback and contributions to optimize costs.
 | Script                            | Purpose                                                                                         |
 |-----------------------------------|-------------------------------------------------------------------------------------------------|
 | buildSolr6Image.sh                | Builds a custom solr image and deploys it to the local image registry                           |
+| deployCdcLoadTestConfig.sh        | Brings up a capture-and-replay (CDC) load-test pipeline by submitting a migration config        |
 | fillLocalRegistry.sh              | Sets up local registry, builds and pushes images to that local registry                         |
 | forwardAllServicePorts.sh         | Port-forwards all services to localhost to make them accessible from the host machine           |
 | generateWorkflowSchemaArtifact.sh | Generates the workflow schema artifact                                                          |
+| installK6Chart.sh                 | Installs or uninstalls the standalone k6 load-test chart (operator + scenarios + RBAC)          |
 | kindCleanup.sh                    | Cleanups the loal kind deployment                                                               |
 | kindTesting.sh                    | (Re)deploys a local kind cluster and installs the migration assistant with a source and target  |
 | localTestingCommon.sh             | Contains shared code for kindTesting.sh and kindCleanup.sh                                      |
@@ -31,6 +33,31 @@ welcome feedback and contributions to optimize costs.
 | workflowWeb.sh                    | Starts and port-forwards the packaged Workflow Web UI from the migration console                 |
 
 See the [kind instructions](#install-kind) below for more details about specific scripts.
+
+`deployCdcLoadTestConfig.sh` is the one to reach for when you want a running capture proxy and
+replayer locally, with k6 ready to drive traffic through them.
+
+What it submits is a migration **config** (`configs/cdcLoadTest.yaml`, or your own with `-f`), not a
+workflow: it feeds the config to `workflow configure edit --stdin` + `workflow submit` in the
+migration console, and the console's config processor generates the Argo workflow from it. The
+script then waits on the resulting CRs and installs the k6 chart. It is a driver over the supported
+path rather than an alternate deployment mechanism — the same two console commands you would run by
+hand.
+
+Because the topology lives entirely in the config, any CDC shape is expressible without changing the
+script: more proxies, more replayers, an S3 traffic source, an external Kafka. Resource names are
+read back from the cluster rather than predicted, since the config processor composes them
+(`<proxy>-topic`, `<proxy>-<target>-<replayer>`).
+
+Run `kindTesting.sh` first — it expects the control plane and clusters to exist.
+
+```bash
+./deployCdcLoadTestConfig.sh up --dry-run   # show the config that would be submitted
+./deployCdcLoadTestConfig.sh up             # submit + wait for the CRs to report Ready + install k6
+./deployCdcLoadTestConfig.sh up --no-auth   # ... against clusters deployed with valuesNoAuth.yaml
+./deployCdcLoadTestConfig.sh status         # CR phases, workflow phase, proxy endpoint
+./deployCdcLoadTestConfig.sh down           # delete the migration resources + the k6 chart
+```
 
 ## Quick Start
 

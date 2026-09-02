@@ -1,0 +1,17 @@
+{{- if .Values.dashboard.enabled }}
+# k6 load-test dashboard. The grafana_dashboard="1" label makes the kube-prometheus-stack Grafana
+# sidecar auto-import it (same mechanism as the migration's prometheus-metrics-dashboard). The JSON
+# metric names already match k6's OTLP output, so no edits are needed. Datasource uid "prometheus"
+# matches the kube-prometheus-stack default.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-load-test-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+    app: k6-load-test
+data:
+  k6-load-test.json: |
+{{ .Files.Get "files/grafana/load-test.json" | indent 4 }}
+{{- end }}
