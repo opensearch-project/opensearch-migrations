@@ -64,6 +64,20 @@ ensure_eks_buildkit_release() {
     ${BUILDKIT_HELM_ARGS:-}
 }
 
+run_with_optional_timeout() {
+  local timeout_value="$1"
+  shift
+
+  if command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "${timeout_value}" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout "${timeout_value}" "$@"
+  else
+    echo "No timeout command found; running without an external ${timeout_value} timeout." >&2
+    "$@"
+  fi
+}
+
 ensure_eks_buildx_builder() {
   local context builder_name namespace
   set_k8s_context_args
@@ -118,7 +132,7 @@ ensure_eks_buildx_builder() {
   local attempt=1
   while true; do
     echo "Bootstrapping buildx builder with timeout ${build_timeout} (attempt ${attempt}/${attempts})..."
-    if docker buildx inspect --bootstrap --timeout="${build_timeout}"; then
+    if run_with_optional_timeout "${build_timeout}" docker buildx inspect --bootstrap; then
       break
     fi
     echo "buildx bootstrap failed on attempt ${attempt}/${attempts}" >&2
