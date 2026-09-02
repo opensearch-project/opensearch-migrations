@@ -237,7 +237,7 @@ def _override_env(params, declared, profile):
 
 def build_k6_parameters(scenario=None, config_name=None, parallelism=1, target_url=None, rate=None,
                         duration=None, vus=None, registry_enabled=None, control_enabled=None,
-                        webdis_url=None, overrides_text=None, extra_args=None):
+                        webdis_url=None, auth_secret_name=None, overrides_text=None, extra_args=None):
     """Normalize run inputs into a params dict (shared by the CLI and the TUI).
 
     A run needs a profile. Naming a scenario alone means its steady profile; naming a profile alone
@@ -264,6 +264,7 @@ def build_k6_parameters(scenario=None, config_name=None, parallelism=1, target_u
         "registryEnabled": registry_enabled,
         "controlEnabled": control_enabled,
         "webdisUrl": webdis_url,
+        "authSecretName": auth_secret_name,
         "overrides": overrides_text,
         "extraArgs": extra_args,
     }
@@ -292,6 +293,8 @@ def build_workflow_submission(namespace, params):
 
     parameters = [{"name": k, "value": str(v)} for k, v in sorted(overrides.items())]
     parameters.append({"name": "parallelism", "value": str(int(params.get("parallelism", 1)))})
+    if params.get("authSecretName"):
+        parameters.append({"name": "authSecretName", "value": params["authSecretName"]})
     if params.get("extraArgs"):
         parameters.append({"name": "arguments", "value": params["extraArgs"]})
 

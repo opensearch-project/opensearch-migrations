@@ -31,7 +31,7 @@ image:
 #
 # It is NOT a released artifact (load testing is a dev/test capability, so it is not published
 # publicly, not mirrored by aws-bootstrap.sh, and not built by :buildImages:buildImagesToRegistry)
-# — build and push it yourself (~25 KB) with
+# — build and push it yourself (~100 KB) with
 #   ./gradlew :buildImages:buildKitLoadTestAll -PregistryEndpoint=<registry>
 # then point this at wherever it landed:
 #   local minikube:  --set scriptsImage.repository=localhost:5001/migrations/k6_scripts
@@ -96,6 +96,12 @@ testRun:
 # default of the CAPTURE_PROXY_URL parameter on every rendered WorkflowTemplate.
 captureProxyUrl: https://capture-proxy:9201
 
+# Optional Secret imported into every runner with envFrom. The default deliberately names a
+# normally-absent Secret and is optional in the pod spec, so unauthenticated runs are unchanged.
+# A caller with credentials creates a per-run Secret and overrides authSecretName; keeping secret
+# values out of Workflow parameters prevents them from being exposed in Argo/TestRun objects.
+authSecretName: k6-load-test-auth
+
 # ---------------------------------------------------------------------------
 # Scenario knobs and load profiles.
 # ---------------------------------------------------------------------------
@@ -145,9 +151,10 @@ scenarios:
       CONTROL_ENABLED: "false"           # chaos control bus (needs registry.enabled=true)
       CONTROL_CMD_KEY: control_cmd
       WEBDIS_URL: http://webdis:7379     # read by the control bus only
-      AUTH_MODE: ""                      # blank = basic when AUTH_USERNAME is set, else none
+      AUTH_MODE: ""                      # blank = infer Basic/SigV4 credentials, else none
       AUTH_USERNAME: ""                  # per-run input — never give these a value here
       AUTH_PASSWORD: ""
+      LATENCY_THRESHOLDS_ENABLED: "true" # false keeps request-error thresholds only
   search:
     env:
       SCHEMA: nyc_taxis

@@ -170,6 +170,8 @@ def loadtest_cli(ctx, verbose, namespace, refresh_interval):
 @click.option('--override', '-e', 'overrides', multiple=True, metavar='KEY=VALUE',
               help="Override any other setting of the profile by name (matches k6-run.sh's -e). "
                    "Repeatable. A name the profile does not have is an error, not a no-op.")
+@click.option('--auth-secret-name', default=None,
+              help="Kubernetes Secret imported into runner environment variables.")
 @click.option('--extra-args', default=None, help="Extra flags for `k6 run` (e.g. --no-thresholds).")
 @click.option('--namespace', **_NAMESPACE_OPTION)
 @click.option('--wait', is_flag=True, default=False, help="Wait for the run to complete.")

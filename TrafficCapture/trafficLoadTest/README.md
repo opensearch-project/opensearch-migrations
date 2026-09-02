@@ -5,7 +5,7 @@ A run is an **Argo Workflow** that creates a **k6-operator `TestRun`** and waits
 the migration console (`loadtest …`), a thin shell helper, or plain `kubectl`.
 
 The load test itself — the scenario scripts, their libs and the document schemas — lives **in this
-directory** and reaches the cluster as a ~25 KB **`FROM scratch` data
+directory** and reaches the cluster as a ~100 KB **`FROM scratch` data
 image** (`migrations/k6_scripts`), mounted read-only at `/scripts` with a Kubernetes `image:` volume
 on pods running **stock `grafana/k6`**. That is the same mechanism as the migration's
 [mountable transforms](../../docs/MountableTransformsDesign.md), and it is why this chart requires
@@ -138,7 +138,7 @@ other `migrations/*` images):
 > - **Building from source does not either.** `aws-bootstrap.sh --build` and the
 >   `migration-assistant` CLI both run `:buildImages:buildImagesToRegistry`, which builds the general
 >   image set only. Load-test images are a separate aggregate, deliberately kept out of a deployment
->   path that production users also run. Build and push the ~25 KB image yourself with
+>   path that production users also run. Build and push the ~100 KB image yourself with
 >   `buildKitLoadTestAll` (see below) when a cluster must run load tests.
 >
 > Either way the k6 chart is a separate opt-in: nothing in the EKS bootstrap installs it, so a
@@ -235,6 +235,7 @@ now a chart edit — no image rebuild.
 | The TestRun manifest itself (mount shape, `K6_OUT` trio, labels) | chart `templates/k6-workflowtemplates.yaml` | the templates' `resource.manifest` | `helm upgrade` |
 | Runner image / tag | chart `values.yaml` (`image.*`) | the `runnerImage` parameter default | `helm upgrade` |
 | Scripts image / tag / digest | chart `values.yaml` (`scriptsImage.*`) | the `scriptsRef` parameter default | `helm upgrade` |
+| Default auth Secret name | chart `values.yaml` (`authSecretName`) | optional `envFrom` on each runner | `helm upgrade` |
 
 **Apply a scenario edit** — rebuild the image, then submit a fresh run:
 
@@ -322,33 +323,66 @@ helm upgrade --install k6-load-test "$CHART" -n ma --set captureProxyUrl="$PROXY
 ## Authentication
 
 The capture proxy is a transparent forwarder: it does not add credentials, so whatever the **source
-cluster** requires, the client must send. This matters because the default local stack now runs the
-testClusters chart, which serves HTTPS with basic auth (`admin:admin`).
+cluster** requires, the client must send. The wrapper supports unauthenticated, HTTP Basic, and AWS
+SigV4 sources.
 
-Pass HTTP Basic credentials with `AUTH_USERNAME` / `AUTH_PASSWORD`, like any other run input:
+For a local Basic-auth source, credentials can still be passed as ordinary run overrides:
 
 ```bash
 loadtest run --scenario ingest --config ingest-steady --target "$PROXY" \
   -e AUTH_USERNAME=admin -e AUTH_PASSWORD=admin
 ```
 
-`deployCdcLoadTestConfig.sh up` prints exactly this command with the flags already filled in
-whenever the config it submitted references credential secrets, so the common path is copy-paste.
+For credentials that should not appear in the Workflow or TestRun, create a Kubernetes Secret and
+name it with `--auth-secret-name`. Basic-auth Secrets use these keys:
+
+```text
+K6_AUTH_MODE=basic
+K6_AUTH_USERNAME=admin
+K6_AUTH_PASSWORD=admin
+```
+
+SigV4 Secrets use the standard temporary AWS credential variables plus the endpoint that must be
+signed. The request is still sent to the capture proxy; only its signature and `Host` header use the
+real source endpoint.
+
+```text
+K6_AUTH_MODE=sigv4
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_SESSION_TOKEN=...
+AWS_REGION=us-east-1
+SIGV4_SERVICE=es
+SIGV4_SIGNING_ENDPOINT=https://search-source.us-east-1.es.amazonaws.com
+```
+
+```bash
+kubectl create secret generic k6-source-auth -n ma --from-env-file=k6-source-auth.env
+loadtest run --scenario ingest --target "$PROXY" --auth-secret-name k6-source-auth
+```
+
+Temporary credentials must remain valid for the whole run. The CDC k6 integration test resolves
+credentials through boto3's normal credential chain, creates a unique per-run Secret, and deletes it
+after k6 exits.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `AUTH_USERNAME` | *(unset)* | HTTP Basic username. **Setting it is what turns auth on.** |
-| `AUTH_PASSWORD` | *(empty)* | HTTP Basic password. |
-| `AUTH_MODE` | `basic` when `AUTH_USERNAME` is set, else `none` | Force credentials off with `none` without unsetting the username. |
+| `AUTH_USERNAME` | *(unset)* | Visible per-run HTTP Basic username. |
+| `AUTH_PASSWORD` | *(empty)* | Visible per-run HTTP Basic password. |
+| `AUTH_MODE` | inferred | Visible per-run `basic`, `sigv4`, or `none` override; SigV4 credentials still come from the Secret. |
+| `K6_AUTH_MODE` | inferred | Secret-provided `basic`, `sigv4`, or `none`; takes precedence. |
+| `SIGV4_SERVICE` | `es` | AWS signing service (`es` or `aoss`). |
+| `SIGV4_SIGNING_ENDPOINT` | *(required for SigV4)* | Real source endpoint used to build the signature. |
 
 Credentials are deliberately **not** baked into any `k6-config/*.env` preset — presets ship inside
-the scripts image, and secrets do not belong in an image. They are per-run inputs only.
+the scripts image, and secrets do not belong in an image. SigV4 signing uses the repository's small
+`lib/sigv4.js` implementation and stock k6 cryptographic primitives, so runs do not fetch code from
+the internet.
 
-**How it works.** Scenarios import `lib/http-client.js` instead of `k6/http`. That wrapper merges an
-`Authorization` header into the params of every cluster-bound request, so auth applies uniformly to
-load traffic *and* to the setup calls (index creation, mapping checks) that do not go through
-`pinned()`/`spread()`. `lib/id-registry.js` and `lib/control.js` keep the raw `k6/http` client on
-purpose — they talk to Webdis, not the cluster, and must never receive cluster credentials.
+**How it works.** Scenarios import `lib/http-client.js` instead of `k6/http`. That wrapper applies
+Basic or SigV4 headers to every cluster-bound request, including setup calls such as index creation.
+`lib/id-registry.js` and `lib/control.js` keep the raw `k6/http` client because they talk to Webdis,
+not the source cluster.
 
 **Running without auth** is unchanged: leave `AUTH_USERNAME` unset. To take auth off the clusters
 themselves, deploy testClusters with the no-auth preset (plain HTTP, security disabled both sides):
@@ -872,7 +906,7 @@ Why the current setup looks the way it does (decision → rationale → alternat
    — load testing is a dev/test capability, so it is absent from `publishedRepoByImageName` and from
    the list `aws-bootstrap.sh` mirrors out of `public.ecr.aws`. It is still an ordinary build target,
    so `aws-bootstrap.sh --build` pushes it to the private ECR registry with everything else; only a
-   deployment made purely from released artifacts has to build and push those 25 KB itself.
+   deployment made purely from released artifacts has to build and push that small image itself.
    *Rejected:* publishing a public k6 image, which would make a load generator part of the released
    surface for every customer — and would enable nothing on its own, since the bootstrap never
    installs the k6 chart.

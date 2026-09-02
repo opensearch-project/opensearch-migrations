@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./k6-run.sh <ingest|search|mixed> [--config PROFILE] [--parallelism N] [--target URL]
-#               [--extra-args STR] [-e KEY=VALUE]...
+#               [--auth-secret-name NAME] [--extra-args STR] [-e KEY=VALUE]...
 #   CONTEXT=<ctx> NAMESPACE=ma ./k6-run.sh ingest --config ingest-burst -e BULK_BATCH_SIZE=50
 #
 # --config names the profile to run; without it the scenario's steady profile is used. -e KEY=VALUE
@@ -27,7 +27,7 @@ CONTEXT="${CONTEXT:-$(kubectl config current-context)}"
 NAMESPACE="${NAMESPACE:-ma}"
 
 usage() {
-  echo "usage: k6-run.sh <ingest|search|mixed> [--config PROFILE] [--parallelism N] [--target URL] [--extra-args STR] [-e KEY=VALUE]..." >&2
+  echo "usage: k6-run.sh <ingest|search|mixed> [--config PROFILE] [--parallelism N] [--target URL] [--auth-secret-name NAME] [--extra-args STR] [-e KEY=VALUE]..." >&2
   exit 2
 }
 
@@ -35,12 +35,13 @@ usage() {
 SCENARIO="$1"; shift
 case "$SCENARIO" in ingest|search|mixed) ;; *) echo "unknown scenario: $SCENARIO" >&2; usage ;; esac
 
-CONFIG=""; PARALLELISM=""; TARGET=""; EXTRA=""; ENVS=()
+CONFIG=""; PARALLELISM=""; TARGET=""; AUTH_SECRET=""; EXTRA=""; ENVS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config)      CONFIG="$2"; shift ;;
     --parallelism) PARALLELISM="$2"; shift ;;
     --target)      TARGET="$2"; shift ;;
+    --auth-secret-name) AUTH_SECRET="$2"; shift ;;
     --extra-args)  EXTRA="$2"; shift ;;
     -e)            ENVS+=("$2"); shift ;;
     *) echo "unknown arg: $1" >&2; usage ;;
@@ -86,6 +87,7 @@ done
 # anything a setting can hold — RAMP_STAGES carries double quotes, which a plain YAML scalar here
 # could not survive.
 [[ -n "$PARALLELISM" ]] && PARAMS+=("parallelism=$PARALLELISM")
+[[ -n "$AUTH_SECRET" ]] && add_param authSecretName "$AUTH_SECRET"
 [[ -n "$EXTRA" ]] && PARAMS+=("arguments=$EXTRA")
 
 # The parameter lines first, so a run that overrides nothing omits `arguments:` altogether rather
