@@ -1,0 +1,37 @@
+baseConfig: ../fixtures/basicSnapshotMigration.local.wf.yaml
+phaseCompletionTimeoutSeconds: 900
+
+# Hold the DataSnapshot open with a bad snapshot-repository endpoint,
+# then submit the real DataSnapshot mutator with the endpoint restored.
+matrix:
+  subject: datasnapshot:source-snap1
+  select:
+    - changeClass: safe
+      patterns: [subject-change]
+      poisonPill: datasnapshot-bad-repo-endpoint
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
+  poisonPills:
+    byName:
+      datasnapshot-bad-repo-endpoint:
+        subject: datasnapshot:source-snap1
+        strategy: config-value
+        expectedCollateral: [captureproxy:capture-proxy]
+        poison:
+          path: sourceClusters.source.snapshotInfo.repos.default.endpoint
+          value: "http://does-not-exist.ma.svc.cluster.local:4566"
+        restore:
+          path: sourceClusters.source.snapshotInfo.repos.default.endpoint
+          value: "localstack://localstack:4566"

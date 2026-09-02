@@ -313,7 +313,10 @@ class RegistryImageBuildUtils {
                                         config.get("repoName", null)?.toString())[0]
                                 // Extract just the tag portion for Jib's tags list
                                 def formattedTag = versionDest.toString().split(":")[-1]
-                                tagList.add("${formattedTag}${suffix}".toString())
+                                tagList.add(formattedTag.toString())
+                                if (suffix) {
+                                    tagList.add("${formattedTag}${suffix}".toString())
+                                }
                             }
                             if (tagList) tags = tagList
                         }

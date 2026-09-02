@@ -1,0 +1,45 @@
+baseConfig: ../fixtures/basicSnapshotMigration.local.wf.yaml
+phaseCompletionTimeoutSeconds: 900
+
+# Hold SnapshotMigration open with bad target credentials, then submit
+# a declared-gated document-backfill setting change with credentials
+# restored. This tests the pre-completion behavior separately from the
+# terminal-seal impossible case in basicSnapshotImpossible.test.yaml.
+matrix:
+  subject: snapshotmigration:source-target-snap1-migration-0
+  select:
+    - changeClass: gated
+      patterns: [subject-gated-change]
+      response: leave-blocked
+      poisonPill: snapshotmigration-bad-target-auth
+    - changeClass: gated
+      patterns: [subject-gated-change]
+      response: approve
+      poisonPill: snapshotmigration-bad-target-auth
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
+  poisonPills:
+    byName:
+      snapshotmigration-bad-target-auth:
+        subject: snapshotmigration:source-target-snap1-migration-0
+        strategy: basic-auth-credentials
+        expectedCollateral: []
+        secretName: target-creds
+        poison:
+          usernameEnv: E2E_BAD_TARGET_BASIC_AUTH_USERNAME
+          passwordEnv: E2E_BAD_TARGET_BASIC_AUTH_PASSWORD
+        restore:
+          usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+          passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
