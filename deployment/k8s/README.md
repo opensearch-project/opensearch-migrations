@@ -13,6 +13,12 @@ Workflows, metrics collectors, etc).
 **Notice**: The user is responsible for the cost of any underlying infrastructure required to operate the solution. We
 welcome feedback and contributions to optimize costs.
 
+## Deployment Architecture
+
+See the [multi-cloud Kubernetes deployment architecture](multiCloudKubernetesDeployment.md) for the responsibility
+boundary between cloud infrastructure and Helm, provider identity and snapshot flows, and connectivity to managed or
+self-managed OpenSearch endpoints.
+
 ## Scripts
 
 | Script                            | Purpose                                                                                         |
