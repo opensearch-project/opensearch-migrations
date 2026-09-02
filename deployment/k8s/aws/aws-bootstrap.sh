@@ -73,7 +73,6 @@ skip_test_images=false
 with_load_test_images=false
 image_tag="latest"
 kubectl_context=""
-skip_image_build=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -113,7 +112,6 @@ while [[ $# -gt 0 ]]; do
     --skip-test-images) skip_test_images=true; shift 1 ;;
     --with-load-test-images) with_load_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
-    --skip-image-build) skip_image_build=true; shift 1 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
     --pca-arn) pca_arn="$2"; shift 2 ;;
     -h|--help)
@@ -179,8 +177,6 @@ while [[ $# -gt 0 ]]; do
       echo "                                            They are not part of the standard image set. Only the k6"
       echo "                                            load-test cases (Test008x) need them. Requires --build."
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
-      echo "  --skip-image-build                        With --build, skip container image build/mirror steps and"
-      echo "                                            use images already present in the stack ECR repository."
       echo ""
       echo "Build options:"
       echo "  --build                                   Build ALL artifacts from source: images, CFN templates,"
@@ -236,10 +232,6 @@ fi
 if [[ "$build" == "true" ]]; then
   use_public_images=false
 fi
-if [[ "$skip_image_build" == "true" ]]; then
-  use_public_images=false
-  push_images_to_ecr=false
-fi
 
 # --ma-images-source implies mirroring to private ECR
 if [[ -n "$ma_images_source" ]]; then
@@ -281,14 +273,6 @@ validate_args() {
   fi
   if [[ "$build" == "true" && "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" ]]; then
     echo "Error: --build requires --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, or --skip-cfn-deploy." >&2
-    exit 1
-  fi
-  if [[ "$skip_image_build" == "true" && "$build" != "true" ]]; then
-    echo "Error: --skip-image-build requires --build so local chart/CFN artifacts are used." >&2
-    exit 1
-  fi
-  if [[ "$skip_image_build" == "true" && -n "$ma_images_source" ]]; then
-    echo "Error: --skip-image-build cannot be combined with --ma-images-source." >&2
     exit 1
   fi
   if [[ "$deploy_cfn" == "true" && -z "$cfn_stack_name" ]]; then
@@ -1105,7 +1089,7 @@ migration_console|console"
   use_public_images=false
 fi
 
-if [[ "$build" == "true" && -z "$ma_images_source" && "$skip_image_build" != "true" ]]; then
+if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
   BUILD_TARGETS=":buildImages:buildImagesToRegistry"
