@@ -4,6 +4,10 @@
 **Author:** Aman-bv · **Branch:** `fix/replayer-rebalance-deadlock-and-drain-gate` · 21 files, ~1200+/~85−
 **Reviewed against:** `main` @ `af05a02e5` (v3.3.7)
 **Status of these notes:** working analysis, nothing posted to the PR yet.
+**Status of all recommendations:** **PROVISIONAL.** Every verdict, proposed policy,
+sequencing choice, and design-doc impact below remains open until its change is reviewed
+individually. Before finalizing a disposition, record both the production-code scope and the
+coupled tests that must be retained, removed, or rewritten.
 
 Companion to [`replayer-expiration-hardening.md`](replayer-expiration-hardening.md). That doc
 owns the *design*; this one owns *what to do about this PR*. They overlap because #3231 touches
@@ -25,23 +29,27 @@ temporal expiry policy should not land, because Phase 1 will have to remove them
 
 ---
 
-## 2. Verdict summary
+## 2. Provisional verdict and scope ledger
 
-| # | Change | Verdict |
-|---|---|---|
-| 1 | Commit tuple output in a `finally` block | **Rework** — needs classification, may lose replays |
-| 2 | Remove the `isWorkOutstanding()` guard from the idle updater | **Push back** — bounded stall → unbounded read-ahead |
-| 3 | `TrackedFuture` duplicate-parent ISE → warn | **Approve** |
-| 4 | `schedule.clear()` → `drainWithCancellation()` in `closeClientConnectionChannel` | **Approve** |
-| 5 | Wall-clock force-expiry in the accumulator heartbeat | **Reject** — wrong clock; see §3.5 |
-| 6 | Rebalance drain-gate trio | **Approve 6b; question 6a; scrutinize 6c** |
-| 7 | Observability (timing diagnostics, limiter/consumer heartbeats) | **Approve** |
+`Final disposition` remains `TBD` until each change is reviewed. The scope column is the
+checklist for preserving or removing the complete change, including tests that encode its
+behavior.
+
+| # | Change | Status | Provisional recommendation | Final disposition | Scope to track |
+|---|---|---|---|---|---|
+| 1 | Commit tuple output in a `finally` block | **PROVISIONAL** | **Rework** — needs classification, may lose replays | **TBD** | `TrafficReplayerCore.processCompletedTransaction`; add/adjust commit-on-failure tests |
+| 2 | Remove the `isWorkOutstanding()` guard from the idle updater | **PROVISIONAL** | **Push back** — bounded stall → unbounded read-ahead | **TBD** | `ReplayEngine.updateContentTimeControllerWhenIdling`; `BackpressureGateAdvancesWithWorkOutstandingTest` |
+| 3 | `TrackedFuture` duplicate-parent ISE → warn | **PROVISIONAL** | **Approve** | **TBD** | `TrackedFuture.setParentDiagnosticFuture`; `TrackedFutureDuplicateParentTest`; sorter callers |
+| 4 | `schedule.clear()` → `drainWithCancellation()` in `closeClientConnectionChannel` | **PROVISIONAL** | **Approve** | **TBD** | `ClientConnectionPool.closeClientConnectionChannel`; schedule-cancellation coverage |
+| 5 | Wall-clock force-expiry in the accumulator heartbeat | **PROVISIONAL** | **Reject** — wrong clock; see §3.5 | **TBD** | `CapturedTrafficToHttpTransactionAccumulator`, `Accumulation`, heartbeat wiring in `TrafficReplayer`; `AccumulatorHeartbeatCoverageTest` |
+| 6 | Rebalance drain-gate trio | **PROVISIONAL** | **Approve 6b; question 6a; scrutinize 6c** | **TBD** | `KafkaTrafficCaptureSource`, `BlockingTrafficSource`; close-accounting and delegation tests |
+| 7 | Observability (timing diagnostics, limiter/consumer heartbeats) | **PROVISIONAL** | **Approve** | **TBD** | timing diagnostics, `TrafficStreamLimiter`, `TrackingKafkaConsumer`, retry diagnostics; heartbeat/timing coverage tests |
 
 ---
 
 ## 3. Change-by-change
 
-### 3.1 Change 4 — `schedule.clear()` → `drainWithCancellation()` — APPROVE
+### 3.1 Change 4 — `schedule.clear()` → `drainWithCancellation()` — PROVISIONAL APPROVE
 
 `ClientConnectionPool.closeClientConnectionChannel` (line ~211 on main) still calls
 `session.schedule.clear()`, which drops pending `scheduleFuture` entries on the floor. Nothing
@@ -64,7 +72,7 @@ advances and `totalCountOfScheduledTasksOutstanding` decrements. Good. It then c
 (an `Exception`, so it does *not* take the `rethrowUnexpectedThrowable` path). What happens next
 is entirely governed by change 1 — see §3.3.
 
-### 3.2 Change 2 — removing the `isWorkOutstanding()` guard — PUSH BACK
+### 3.2 Change 2 — removing the `isWorkOutstanding()` guard — PROVISIONAL PUSH BACK
 
 ```java
  private void updateContentTimeControllerWhenIdling() {
@@ -88,8 +96,8 @@ The stall it's fixing is also *bounded by construction*: sends are capped at
 ~10 minutes even against a dead target. That's a latency problem, not a livelock — the design
 doc classifies it under "not locks (bounded-slow)."
 
-**Recommendation:** revert change 2 and re-test the reported gate-freeze with changes 3, 4, and
-6b in place. My hypothesis is that the freeze was a *symptom* of the orphaned futures from
+**Provisional recommendation:** revert change 2 and re-test the reported gate-freeze with
+changes 3, 4, and 6b in place. My hypothesis is that the freeze was a *symptom* of the orphaned futures from
 change 4 — futures that never complete mean work that never stops being "outstanding," which
 freezes the gate forever. That *is* an unbounded stall, and change 4 fixes it at the root. If
 the freeze reproduces after 4 lands, the right fix is a bound on how long the idle updater may
@@ -101,7 +109,7 @@ watch (a) whether `tasksOutstanding` ever stops draining, and (b) read-ahead gro
 `BackpressureGateAdvancesWithWorkOutstandingTest` asserts the *new* behavior, so it will need to
 change either way; it is not evidence that the new behavior is desirable.
 
-### 3.3 Change 1 — commit in a `finally` block — REWORK
+### 3.3 Change 1 — commit in a `finally` block — PROVISIONAL REWORK
 
 ```java
  try {
@@ -132,7 +140,7 @@ now deliberately injects. A send cancelled mid-drain would have its offsets comm
 the replay had happened. Not committing is a failure that forces someone to figure out why;
 dropping a message because of a glitch, with no obvious signal, is the worse outcome.
 
-#### The policy this should implement
+#### Provisional policy to evaluate
 
 Three classes, not two:
 
@@ -159,9 +167,9 @@ two different things depending on the failure:
 Both justify not committing, but they differ in whether a re-replay is desirable or merely
 harmless. Worth deciding explicitly rather than by accident.
 
-**Concrete rework:** keep the `finally` structure — it's the right shape for closing the gap —
-but make the commit conditional on a classification of the in-flight failure, defaulting to
-*don't commit + loud* for anything unrecognized. Explicitly suppress on
+**Provisional rework:** keep the `finally` structure — it's the right shape for closing the
+gap — but make the commit conditional on a classification of the in-flight failure, defaulting
+to *don't commit + loud* for anything unrecognized. Explicitly suppress on
 `CancellationException`. And extend `failReplayForTupleWrite`'s treatment to the
 `tupleWriter == null` path so both paths implement the same policy.
 
@@ -169,7 +177,7 @@ but make the commit conditional on a classification of the in-flight failure, de
 offsets are **not** committed and are re-delivered on the next assignment. I expect current
 #3231 to fail that test.
 
-### 3.4 Change 3 — `TrackedFuture` duplicate-parent ISE → warn — APPROVE
+### 3.4 Change 3 — `TrackedFuture` duplicate-parent ISE → warn — PROVISIONAL APPROVE
 
 `setParentDiagnosticFuture` threw `IllegalStateException` when `parentDiagnosticFutureRef` was
 already set. That reference is purely a diagnostic breadcrumb chain — the comment right below it
@@ -179,7 +187,7 @@ a future. Downgrading to a warn-and-return is correct.
 
 Nit: the warn will be noisy if the retry path hits it routinely. Consider `atDebug`, or dedupe.
 
-### 3.5 Change 5 — wall-clock force-expiry in the heartbeat — REJECT
+### 3.5 Change 5 — wall-clock force-expiry in the heartbeat — PROVISIONAL REJECT
 
 `logHeartbeat` is renamed to `heartbeatAndExpireStaleConnections` and gains:
 
@@ -221,15 +229,15 @@ suggests the author noticed the race; volatile on one flag doesn't make
 mutates `liveStreams` while iterating a snapshot taken via `.collect(toList())` — the snapshot
 avoids `ConcurrentModificationException` but not the underlying interleaving with `accept()`.
 
-**Recommendation:** drop the expiry behavior. Keep the rename and the `wallClockExpired` counter
-only if it counts something diagnostic. If a stuck-connection signal is wanted now, log a
-warning with the connection id and let a human act — that's evidence-gathering, not policy.
-Phase 1's scanner is the structural answer.
+**Provisional recommendation:** drop the expiry behavior. Keep the rename and the
+`wallClockExpired` counter only if it counts something diagnostic. If a stuck-connection signal
+is wanted now, log a warning with the connection id and let a human act — that's
+evidence-gathering, not policy. Phase 1's scanner is the structural answer.
 
 ### 3.6 Change 6 — the rebalance drain-gate trio
 
-**6a — `onNetworkConnectionClosed` key mismatch: QUESTION.** The change rewrites the lookup to
-use `PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER` instead of the passed `sessionNumber`:
+**6a — `onNetworkConnectionClosed` key mismatch: PROVISIONAL QUESTION.** The change rewrites the
+lookup to use `PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER` instead of the passed `sessionNumber`:
 
 ```java
 -var sessionKey = connectionId + ":" + sessionNumber + ":" + generation;
@@ -250,8 +258,8 @@ the parameter. Note their edit to test #1 inverts what that test asserted (it pr
 a non-placeholder key matched; now it proves the parameter is ignored) — that's a semantic
 change to a regression test and should be called out, not slipped in.
 
-**6b — `BlockingTrafficSource` delegation: APPROVE, and needed regardless.** `BlockingTrafficSource`
-implements `ITrafficCaptureSource` but did **not** override `onNetworkConnectionClosed` or
+**6b — `BlockingTrafficSource` delegation: PROVISIONAL APPROVE, and needed regardless.**
+`BlockingTrafficSource` implements `ITrafficCaptureSource` but did **not** override `onNetworkConnectionClosed` or
 `onConnectionAccumulationComplete`; both are `default {}` no-ops on the interface
 (`ITrafficCaptureSource:37,51`). Since `runReplay` is typed on `BlockingTrafficSource` and that
 is what gets wired into `setGlobalOnSessionClose`, **every close callback in production is
@@ -262,7 +270,7 @@ find: an empty default method on an interface silently absorbing a required noti
 This one should land on its own, ahead of everything else in the PR. It's ~10 lines, it's
 independently testable, and it's the fix for the incident.
 
-**6c — 5-minute drain-gate timeout with forced reset: SCRUTINIZE.** After
+**6c — 5-minute drain-gate timeout with forced reset: PROVISIONAL SCRUTINIZE.** After
 `DRAIN_GATE_TIMEOUT_NANOS`, `handleDrainGateIfActive` resets the counter, clears the pending map,
 and logs at ERROR — the message itself admits *"data loss may occur for in-flight connections."*
 
@@ -281,7 +289,7 @@ The `touch()` call inside the drain loop (keeping the consumer alive so we don't
 group mid-recovery) is good and should be kept independent of the timeout question. The
 `catch (RuntimeException)` around it is reasonable given a new assignment can race the pause.
 
-### 3.7 Change 7 — observability — APPROVE
+### 3.7 Change 7 — observability — PROVISIONAL APPROVE
 
 `warnIfReadWasSlow` / `acceptWithTimingDiagnostic` / `warnIfBatchWasSlow` (a clean extraction of
 the existing inline batch-timing warn, plus per-record and read-phase equivalents),
@@ -304,7 +312,7 @@ Two notes:
 
 ---
 
-## 4. Recommended sequencing
+## 4. Provisional recommended sequencing
 
 1. **Land 6b alone** (`BlockingTrafficSource` delegation) — the actual deadlock fix, ~10 lines.
 2. **Land 4 + 3 + 7** — permit-leak fix and diagnostics, low risk.
