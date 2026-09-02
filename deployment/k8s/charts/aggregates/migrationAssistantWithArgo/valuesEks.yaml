@@ -149,11 +149,21 @@ metrics:
           processors: [batch]
           exporters: [awsemf/cadvisor, prometheus]
 
+logs:
+  sharedLogsVolume:
+    storageClass: auto-ebs-sc
+
 charts:
   kube-prometheus-stack:
     values:
       grafana:
         enabled: false
+      prometheus:
+        prometheusSpec:
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: auto-ebs-sc
 
   argo-workflows:
     values:

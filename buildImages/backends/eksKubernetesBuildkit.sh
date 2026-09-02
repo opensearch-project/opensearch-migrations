@@ -110,36 +110,23 @@ ensure_eks_buildx_builder() {
   echo "BUILDX_BUILDER=${builder_name}"
   echo "Bootstrapping builder..."
 
-  # docker buildx inspect --bootstrap uses a hardcoded 110s timeout when it
-  # waits for the builder Deployments to become Ready. On EKS, the very first
-  # time the build-nodepool scales up, Karpenter cold-start routinely blows
-  # past 110s (node provisioning + image pull + container start), so the
-  # bootstrap fails with `expected 1 replicas to be ready, got 0` and the
-  # whole pipeline dies before any test runs.
-  #
-  # Do a longer kubectl-level pre-wait on every buildkit Deployment in the
-  # namespace first, then call buildx. The kubectl wait gives Karpenter the
-  # time it realistically needs; once pods are Available, buildx's internal
-  # 110s window is plenty. We still retry the bootstrap once in case a pod
-  # flaps between kubectl-wait and buildx-inspect.
+  # The kubernetes driver creates its builder Deployments as part of buildx
+  # bootstrap. Give that bootstrap enough time for the build-nodepool cold-start
+  # path; a kubectl pre-wait cannot help before buildx has created anything.
   local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
   local attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-2}"
   local attempt=1
   while true; do
-    echo "Pre-waiting up to ${build_timeout} for buildkit Deployments in '${namespace}' (attempt ${attempt}/${attempts})..."
-    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-      wait --for=condition=Available deployment --all -n "${namespace}" \
-      --timeout="${build_timeout}" || {
-        echo "Deployments not yet Available after kubectl wait; dumping state for diagnosis" >&2
-        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-          get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
-        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-          describe pods -n "${namespace}" >&2 || true
-      }
-    if docker buildx inspect --bootstrap; then
+    echo "Bootstrapping buildx builder with timeout ${build_timeout} (attempt ${attempt}/${attempts})..."
+    if docker buildx inspect --bootstrap --timeout="${build_timeout}"; then
       break
     fi
     echo "buildx bootstrap failed on attempt ${attempt}/${attempts}" >&2
+    echo "Dumping buildkit namespace state for diagnosis" >&2
+    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+      get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
+    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+      describe pods -n "${namespace}" >&2 || true
     if [[ "${attempt}" -ge "${attempts}" ]]; then
       echo "ERROR: buildx bootstrap exhausted ${attempts} attempt(s); dumping buildkit namespace state" >&2
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
