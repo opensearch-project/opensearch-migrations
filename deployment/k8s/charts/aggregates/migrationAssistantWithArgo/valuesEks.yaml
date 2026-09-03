@@ -158,12 +158,6 @@ charts:
     values:
       grafana:
         enabled: false
-      prometheus:
-        prometheusSpec:
-          storageSpec:
-            volumeClaimTemplate:
-              spec:
-                storageClassName: auto-ebs-sc
 
   argo-workflows:
     values:
