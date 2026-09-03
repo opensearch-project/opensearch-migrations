@@ -33,6 +33,7 @@ import type {
   ResourceDraftChangeState,
   ResourceValidationState,
 } from "../configuration/editProjection";
+import { fieldValidationProblem } from "../configuration/fieldValidation";
 import {
   resolveTreeLayoutOffset,
   type TreeLayoutOffset,
@@ -319,6 +320,13 @@ const TreeRow = memo(function TreeRow({
     && !configurationStateVisible;
   const configurationStatusVisible = configurationOnly
     && ["changed", "removed", "syncing"].includes(node.status);
+  const renameValidationProblem = renaming && renameOption
+    ? fieldValidationProblem(
+        renameValue,
+        renameOption.pattern,
+        renameOption.validationMessage,
+      )
+    : "";
   return (
     <div
       aria-expanded={expandable ? expanded : undefined}
@@ -434,6 +442,7 @@ const TreeRow = memo(function TreeRow({
               addPending
               || !renameValue.trim()
               || renameValue.trim() === renameOption.currentName
+              || Boolean(renameValidationProblem)
             }
             onClick={(event) => event.stopPropagation()}
             title="Apply rename"
@@ -453,6 +462,11 @@ const TreeRow = memo(function TreeRow({
           >
             <X aria-hidden="true" />
           </button>
+          {renameValidationProblem ? (
+            <small className="tree-inline-validation" role="alert">
+              {renameValidationProblem}
+            </small>
+          ) : null}
         </form>
       ) : (
         <>
@@ -667,6 +681,23 @@ function InlineCreateRow({
   onLeave: () => void;
   onSubmit: () => void;
 }>) {
+  const validationProblem = fieldValidationProblem(
+    create.name,
+    create.option.pattern,
+    create.option.validationMessage,
+  );
+  const resourceType = create.option.placement.resourceType.toLocaleLowerCase();
+  const clusterObjectHelp = resourceType.includes("repository")
+    ? (
+        " Submitting this configuration can create this repository on the "
+        + "source Elasticsearch/OpenSearch cluster."
+      )
+    : resourceType.includes("snapshot")
+      ? (
+          " Submitting this configuration can create this snapshot on the "
+          + "source Elasticsearch/OpenSearch cluster."
+        )
+      : "";
   return (
     <form
       aria-label={`New ${create.option.label}`}
@@ -714,16 +745,18 @@ function InlineCreateRow({
           pattern={create.option.pattern}
           placeholder={`New ${create.option.label}`}
           required
-          title={create.option.validationMessage}
           value={create.name}
         />
         <button
           aria-label={`Create ${create.option.label}`}
-          disabled={pending || !create.name.trim()}
+          disabled={
+            pending || !create.name.trim() || Boolean(validationProblem)
+          }
           title={`Create ${create.option.label}`}
           type="submit"
         >
           <Check aria-hidden="true" />
+          <span>Add</span>
         </button>
         <button
           aria-label={`Cancel adding ${create.option.label}`}
@@ -733,7 +766,20 @@ function InlineCreateRow({
           type="button"
         >
           <X aria-hidden="true" />
+          <span>Cancel</span>
         </button>
+        <small className={[
+          "tree-inline-name-help",
+          clusterObjectHelp ? "cluster-object-name-help" : "",
+        ].join(" ")}>
+          This name is an alias used by references and status views.
+          {clusterObjectHelp}
+        </small>
+        {validationProblem ? (
+          <small className="tree-inline-validation" role="alert">
+            {validationProblem}
+          </small>
+        ) : null}
       </div>
     </form>
   );

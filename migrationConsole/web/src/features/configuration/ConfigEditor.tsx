@@ -42,6 +42,11 @@ import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 import { SubmitConfigDialog } from "../submission/SubmitConfigDialog";
 import { ExternalResourceEditor } from "./ExternalResourceEditor";
 import {
+  readEditorDisplayPreferences,
+  writeEditorDisplayPreferences,
+} from "./editorPreferences";
+import { fieldValidationProblem } from "./fieldValidation";
+import {
   pendingResourceAddition,
   pendingResourceRename,
   resourceAddPlacement,
@@ -73,6 +78,7 @@ interface ConfigEditorProps {
   onSubmitted: () => void;
   removalState?: string | null;
   resourceLabel: string;
+  resourceType: string;
   resourceSyncing?: boolean;
 }
 
@@ -540,12 +546,18 @@ function ScalarEditor({
     referenceUnavailable && !usesImplicitReferenceDefault
   );
   const readOnly = hint.readOnly === true;
-  const [value, setValue] = useState(authoredValue);
+  const generatedDefault = (
+    node.valueDefaulted && !node.valueAuthored ? authoredValue : ""
+  );
+  const [value, setValue] = useState(generatedDefault ? "" : authoredValue);
   const [applying, setApplying] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [validationProblem, setValidationProblem] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const pattern = hintRecord(node.validation).pattern;
+  const patternMessage = hintRecord(node.validation).message;
   const selectedOption = options.find(
-    (option) => String(option.value) === value,
+    (option) => String(option.value) === (value || generatedDefault),
   );
 
   if (options.length > 0 && !allowCustom) {
@@ -555,7 +567,9 @@ function ScalarEditor({
           <span className="sr-only">{name}</span>
           <select
             aria-label={name}
+            className={generatedDefault && !value ? "default-hint-input" : ""}
             disabled={busy || applying}
+            onBlur={() => setFocused(false)}
             onChange={(event) => {
               const nextValue = event.target.value;
               const selected = options.find(
@@ -570,10 +584,15 @@ function ScalarEditor({
                 value: selected.value,
               }).finally(() => setApplying(false));
             }}
+            onFocus={() => setFocused(true)}
             value={value}
           >
-            {selectedOption ? null : (
-              <option disabled value="">Select a value</option>
+            {value ? null : (
+              <option disabled value="">
+                {generatedDefault && !focused
+                  ? `Default: ${authoredValue}`
+                  : "Select a value"}
+              </option>
             )}
             {options.map((option) => (
               <option key={String(option.value)} value={String(option.value)}>
@@ -592,7 +611,7 @@ function ScalarEditor({
 
   const syncValue = async () => {
     if (applying || referenceUnavailable || readOnly) return false;
-    if (value === authoredValue) {
+    if (value === authoredValue || (generatedDefault && value === "")) {
       onLocalDirtyChange(false);
       return true;
     }
@@ -622,24 +641,41 @@ function ScalarEditor({
         <input
           aria-label={name}
           aria-busy={applying}
+          className={generatedDefault && !value ? "default-hint-input" : ""}
           disabled={referenceUnavailable || readOnly || applying}
           list={options.length > 0 || examples.length > 0
             ? `${node.id}-choices`
             : undefined}
-          onBlur={() => void syncValue()}
+          onBlur={() => {
+            setFocused(false);
+            void syncValue();
+          }}
           onChange={(event) => {
             const nextValue = event.target.value;
             setValue(nextValue);
-            onLocalDirtyChange(nextValue !== authoredValue);
+            setValidationProblem(fieldValidationProblem(
+              nextValue,
+              typeof pattern === "string" ? pattern : undefined,
+              typeof patternMessage === "string"
+                ? patternMessage
+                : undefined,
+            ));
+            onLocalDirtyChange(
+              generatedDefault ? nextValue !== "" : nextValue !== authoredValue,
+            );
           }}
+          onFocus={() => setFocused(true)}
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             event.preventDefault();
             void syncValue();
           }}
           pattern={typeof pattern === "string" ? pattern : undefined}
+          placeholder={!focused && generatedDefault
+            ? generatedDefault
+            : undefined}
           ref={inputRef}
-          required={node.required === true}
+          required={node.required === true && !generatedDefault}
           type={node.valueType === "number" ? "number" : "text"}
           value={value}
         />
@@ -657,6 +693,11 @@ function ScalarEditor({
         ) : null}
       </label>
       {applying ? <LoaderCircle className="spin inline-spinner" /> : null}
+      {validationProblem ? (
+        <p className="field-error inline-validation-help" role="alert">
+          {validationProblem}
+        </p>
+      ) : null}
       {showDocumentation && selectedOption?.description
         ? <p className="field-help">{selectedOption.description}</p>
         : null}
@@ -819,8 +860,11 @@ function CommandEditor({
   const requiresName = node.command?.requiresName !== false;
   const label = fieldName(node);
   const [name, setName] = useState("");
+  const [validationProblem, setValidationProblem] = useState("");
   const pattern = hintRecord(node.validation).pattern
     ?? hintRecord(node.inputHint).pattern;
+  const patternMessage = hintRecord(node.validation).message
+    ?? hintRecord(node.inputHint).message;
   const formRef = useEscapeCancel<HTMLFormElement>(onCancel, busy);
   return (
     <form
@@ -850,7 +894,17 @@ function CommandEditor({
           <input
             aria-label={`${label} name`}
             autoFocus
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              const nextName = event.target.value;
+              setName(nextName);
+              setValidationProblem(fieldValidationProblem(
+                nextName,
+                typeof pattern === "string" ? pattern : undefined,
+                typeof patternMessage === "string"
+                  ? patternMessage
+                  : undefined,
+              ));
+            }}
             pattern={typeof pattern === "string" ? pattern : undefined}
             required
             value={name}
@@ -862,6 +916,7 @@ function CommandEditor({
           busy
           || Boolean(node.command?.blockedMessage)
           || (requiresName && !name.trim())
+          || Boolean(validationProblem)
         }
         type="submit"
       >
@@ -869,6 +924,16 @@ function CommandEditor({
         Create {label}
       </button>
       <button disabled={busy} onClick={onCancel} type="button">Cancel</button>
+      {requiresName ? (
+        <p className="field-help naming-help">
+          This name is an alias used by references and status views.
+        </p>
+      ) : null}
+      {validationProblem ? (
+        <p className="field-error inline-validation-help" role="alert">
+          {validationProblem}
+        </p>
+      ) : null}
       {node.command?.blockedMessage
         ? <p className="field-help">{node.command.blockedMessage}</p>
         : null}
@@ -1015,6 +1080,25 @@ function ConfigPropertyRow({
     (candidate) => candidate.id === addingCommandId,
   ) ?? null;
   const canRename = renameableConfigPath(node.path) && node.implicit !== true;
+  const renamePattern = (
+    node.path.length === 3 && node.path[0] === "traffic"
+      ? KUBERNETES_NAME_PATTERN
+      : typeof hintRecord(parent?.inputHint).keyPattern === "string"
+        ? String(hintRecord(parent?.inputHint).keyPattern)
+        : undefined
+  );
+  const renameMessage = (
+    node.path.length === 3 && node.path[0] === "traffic"
+      ? KUBERNETES_NAME_MESSAGE
+      : typeof hintRecord(parent?.inputHint).message === "string"
+        ? String(hintRecord(parent?.inputHint).message)
+        : undefined
+  );
+  const renameValidationProblem = fieldValidationProblem(
+    newName,
+    renamePattern,
+    renameMessage,
+  );
   const canUnset = (
     node.presence === "optional"
     && node.required !== true
@@ -1385,14 +1469,7 @@ function ConfigPropertyRow({
                       aria-label="Configuration name"
                       autoFocus
                       onChange={(event) => setNewName(event.target.value)}
-                      pattern={
-                        node.path.length === 3 && node.path[0] === "traffic"
-                          ? KUBERNETES_NAME_PATTERN
-                          : typeof hintRecord(parent?.inputHint).keyPattern
-                            === "string"
-                            ? String(hintRecord(parent?.inputHint).keyPattern)
-                            : undefined
-                      }
+                      pattern={renamePattern}
                       required
                       title={
                         node.path.length === 3 && node.path[0] === "traffic"
@@ -1402,12 +1479,22 @@ function ConfigPropertyRow({
                       value={newName}
                     />
                   </label>
-                  <button disabled={busy || !newName.trim()} type="submit">
+                  <button
+                    disabled={
+                      busy || !newName.trim() || Boolean(renameValidationProblem)
+                    }
+                    type="submit"
+                  >
                     Apply rename
                   </button>
                   <button onClick={() => setRenaming(false)} type="button">
                     Cancel
                   </button>
+                  {renameValidationProblem ? (
+                    <p className="field-error" role="alert">
+                      {renameValidationProblem}
+                    </p>
+                  ) : null}
                 </form>
               ) : addingCommand ? (
                 <CommandEditor
@@ -1456,6 +1543,7 @@ export function ConfigEditor({
   onSubmitted,
   removalState,
   resourceLabel,
+  resourceType,
   resourceSyncing = false,
 }: Readonly<ConfigEditorProps>) {
   const queryClient = useQueryClient();
@@ -1470,11 +1558,22 @@ export function ConfigEditor({
   const [activeTargetId, setActiveTargetId] = useState<string | null>(
     initialTargetId ?? null,
   );
-  const [showOptional, setShowOptional] = useState(true);
-  const [showExpert, setShowExpert] = useState(false);
-  const [showDocumentation, setShowDocumentation] = useState(false);
-  const [renderOptional, setRenderOptional] = useState(true);
-  const [renderExpert, setRenderExpert] = useState(false);
+  const initialDisplayPreferences = readEditorDisplayPreferences(resourceType);
+  const [showOptional, setShowOptional] = useState(
+    initialDisplayPreferences.showOptional,
+  );
+  const [showExpert, setShowExpert] = useState(
+    initialDisplayPreferences.showExpert,
+  );
+  const [showDocumentation, setShowDocumentation] = useState(
+    initialDisplayPreferences.showDocumentation,
+  );
+  const [renderOptional, setRenderOptional] = useState(
+    initialDisplayPreferences.showOptional,
+  );
+  const [renderExpert, setRenderExpert] = useState(
+    initialDisplayPreferences.showExpert,
+  );
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [removingIds, setRemovingIds] = useState<Set<string>>(
@@ -1543,6 +1642,27 @@ export function ConfigEditor({
   );
 
   const draft = draftQuery.data;
+  const interactionPending = busy || actionPending || resourceSyncing;
+
+  useEffect(() => {
+    const preferences = readEditorDisplayPreferences(resourceType);
+    setShowOptional(preferences.showOptional);
+    setRenderOptional(preferences.showOptional);
+    setShowExpert(preferences.showExpert);
+    setRenderExpert(preferences.showExpert);
+    setShowDocumentation(preferences.showDocumentation);
+  }, [resourceType]);
+
+  const storeDisplayPreferences = (
+    next: Partial<ReturnType<typeof readEditorDisplayPreferences>>,
+  ) => {
+    writeEditorDisplayPreferences(resourceType, {
+      showDocumentation,
+      showExpert,
+      showOptional,
+      ...next,
+    });
+  };
   const nodes = useMemo(
     () => draft?.editState.nodes ?? [],
     [draft?.editState.nodes],
@@ -1755,6 +1875,7 @@ export function ConfigEditor({
     clearRemovingRows(transition.rowIds);
   }, [clearRemovingRows]);
   const changeOptionalVisibility = (next: boolean) => {
+    storeDisplayPreferences({ showOptional: next });
     setShowOptional(next);
     cancelRowExit(optionalTransition.current);
     optionalTransition.current = null;
@@ -1796,6 +1917,7 @@ export function ConfigEditor({
     });
   };
   const changeExpertVisibility = (next: boolean) => {
+    storeDisplayPreferences({ showExpert: next });
     setShowExpert(next);
     cancelRowExit(expertTransition.current);
     expertTransition.current = null;
@@ -2374,6 +2496,7 @@ export function ConfigEditor({
   return (
     <section
       aria-label={`Edit ${resourceLabel} configuration`}
+      aria-busy={interactionPending}
       className="workspace config-editor"
     >
       <header className="config-toolbar">
@@ -2420,8 +2543,12 @@ export function ConfigEditor({
           <label>
             <input
               checked={showDocumentation}
-              onChange={(event) =>
-                setShowDocumentation(event.target.checked)}
+              onChange={(event) => {
+                storeDisplayPreferences({
+                  showDocumentation: event.target.checked,
+                });
+                setShowDocumentation(event.target.checked);
+              }}
               type="checkbox"
             />
             <span>Show field documentation</span>
@@ -2888,6 +3015,19 @@ export function ConfigEditor({
             onSubmitted();
           }}
         />
+      ) : null}
+      {interactionPending ? (
+        <div
+          aria-live="polite"
+          className="interaction-shield"
+          role="status"
+        >
+          <div>
+            <LoaderCircle className="spin" aria-hidden="true" />
+            <strong>Updating configuration</strong>
+            <span>Waiting for the server to finish this change.</span>
+          </div>
+        </div>
       ) : null}
     </section>
   );

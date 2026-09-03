@@ -1306,6 +1306,10 @@ function ManageApp() {
                     displayedState.nodes[editContext.resourceId]?.label
                     ?? "resource"
                   }
+                  resourceType={
+                    displayedState.nodes[editContext.resourceId]?.resourceType
+                    ?? "Workflow configuration"
+                  }
                   resourceSyncing={selectedNode?.status === "syncing"}
                 />
               ) : selectedNode ? (

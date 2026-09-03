@@ -54,7 +54,11 @@ interface CreateDescriptor {
 type Pane =
   | { mode: "create" }
   | { mode: "manual" }
-  | { mode: "view" | "update"; details: ExternalResourceDetails };
+  | {
+      mode: "view" | "update";
+      details: ExternalResourceDetails;
+      row: ExternalResourceInventory["rows"][number];
+    };
 
 
 interface KubernetesResourceType {
@@ -464,13 +468,20 @@ function ExternalResourceView({
   descriptor,
   details,
   onBack,
+  onSelect,
   onUpdate,
+  selectsKey,
 }: Readonly<{
-  descriptor: CreateDescriptor;
+  descriptor: CreateDescriptor | null;
   details: ExternalResourceDetails;
   onBack: () => void;
+  onSelect: (key?: string) => void;
   onUpdate: () => void;
+  selectsKey: boolean;
 }>) {
+  const fields = descriptor?.fields ?? Object.keys(details.fieldValues).map(
+    (name) => ({ name, label: name, input: "text" }),
+  );
   return (
     <section className="external-resource-view">
       <header>
@@ -479,10 +490,34 @@ function ExternalResourceView({
           <span>{details.kind}{details.resourceType ? ` · ${details.resourceType}` : ""}</span>
         </div>
         <div>
-          <button className="secondary-button" onClick={onUpdate} type="button">
-            <Pencil aria-hidden="true" />
-            Update resource
-          </button>
+          {selectsKey ? details.keys.map((key) => (
+            <button
+              className="primary-button"
+              key={key}
+              onClick={() => onSelect(key)}
+              type="button"
+            >
+              Use {key}
+            </button>
+          )) : (
+            <button
+              className="primary-button"
+              onClick={() => onSelect()}
+              type="button"
+            >
+              Use resource
+            </button>
+          )}
+          {descriptor ? (
+            <button
+              className="secondary-button"
+              onClick={onUpdate}
+              type="button"
+            >
+              <Pencil aria-hidden="true" />
+              Update resource
+            </button>
+          ) : null}
           <button className="secondary-button" onClick={onBack} type="button">
             <ArrowLeft aria-hidden="true" />
             Back to resources
@@ -491,7 +526,7 @@ function ExternalResourceView({
       </header>
       {details.message ? <p className="field-help">{details.message}</p> : null}
       <dl className="external-resource-values">
-        {descriptor.fields.map((field) => {
+        {fields.map((field) => {
           const value = details.fieldValues[field.name];
           const hidden = details.hiddenFields.includes(field.name);
           if (value === undefined && !hidden) return null;
@@ -514,6 +549,98 @@ function ExternalResourceView({
 }
 
 
+type ExternalResourceRow = ExternalResourceInventory["rows"][number];
+
+
+function ExternalResourceRows({
+  busy,
+  canUpdate,
+  onInspect,
+  onSelect,
+  rows,
+  selectsKey,
+}: Readonly<{
+  busy: boolean;
+  canUpdate: boolean;
+  onInspect: (row: ExternalResourceRow, mode: "view" | "update") => void;
+  onSelect: (row: ExternalResourceRow, key?: string) => void;
+  rows: ExternalResourceRow[];
+  selectsKey: boolean;
+}>) {
+  if (rows.length === 0) {
+    return (
+      <p className="external-resource-empty">
+        No Kubernetes resources match this field.
+      </p>
+    );
+  }
+  return (
+    <div className="external-resource-list">
+      {rows.map((row) => (
+        <div
+          className={`external-resource-row status-${row.status}`}
+          key={`${row.group}-${row.kind}-${row.name}`}
+        >
+          <div className="external-resource-heading">
+            <strong>{row.name}</strong>
+            <span>{row.kind}{row.type ? ` · ${row.type}` : ""}</span>
+            {row.current ? <em>Current</em> : null}
+          </div>
+          {row.message ? <p>{row.message}</p> : null}
+          {row.keys.length > 0 ? (
+            <div className="external-keys" aria-label={`Keys in ${row.name}`}>
+              {row.keys.map((key) => <span key={key}>{key}</span>)}
+            </div>
+          ) : <span className="empty-keys">No keys reported</span>}
+          <div className="external-resource-actions">
+            {selectsKey ? row.keys.map((key) => (
+              <button
+                aria-label={`Use ${row.name} and key ${key}`}
+                disabled={busy}
+                key={key}
+                onClick={() => onSelect(row, key)}
+                type="button"
+              >
+                Use {key}
+              </button>
+            )) : (
+              <button
+                aria-label={`Use ${row.name}`}
+                disabled={busy}
+                onClick={() => onSelect(row)}
+                type="button"
+              >
+                Use resource
+              </button>
+            )}
+            <button
+              aria-label={`Inspect ${row.name}`}
+              disabled={busy}
+              onClick={() => onInspect(row, "view")}
+              type="button"
+            >
+              <Eye aria-hidden="true" />
+              Inspect
+            </button>
+            {canUpdate ? (
+              <button
+                aria-label={`Update ${row.name}`}
+                disabled={busy}
+                onClick={() => onInspect(row, "update")}
+                type="button"
+              >
+                <Pencil aria-hidden="true" />
+                Update
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 function ExternalResourceDialogContent({
   draft,
   node,
@@ -529,11 +656,14 @@ function ExternalResourceDialogContent({
   replaceDraft: (promise: Promise<ConfigDraft>) => Promise<boolean>;
   reportError: (message: string) => void;
 }>) {
+  const allResourcesTitleId = useId();
   const [inventory, setInventory] = useState<ExternalResourceInventory | null>(
     null,
   );
   const [loading, setLoading] = useState(false);
   const [pane, setPane] = useState<Pane | null>(null);
+  const [allResourcesOpen, setAllResourcesOpen] = useState(false);
+  const [allResourcesPane, setAllResourcesPane] = useState<Pane | null>(null);
   const [warning, setWarning] = useState<{
     selection: ExternalResourceSelection;
     message: string;
@@ -545,6 +675,13 @@ function ExternalResourceDialogContent({
   const warningRef = useEscapeCancel<HTMLDivElement>(
     () => setWarning(null),
     warning === null,
+  );
+  const allResourcesDialogRef = useEscapeCancel<HTMLElement>(
+    () => {
+      if (allResourcesPane) setAllResourcesPane(null);
+      else setAllResourcesOpen(false);
+    },
+    busy || !allResourcesOpen,
   );
 
   const load = useCallback(async () => {
@@ -563,15 +700,21 @@ function ExternalResourceDialogContent({
     void load();
   }, [load]);
 
-  const inspect = async (name: string, mode: "view" | "update") => {
+  const inspect = async (
+    row: ExternalResourceInventory["rows"][number],
+    mode: "view" | "update",
+    fromAllResources = false,
+  ) => {
     setLoading(true);
     try {
       const details = await getExternalResourceDetails(
         node.id,
         draft.draftRevision,
-        name,
+        row.name,
       );
-      setPane({ mode, details });
+      const nextPane = { mode, details, row } as const;
+      if (fromAllResources) setAllResourcesPane(nextPane);
+      else setPane(nextPane);
     } catch (error) {
       reportError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -602,6 +745,16 @@ function ExternalResourceDialogContent({
     ));
     if (applied) onClose();
   };
+  const selectionForRow = (
+    row: ExternalResourceInventory["rows"][number],
+    key?: string,
+  ): ExternalResourceSelection => ({
+    nodeId: node.id,
+    name: row.name,
+    kind: row.kind,
+    group: row.group,
+    key,
+  });
 
   if (descriptor && pane?.mode === "create") {
     return (
@@ -641,13 +794,26 @@ function ExternalResourceDialogContent({
       />
     );
   }
-  if (descriptor && pane?.mode === "view") {
+  if (pane?.mode === "view") {
     return (
       <ExternalResourceView
         descriptor={descriptor}
-        details={pane.details}
+        details={{
+          ...pane.details,
+          message: pane.details.message || pane.row.message,
+        }}
         onBack={() => setPane(null)}
-        onUpdate={() => setPane({ mode: "update", details: pane.details })}
+        onSelect={(key) => void select(
+          selectionForRow(pane.row, key),
+          pane.row.status,
+          pane.row.message,
+        )}
+        onUpdate={() => setPane({
+          mode: "update",
+          details: pane.details,
+          row: pane.row,
+        })}
+        selectsKey={selectsKey}
       />
     );
   }
@@ -682,138 +848,208 @@ function ExternalResourceDialogContent({
     );
   }
 
+  const matchingRows = inventory.rows.filter(
+    (row) => row.status === "matching",
+  );
   return (
-    <section className="external-picker">
-      <header>
-        <div>
-          <strong>{inventory.displayName}</strong>
-          <span>{inventory.rows.length} resources</span>
-        </div>
-        <div className="external-picker-header-actions">
-          {descriptor ? (
+    <>
+      <section className="external-picker">
+        <header>
+          <div>
+            <strong>{inventory.displayName}</strong>
+            <span>{matchingRows.length} matching resources</span>
+          </div>
+          <div className="external-picker-header-actions">
             <button
               className="secondary-button"
-              onClick={() => setPane({ mode: "create" })}
+              disabled={busy}
+              onClick={() => setAllResourcesOpen(true)}
               type="button"
             >
-              <Plus aria-hidden="true" />
-              Create {descriptor.label}
+              <Eye aria-hidden="true" />
+              View all {inventory.rows.length}
             </button>
-          ) : null}
-          <button
-            className="secondary-button"
-            disabled={busy}
-            onClick={() => setPane({ mode: "manual" })}
-            type="button"
-          >
-            <Keyboard aria-hidden="true" />
-            Enter reference manually
-          </button>
-          <button
-            aria-label="Refresh external resources"
-            className="icon-button"
-            disabled={loading}
-            onClick={() => void load()}
-            type="button"
-          >
-            <RefreshCw className={loading ? "spin" : ""} />
-          </button>
-        </div>
-      </header>
-      {warning ? (
-        <div
-          className="selection-warning"
-          data-escape-cancel-layer
-          ref={warningRef}
-          role="alert"
-        >
-          <span>{warning.message || "This resource does not match all requirements."}</span>
-          <button
-            disabled={busy}
-            onClick={() => void acceptWarning()}
-            type="button"
-          >
-            Use anyway
-          </button>
-          <button onClick={() => setWarning(null)} type="button">Cancel</button>
-        </div>
-      ) : null}
-      <div className="external-resource-list">
-        {inventory.rows.map((row) => (
-          <div
-            className={`external-resource-row status-${row.status}`}
-            key={`${row.group}-${row.kind}-${row.name}`}
-          >
-            <div className="external-resource-heading">
-              <strong>{row.name}</strong>
-              <span>{row.kind}{row.type ? ` · ${row.type}` : ""}</span>
-              {row.current ? <em>Current</em> : null}
-            </div>
-            {row.message ? <p>{row.message}</p> : null}
-            {row.keys.length > 0 ? (
-              <div className="external-keys" aria-label={`Keys in ${row.name}`}>
-                {row.keys.map((key) => <span key={key}>{key}</span>)}
-              </div>
-            ) : <span className="empty-keys">No keys reported</span>}
-            <div className="external-resource-actions">
-              {selectsKey ? row.keys.map((key) => (
-                <button
-                  aria-label={`Use ${row.name} and key ${key}`}
-                  disabled={busy}
-                  key={key}
-                  onClick={() => void select({
-                    nodeId: node.id,
-                    name: row.name,
-                    kind: row.kind,
-                    group: row.group,
-                    key,
-                  }, row.status, row.message)}
-                  type="button"
-                >
-                  Use {key}
-                </button>
-              )) : (
-                <button
-                  aria-label={`Use ${row.name}`}
-                  disabled={busy}
-                  onClick={() => void select({
-                    nodeId: node.id,
-                    name: row.name,
-                    kind: row.kind,
-                    group: row.group,
-                  }, row.status, row.message)}
-                  type="button"
-                >
-                  Use resource
-                </button>
-              )}
-              {descriptor ? (
-                <>
-                  <button
-                    aria-label={`Inspect ${row.name}`}
-                    disabled={loading}
-                    onClick={() => void inspect(row.name, "view")}
-                    type="button"
-                  >
-                    <Eye aria-hidden="true" />
-                    Inspect
-                  </button>
-                  <button
-                    aria-label={`Update ${row.name}`}
-                    disabled={loading}
-                    onClick={() => void inspect(row.name, "update")}
-                    type="button"
-                  >
-                    <Pencil aria-hidden="true" />
-                    Update
-                  </button>
-                </>
-              ) : null}
-            </div>
+            {descriptor ? (
+              <button
+                className="secondary-button"
+                onClick={() => setPane({ mode: "create" })}
+                type="button"
+              >
+                <Plus aria-hidden="true" />
+                Create {descriptor.label}
+              </button>
+            ) : null}
+            <button
+              className="secondary-button"
+              disabled={busy}
+              onClick={() => setPane({ mode: "manual" })}
+              type="button"
+            >
+              <Keyboard aria-hidden="true" />
+              Enter reference manually
+            </button>
+            <button
+              aria-label="Refresh external resources"
+              className="icon-button"
+              disabled={loading}
+              onClick={() => void load()}
+              type="button"
+            >
+              <RefreshCw className={loading ? "spin" : ""} />
+            </button>
           </div>
-        ))}
-      </div>
-    </section>
+        </header>
+        {warning ? (
+          <div
+            className="selection-warning"
+            data-escape-cancel-layer
+            ref={warningRef}
+            role="alert"
+          >
+            <span>
+              {warning.message
+                || "This resource does not match all requirements."}
+            </span>
+            <button
+              disabled={busy}
+              onClick={() => void acceptWarning()}
+              type="button"
+            >
+              Use anyway
+            </button>
+            <button onClick={() => setWarning(null)} type="button">
+              Cancel
+            </button>
+          </div>
+        ) : null}
+        <ExternalResourceRows
+          busy={busy || loading}
+          canUpdate={Boolean(descriptor)}
+          onInspect={(row, mode) => void inspect(row, mode)}
+          onSelect={(row, key) => void select(
+            selectionForRow(row, key),
+            row.status,
+            row.message,
+          )}
+          rows={matchingRows}
+          selectsKey={selectsKey}
+        />
+      </section>
+      {allResourcesOpen ? createPortal(
+        <div className="modal-backdrop nested-modal-backdrop">
+          <section
+            aria-labelledby={allResourcesTitleId}
+            aria-modal="true"
+            className="confirmation-dialog external-resource-dialog"
+            data-escape-cancel-layer
+            ref={allResourcesDialogRef}
+            role="dialog"
+          >
+            <header>
+              <Database aria-hidden="true" />
+              <div>
+                <span>Kubernetes resource inventory</span>
+                <h2 id={allResourcesTitleId}>
+                  All {inventory.displayName} resources
+                </h2>
+              </div>
+              <button
+                aria-label="Close all Kubernetes resources"
+                className="icon-button"
+                disabled={busy}
+                onClick={() => {
+                  setAllResourcesPane(null);
+                  setAllResourcesOpen(false);
+                }}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+            <div className="external-resource-dialog-body">
+              {warning ? (
+                <div className="selection-warning" role="alert">
+                  <span>
+                    {warning.message
+                      || "This resource does not match all requirements."}
+                  </span>
+                  <button
+                    disabled={busy}
+                    onClick={() => void acceptWarning()}
+                    type="button"
+                  >
+                    Use anyway
+                  </button>
+                  <button
+                    onClick={() => setWarning(null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
+              {
+                descriptor && allResourcesPane?.mode === "update"
+                  ? (
+                    <ExternalResourceForm
+                      descriptor={descriptor}
+                      details={allResourcesPane.details}
+                      draft={draft}
+                      node={node}
+                      onApplied={onClose}
+                      onBack={() => setAllResourcesPane(null)}
+                      replaceDraft={replaceDraft}
+                      reportError={reportError}
+                    />
+                    )
+                  : allResourcesPane?.mode === "view"
+                    ? (
+                      <ExternalResourceView
+                        descriptor={descriptor}
+                        details={{
+                          ...allResourcesPane.details,
+                          message: allResourcesPane.details.message
+                            || allResourcesPane.row.message,
+                        }}
+                        onBack={() => setAllResourcesPane(null)}
+                        onSelect={(key) => void select(
+                          selectionForRow(allResourcesPane.row, key),
+                          allResourcesPane.row.status,
+                          allResourcesPane.row.message,
+                        )}
+                        onUpdate={() => setAllResourcesPane({
+                          mode: "update",
+                          details: allResourcesPane.details,
+                          row: allResourcesPane.row,
+                        })}
+                        selectsKey={selectsKey}
+                      />
+                      )
+                    : (
+                      <ExternalResourceRows
+                        busy={busy || loading}
+                        canUpdate={Boolean(descriptor)}
+                        onInspect={(row, mode) => void inspect(
+                          row,
+                          mode,
+                          true,
+                        )}
+                        onSelect={(row, key) => void select(
+                          selectionForRow(row, key),
+                          row.status,
+                          row.message,
+                        )}
+                        rows={inventory.rows}
+                        selectsKey={selectsKey}
+                      />
+                      )
+              }
+            </div>
+          </section>
+        </div>,
+        document.body,
+      ) : null}
+    </>
   );
 }
 

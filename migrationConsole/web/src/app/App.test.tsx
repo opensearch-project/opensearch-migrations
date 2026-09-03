@@ -2306,7 +2306,7 @@ test("opens a generic configuration editor and explains generated values", async
   });
   expect(screen.getByRole("checkbox", {
     name: "Show field documentation",
-  })).not.toBeChecked();
+  })).toBeChecked();
   expect(screen.getByRole("checkbox", {
     name: "Show optional fields",
   })).toBeChecked();
@@ -2316,24 +2316,30 @@ test("opens a generic configuration editor and explains generated values", async
   const credentialsLabel = within(credentials)
     .getByText("Credentials secret", { selector: "strong" })
     .closest(".property-label");
-  expect(credentialsLabel).toHaveAttribute(
-    "title",
+  expect(credentialsLabel).not.toHaveAttribute("title");
+  expect(within(credentials).getByText(
     "Kubernetes Secret containing the HTTP credentials.",
-  );
-  expect(within(credentials).queryByText(
-    "Kubernetes Secret containing the HTTP credentials.",
-  )).toBeNull();
+  )).toBeInTheDocument();
   expect(within(credentials).getByText("Authored"))
     .toBe(credentialsLabel?.querySelector(".property-flags span"));
   expect(configTree.querySelector(".status-dot")).toBeNull();
   const timeout = within(configTree).getByRole("row", { name: /Timeout/ });
   await userEvent.click(timeout);
+  const timeoutInput = within(timeout).getByRole("spinbutton", {
+    name: "Timeout",
+  });
+  expect(timeoutInput).toHaveValue(null);
+  expect(timeoutInput).toHaveAttribute("placeholder", "30");
+  await userEvent.click(timeoutInput);
+  expect(timeoutInput).not.toHaveAttribute("placeholder");
+  await userEvent.tab();
+  expect(timeoutInput).toHaveAttribute("placeholder", "30");
 
   expect(within(timeout).getByText("Generated")).toBeInTheDocument();
-  expect(screen.queryByText("runtime timeout")).toBeNull();
-  expect(screen.queryByText(
+  expect(screen.getByText("runtime timeout")).toBeInTheDocument();
+  expect(screen.getByText(
     "Generated from the standard runtime profile.",
-  )).toBeNull();
+  )).toBeInTheDocument();
   const state = timeout.querySelector(".property-state-cell");
   expect(state?.querySelector(".property-state-content")).toBeInTheDocument();
   expect(within(state as HTMLElement).getByText("ok")).toBeInTheDocument();
@@ -2344,14 +2350,17 @@ test("opens a generic configuration editor and explains generated values", async
   await userEvent.click(screen.getByRole("checkbox", {
     name: "Show field documentation",
   }));
-  expect(screen.getByText("runtime timeout")).toBeInTheDocument();
-  expect(screen.getByText(
+  expect(screen.queryByText("runtime timeout")).toBeNull();
+  expect(screen.queryByText(
     "Generated from the standard runtime profile.",
-  )).toBeInTheDocument();
-  expect(within(credentials).getByText(
+  )).toBeNull();
+  expect(within(credentials).queryByText(
     "Kubernetes Secret containing the HTTP credentials.",
-  )).toBeInTheDocument();
-  expect(credentialsLabel).not.toHaveAttribute("title");
+  )).toBeNull();
+  expect(credentialsLabel).toHaveAttribute(
+    "title",
+    "Kubernetes Secret containing the HTTP credentials.",
+  );
 
   expect(
     within(configTree).getByRole("row", {
@@ -4431,15 +4440,15 @@ test("submits scalar, exact-node rename, union, and add operations", async () =>
     within(snapshotChoice).getByRole("option", { name: "weekly" }),
   ).toBeInTheDocument();
   await userEvent.selectOptions(snapshotChoice, "weekly");
-  expect(screen.queryByText(
+  expect(screen.getByText(
     "Generated from the source snapshot definitions.",
-  )).toBeNull();
+  )).toBeInTheDocument();
   await userEvent.click(screen.getByRole("checkbox", {
     name: "Show field documentation",
   }));
-  expect(
-    screen.getByText("Generated from the source snapshot definitions."),
-  ).toBeInTheDocument();
+  expect(screen.queryByText(
+    "Generated from the source snapshot definitions.",
+  )).toBeNull();
 
   await userEvent.click(screen.getByRole("button", { name: "Add transform" }));
 
@@ -4611,8 +4620,41 @@ test("selects an HTTP Basic Auth Secret in the shared resource dialog", async ()
         status: "matching",
         message: "",
         current: true,
+      }, {
+        name: "unrelated-creds",
+        kind: "Secret",
+        group: "",
+        version: "v1",
+        type: "Opaque",
+        keys: ["token"],
+        status: "warn",
+        message: "Missing username and password keys.",
+        current: false,
       }],
     })),
+    http.get("*/api/v1/external-resources/details", ({ request }) => {
+      const name = new URL(request.url).searchParams.get("name")
+        ?? "source-creds";
+      return HttpResponse.json({
+        nodeId: secret.id,
+        draftRevision: secretDraft.draftRevision,
+        displayName: "HTTP Basic Auth Secret",
+        name,
+        kind: "Secret",
+        resourceType: name === "source-creds"
+          ? "kubernetes.io/basic-auth"
+          : "Opaque",
+        keys: name === "source-creds"
+          ? ["username", "password"]
+          : ["token"],
+        fieldValues: {},
+        hiddenFields: name === "source-creds"
+          ? ["username", "password"]
+          : ["token"],
+        missing: false,
+        message: null,
+      });
+    }),
     http.post("*/api/v1/external-resources/select", async ({ request }) => {
       selection = await request.json();
       return HttpResponse.json({
@@ -4637,8 +4679,33 @@ test("selects an HTTP Basic Auth Secret in the shared resource dialog", async ()
   const selector = await screen.findByRole("dialog", {
     name: "Select HTTP Basic Auth Secret",
   });
-  await userEvent.click(await within(selector).findByRole("button", {
-    name: "Use source-creds",
+  expect(await within(selector).findByText("source-creds"))
+    .toBeInTheDocument();
+  expect(within(selector).queryByText("unrelated-creds")).toBeNull();
+
+  await userEvent.click(within(selector).getByRole("button", {
+    name: "View all 2",
+  }));
+  const allResources = await screen.findByRole("dialog", {
+    name: "All HTTP Basic Auth Secret resources",
+  });
+  expect(within(allResources).getByText("unrelated-creds"))
+    .toBeInTheDocument();
+  await userEvent.click(within(allResources).getByRole("button", {
+    name: "Inspect unrelated-creds",
+  }));
+  expect(await within(allResources).findByText(
+    "Missing username and password keys.",
+  )).toBeInTheDocument();
+  await userEvent.click(within(allResources).getByRole("button", {
+    name: "Back to resources",
+  }));
+  expect(within(allResources).getByText("source-creds")).toBeInTheDocument();
+  await userEvent.click(within(allResources).getByRole("button", {
+    name: "Inspect source-creds",
+  }));
+  await userEvent.click(await within(allResources).findByRole("button", {
+    name: "Use resource",
   }));
 
   expect(selection).toEqual({
@@ -5054,6 +5121,9 @@ test("shows a newly added resource while the server operation is pending", async
     name: /^immediate, Syncing configuration$/,
   })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByText("Preparing immediate configuration")).toBeVisible();
+  expect(screen.getAllByRole("status").some(
+    (element) => element.textContent?.includes("Updating configuration"),
+  )).toBe(true);
   expect(screen.queryByRole("textbox", {
     name: "source cluster name",
   })).toBeNull();
@@ -5096,6 +5166,13 @@ test("cancels inline resource naming and restores tree selection and focus", asy
     name: "source cluster name",
   });
   expect(nameInput).toHaveFocus();
+  expect(within(tree).getByText(
+    "This name is an alias used by references and status views.",
+  )).toBeInTheDocument();
+  await userEvent.type(nameInput, "Invalid Name");
+  expect(within(tree).getByRole("alert")).toHaveTextContent(
+    "Use a Kubernetes-compatible name.",
+  );
   const existingSource = within(tree).getByRole("treeitem", {
     name: /^legacy, Addition pending submission$/,
   });
