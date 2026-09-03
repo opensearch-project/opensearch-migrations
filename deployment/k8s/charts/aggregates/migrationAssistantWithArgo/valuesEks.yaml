@@ -149,6 +149,10 @@ metrics:
           processors: [batch]
           exporters: [awsemf/cadvisor, prometheus]
 
+logs:
+  sharedLogsVolume:
+    enabled: false
+
 charts:
   kube-prometheus-stack:
     values:
