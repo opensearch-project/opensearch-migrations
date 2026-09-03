@@ -88,8 +88,8 @@ class TestRunner:
                  capture_proxy_service_type: str = "LoadBalancer",
                  trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
                  trace_backend: str = "",
-                 k6_chart_path: str = "", k6_install_script: str = "", k6_scripts_image: str = "",
-                 load_test_image: str = "") -> None:
+                 k6_chart_path: str = "", k6_install_script: str = "",
+                 k6_runner_image: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -109,8 +109,7 @@ class TestRunner:
         self.trace_backend = trace_backend
         self.k6_chart_path = k6_chart_path
         self.k6_install_script = k6_install_script
-        self.k6_scripts_image = k6_scripts_image
-        self.load_test_image = load_test_image
+        self.k6_runner_image = k6_runner_image
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -490,10 +489,8 @@ class TestRunner:
         cmd = self._k6_chart_cmd("install") + ["--chart", self.k6_chart_path]
         if self.registry_prefix:
             cmd += ["--registry-prefix", self.registry_prefix]
-        if self.k6_scripts_image:
-            cmd += ["--scripts-image", self.k6_scripts_image]
-        if self.load_test_image:
-            cmd += ["--runner-image", self.load_test_image]
+        if self.k6_runner_image:
+            cmd += ["--runner-image", self.k6_runner_image]
         logger.info("Installing k6 load-test chart: %s", " ".join(cmd))
         if subprocess.run(cmd).returncode != 0:
             raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
@@ -876,12 +873,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind tests."
     )
     parser.add_argument(
-        "--k6-scripts-image",
+        "--k6-runner-image",
         type=str,
         default="",
-        help="Complete reference to the k6 scripts image (migrations/k6_scripts), the data image "
-             "mounted at /scripts that carries the load-test scenarios and presets. Accepts a tag "
-             "or a digest pin, e.g. '<ecr-repo>:migrations_k6_scripts_latest' or "
+        help="Complete reference to the combined k6 load-test runner (migrations/k6_runner), which "
+             "contains the pinned k6 extensions, scenarios, and presets. Accepts a tag "
+             "or a digest pin, e.g. '<ecr-repo>:migrations_k6_runner_latest' or "
              "'<repo>@sha256:...'. Only used by load-test cases (008x). Without it the reference is "
              "derived from --registry-prefix."
     )
@@ -949,7 +946,7 @@ def main() -> None:
                              trace_backend=args.trace_backend or "",
                              k6_chart_path=k6_chart_path,
                              k6_install_script=k6_install_script,
-                             k6_scripts_image=args.k6_scripts_image)
+                             k6_runner_image=args.k6_runner_image)
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()

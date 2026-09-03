@@ -97,10 +97,10 @@ header "Service health"
 # readiness is the CRs' phase; the Deployment check then confirms pods are actually serving.
 check_migration_resources_ready
 check_workload_health
-# redis/webdis back the mixed scenario's id registry, and come from the k6LoadTest chart
+# Valkey backs the mixed scenario's ID registry and comes from the k6LoadTest chart
 # (registry.enabled=true) rather than from the migration workflow.
 if [[ "$SCENARIO" == "mixed" ]]; then
-  check_service_health "" redis webdis
+  check_service_health "" valkey
 fi
 
 # Ramp/burst shapes: report the peak arrival rate reached (constant-rate steady runs skip this).
@@ -156,12 +156,12 @@ check_search() {
 }
 
 check_mixed() {
-  header "Webdis PING"
-  webdis_raw=$(kcurl -sf "http://webdis:7379/PING" 2>/dev/null || echo "")
-  if echo "$webdis_raw" | grep -q "PONG"; then
-    pass "Webdis reachable (PING → PONG)"
+  header "Valkey PING"
+  valkey_raw=$(K exec deploy/valkey -- valkey-cli PING 2>/dev/null || echo "")
+  if [[ "$valkey_raw" == "PONG" ]]; then
+    pass "Valkey reachable (PING → PONG)"
   else
-    info "Webdis PING response: '${webdis_raw:-none}' (needs the chart installed with registry.enabled=true)"
+    info "Valkey PING response: '${valkey_raw:-none}' (needs the chart installed with registry.enabled=true)"
   fi
   header "OpenSearch index (source)"
   check_opensearch_docs nyc_taxis 1 source

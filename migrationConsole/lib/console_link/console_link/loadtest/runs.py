@@ -4,9 +4,8 @@ cluster, with no Click in it, so the CLI and the TUI drive the same code.
 Each run is an **Argo Workflow** that creates a k6-operator **TestRun** and waits for it. The
 operator, the per-scenario WorkflowTemplates, and this client's RBAC ship in the standalone
 k6LoadTest chart (deployment/k8s/charts/components/k6LoadTest), which is installed separately from
-any migration; the scenarios and presets themselves ride in a data image (migrations/k6_scripts,
-built from TrafficCapture/trafficLoadTest) that the templates mount at /scripts on stock grafana/k6
-pods.
+any migration. The load-test-only migrations/k6_runner image contains the pinned k6 executable,
+extensions, scenarios, and presets.
 
 A run is specified by a load `profile` — one WorkflowTemplate, e.g. `k6-ingest-burst` — which states
 every setting of that run as a named Argo parameter with a value. Submitting overrides only the
@@ -178,7 +177,6 @@ _VALUE_ENV_VARS = (
     ("rate", ("INGEST_RATE", "SEARCH_RATE")),
     ("vus", ("INGEST_VUS", "SEARCH_VUS")),
     ("targetUrl", ("CAPTURE_PROXY_URL",)),
-    ("webdisUrl", ("WEBDIS_URL",)),
 )
 # The toggles are three-state: None means "keep the template's value", so they can't use the
 # truthiness test above — an explicit False still has to emit an override to turn a profile's
@@ -237,7 +235,7 @@ def _override_env(params, declared, profile):
 
 def build_k6_parameters(scenario=None, config_name=None, parallelism=1, target_url=None, rate=None,
                         duration=None, vus=None, registry_enabled=None, control_enabled=None,
-                        webdis_url=None, auth_secret_name=None, overrides_text=None, extra_args=None):
+                        auth_secret_name=None, overrides_text=None, extra_args=None):
     """Normalize run inputs into a params dict (shared by the CLI and the TUI).
 
     A run needs a profile. Naming a scenario alone means its steady profile; naming a profile alone
@@ -263,7 +261,6 @@ def build_k6_parameters(scenario=None, config_name=None, parallelism=1, target_u
         "vus": vus,
         "registryEnabled": registry_enabled,
         "controlEnabled": control_enabled,
-        "webdisUrl": webdis_url,
         "authSecretName": auth_secret_name,
         "overrides": overrides_text,
         "extraArgs": extra_args,

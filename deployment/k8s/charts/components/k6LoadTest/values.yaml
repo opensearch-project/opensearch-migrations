@@ -1,50 +1,12 @@
 # k6 load-test component. Installed separately from any migration (opt-in), so a normal
 # migrationAssistant deployment contains no operator, scenarios, RBAC, or CLI capability.
 
-# A run pulls TWO images: the stock k6 runtime, and a data-only image carrying the load test.
-# Neither the operator nor this chart holds any scenario content.
-
-# Runner image — grafana/k6, unmodified, used as both spec.initializer.image and
-# spec.runner.image.
+# A run pulls one load-test-only image containing the pinned k6 executable, its compiled extensions,
+# and all scenarios under /scripts. The Dockerfile owns the k6 and extension versions.
 #
-# `tag` is THE place the k6 version is pinned: it becomes the `runnerImage` parameter default on
-# every WorkflowTemplate, so a run uses it unless a caller overrides it explicitly. Callers that
-# need a different registry (a mirror, a private ECR) should override `image.repository` ONLY and
-# leave the tag alone — otherwise the version is decided in several places at once and drifts.
-# Upgrading k6 is a one-line change here.
-#
-# `repository` defaults to the Docker Hub name. Point it at a mirror when Docker Hub is rate-limited
-# or unreachable — the tags are identical, so the pin still applies:
-#   --set image.repository=mirror.gcr.io/grafana/k6
+# `digest` pins exact content and wins over `tag`.
 image:
-  repository: grafana/k6
-  tag: "2.2.0"
-  pullPolicy: IfNotPresent
-
-# Scripts image — migrations/k6_scripts, a `FROM scratch` data image built from
-# TrafficCapture/trafficLoadTest, mounted read-only at /scripts on the initializer and every runner
-# via a Kubernetes `image:` volume (the same mechanism as the migration's mountable transforms; it
-# is why this chart requires k8s >= 1.35). It holds the scenarios, libs and document schemas — the
-# ONLY place that content lives, so editing a scenario means rebuilding and pushing this image, not a
-# helm upgrade. The load PROFILES are not in it: they are the `profiles` map below, so changing a
-# load shape is a helm upgrade. (It also carries k6-config/*.env, which only a local `k6 run` uses.)
-#
-# It is NOT a released artifact (load testing is a dev/test capability, so it is not published
-# publicly, not mirrored by aws-bootstrap.sh, and not built by :buildImages:buildImagesToRegistry)
-# — build and push it yourself (~100 KB) with
-#   ./gradlew :buildImages:buildKitLoadTestAll -PregistryEndpoint=<registry>
-# then point this at wherever it landed:
-#   local minikube:  --set scriptsImage.repository=localhost:5001/migrations/k6_scripts
-#   ECR (one repo, per-image tags):
-#                    --set scriptsImage.repository=<acct>.dkr.ecr.<region>.amazonaws.com/<repo> \
-#                    --set scriptsImage.tag=migrations_k6_scripts_latest
-#
-# `digest` pins the exact content and WINS over `tag` when set (repository@sha256:...), which is the
-# reproducible way to reference it — a moving tag otherwise leaves the content up to each node's
-# pull policy:
-#   --set scriptsImage.digest=sha256:<hex>
-scriptsImage:
-  repository: migrations/k6_scripts
+  repository: migrations/k6_runner
   tag: "latest"
   digest: ""
   pullPolicy: IfNotPresent
@@ -90,7 +52,7 @@ testRun:
 # Where a run aims its traffic. This is deployment topology — the proxy's service name and namespace
 # — not a load profile, so it belongs to the chart rather than to the k6-config/*.env presets, which
 # describe only the shape of the load. Keeping it here means pointing runs at a differently named
-# proxy is a `helm install` flag instead of a rebuild of the migrations/k6_scripts image.
+# proxy is a `helm install` flag instead of a rebuild of the migrations/k6_runner image.
 #
 # Precedence: `loadtest run --target` / `-p CAPTURE_PROXY_URL=` beats this per run, and this is the
 # default of the CAPTURE_PROXY_URL parameter on every rendered WorkflowTemplate.
@@ -150,7 +112,7 @@ scenarios:
       NO_CONNECTION_REUSE: "false"
       CONTROL_ENABLED: "false"           # chaos control bus (needs registry.enabled=true)
       CONTROL_CMD_KEY: control_cmd
-      WEBDIS_URL: http://webdis:7379     # read by the control bus only
+      VALKEY_URL: redis://valkey:6379    # read by the control bus only
       AUTH_MODE: ""                      # blank = infer Basic/SigV4 credentials, else none
       AUTH_USERNAME: ""                  # per-run input — never give these a value here
       AUTH_PASSWORD: ""
@@ -196,11 +158,11 @@ scenarios:
       CONSISTENCY_FRACTION: "0.10"       # share of searches that read back a just-written doc ID
       CONNECTION_MODE: pinned            # pinned (keep-alive) | spread (Connection: close)
       NO_CONNECTION_REUSE: "false"
-      REGISTRY_ENABLED: "false"          # the Redis ID ring that connects the two streams
+      REGISTRY_ENABLED: "false"          # the Valkey ID ring that connects the two streams
       REGISTRY_KEY: recent_ids
       REGISTRY_CAP: "1000"
       MIN_RING_FILL: "0"                 # delay the search stream until the ring holds this many IDs
-      WEBDIS_URL: http://webdis:7379
+      VALKEY_URL: redis://valkey:6379
       CONTROL_ENABLED: "false"
       CONTROL_CMD_KEY: control_cmd
       AUTH_MODE: ""
@@ -268,7 +230,7 @@ profiles:
       SEARCH_MAX_VUS: "200"
 
   # ── mixed ─────────────────────────────────────────────────────────────────
-  # Every mixed profile turns the ID ring on, so it needs registry.enabled=true (redis + webdis).
+  # Every mixed profile turns the ID ring on, so it needs registry.enabled=true (Valkey).
   mixed-steady:
     scenario: mixed
     description: Concurrent ingest (30 req/s) and search (20 req/s) for 5m, with consistency reads.
@@ -311,10 +273,14 @@ k6Output:
   K6_OTEL_GRPC_EXPORTER_ENDPOINT: otel-collector:4317
   K6_OTEL_GRPC_EXPORTER_INSECURE: "true"
 
-# Redis + Webdis sidecars, required only by the mixed (write-then-read) and chaos scenarios.
-# Off by default; those scenarios degrade gracefully to flat searches when absent.
+# Valkey is required only by the mixed write-then-read registry and chaos control bus. It is off by
+# default; mixed runs degrade to flat searches when the registry is disabled or unavailable.
 registry:
   enabled: false
+  image:
+    repository: valkey/valkey
+    tag: 8.1.9-alpine
+    pullPolicy: IfNotPresent
 
 # Grafana dashboard auto-import (via the kube-prometheus-stack Grafana sidecar). Harmless if that
 # stack is absent — the ConfigMap simply isn't picked up.

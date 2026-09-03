@@ -82,15 +82,15 @@ def call(Map config = [:]) {
                         def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
 
-                        // The load-test cases (008x) run on the k6LoadTest chart, which mounts the
-                        // migrations/k6_scripts data image. That image is not part of the standard
-                        // image set, so the bootstrap must be told to build it. The 008x prefix is
-                        // the same trigger that makes test_runner.py install the chart.
+                        // The load-test cases (008x) use the combined migrations/k6_runner image.
+                        // It is not part of the standard image set, so the bootstrap must be told
+                        // to build it. The 008x prefix is the same trigger that makes
+                        // test_runner.py install the chart.
                         env.needsLoadTestImages = params.TEST_IDS.split(',')
                                 .any { it.trim().startsWith(loadTestIdPrefix) }.toString()
                         if (env.needsLoadTestImages == "true" && (!params.BUILD || params.USE_RELEASE_BOOTSTRAP)) {
                             error("Test IDs ${params.TEST_IDS} include a load-test case (${loadTestIdPrefix}x), " +
-                                  "which needs the migrations/k6_scripts image. No release publishes that image, " +
+                                  "which needs the migrations/k6_runner image. No release publishes that image, " +
                                   "so it must be built from source. Set BUILD=true and USE_RELEASE_BOOTSTRAP=false.")
                         }
                     }
@@ -289,16 +289,16 @@ def call(Map config = [:]) {
                                 if (traceTestIds != "") {
                                     traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
                                 }
-                                // The k6 scripts image (migrations/k6_scripts) is handed over as a
+                                // The combined k6 runner (migrations/k6_runner) is handed over as a
                                 // complete reference, the same way the transform images above are.
                                 // It is not part of the standard image set: only a bootstrap that
                                 // also gets --with-load-test-images pushes it to this run's private
                                 // ECR registry, under ECR's flattened tag layout. The flag is set
                                 // above when a load-test case (008x) is selected, and only those
                                 // cases consume the reference.
-                                def k6ScriptsImage = "${env.registryEndpoint}:migrations_k6_scripts_latest"
+                                def k6RunnerImage = "${env.registryEndpoint}:migrations_k6_runner_latest"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-scripts-image='${k6ScriptsImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}' --verify-resource-tags --ma-stack-name='${env.MA_STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-runner-image='${k6RunnerImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}' --verify-resource-tags --ma-stack-name='${env.MA_STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
                                 }
                             }
                         }

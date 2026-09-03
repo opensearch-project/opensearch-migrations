@@ -38,14 +38,11 @@
 #
 # Parameter naming carries meaning and clients rely on it: an ALL_CAPS parameter is a runner
 # environment variable, anything camelCase configures the run around it (images, parallelism).
-{{- $image := printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
+{{- $image := ternary
+      (printf "%s@%s" .Values.image.repository .Values.image.digest)
+      (printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion))
+      (ne (toString .Values.image.digest) "") }}
 {{- $starter := printf "%s:%s" .Values.starterImage.repository .Values.starterImage.tag }}
-{{- $scripts := .Values.scriptsImage }}
-{{- /* A digest pins exact content and wins over the tag — see the values.yaml comment. */ -}}
-{{- $scriptsRef := ternary
-      (printf "%s@%s" $scripts.repository $scripts.digest)
-      (printf "%s:%s" $scripts.repository ($scripts.tag | default .Chart.AppVersion))
-      (ne (toString $scripts.digest) "") }}
 {{- range $profile, $p := .Values.profiles }}
 {{- $s := index $.Values.scenarios $p.scenario | required (printf "profile %q names unknown scenario %q" $profile $p.scenario) }}
 {{- /*
@@ -110,10 +107,6 @@ spec:
         value: {{ $image | quote }}
       - name: starterImage
         value: {{ $starter | quote }}
-      - name: scriptsRef
-        value: {{ $scriptsRef | quote }}
-      - name: scriptsPullPolicy
-        value: {{ $scripts.pullPolicy | quote }}
       # The load itself: everything this scenario reads, at this profile's values. Every one of
       # these reaches the runner as the environment variable of the same name; see values.yaml for
       # what each does.
@@ -153,20 +146,11 @@ spec:
             starter:
               image: "{{`{{workflow.parameters.starterImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
-            # The initializer runs `k6 archive`, so it needs the same scenarios at the same path as
-            # the runners. It gets no env: it only has to parse the script, and giving it the load
-            # configuration would make a typo in a parameter fail in the wrong pod.
+            # The initializer runs `k6 archive`. The custom runner image contains both the compiled
+            # extensions and the scenarios under /scripts, so initializer and runners use one image.
             initializer:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
-              volumes:
-                - name: scripts
-                  image:
-                    reference: "{{`{{workflow.parameters.scriptsRef}}`}}"
-                    pullPolicy: "{{`{{workflow.parameters.scriptsPullPolicy}}`}}"
-              volumeMounts:
-                - name: scripts
-                  mountPath: /scripts
             runner:
               image: "{{`{{workflow.parameters.runnerImage}}`}}"
               imagePullPolicy: {{ $.Values.image.pullPolicy }}
@@ -189,12 +173,4 @@ spec:
                 - name: {{ $k }}
                   value: '{{ printf "{{workflow.parameters.%s}}" $k }}'
 {{- end }}
-              volumes:
-                - name: scripts
-                  image:
-                    reference: "{{`{{workflow.parameters.scriptsRef}}`}}"
-                    pullPolicy: "{{`{{workflow.parameters.scriptsPullPolicy}}`}}"
-              volumeMounts:
-                - name: scripts
-                  mountPath: /scripts
 {{- end }}

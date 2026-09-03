@@ -6,8 +6,8 @@ capture-and-replay pipeline moved that traffic to the target — i.e. the pipeli
 not just for a handful of hand-written docs.
 
 Requires the standalone k6LoadTest chart to be installed (operator + per-scenario WorkflowTemplates
-+ RBAC) and the migrations/k6_scripts image, the data image mounted at /scripts that carries the
-scenarios and presets. The test runner installs the chart on its own when a load-test ID (0080-0089)
++ RBAC) and the migrations/k6_runner image, which carries the pinned runtime, scenarios, and
+presets. The test runner installs the chart on its own when a load-test ID (0080-0089)
 is selected; the case is explicit-selection only so it never runs in a normal migration suite.
 """
 

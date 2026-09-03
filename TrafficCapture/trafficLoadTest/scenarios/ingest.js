@@ -30,9 +30,9 @@
  *   RAMP_STAGES        — JSON array of k6 stage objects when EXECUTOR=ramping-arrival-rate
  *                        e.g. '[{"duration":"2m","target":150},{"duration":"1m","target":0}]'
  *                        Omit to use a single hold-at-INGEST_RATE-for-DURATION stage.
- *   CONTROL_ENABLED    — "true" to enable mid-test pause/resume/rate control via Webdis;
+ *   CONTROL_ENABLED    — "true" to enable mid-test pause/resume/rate control via Valkey;
  *                        defaults to "false" (no-op). See lib/control.js.
- *   CONTROL_CMD_KEY    — Redis key polled for control commands (default: "control_cmd")
+ *   CONTROL_CMD_KEY    — Valkey key polled for control commands (default: "control_cmd")
  */
 
 import http from '../lib/http-client.js';
@@ -146,8 +146,8 @@ export function setup() {
 
 // ── VU function ────────────────────────────────────────────────────────────
 // Dispatch: SEQ_FRACTION → sequence; remaining budget → BULK_FRACTION bulk / rest single-doc.
-export default function () {
-  if (!checkControl(RATE)) return;
+export default async function () {
+  if (!await checkControl(RATE)) return;
 
   const r = Math.random();
   if (r < SEQ_FRACTION) {

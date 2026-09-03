@@ -7,7 +7,7 @@
 //   3. Explicit version without build: downloads artifacts for that version
 //
 // Optional 'loadTestImages: true' adds --with-load-test-images, which also builds
-// migrations/k6_scripts. Only the k6 load-test cases (Test008x) need it. It requires
+// migrations/k6_runner. Only the k6 load-test cases (Test008x) need it. It requires
 // build=true, because no release publishes that image.
 def call(Map config = [:]) {
     def bootstrapScript
@@ -36,7 +36,7 @@ def call(Map config = [:]) {
     if (build) {
         flags << '--build'
         if (skipTestImages) flags << '--skip-test-images'
-        // The load-test images (migrations/k6_scripts) are a separate gradle aggregate.
+        // The load-test images (migrations/k6_runner) are a separate gradle aggregate.
         // --build alone does not build them, and no release publishes them.
         if (loadTestImages) flags << '--with-load-test-images'
         // --build and --version are mutually exclusive; no --version needed

@@ -43,7 +43,7 @@ _SCENARIO_ENV = {
                "K6_OUT": "opentelemetry", "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
     "mixed": {"INGEST_RATE": "30", "SEARCH_RATE": "20", "INGEST_VUS": "15", "SEARCH_VUS": "15",
               "DURATION": "5m", "REGISTRY_ENABLED": "true", "CONTROL_ENABLED": "false",
-              "WEBDIS_URL": "http://webdis:7379", "K6_OUT": "opentelemetry",
+              "VALKEY_URL": "redis://valkey:6379", "K6_OUT": "opentelemetry",
               "CAPTURE_PROXY_URL": "https://capture-proxy:9201"},
 }
 
@@ -67,8 +67,7 @@ def _template(profile, scenario=None, env=None):
                 {"name": "separate", "value": "false"},
                 {"name": "arguments", "value": ""},
                 {"name": "authSecretName", "value": "k6-load-test-auth"},
-                {"name": "runnerImage", "value": "grafana/k6:2.2.0"},
-                {"name": "scriptsRef", "value": "migrations/k6_scripts:latest"},
+                {"name": "runnerImage", "value": "migrations/k6_runner:latest"},
             ] + [{"name": k, "value": v} for k, v in sorted(env.items())]},
         },
     }
@@ -699,8 +698,7 @@ class TestLoadTemplateDefaults:
     def test_defaults_are_read_from_the_template(self, monkeypatch):
         monkeypatch.setattr(runs_mod, "get_workflow_template", _fake_get_workflow_template)
         defaults = load_template_defaults("ma", "ingest-steady")
-        assert defaults["runnerImage"] == "grafana/k6:2.2.0"
-        assert defaults["scriptsRef"] == "migrations/k6_scripts:latest"
+        assert defaults["runnerImage"] == "migrations/k6_runner:latest"
         assert defaults["INGEST_RATE"] == "50"      # the load is in the template too
 
 

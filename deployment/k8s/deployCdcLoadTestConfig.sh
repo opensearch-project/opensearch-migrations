@@ -32,7 +32,7 @@
 #   CONTEXT=<kube-context>  NAMESPACE=ma  CONFIG_FILE=<path>
 #   CLUSTER_USERNAME=admin  CLUSTER_PASSWORD=admin   (for the secrets the config references)
 #   READY_TIMEOUT=1800  POLL_INTERVAL=10  QUERY_RETRIES=3
-#   K6_IMAGE / K6_SCRIPTS_IMAGE / K6_RELEASE         (passed through to installK6Chart.sh, which
+#   K6_IMAGE / K6_RELEASE                            (passed through to installK6Chart.sh, which
 #                                                     owns both the install and the uninstall)
 #
 # non-zero exit codes:

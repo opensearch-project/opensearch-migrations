@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Validates the runtime control plane: pause / resume / dynamic rate via the Webdis control bus.
-# Needs Redis+Webdis (install the chart with registry.enabled=true) and the data plane up.
+# Validates the runtime control plane: pause / resume / dynamic rate via the Valkey control bus.
+# Needs Valkey (install the chart with registry.enabled=true) and the data plane up.
 #
 # Usage:
 #   ./scripts/run_test_chaos.sh --run    # submit a controlled k6 run, drive it, then check
@@ -26,11 +26,11 @@ echo -e "\n${BOLD}Chaos Control Validation — $(date '+%Y-%m-%d %H:%M:%S')${NC}
 echo "──────────────────────────────────────────────────"
 
 header "Step 1 — Service health"
-# The pipeline itself is workflow-owned (CR phase + Deployment); redis/webdis are the chaos control
-# bus from the k6LoadTest chart, which this script requires (registry.enabled=true).
+# The pipeline itself is workflow-owned (CR phase + Deployment); Valkey is the chaos control bus
+# from the k6LoadTest chart, which this script requires (registry.enabled=true).
 check_migration_resources_ready
 check_workload_health
-check_service_health "" redis webdis
+check_service_health "" valkey
 
 if $WITH_RUN; then
   header "Step 2 — Submitting a controlled k6 run (CONTROL_ENABLED, 2m)"
@@ -47,10 +47,10 @@ fi
 
 header "Step 3 — Pause"
 offset_before_pause=$(kafka_total_offset)
-webdis_set "control_cmd" "pause"
-stored=$(webdis_get "control_cmd")
-[[ "$stored" == "pause" ]] && info "Pause signal verified in Redis (control_cmd=pause)" \
-                           || info "Webdis GET after SET: '${stored}' (expected 'pause')"
+valkey_set "control_cmd" "pause"
+stored=$(valkey_get "control_cmd")
+[[ "$stored" == "pause" ]] && info "Pause signal verified in Valkey (control_cmd=pause)" \
+                           || info "Valkey GET after SET: '${stored}' (expected 'pause')"
 sleep 10
 offset_after_pause=$(kafka_total_offset)
 pause_delta=$(( offset_after_pause - offset_before_pause ))
@@ -62,7 +62,7 @@ fi
 
 header "Step 4 — Resume"
 offset_before_resume=$(kafka_total_offset)
-webdis_set "control_cmd" "resume"
+valkey_set "control_cmd" "resume"
 info "Sent resume signal (control_cmd=resume)"
 sleep 10
 offset_after_resume=$(kafka_total_offset)
@@ -74,7 +74,7 @@ else
 fi
 
 header "Step 5 — Dynamic rate (set-rate:10)"
-webdis_set "control_cmd" "set-rate%3A10"
+valkey_set "control_cmd" "set-rate:10"
 info "Sent set-rate:10 (throttle). Effective throughput should drop; observe in Grafana."
 
 print_summary

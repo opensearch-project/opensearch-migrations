@@ -148,13 +148,11 @@ k6_active_count() {
     | grep -cvE 'Succeeded|Failed|Error' || true
 }
 
-# ── Webdis (chaos / consistency control bus) ───────────────────────────────────
-# Values with ':' must be URL-encoded (e.g. "set-rate:10" -> "set-rate%3A10").
-webdis_set() { kcurl -sf "http://webdis:7379/SET/${1}/${2}" >/dev/null; }
-webdis_get() {
-  kcurl -sf "http://webdis:7379/GET/${1}" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('GET') or '')" 2>/dev/null || true
-}
+# ── Valkey (chaos / consistency control bus) ──────────────────────────────────
+# valkey-cli is already present in the chart's Valkey container, so host-side validation can drive
+# the control bus without a permanent HTTP proxy or another client image.
+valkey_set() { K exec deploy/valkey -- valkey-cli SET "$1" "$2" >/dev/null; }
+valkey_get() { K exec deploy/valkey -- valkey-cli GET "$1" 2>/dev/null || true; }
 
 # ── Prometheus (kube-prometheus-stack, queried from the console pod) ────────────
 prom_query() {
@@ -271,8 +269,8 @@ check_workload_health() {
 }
 
 # Plain Deployment availability by name. Used for workloads that are NOT workflow-owned and so keep
-# fixed names — redis and webdis, which the k6LoadTest chart deploys when registry.enabled=true.
-# Usage: check_service_health "(post-burst)" redis webdis
+# fixed names — currently Valkey, which the k6LoadTest chart deploys when registry.enabled=true.
+# Usage: check_service_health "(post-burst)" valkey
 check_service_health() {
   local label="${1:-}"; shift
   for d in "$@"; do

@@ -192,7 +192,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
       echo "                                            Useful for CI systems that need a predictable context name."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
-      echo "  --with-load-test-images                   Also build the load-test images (migrations/k6_scripts)."
+      echo "  --with-load-test-images                   Also build the load-test images (migrations/k6_runner)."
       echo "                                            They are not part of the standard image set. Only the k6"
       echo "                                            load-test cases (Test008x) need them. Requires --build."
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
@@ -483,7 +483,7 @@ validate_args() {
   if [[ "$with_load_test_images" == "true" ]]; then
     if [[ "$build" != "true" ]]; then
       echo "Error: --with-load-test-images requires --build." >&2
-      echo "  The load-test images (migrations/k6_scripts) are not published in a release." >&2
+      echo "  The load-test images (migrations/k6_runner) are not published in a release." >&2
       exit 1
     fi
     if [[ -n "$ma_images_source" ]]; then
@@ -1761,7 +1761,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   BUILD_TARGETS=":buildImages:buildImagesToRegistry"
   # Load-test images are their own aggregate (see buildImages/build.gradle), so
   # buildImagesToRegistry does not build them. Only the k6 load-test cases
-  # (Test008x) need migrations/k6_scripts in the registry.
+  # (Test008x) need migrations/k6_runner in the registry.
   if [[ "$with_load_test_images" == "true" ]]; then
     BUILD_TARGETS="${BUILD_TARGETS} :buildImages:buildKitLoadTestAll"
   fi

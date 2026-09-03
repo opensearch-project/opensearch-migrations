@@ -5,7 +5,7 @@
  *   mixed_ingest  — ingest stream (Profile 1 operation mix)
  *   mixed_search  — search stream (Profile 2 operation mix)
  *
- * Shared ID registry: ingest VUs write newly-created doc IDs to a Redis ring
+ * Shared ID registry: ingest VUs write newly-created doc IDs to a Valkey ring
  * buffer. CONSISTENCY_FRACTION of search iterations draw an ID from the ring
  * and issue a targeted GET to verify write-then-read consistency through the
  * Capture Proxy → Kafka pipeline.
@@ -34,7 +34,7 @@
  *   NO_CONNECTION_REUSE     — "true" to disable keep-alive at the k6 transport level for all VUs
  *                             (noConnectionReuse: true); use alongside CONNECTION_MODE=spread for a
  *                             guaranteed per-request TCP teardown independent of server behaviour
- *   WEBDIS_URL              — Webdis HTTP-to-Redis proxy URL (default: http://webdis:7379)
+ *   VALKEY_URL              — direct Valkey endpoint (default: redis://valkey:6379)
  *   EXECUTOR                — "constant-arrival-rate" (default) or "ramping-arrival-rate"
  *   INGEST_RAMP_STAGES      — JSON stage array for the ingest stream when EXECUTOR=ramping-arrival-rate
  *                             e.g. '[{"duration":"2m","target":80},{"duration":"1m","target":0}]'
@@ -42,9 +42,9 @@
  *   MIN_RING_FILL           — minimum number of IDs the ring must contain before search VUs start;
  *                             converted to a startTime delay using the estimated single-doc ID rate
  *                             (INGEST_RATE × (1−SEQUENCE_FRACTION) × (1−BULK_FRACTION)); default 0 (no delay)
- *   CONTROL_ENABLED         — "true" to enable mid-test pause/resume/rate control via Webdis;
+ *   CONTROL_ENABLED         — "true" to enable mid-test pause/resume/rate control via Valkey;
  *                             defaults to "false" (no-op). See lib/control.js.
- *   CONTROL_CMD_KEY         — Redis key polled for control commands (default: "control_cmd")
+ *   CONTROL_CMD_KEY         — Valkey key polled for control commands (default: "control_cmd")
  */
 
 import http from '../lib/http-client.js';
@@ -206,9 +206,9 @@ export const options = {
 
 // ── Setup ───────────────────────────────────────────────────────────────────
 // 1. Ensure the index exists with the correct mapping (same guard as search.js).
-// 2. Flush the Redis ID ring so the test starts from a known-empty state.
+// 2. Flush the Valkey ID ring so the test starts from a known-empty state.
 // 3. Sample up to 100 seed doc IDs for the search stream's partial-update operation.
-export function setup() {
+export async function setup() {
   const indexUrl = `${PROXY_URL}/${INDEX}`;
 
   const existing = http.get(indexUrl, { tags: { name: 'setup_check_index' } });
@@ -247,7 +247,7 @@ export function setup() {
   }
 
   // Flush the ID ring so the test does not draw from a previous run's IDs.
-  registryFlush();
+  await registryFlush();
   console.log('setup: flushed ID ring (recent_ids)');
   if (RING_FILL_DELAY_S > 0) {
     console.log(
@@ -286,8 +286,8 @@ export function setup() {
 // ── Ingest VU ───────────────────────────────────────────────────────────────
 // Dispatch: SEQ_FRACTION → sequence (ephemeral, no registry)
 //           remaining budget → BULK_FRACTION bulk / rest single-doc with registry
-export function ingestVU() {
-  if (!checkControl(INGEST_RATE)) return;
+export async function ingestVU() {
+  if (!await checkControl(INGEST_RATE)) return;
 
   const r = Math.random();
   if (r < SEQ_FRACTION) {
@@ -295,21 +295,21 @@ export function ingestVU() {
   } else if (r < SEQ_FRACTION + (1 - SEQ_FRACTION) * BULK_FRACTION) {
     sendBulk();
   } else {
-    doSingleDocWithRegistry();
+    await doSingleDocWithRegistry();
   }
 }
 
 // ── Search VU ───────────────────────────────────────────────────────────────
-// CONSISTENCY_FRACTION of iterations draw a recently-ingested ID from Redis.
+// CONSISTENCY_FRACTION of iterations draw a recently-ingested ID from Valkey.
 // The remaining iterations the configured mix.
 // NOTE: data input is the return value of setup().
-export function searchVU(data) {
-  if (!checkControl(SEARCH_RATE)) return;
+export async function searchVU(data) {
+  if (!await checkControl(SEARCH_RATE)) return;
 
   const { seedDocIds } = data;
 
   if (Math.random() < CONSISTENCY_FRACTION) {
-    doConsistencyRead();
+    await doConsistencyRead();
     return;
   }
 
@@ -335,7 +335,7 @@ function doSequence() {
   ingestErrors.add(success ? 0 : 1);
 }
 
-function doSingleDocWithRegistry() {
+async function doSingleDocWithRegistry() {
   // Use an explicit PUT with a known ID so we can register it after a successful write.
   // mix-<VU>-<ITER> is unique per VU + iteration within the run.
   const id = `mix-${__VU}-${__ITER}`;
@@ -348,7 +348,7 @@ function doSingleDocWithRegistry() {
   ingestErrors.add(res.status >= 400 ? 1 : 0);
   check(res, { 'single doc written (200/201)': (r) => r.status === 200 || r.status === 201 });
   if (res.status === 200 || res.status === 201) {
-    registryWrite(id);
+    await registryWrite(id);
   }
 }
 
@@ -372,8 +372,8 @@ function sendBulk() {
 
 // ── Search helpers ──────────────────────────────────────────────────────────
 
-function doConsistencyRead() {
-  const docId = registryRead();
+async function doConsistencyRead() {
+  const docId = await registryRead();
   const hit = docId !== null && docId !== undefined;
   idRegistryHits.add(hit ? 1 : 0);
   if (!hit) {

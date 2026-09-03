@@ -2,12 +2,12 @@
  * Chaos control hooks.
  *
  * Allows an external orchestration layer to pause, resume, or throttle traffic
- * mid-test by writing a command string to a Redis key via the Webdis HTTP sidecar.
+ * mid-test by writing a command string to a Valkey key.
  *
  * Disabled by default (CONTROL_ENABLED != "true"). When disabled, checkControl()
- * returns true immediately — zero Webdis calls, zero overhead per iteration.
+ * returns true immediately — zero Valkey calls, zero overhead per iteration.
  *
- * Commands (written by the orchestration layer to the Redis key named by
+ * Commands (written by the orchestration layer to the Valkey key named by
  * CONTROL_CMD_KEY, default "control_cmd"):
  *
  *   pause        — VU enters a 50 ms sleep loop until the command is no longer
@@ -18,44 +18,33 @@
  *                  effective throughput ≈ N/baseRate × configured rate. Coarse-
  *                  grained: works best for ≥20% reductions at the configured rate.
  *
- * How to send commands from the host while k6 is running inside Docker
- * (Webdis is exposed on host port 7379):
+ * How to send commands from a host with kubectl access:
  *
  *   # pause all VUs:
- *   curl -s "http://localhost:7379/SET/control_cmd/pause"
+ *   kubectl exec deploy/valkey -- valkey-cli SET control_cmd pause
  *
  *   # resume (two equivalent approaches):
- *   curl -s "http://localhost:7379/SET/control_cmd/resume"
- *   curl -s "http://localhost:7379/DEL/control_cmd"
+ *   kubectl exec deploy/valkey -- valkey-cli SET control_cmd resume
+ *   kubectl exec deploy/valkey -- valkey-cli DEL control_cmd
  *
  *   # throttle to ~10 req/s (with baseRate=50, skips 80% of iterations):
- *   curl -s "http://localhost:7379/SET/control_cmd/set-rate%3A10"
+ *   kubectl exec deploy/valkey -- valkey-cli SET control_cmd set-rate:10
  *
  *   # clear throttle:
- *   curl -s "http://localhost:7379/DEL/control_cmd"
+ *   kubectl exec deploy/valkey -- valkey-cli DEL control_cmd
  *
  */
 
-import http from 'k6/http';
 import { sleep } from 'k6';
 import { CFG } from './config.js';
+import { valkeyCommand } from './valkey.js';
 
 const ENABLED    = (CFG.CONTROL_ENABLED || 'false').toLowerCase() === 'true';
-const WEBDIS_URL = CFG.WEBDIS_URL      || 'http://webdis:7379';
 const CMD_KEY    = CFG.CONTROL_CMD_KEY || 'control_cmd';
 
-// Tag all control-poll requests distinctly so they don't inflate pipeline metrics.
-const POLL_PARAMS = { tags: { name: 'control_poll' } };
-
-/** Read the current command string from Redis via Webdis. Returns '' on any error. */
-function readCmd() {
-  const res = http.get(`${WEBDIS_URL}/GET/${CMD_KEY}`, POLL_PARAMS);
-  if (res.status !== 200) return '';
-  try {
-    return JSON.parse(res.body).GET || '';
-  } catch (_) {
-    return '';
-  }
+/** Read the current command string from Valkey. Returns '' on any error. */
+async function readCmd() {
+  return (await valkeyCommand('GET', CMD_KEY)) || '';
 }
 
 /**
@@ -67,17 +56,17 @@ function readCmd() {
  * @param {number} baseRate - the scenario's configured req/s target; used to
  *   compute the skip probability for set-rate throttling. Pass 0 to disable
  *   throttling (pause/resume still work).
- * @returns {boolean} true → proceed with this iteration; false → skip it.
+ * @returns {Promise<boolean>} true → proceed with this iteration; false → skip it.
  */
-export function checkControl(baseRate) {
+export async function checkControl(baseRate) {
   if (!ENABLED) return true;
 
-  const cmd = readCmd();
+  const cmd = await readCmd();
 
   if (cmd === 'pause') {
     // Spin in 50 ms increments until the command is cleared or changed.
-    // readCmd() returns '' on Webdis error, which exits the loop (fail open).
-    while (readCmd() === 'pause') {
+    // readCmd() returns '' on Valkey error, which exits the loop (fail open).
+    while (await readCmd() === 'pause') {
       sleep(0.05);
     }
     return true; // proceed normally after resume

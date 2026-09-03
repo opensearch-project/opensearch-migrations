@@ -3,8 +3,8 @@
 #
 # A run is an Argo Workflow that creates a k6-operator TestRun and waits for it. The chart renders
 # one WorkflowTemplate per load profile (k6-ingest-burst, k6-mixed-steady, …) holding the whole run
-# definition: the images, the scripts image mounted at /scripts, and EVERY setting of that profile
-# as a named parameter with a value. This only names the template and what the run changes.
+# definition: the combined runner image and EVERY setting of that profile as a named parameter with
+# a value. This only names the template and what the run changes.
 #
 # Usage:
 #   ./k6-run.sh <ingest|search|mixed> [--config PROFILE] [--parallelism N] [--target URL]
