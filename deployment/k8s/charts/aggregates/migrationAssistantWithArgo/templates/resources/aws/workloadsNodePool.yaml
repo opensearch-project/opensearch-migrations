@@ -13,7 +13,7 @@ spec:
       nodeClassRef:
         group: eks.amazonaws.com
         kind: NodeClass
-        name: default
+        name: {{ .Values.aws.nodeClassName }}
       requirements:
         - key: karpenter.sh/capacity-type
           operator: In

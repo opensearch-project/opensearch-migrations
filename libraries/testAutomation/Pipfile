@@ -9,12 +9,18 @@ urllib3 = ">=2.7.0"
 kubernetes = ">=36.0.2"
 argparse = "*"
 tabulate = "*"
+# Used by resource_tag_verifier to read tags straight from the AWS APIs.
+boto3 = "*"
 
 [requires]
 python_version = "3.11"
 
 [scripts]
 app = "python3 testAutomation/test_runner.py"
+# Standalone so it can be re-run against an existing deployment without re-running a migration:
+#   pipenv run verify-tags --expect-tags 'K=V,K2=V2' --region us-east-1 \
+#     --kube-context <ctx> --stack-name <stack>
+verify-tags = "python3 testAutomation/resource_tag_verifier.py"
 test = "coverage run -m pytest tests/"
 coverage = "coverage"
 

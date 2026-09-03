@@ -73,6 +73,8 @@ skip_test_images=false
 with_load_test_images=false
 image_tag="latest"
 kubectl_context=""
+tags_raw=()
+enforce_tags_on_create_for_tests=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -114,6 +116,8 @@ while [[ $# -gt 0 ]]; do
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
     --pca-arn) pca_arn="$2"; shift 2 ;;
+    --tags) tags_raw+=("$2"); shift 2 ;;
+    --enforce-tags-on-create-for-tests) enforce_tags_on_create_for_tests=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -138,6 +142,21 @@ while [[ $# -gt 0 ]]; do
       echo "                                            Only valid with --deploy-import-vpc-cfn."
       echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,monitoring,efs,sts,eksAuth."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
+      echo "  --tags <Key=Value,Key2=Value2>            Tags to apply to everything this deployment creates."
+      echo "                                            Repeatable; values cannot contain commas."
+      echo "                                            These become CloudFormation stack tags -- the same thing the"
+      echo "                                            console's Tags step sets -- so CloudFormation propagates them"
+      echo "                                            to every resource it creates. They are ALSO threaded into the"
+      echo "                                            cluster so that the resources EKS Auto Mode creates later"
+      echo "                                            (EC2 instances, EBS volumes, load balancers) carry them, which"
+      echo "                                            CloudFormation cannot do on its own. See 'Tag propagation'"
+      echo "                                            below for what that entails."
+      echo "  --enforce-tags-on-create-for-tests        TEST ONLY: additionally DENY the cluster role from creating"
+      echo "                                            any covered resource without the --tags keys. Reproduces an"
+      echo "                                            SCP that requires tags on create: an untagged create then fails"
+      echo "                                            immediately instead of being discovered later. This can stop"
+      echo "                                            cluster scaling and is not a production enforcement mechanism."
+      echo "                                            Requires --tags and is intended only for integration tests."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
       echo "                                            from public.ecr.aws/opensearchproject and public helm chart"
@@ -199,6 +218,21 @@ while [[ $# -gt 0 ]]; do
       echo "  --pca-arn <arn>                           ARN of existing AWS Private CA"
       echo "                                            (required with --tls-mode pca-existing)"
       echo ""
+      echo "Tag propagation (--tags):"
+      echo "  CloudFormation stack tags only reach resources CloudFormation itself creates. Nodes,"
+      echo "  volumes and load balancers are created later, at runtime, by EKS Auto Mode -- so"
+      echo "  --tags additionally:"
+      echo "    * creates a custom EKS Auto Mode NodeClass carrying the tags, because the built-in"
+      echo "      'default' NodeClass is owned by EKS and cannot be edited;"
+      echo "    * disables the built-in 'system' and 'general-purpose' NodePools, whose nodes always"
+      echo "      use the untaggable 'default' NodeClass, and replaces them with a NodePool bound to"
+      echo "      the custom NodeClass;"
+      echo "    * sets tagSpecification parameters on the StorageClass so provisioned EBS volumes"
+      echo "      are tagged, and annotates any load balancer the chart creates."
+      echo "  This requires the cluster IAM role to permit user-defined tags on Auto Mode resources."
+      echo "  --tags ensures the required inline policy even for older, adopted, or hand-built clusters;"
+      echo "  the caller therefore needs iam:PutRolePolicy on the cluster role."
+      echo ""
       echo "Examples:"
       echo "  # Mode 1 — Default: download latest release artifacts, create new VPC:"
       echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1"
@@ -215,6 +249,10 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "  # Bootstrap only (CloudFormation stack already deployed):"
       echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
+      echo ""
+      echo "  # Tag every created resource, including the nodes and volumes EKS creates later:"
+      echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1 \\"
+      echo "     --tags CostCenter=1234,Owner=platform-team"
       exit 0
       ;;
     *)
@@ -236,6 +274,93 @@ fi
 # --ma-images-source implies mirroring to private ECR
 if [[ -n "$ma_images_source" ]]; then
   push_images_to_ecr=true
+fi
+
+# --- parse --tags into parallel key/value arrays ---
+# One flat pass so every consumer (CloudFormation stack tags, the Auto Mode NodeClass, the
+# StorageClass, load balancer annotations) works from the same normalized set. Entries are split
+# on commas and newlines, which is what makes a comma illegal inside a tag value.
+tag_keys=()
+tag_values=()
+
+# Tag keys that EKS, Karpenter and AWS itself own. Passing one of these through would either be
+# silently dropped or rejected at NodeClass admission, so fail loudly instead of half-applying.
+RESERVED_TAG_PREFIXES=('aws:' 'eks:' 'eks.amazonaws.com/' 'karpenter.sh/' 'kubernetes.io/cluster/')
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  printf '%s' "${s%"${s##*[![:space:]]}"}"
+}
+
+validate_and_add_tag() {
+  local key="$1"
+  local value="$2"
+  local source="$3"
+  local prefix
+  if [[ -z "$key" ]]; then
+    echo "Error: ${source} has an empty key." >&2
+    exit 1
+  fi
+  for prefix in "${RESERVED_TAG_PREFIXES[@]}"; do
+    if [[ "$key" == "$prefix"* ]]; then
+      echo "Error: ${source} key '$key' uses the reserved prefix '$prefix'." >&2
+      echo "  These prefixes are owned by AWS, EKS or Karpenter and cannot be set by a deployer." >&2
+      exit 1
+    fi
+  done
+  tag_keys+=("$key")
+  tag_values+=("$value")
+}
+
+parse_tags() {
+  local spec entry key value
+  # `set -u` makes an unquoted expansion of an empty array an error on bash 3.2 (macOS), so
+  # bail out before touching it rather than relying on `${arr[@]+...}` gymnastics.
+  [[ ${#tags_raw[@]} -eq 0 ]] && return 0
+  for spec in "${tags_raw[@]}"; do
+    while IFS= read -r entry; do
+      entry="$(trim "$entry")"
+      [[ -z "$entry" ]] && continue
+      if [[ "$entry" != *=* ]]; then
+        echo "Error: --tags entry '$entry' is not in Key=Value form." >&2
+        exit 1
+      fi
+      key="$(trim "${entry%%=*}")"
+      value="$(trim "${entry#*=}")"
+      validate_and_add_tag "$key" "$value" "--tags entry '$entry'"
+      # Trailing newline matters: without it `read` returns non-zero on the final entry and the
+      # loop body is skipped, silently dropping the last tag.
+    done < <(printf '%s\n' "$spec" | tr ',' '\n')
+  done
+}
+
+parse_tags
+
+if [[ ${#tag_keys[@]} -gt 0 ]]; then
+  # --use-general-node-pool points the chart's workloads at the built-in general-purpose NodePool,
+  # which --tags has to delete: its nodes come from the EKS-owned "default" NodeClass and cannot
+  # carry tags. Honouring both would schedule onto a NodePool that no longer exists.
+  if [[ "$use_general_node_pool" == "true" ]]; then
+    echo "ERROR: --tags and --use-general-node-pool are mutually exclusive." >&2
+    # (--enforce-tags-on-create-for-tests is validated below; it needs tags to require.)
+    echo "  --tags replaces the built-in general-purpose NodePool with a tagged one, because the" >&2
+    echo "  NodeClass behind the built-in pools is owned by EKS and cannot carry user tags." >&2
+    exit 1
+  fi
+  # Already implied -- and stronger, since --tags disables the system pool too.
+  if [[ "$disable_general_purpose_pool" == "true" ]]; then
+    echo "Note: --disable-general-purpose-pool is redundant with --tags; --tags disables both"
+    echo "      built-in NodePools (system and general-purpose) for the life of the cluster."
+    disable_general_purpose_pool=false
+  fi
+fi
+
+# There is nothing to require without tags, and silently doing nothing would make a test that relies
+# on enforcement pass for the wrong reason.
+if [[ "$enforce_tags_on_create_for_tests" == "true" && ${#tag_keys[@]} -eq 0 ]]; then
+  echo "ERROR: --enforce-tags-on-create-for-tests requires --tags: there would be no tag to require." >&2
+  exit 1
 fi
 
 # --- derive state from parsed arguments ---
@@ -700,6 +825,18 @@ if [[ "$deploy_cfn" == "true" ]]; then
     fi
   fi
 
+  # Stack tags. CloudFormation propagates these to every resource it creates that supports
+  # tagging -- the same behaviour as filling in the console's Tags step. Resources created later
+  # by EKS Auto Mode are handled separately, further down.
+  cfn_tag_args=()
+  if [[ ${#tag_keys[@]} -gt 0 ]]; then
+    cfn_tag_args=(--tags)
+    for i in "${!tag_keys[@]}"; do
+      cfn_tag_args+=("${tag_keys[$i]}=${tag_values[$i]}")
+    done
+    echo "Applying ${#tag_keys[@]} stack tag(s): ${cfn_tag_args[*]:1}"
+  fi
+
   echo "Deploying CloudFormation stack: $cfn_stack_name"
 
   # Check for stack states that prevent deployment
@@ -741,10 +878,12 @@ if [[ "$deploy_cfn" == "true" ]]; then
     stream_cfn_events &
     local stream_pid=$!
 
+    # `${arr[@]+"${arr[@]}"}` so an empty tag list expands to nothing instead of tripping `set -u`.
     aws cloudformation deploy \
       --template-file "$cfn_template_file" \
       --stack-name "$cfn_stack_name" \
       --parameter-overrides "${cfn_params[@]}" \
+      ${cfn_tag_args[@]+"${cfn_tag_args[@]}"} \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
       --no-fail-on-empty-changeset \
       ${region:+--region "$region"}
@@ -856,26 +995,553 @@ if [[ -n "$eks_access_principal_arn" ]]; then
   echo "EKS access configured for $eks_access_principal_arn"
 fi
 
-# Check if general-purpose pool is disabled and re-enable if needed for installation
-# Skip this if building images locally, since we'll pre-create general-work-pool
-CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
-  --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
-if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]; then
-  echo "general-purpose nodepool is currently disabled."
-  echo "Re-enabling it temporarily to allow pod scheduling during installation..."
-  NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
-    --query 'cluster.computeConfig.nodeRoleArn' --output text)
-  aws eks update-cluster-config \
+# =============================================================================
+# Tag propagation to EKS Auto Mode resources
+#
+# CloudFormation stack tags stop at the resources CloudFormation creates. Nodes, volumes, ENIs
+# and load balancers are created later and by EKS Auto Mode, which reads the tags it should apply
+# from in-cluster objects: a NodeClass for compute, a StorageClass for volumes, Service/Ingress
+# annotations for load balancers. Nothing in AWS bridges those two worlds, so this section does.
+#
+# The built-in "default" NodeClass is reconciled by EKS and cannot carry user tags, and the
+# built-in "system"/"general-purpose" NodePools are hard-wired to it. Tagging every node therefore
+# means replacing all three with our own, which is why this only happens when --tags is given.
+# =============================================================================
+
+# NodeClass that the Helm chart's NodePools will reference. Stays "default" (the EKS-managed one)
+# unless tags need to be carried. Must not be named "default": EKS owns that name.
+auto_mode_node_class="default"
+AUTO_MODE_TAGGED_NODE_CLASS="migrations-tagged"
+AUTO_MODE_BOOTSTRAP_NODE_POOL="migrations-bootstrap-pool"
+
+# Inherit the deployed stack's tags when --tags was not passed, so that a re-run (in particular
+# --skip-cfn-deploy, which never touches stack tags) keeps the cluster's tagging in step with the
+# stack instead of silently reverting the nodes to untagged.
+if [[ ${#tag_keys[@]} -eq 0 && -n "$cfn_stack_name" ]]; then
+  while IFS=$'\t' read -r _tag_key _tag_value; do
+    [[ -z "$_tag_key" ]] && continue
+    validate_and_add_tag "$_tag_key" "$_tag_value" "inherited stack tag"
+  done < <(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+             --query 'Stacks[0].Tags[].[Key,Value]' --output text 2>/dev/null || true)
+  if [[ ${#tag_keys[@]} -gt 0 ]]; then
+    echo "Inherited ${#tag_keys[@]} tag(s) from stack $cfn_stack_name (no --tags given)."
+  fi
+fi
+
+emit_resource_tags_yaml() {
+  local i yaml_key yaml_value
+  for i in "${!tag_keys[@]}"; do
+    # A JSON string is also a valid YAML double-quoted scalar. Let jq escape quotes, backslashes,
+    # newlines and other control characters rather than interpolating external tag text into YAML.
+    yaml_key=$(jq -Rn --arg text "${tag_keys[$i]}" '$text')
+    yaml_value=$(jq -Rn --arg text "${tag_values[$i]}" '$text')
+    printf '    %s: %s\n' "$yaml_key" "$yaml_value"
+  done
+}
+
+# Write the tags into a Helm values file. The chart uses them for the StorageClass's
+# tagSpecification parameters and for load balancer annotations, and needs nodeClassName so its
+# NodePools bind to the NodeClass created below rather than to "default".
+emit_tag_helm_values() {
+  local values_file
+  values_file=$(mktemp)
+  {
+    echo "aws:"
+    echo "  nodeClassName: \"${auto_mode_node_class}\""
+    echo "  resourceTags:"
+    emit_resource_tags_yaml
+  } > "$values_file"
+  printf '%s' "$values_file"
+}
+
+AUTO_MODE_TAG_PROPAGATION_POLICY_NAME="AutoModeTagPropagationPolicy"
+
+# EKS Auto Mode's managed cluster policy only permits its own eks:* request tags. A custom
+# NodeClass carrying deployer tags therefore needs the additional Allow policy documented by EKS.
+# The solution template declares the same named inline policy, but assert it here as well so --tags
+# works against older stacks and clusters created outside this solution without manual IAM changes.
+ensure_auto_mode_tag_propagation_policy() {
+  local cluster_role_arn cluster_role_name part policy_document
+  cluster_role_arn=$(aws eks describe-cluster \
     --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
     --region "${AWS_CFN_REGION}" \
-    --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
-    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
-    --storage-config '{"blockStorage":{"enabled": true}}'
-  echo "Waiting for cluster update to complete..."
-  aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
-  echo "general-purpose nodepool re-enabled"
-  if [[ "$disable_general_purpose_pool" == "true" ]]; then
-    echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+    --query 'cluster.roleArn' \
+    --output text)
+  if [[ -z "$cluster_role_arn" || "$cluster_role_arn" == "None" ]]; then
+    echo "Error: could not resolve the EKS cluster role required for --tags." >&2
+    exit 1
+  fi
+  cluster_role_name="${cluster_role_arn##*/}"
+  part="${cluster_role_arn#arn:}"
+  part="${part%%:*}"
+
+  # Keep this aligned with the EKS Auto Mode tag-propagation policy:
+  # https://docs.aws.amazon.com/eks/latest/userguide/auto-learn-iam.html
+  # The Shield statement only supports the optional Auto Mode ALB Shield Advanced annotation;
+  # granting it does not enable Shield or create a protection by itself.
+  policy_document=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Compute",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateFleet",
+        "ec2:RunInstances",
+        "ec2:CreateLaunchTemplate"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:RequestTag/eks:kubernetes-node-class-name": "*",
+          "aws:RequestTag/eks:kubernetes-node-pool-name": "*"
+        }
+      }
+    },
+    {
+      "Sid": "Storage",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVolume",
+        "ec2:CreateSnapshot"
+      ],
+      "Resource": [
+        "arn:${part}:ec2:*:*:volume/*",
+        "arn:${part}:ec2:*:*:snapshot/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        }
+      }
+    },
+    {
+      "Sid": "Networking",
+      "Effect": "Allow",
+      "Action": "ec2:CreateNetworkInterface",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        },
+        "StringLike": {
+          "aws:RequestTag/eks:kubernetes-cni-node-name": "*"
+        }
+      }
+    },
+    {
+      "Sid": "LoadBalancer",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:CreateRule",
+        "ec2:CreateSecurityGroup"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        }
+      }
+    },
+    {
+      "Sid": "Shield",
+      "Effect": "Allow",
+      "Action": [
+        "shield:CreateProtection",
+        "shield:TagResource"
+      ],
+      "Resource": "arn:${part}:shield::*:protection/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}"
+        }
+      }
+    }
+  ]
+}
+EOF
+)
+
+  echo "  Ensuring Auto Mode may propagate user tags through cluster role ${cluster_role_name}..."
+  aws iam put-role-policy \
+    --role-name "$cluster_role_name" \
+    --policy-name "$AUTO_MODE_TAG_PROPAGATION_POLICY_NAME" \
+    --policy-document "$policy_document" \
+    || {
+      echo "Error: --tags could not attach ${AUTO_MODE_TAG_PROPAGATION_POLICY_NAME}" >&2
+      echo "  to cluster role ${cluster_role_name}. The caller needs iam:PutRolePolicy." >&2
+      exit 1
+    }
+}
+
+# Deny the cluster role from launching instances or provisioning volumes without every --tags key.
+#
+# The inverse of AutoModeTagPropagationPolicy: that policy *permits* user tags on these actions, this
+# one *requires* them.
+#
+# Resource is scoped, NOT "*", and that distinction is the whole ballgame. ec2:RunInstances authorizes
+# against every resource it touches -- instance, volume, network-interface, launch-template, subnet,
+# security group, AMI -- but only the first three receive the request's tags. With Resource "*" the
+# Null condition is therefore true for launch-template/subnet/etc and the deny fires on every launch,
+# even when the instance tags are perfectly correct. A broad Resource is harmless in an Allow and
+# fatal in a Deny. Observed as:
+#   not authorized to perform: ec2:RunInstances on resource: .../launch-template/lt-0f5992a0cef08107b
+#   with an explicit deny in an identity-based policy
+#
+# Each action is scoped to ONLY the resource types that receive its request tags, and each gets its
+# own statement rather than sharing a Resource list, so one action's untaggable resource cannot make
+# another action's deny fire.
+#
+# Deliberately NOT denied, on evidence from CloudTrail:
+#   ec2:CreateFleet           carries no TagSpecifications at all; the instances it launches inherit
+#                             their tags from the launch template. Denying it blocks the fleet path.
+#   ec2:CreateLaunchTemplate  its own TagSpecification is null, for the same reason.
+#   ec2:CreateSecurityGroup   MIXED. A load balancer's frontend SG carries the tags, but the shared
+#                             "k8s-traffic-*" SG the controller attaches to nodes does not, so a deny
+#                             here would block every load balancer.
+#
+# ec2:CreateNetworkInterface is denied without direct evidence that standalone CNI interface creates
+# carry the user tags -- interfaces created as part of RunInstances demonstrably do. If nodes come up
+# but pods never get addresses, this statement is the first thing to remove: Auto Mode does not put the user tags
+# on those resources at create time, so requiring them would block the cluster rather than test it.
+# The CloudTrail sweep in resource_tag_verifier.py reports on them instead, which is the right tool
+# for actions we cannot influence.
+#
+# This reproduces a deployer SCP that requires tags on create: the failure surfaces at the moment of
+# the untagged create rather than being discovered afterwards. That also means it will stop the
+# cluster scaling if anything Auto Mode creates cannot carry the tags -- which is the point, since
+# that is precisely what such a deployer experiences.
+#
+# Attached out-of-band rather than through CloudFormation so that enabling it cannot change the
+# shipped template, and so it can be detached without a stack update when a statement turns out to be
+# wrong. Remove with:
+#   for p in $(aws iam list-role-policies --role-name <role> \
+#       --query "PolicyNames[?starts_with(@, 'MigrationsDenyUntaggedCreates')]" --output text); do
+#     aws iam delete-role-policy --role-name <role> --policy-name "$p"; done
+DENY_POLICY_PREFIX="MigrationsDenyUntaggedCreates"
+DENY_POLICY_NAME="${DENY_POLICY_PREFIX}ForTests"
+
+enforce_tags_on_cluster_role_for_tests() {
+  local cluster_role_arn cluster_role_name sid key i j
+  cluster_role_arn=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" --query 'cluster.roleArn' --output text)
+  if [[ -z "$cluster_role_arn" || "$cluster_role_arn" == "None" ]]; then
+    echo "Error: could not resolve the EKS cluster role for tag enforcement." >&2
+    exit 1
+  fi
+  cluster_role_name="${cluster_role_arn##*/}"
+
+  # Parallel arrays rather than an associative array: bash 3.2 (macOS) has none.
+  # Each group pairs a set of actions with ONLY the resource types that receive those actions'
+  # request tags -- see the note above about RunInstances and launch-template/*.
+  local part="${AWS_PARTITION:-aws}"
+  local group_sids=(InstanceLaunch StandaloneStorage NetworkInterface LoadBalancer TargetGroup ListenerAndRule)
+  local group_actions=(
+    '"ec2:RunInstances"'
+    '"ec2:CreateVolume", "ec2:CreateSnapshot"'
+    '"ec2:CreateNetworkInterface"'
+    '"elasticloadbalancing:CreateLoadBalancer"'
+    '"elasticloadbalancing:CreateTargetGroup"'
+    '"elasticloadbalancing:CreateListener", "elasticloadbalancing:CreateRule"'
+  )
+  local group_resources=(
+    "\"arn:${part}:ec2:*:*:instance/*\", \"arn:${part}:ec2:*:*:volume/*\", \"arn:${part}:ec2:*:*:network-interface/*\""
+    "\"arn:${part}:ec2:*:*:volume/*\", \"arn:${part}:ec2:*:*:snapshot/*\""
+    "\"arn:${part}:ec2:*:*:network-interface/*\""
+    "\"arn:${part}:elasticloadbalancing:*:*:loadbalancer/*\""
+    "\"arn:${part}:elasticloadbalancing:*:*:targetgroup/*\""
+    "\"arn:${part}:elasticloadbalancing:*:*:listener/*\", \"arn:${part}:elasticloadbalancing:*:*:listener-rule/*\""
+  )
+
+  # ONE statement per (action group x tag key). Multiple context keys inside a single condition
+  # operator are AND-ed by IAM -- "All context keys in a condition element block must resolve to true"
+  # -- so listing every key in one Null block would only deny a create that omitted ALL of them, and
+  # a create carrying one tag but not another would pass. Deny statements are OR-ed instead, so a
+  # separate statement per key is what makes each key independently mandatory.
+  # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_multi-value-conditions.html
+  local statements=""
+  local statement_count=0
+  for i in "${!group_sids[@]}"; do
+    for j in "${!tag_keys[@]}"; do
+      key="${tag_keys[$j]}"
+      # Sids permit only alphanumerics, and tag keys may contain dots or slashes.
+      sid="Deny${group_sids[$i]}$(printf '%s' "$key" | tr -cd '[:alnum:]')"
+      [[ -n "$statements" ]] && statements+=","
+      statements+="{\"Sid\":\"${sid}\",\"Effect\":\"Deny\",\"Action\":[${group_actions[$i]}],\"Resource\":[${group_resources[$i]}],\"Condition\":{\"Null\":{\"aws:RequestTag/${key}\":\"true\"}}}"
+      statement_count=$((statement_count + 1))
+    done
+  done
+
+  # This is intentionally one inline policy. IAM's 10,240-character quota is aggregate across every
+  # inline policy on a role, so splitting the statements into multiple policies does not create more
+  # capacity and can leave a partially attached deny if a later part fails. This test-only option is
+  # exercised with two tags in CI. A sufficiently large tag set can exceed the role's remaining
+  # inline-policy quota; in that case put-role-policy fails and the caller must use fewer test tags.
+  local policy_document
+  policy_document="{\"Version\":\"2012-10-17\",\"Statement\":[${statements}]}"
+  if [[ ${#policy_document} -gt 10240 ]]; then
+    echo "Error: the generated test-only tag-enforcement policy is ${#policy_document} characters," >&2
+    echo "  exceeding IAM's 10,240-character aggregate inline-policy quota for a role." >&2
+    echo "  Use fewer --tags with --enforce-tags-on-create-for-tests." >&2
+    exit 1
+  fi
+
+  echo "  Enforcing tags on create for TESTS on cluster role ${cluster_role_name}:"
+  echo "    ${statement_count} deny statement(s): each of ${#tag_keys[@]} tag key(s) (${tag_keys[*]})"
+  echo "    required independently on 6 action group(s)."
+
+  # Remove legacy split-policy parts, but leave the current policy in place until put-role-policy
+  # replaces it so a failed update does not create an avoidable enforcement gap.
+  local stale
+  for stale in $(aws iam list-role-policies --role-name "$cluster_role_name" \
+      --query "PolicyNames[?starts_with(@, '${DENY_POLICY_PREFIX}')]" --output text 2>/dev/null); do
+    [[ "$stale" == "$DENY_POLICY_NAME" ]] && continue
+    aws iam delete-role-policy --role-name "$cluster_role_name" --policy-name "$stale" >/dev/null \
+      2>&1 || true
+  done
+
+  aws iam put-role-policy \
+    --role-name "$cluster_role_name" \
+    --policy-name "$DENY_POLICY_NAME" \
+    --policy-document "$policy_document" \
+    || {
+      echo "Error: failed to attach the test-only tag-enforcement policy." >&2
+      echo "  IAM limits all inline policies on a role to 10,240 aggregate characters;" >&2
+      echo "  use fewer --tags if the role has insufficient remaining capacity." >&2
+      exit 1
+    }
+  echo "    Attached test-only inline policy ${DENY_POLICY_NAME}."
+}
+
+# An EC2-type access entry lets nodes launched by a custom NodeClass join the cluster. EKS creates
+# one automatically for the built-in NodeClass; since we are about to disable the built-in
+# NodePools, assert it ourselves rather than depend on what EKS leaves behind.
+ensure_auto_node_access_entry() {
+  local node_role_arn="$1"
+  if aws eks describe-access-entry --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+       --principal-arn "$node_role_arn" --region "${AWS_CFN_REGION}" >/dev/null 2>&1; then
+    echo "  Access entry for node role already exists."
+  else
+    echo "  Creating EC2 access entry for node role..."
+    aws eks create-access-entry \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --principal-arn "$node_role_arn" \
+      --type EC2 \
+      --region "${AWS_CFN_REGION}" >/dev/null
+  fi
+  aws eks associate-access-policy \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --principal-arn "$node_role_arn" \
+    --policy-arn "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy" \
+    --access-scope type=cluster \
+    --region "${AWS_CFN_REGION}" >/dev/null \
+    || {
+      echo "Error: failed to associate AmazonEKSAutoNodePolicy with ${node_role_arn}." >&2
+      exit 1
+    }
+}
+
+configure_tagged_auto_mode_compute() {
+  echo ""
+  echo "Configuring EKS Auto Mode to tag the resources it creates..."
+
+  # One describe call for everything the NodeClass needs. Mirror the built-in NodeClass's placement
+  # rather than inventing selectors: the same subnets and the same EKS-managed cluster security
+  # group the control plane already uses.
+  local described node_role_arn node_role_name subnet_ids_text cluster_sg builtin_pools
+  described=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'join(`|`, [cluster.computeConfig.nodeRoleArn || `NONE`, cluster.resourcesVpcConfig.clusterSecurityGroupId || `NONE`, join(`,`, cluster.resourcesVpcConfig.subnetIds || `[]`), join(`,`, cluster.computeConfig.nodePools || `[]`)])' \
+    --output text)
+  IFS='|' read -r node_role_arn cluster_sg subnet_ids_text builtin_pools <<< "$described"
+  subnet_ids_text="${subnet_ids_text//,/ }"
+
+  if [[ -z "$subnet_ids_text" || -z "$cluster_sg" || "$cluster_sg" == "NONE" ]]; then
+    echo "Error: could not read subnets / cluster security group from ${MIGRATIONS_EKS_CLUSTER_NAME}." >&2
+    exit 1
+  fi
+  ensure_auto_mode_tag_propagation_policy
+
+  if [[ -z "$node_role_arn" || "$node_role_arn" == "NONE" || "$node_role_arn" == "None" ]]; then
+    # A successful first run created the access entry before disabling the built-in NodePools.
+    # That update clears computeConfig.nodeRoleArn, so on a re-run only the role name remains on
+    # the custom NodeClass. Reuse it directly; no IAM lookup or access-entry reconciliation is
+    # needed for state this script has already established.
+    node_role_name=$(kubectl --context="${KUBE_CONTEXT}" \
+      get nodeclass "${AUTO_MODE_TAGGED_NODE_CLASS}" \
+      -o jsonpath='{.spec.role}' 2>/dev/null || true)
+    if [[ -z "$node_role_name" ]]; then
+      echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no Auto Mode node role in computeConfig" >&2
+      echo "  and NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS} does not contain one." >&2
+      echo "  --tags can only propagate to nodes on an EKS Auto Mode cluster." >&2
+      exit 1
+    fi
+    echo "  Reusing node role from existing NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS}."
+  else
+    # NodeClass takes the role *name*, not the ARN. Roles may carry a path, so take the last segment.
+    node_role_name="${node_role_arn##*/}"
+    ensure_auto_node_access_entry "$node_role_arn"
+  fi
+
+  echo "  Node role:       $node_role_name"
+  echo "  Subnets:         $subnet_ids_text"
+  echo "  Security group:  $cluster_sg"
+
+  if [[ "$enforce_tags_on_create_for_tests" == "true" ]]; then
+    enforce_tags_on_cluster_role_for_tests
+  fi
+
+  # The NodeClass carries the tags; Auto Mode stamps them on the instance, its launch template,
+  # its ENIs and its root/ephemeral volumes. The NodePool exists so that pods -- including the
+  # chart's own pre-install hook Jobs -- have somewhere to land once the built-in pools are gone.
+  # It is deliberately weighted below the chart's general-work-pool (weight 100).
+  # Only two parts of the manifest need building: one subnet term per cluster subnet, and one line
+  # per --tags entry. Both are assembled first so the YAML itself can be a heredoc and stay readable
+  # as YAML rather than as a wall of quoted echo lines.
+  local manifest subnet_terms tag_lines sid
+  subnet_terms=$(for sid in $subnet_ids_text; do printf '    - id: %s\n' "$sid"; done)
+  tag_lines=$(emit_resource_tags_yaml)
+
+  # The bootstrap pool is deliberately small: it only has to hold whatever the chart's own pools do
+  # not claim (pre-install hook Jobs, add-on pods). The chart's general-work-pool outranks it at
+  # weight 100.
+  manifest=$(mktemp)
+  cat > "$manifest" <<EOF
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: ${AUTO_MODE_TAGGED_NODE_CLASS}
+spec:
+  role: ${node_role_name}
+  subnetSelectorTerms:
+${subnet_terms}
+  securityGroupSelectorTerms:
+    - id: ${cluster_sg}
+  tags:
+${tag_lines}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: ${AUTO_MODE_BOOTSTRAP_NODE_POOL}
+spec:
+  weight: 1
+  limits:
+    cpu: "16"
+    memory: 64Gi
+  template:
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: ${AUTO_MODE_TAGGED_NODE_CLASS}
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: eks.amazonaws.com/instance-category
+          operator: In
+          values: ["c", "m", "r", "t"]
+        - key: eks.amazonaws.com/instance-generation
+          operator: Gt
+          values: ["4"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["medium", "large", "xlarge", "2xlarge"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m
+EOF
+
+  echo "  Applying NodeClass ${AUTO_MODE_TAGGED_NODE_CLASS} and NodePool ${AUTO_MODE_BOOTSTRAP_NODE_POOL}..."
+  kubectl --context="${KUBE_CONTEXT}" apply -f "$manifest" \
+    || { echo "Error: failed to apply the tagged NodeClass/NodePool." >&2; cat "$manifest" >&2; exit 1; }
+  rm -f "$manifest"
+
+  # These are applied outside the Helm release on purpose: the release's own pre-install hook Jobs
+  # need a schedulable node before the release exists, and they must outlive `helm uninstall` so a
+  # reinstall has somewhere to run.
+  auto_mode_node_class="${AUTO_MODE_TAGGED_NODE_CLASS}"
+
+  # Every node from a built-in NodePool uses the untaggable "default" NodeClass, so leaving either
+  # enabled would keep producing untagged instances. Removing them from computeConfig deletes the
+  # NodePool objects and drains their nodes, so skip the call when they are already gone -- a re-run
+  # should not disturb a cluster that is already in the desired state.
+  if [[ -z "$builtin_pools" ]]; then
+    echo "  Built-in NodePools are already disabled; leaving compute configuration untouched."
+  else
+    echo "  Disabling the built-in NodePools (currently: ${builtin_pools//,/, })."
+    echo "  Their nodes use the untaggable 'default' NodeClass, so any pods running on them will be"
+    echo "  drained and rescheduled onto ${AUTO_MODE_BOOTSTRAP_NODE_POOL}."
+    # nodeRoleArn is deliberately omitted: EKS rejects it alongside an empty nodePools list with
+    # "When Compute Config nodeRoleArn is not null or empty, nodePool value(s) must be provided."
+    # A cluster with no built-in NodePools is expected to carry no compute-level node role -- the
+    # role lives on the custom NodeClass applied above instead.
+    # https://docs.aws.amazon.com/eks/latest/userguide/create-node-pool.html#_cluster_without_built_in_node_pools
+    aws eks update-cluster-config \
+      --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --compute-config '{"enabled": true, "nodePools": []}' \
+      --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
+      --storage-config '{"blockStorage":{"enabled": true}}' >/dev/null
+    echo "  Waiting for the cluster update to complete..."
+    aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
+    echo "  Built-in NodePools disabled; all compute now comes from ${AUTO_MODE_TAGGED_NODE_CLASS}."
+  fi
+}
+
+if [[ ${#tag_keys[@]} -gt 0 ]]; then
+  configure_tagged_auto_mode_compute
+  # Prepended, not appended, so an explicit --helm-values file still wins.
+  tag_values_file=$(emit_tag_helm_values)
+  echo "  Tag values written to $tag_values_file"
+  if [[ -n "$extra_helm_values" ]]; then
+    extra_helm_values="$tag_values_file,$extra_helm_values"
+  else
+    extra_helm_values="$tag_values_file"
+  fi
+fi
+
+# Check if general-purpose pool is disabled and re-enable if needed for installation. The tagged
+# path already created its replacement pool, so it needs neither this check nor another API call.
+if [[ ${#tag_keys[@]} -eq 0 ]]; then
+  CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+    --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
+  if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]; then
+    echo "general-purpose nodepool is currently disabled."
+    echo "Re-enabling it temporarily to allow pod scheduling during installation..."
+    NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
+      --query 'cluster.computeConfig.nodeRoleArn' --output text)
+    # A cluster previously bootstrapped with --tags has no compute-level node role, because EKS
+    # requires nodeRoleArn to be empty when nodePools is. Re-enabling a built-in pool needs one back,
+    # and EKS reports that as a confusing parameter error, so explain the situation instead.
+    if [[ -z "$NODE_ROLE_ARN" || "$NODE_ROLE_ARN" == "None" ]]; then
+      echo "Error: cluster ${MIGRATIONS_EKS_CLUSTER_NAME} has no computeConfig.nodeRoleArn, so the" >&2
+      echo "  built-in NodePools cannot be re-enabled. This is what --tags leaves behind: its nodes" >&2
+      echo "  come from a custom NodeClass instead. Re-run with --tags to keep using that path." >&2
+      exit 1
+    fi
+    aws eks update-cluster-config \
+      --name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --compute-config "{\"enabled\": true, \"nodePools\": [\"system\", \"general-purpose\"], \"nodeRoleArn\": \"${NODE_ROLE_ARN}\"}" \
+      --kubernetes-network-config '{"elasticLoadBalancing":{"enabled": true}}' \
+      --storage-config '{"blockStorage":{"enabled": true}}'
+    echo "Waiting for cluster update to complete..."
+    aws eks wait cluster-active --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}"
+    echo "general-purpose nodepool re-enabled"
+    if [[ "$disable_general_purpose_pool" == "true" ]]; then
+      echo "Note: --disable-general-purpose-pool was specified, will disable it again after installation completes"
+    fi
   fi
 fi
 
@@ -1115,10 +1781,20 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
     # direct access to a local Docker daemon from the target environment.
     source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
-    # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
-    # from Docker Hub. mirror_images_to_ecr already copied this image above.
-    ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
+    if [[ "$push_images_to_ecr" == "true" ]]; then
+      # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
+      # from Docker Hub. mirror_images_to_ecr already copied this image above.
+      ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+      export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
+    else
+      unset BUILDKIT_IMAGE
+    fi
+    # buildkit gets its own NodePool; point it at the same NodeClass as everything else so its
+    # (large, short-lived) build instances are tagged too, and so it doesn't reference the
+    # built-in "default" NodeClass after --tags has disabled the built-in NodePools.
+    if [[ "$auto_mode_node_class" != "default" ]]; then
+      export BUILDKIT_HELM_ARGS="${BUILDKIT_HELM_ARGS:+$BUILDKIT_HELM_ARGS }--set nodeClassName=${auto_mode_node_class}"
+    fi
     setup_build_backend
   fi
 
@@ -1333,6 +2009,8 @@ set -x
 
 kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
+# Not reachable with --tags, which forces this to false: that path already reduced nodePools to [],
+# and re-enabling "system" here would put untaggable nodes back into the cluster.
 if [[ "$disable_general_purpose_pool" == "true" ]]; then
   echo "Disabling EKS Auto Mode general-purpose nodepool..."
   NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \

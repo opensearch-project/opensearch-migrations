@@ -140,14 +140,21 @@ def call(Map config = [:]) {
                             env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
                             env.MA_STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}"
 
+                            // Deliberately no useGeneralNodePool: --tags below replaces the built-in
+                            // general-purpose NodePool with a tagged one, because the NodeClass
+                            // behind the built-in pools is owned by EKS and cannot carry tags.
                             def bootstrap = resolveBootstrap(
                                 useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                 build: params.BUILD,
                                 skipTestImages: true,
                                 loadTestImages: env.needsLoadTestImages == "true",
-                                version: params.VERSION,
-                                useGeneralNodePool: true
+                                version: params.VERSION
                             )
+
+                            // TWO tags on purpose: one static, one stage-derived. A single tag would
+                            // not catch a bug that drops all but the first entry, and the
+                            // stage-derived value proves values (not just keys) are carried through.
+                            env.MA_RESOURCE_TAGS = "MATestOwner=migrations-ci,MATestStage=${maStageName}"
 
                             parallel(
                                 'Deploy Clusters': {
@@ -172,7 +179,9 @@ def call(Map config = [:]) {
                                             bootstrap: bootstrap,
                                             eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                             kubectlContext: "migration-eks-${maStageName}",
-                                            tlsMode: tlsMode != 'none' ? tlsMode : null
+                                            tlsMode: tlsMode != 'none' ? tlsMode : null,
+                                            resourceTags: env.MA_RESOURCE_TAGS,
+                                            enforceTagsOnCreateForTests: true
                                         )
                                     }
                                 }
@@ -289,7 +298,7 @@ def call(Map config = [:]) {
                                 // cases consume the reference.
                                 def k6ScriptsImage = "${env.registryEndpoint}:migrations_k6_scripts_latest"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-scripts-image='${k6ScriptsImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --k6-scripts-image='${k6ScriptsImage}' --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}' --verify-resource-tags --ma-stack-name='${env.MA_STACK_NAME}' --aws-region=${params.REGION} --eks-cluster-name='${env.eksClusterName}'"
                                 }
                             }
                         }
