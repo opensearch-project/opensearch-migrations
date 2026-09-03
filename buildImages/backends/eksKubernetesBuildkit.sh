@@ -96,6 +96,26 @@ run_with_optional_timeout() {
   fi
 }
 
+duration_to_seconds() {
+  local value="$1"
+  if [[ "${value}" =~ ^([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "${value}" =~ ^([0-9]+)([smh])$ ]]; then
+    local amount="${BASH_REMATCH[1]}"
+    local unit="${BASH_REMATCH[2]}"
+    case "${unit}" in
+      s) echo "${amount}" ;;
+      m) echo $((amount * 60)) ;;
+      h) echo $((amount * 3600)) ;;
+    esac
+    return 0
+  fi
+  echo "ERROR: Unsupported duration '${value}'. Use seconds, or an s/m/h suffix such as 900s, 15m, or 1h." >&2
+  return 1
+}
+
 ensure_eks_buildx_builder() {
   local context builder_name namespace
   set_k8s_context_args
@@ -146,22 +166,43 @@ ensure_eks_buildx_builder() {
   # bootstrap. Give that bootstrap enough time for the build-nodepool cold-start
   # path; a kubectl pre-wait cannot help before buildx has created anything.
   local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
-  local attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-2}"
+  local timeout_seconds
+  timeout_seconds="$(duration_to_seconds "${build_timeout}")"
+  local deadline=$(( $(date +%s) + timeout_seconds ))
+  local max_attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-0}"
+  if [[ ! "${max_attempts}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: BUILDKIT_BOOTSTRAP_ATTEMPTS must be a non-negative integer." >&2
+    return 1
+  fi
   local attempt=1
   while true; do
-    echo "Bootstrapping buildx builder with timeout ${build_timeout} (attempt ${attempt}/${attempts})..."
-    if run_with_optional_timeout "${build_timeout}" docker buildx inspect --bootstrap; then
+    local now remaining attempt_label
+    now="$(date +%s)"
+    remaining=$((deadline - now))
+    if [[ "${remaining}" -le 0 ]]; then
+      echo "ERROR: buildx bootstrap did not complete within ${build_timeout}; dumping buildkit namespace state" >&2
+      kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+        get all -n "${namespace}" >&2 || true
+      kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+        describe pods -n "${namespace}" >&2 || true
+      return 1
+    fi
+
+    if [[ "${max_attempts}" -gt 0 ]]; then
+      attempt_label="attempt ${attempt}/${max_attempts}"
+    else
+      attempt_label="attempt ${attempt}"
+    fi
+    echo "Bootstrapping buildx builder (${attempt_label}, ${remaining}s remaining of ${build_timeout})..."
+    if run_with_optional_timeout "${remaining}s" docker buildx inspect --bootstrap; then
       break
     fi
-    echo "buildx bootstrap failed on attempt ${attempt}/${attempts}" >&2
-    echo "Dumping buildkit namespace state for diagnosis" >&2
+    echo "buildx bootstrap failed on ${attempt_label}; current buildkit namespace state:" >&2
     kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
       get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
-    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
-      describe pods -n "${namespace}" >&2 || true
-    dump_node_provisioning_state
-    if [[ "${attempt}" -ge "${attempts}" ]]; then
-      echo "ERROR: buildx bootstrap exhausted ${attempts} attempt(s); dumping buildkit namespace state" >&2
+
+    if [[ "${max_attempts}" -gt 0 && "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "ERROR: buildx bootstrap exhausted ${max_attempts} attempt(s) before ${build_timeout}; dumping buildkit namespace state" >&2
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
         get all -n "${namespace}" >&2 || true
       kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
@@ -170,7 +211,16 @@ ensure_eks_buildx_builder() {
       return 1
     fi
     attempt=$((attempt + 1))
-    sleep 10
+    now="$(date +%s)"
+    remaining=$((deadline - now))
+    if [[ "${remaining}" -le 0 ]]; then
+      continue
+    fi
+    if [[ "${remaining}" -lt 10 ]]; then
+      sleep "${remaining}"
+    else
+      sleep 10
+    fi
   done
 }
 
