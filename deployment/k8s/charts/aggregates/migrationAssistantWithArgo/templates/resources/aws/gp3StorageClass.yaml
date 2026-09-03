@@ -1,14 +1,9 @@
 {{- if eq (default false .Values.aws.configureAwsEksResources) true }}
-{{- $storageClass := lookup "storage.k8s.io/v1" "StorageClass" "" "auto-ebs-sc" -}}
-{{- if not $storageClass }}
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: auto-ebs-sc
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-3"
-    "helm.sh/resource-policy": keep
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: ebs.csi.eks.amazonaws.com
 volumeBindingMode: WaitForFirstConsumer
@@ -17,5 +12,4 @@ parameters:
   encrypted: "true"
 reclaimPolicy: Delete
 allowVolumeExpansion: false
-{{- end }}
 {{- end }}
