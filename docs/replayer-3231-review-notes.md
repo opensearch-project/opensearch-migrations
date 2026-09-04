@@ -296,7 +296,7 @@ the existing inline batch-timing warn, plus per-record and read-phase equivalent
 `TrafficStreamLimiter.logHeartbeat` with a semaphore-exhaustion warn, and the
 `TrackingKafkaConsumer` heartbeat upgraded to report the *worst* commit head across all
 partitions instead of an arbitrary first one. All useful and all aligned with the design doc's
-metrics table (§5.4) — the worst-head reporting in particular is what the "commit-head age"
+metrics table (§5.5) — the worst-head reporting in particular is what the "commit-head age"
 row wants.
 
 Two notes:
@@ -343,7 +343,7 @@ Nothing in #3231 changes Phase 1's or Phase 2's direction. What it changes is th
   scanner asks "do follow-up records exist?" When Phase 1 lands, any wall-clock expiry must be
   removed, or the two mechanisms will fight — and the impatient one will win, because it fires
   first.
-- **§5.4's metrics table should absorb change 7** rather than duplicate it. Worst-head-across-
+- **§5.5's metrics table should absorb change 7** rather than duplicate it. Worst-head-across-
   partitions is strictly better than what the table assumed exists.
 - **#3231 renames `logHeartbeat` → `heartbeatAndExpireStaleConnections`** and touches
   `CapturedTrafficToHttpTransactionAccumulator`, `ReplayEngine`, `TrafficReplayer`'s heartbeat

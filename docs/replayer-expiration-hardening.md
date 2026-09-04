@@ -10,7 +10,7 @@
 2. [How Time Works Today](#2-how-time-works-today)
 3. [Livelock Taxonomy](#3-livelock-taxonomy)
 4. [Phase 0 — Correctness Fixes (shipped)](#4-phase-0--correctness-fixes-shipped)
-5. [Phase 1 — Epsilon Lookahead + Scanner + Proxy Cap](#5-phase-1--epsilon-lookahead--scanner--proxy-cap)
+5. [Phase 1 — Epsilon Lookahead + Scanner + Liveness + Proxy Cap](#5-phase-1--epsilon-lookahead--scanner--liveness--proxy-cap)
 6. [Phase 2 — Decoupled Tuple API + Response Recreation](#6-phase-2--decoupled-tuple-api--response-recreation)
 7. [Rejected Approaches](#7-rejected-approaches)
 8. [Dependencies on PR #3231](#8-dependencies-on-pr-3231)
@@ -229,9 +229,24 @@ accumulator layer only because the accumulator fails to emit at all.
 
 ---
 
-## 5. Phase 1 — Epsilon Lookahead + Scanner + Proxy Cap
+## 5. Phase 1 — Epsilon Lookahead + Scanner + Liveness + Proxy Cap
 
 Ships as one unit — epsilon cannot ship without the scanner (see §2, "load-bearing invariant").
+
+Four pieces, and it is worth being clear up front about which problem each one solves, because they
+are easy to mistake for redundant:
+
+| Piece | Solves |
+|---|---|
+| **Epsilon** (§5.1) | Memory: stop buffering 400s of traffic |
+| **Scanner** (§5.2) | Reaching proof that is beyond the read barrier, *without* buffering payloads |
+| **Proxy cap** (§5.3) | Making "how far must I look?" a finite, operator-chosen number |
+| **Liveness snapshots** (§5.4) | Turning absence-of-evidence into an explicit, offset-ordered statement by the proxy |
+
+The scanner and liveness snapshots are complementary, not alternatives. Liveness covers
+*proxy alive, connection dead* — the common case — cheaply and exactly. The scanner covers
+*proxy dead*, where no snapshot will ever arrive, and remains the only way to reach either kind of
+proof when it sits past `frontier + ε`.
 
 ### 5.1 Just-in-time lookahead (epsilon)
 
@@ -284,8 +299,29 @@ Mark it expired by pushing a synthetic expire event through the accumulator, whi
 clears the head-of-line blocker and releases its offsets. If follow-up records *do* exist →
 **alive**; do not expire, let replay reach them naturally.
 
-**Scan window** = `connectionTimeout + maxConnectionDuration` (the proxy cap from §5.3). This
-is what bounds the scan: the scanner reads a fixed window ahead, never the whole topic.
+**Two termination conditions, either of which ends a scan.** The scanner stops as soon as it can
+justify a verdict:
+
+1. **Liveness omission (cheap, exact).** Two consecutive snapshots from the blocker's `nodeId` on the
+   blocker's partition both omit the connection, with its last record preceding the earlier of the
+   two. Confirmed dead. Distance: `2 × snapshotInterval` (see §5.4).
+2. **Window exhausted (expensive, inferential).** No observation for the connectionId anywhere in
+   `scanWindow = connectionTimeout + maxConnectionDuration` (the proxy cap from §5.3). Confirmed
+   dead. This is the fallback for a **dead proxy**, where condition 1 can never fire because no
+   further snapshots exist.
+
+Anything short of one of these is `Inconclusive` — do not expire. In particular, *absence of
+snapshots is not evidence*: the scanner cannot distinguish a crashed proxy from a stalled one (GC
+pause, partitioned from Kafka, backed-up producer), so silence never authorizes a commit. Only an
+explicit omission or an exhausted window does.
+
+Condition 1 is why the scanner survives liveness snapshots rather than being replaced by them, and
+why liveness does not let us raise ε instead. With a 30s snapshot interval the proof sits up to 60s
+of source time ahead of the frontier. Reaching it by raising ε to 60s would mean buffering 60s of
+payloads — which, as with the original 400s, is exactly the memory problem we are trying to remove.
+The scan cursor reaches the same offset holding **metadata only**, so ε stays at ~30s independently
+of how far the proof is. Proof distance and buffered bytes are decoupled; that decoupling is the
+scanner's real job.
 
 **Two expiry modes (invariant — do not conflate these):**
 
@@ -325,7 +361,186 @@ operator-chosen quantity rather than an attacker-chosen one. This also defends a
 accumulator treats it as a normal close and its offsets commit promptly — no scanner
 involvement needed for the common case.
 
-### 5.4 Metrics
+**What the cap is still load-bearing for, once §5.4 exists.** Liveness snapshots prove death without
+reference to the cap, so the cap is no longer required for the ordinary verdict. It remains required
+for the **dead-proxy** case: with no further snapshots from that `nodeId`, the only available proof is
+"nothing in the window," and that means nothing unless the window is finite. So the cap stays
+mandatory for epsilon mode, but its role narrows from *the* bound on every verdict to the bound on
+the residual case.
+
+### 5.4 Capture proxy: liveness snapshots
+
+**The problem this solves.** Both the scanner's original verdict and the timestamp sweep infer death
+from *absence*: nothing showed up, therefore nothing exists. That inference is only as good as the
+bound on how far you had to look, which is why it drags in the proxy cap, and why the window is
+minutes wide. The proxy already knows the answer exactly — it holds the channels. Having it *say so*
+converts an inference into a statement.
+
+**Mechanism.** Every `snapshotInterval` (default **30s**), each capture proxy emits, for each
+partition `P` in its shard set (§5.4.4), one record:
+
+```proto
+message ProxyLivenessSnapshot {
+  string nodeId = 1;            // the emitting process's UUID
+  int32 partition = 2;          // the partition this record is being written to
+  int64 emittedAtMillis = 3;    // diagnostic only; never used in a verdict
+  repeated bytes idleConnections = 4;  // suffixes, see 5.4.3
+}
+```
+
+Semantics: *"I, node X, at this point in partition P's log, hold exactly these idle open connections
+whose traffic goes to P."* Everything else about X on P is either closed or actively flushing.
+
+**Why only *idle* connections.** A connection that is actively flushing records announces its own
+liveness through the data stream — listing it adds bytes and says nothing new. Only a connection that
+has gone quiet is ambiguous to the replayer, so only those need naming. Define idle as *no bytes
+flushed since the previous snapshot*.
+
+These records are a **new stream-level message type on the traffic topic**, gated by the incompatible
+`TrafficStream` version bump: the new proxy always emits them, there is no feature flag, and the
+topic is assumed empty at cutover so no mixed-mode reader exists.
+
+#### 5.4.1 Absence is proved by offsets, not by clocks
+
+The naive reading — "the snapshot omits C, so C is dead" — is wrong, and wrong in the direction that
+loses data. Two hazards:
+
+- **Flush latency.** C may have flushed bytes that had not yet reached Kafka when the snapshot was
+  built, so C's records can land at offsets *after* the snapshot that omits it.
+- **Weakly-consistent iteration.** The snapshot is built by iterating a `ConcurrentHashMap`. An entry
+  added while the iteration is in flight may legitimately be missed even though the connection is
+  live.
+
+Both dissolve if the verdict is stated in terms of **offset order on a single partition** rather than
+time. The rule:
+
+> Connection `C` of node `X` is confirmed dead on partition `P` when two consecutive snapshots from
+> `X` for `P`, at offsets `K₁ < K₂`, both omit `C`, **and** `C`'s last record on `P` is at an offset
+> `< K₁`.
+
+Why this holds. Since `C`'s traffic and `X`'s snapshots for `P` are both in `P`, their relative order
+is total and observable — no clock is involved, and "hadn't flushed yet" is not expressible, because
+a flush that happened would appear at some offset and the rule reads offsets, not timestamps. If `C`
+were open-and-idle throughout, `ConcurrentHashMap` would have returned it in at least one of two
+complete iterations (an entry present for the whole traversal is always visited; only entries added
+mid-traversal may be skipped). If `C` were open-and-active, it would have flushed a record after
+`K₁`. Neither happened, so `C` was removed from `X`'s table — the channel is gone. Its accumulation
+at the replayer will never be completed by anyone, which is exactly the condition for expiring it.
+
+The two-consecutive rule is what makes the effective timeout `2 × snapshotInterval` (60s at the
+default) rather than one interval.
+
+**The partition number is stamped in the record and asserted on read.** The entire argument rests on
+`C`'s records and `X`'s snapshot being in the *same* partition. If a partition-count change, a
+producer-side partitioner change, or a shard-set bug ever broke that, the offset ordering would be
+meaningless while still *looking* like proof. So the reader compares `snapshot.partition` against the
+partition it was consumed from and, on mismatch, refuses the verdict and halts loudly. A cheap
+assertion guarding the one assumption whose silent failure commits live data.
+
+#### 5.4.2 Empty snapshots are a statement, not a heartbeat
+
+A snapshot listing zero connections is retained and emitted. It is not filler: *"I hold no idle open
+connections on P"* is a positive structural claim, and it is what lets the last zombie on an
+otherwise quiet partition be expired. Contrast with emitting nothing, which is indistinguishable from
+a crashed or stalled proxy and therefore proves nothing (§5.2). Empty snapshots are also tiny, so
+they flush and land promptly.
+
+**Liveness records bypass the obligation model entirely.** They create no accumulation, hold no
+offsets, and never appear at the commit head; their own offsets commit as soon as they are decoded.
+Routing them through the ordinary record lifecycle would let the liveness stream pin the very commit
+head it exists to unblock.
+
+#### 5.4.3 Sizing
+
+The constraint is a hard one and it is *pre-compression*: `KafkaCaptureFactory` allocates
+`ByteBuffer.allocate(messageSize − KAFKA_MESSAGE_OVERHEAD_BYTES)` and enforces the limit against that
+buffer, so producer-side compression shrinks what crosses the wire but not what has to fit. Default
+`maximumTrafficStreamSize` is 1 MiB.
+
+`connectionId` is `ch.id().asLongText()` — 60 hex-and-dash characters, e.g.
+`0242acfffe13000a-0000000a-00000005-1eb087a9beb83f3e-a32794b4`, structured as:
+
+| Field | Bytes | Varies by |
+|---|---|---|
+| machineId | 8 | host — **constant within a process** |
+| pid | 4 | process — **constant within a process** |
+| sequence | 4 | connection (monotonic) |
+| timestamp | 8 | connection (`Long.reverse(nanoTime()) ^ currentTimeMillis()` — scrambled, incompressible) |
+| random | 4 | connection |
+
+So 12 of the 28 encoded bytes are identical for every connection in the snapshot, and the text form
+doubles the rest. Encoding raw bytes with the per-process prefix elided once per record:
+
+| Encoding | Per entry | Entries in 1 MiB |
+|---|---|---|
+| Full 60-char text | ~62 B | ~16,900 |
+| Raw bytes, prefix elided | ~17 B | ~61,600 |
+
+A proxy saturating 32K ephemeral ports needs 32,768 entries: **1.94 MiB** as text (over the cap),
+**557 KiB** raw (comfortable). Sharding (§5.4.4) divides this by the number of partitions the node
+uses, so per-record counts are far smaller in practice; the raw encoding is what makes the worst case
+safe rather than merely likely-to-fit. Further headroom exists if ever needed — the sequence numbers
+are near-monotonic and would delta-encode well — but is not worth designing for now.
+
+Two related questions, answered: **compression does not help this problem** (it applies after the
+enforced limit), and **there is no destination address to drop** — `BindObservation` /
+`ConnectObservation` carry no address at all in the current proto, the field is commented out.
+
+#### 5.4.4 Node-sharded partitions
+
+Emitting to every partition costs `N × M` records per interval, which scales badly in the wrong
+dimension: every replayer partition pays for every node in the fleet. At `N=32`, `M=1024`, 30s
+interval that is ~1,090 records/s of pure overhead.
+
+Instead, each node writes only to a shard set `S(X)` of `K` partitions (default **16**), derived
+deterministically from `hash(nodeId)`, and — this is the whole trick — it writes **both its traffic
+and its liveness snapshots** only to `S(X)`. Traffic goes to `S(X)[hash(connectionId) mod K]`, set
+explicitly via the four-argument `ProducerRecord` constructor rather than left to key hashing.
+
+| | Records/interval | Records/s (30s) | Per partition |
+|---|---|---|---|
+| Broadcast (`N × M`) | 32,768 | ~1,090 | ~1.07/s |
+| Sharded (`N × K`, K=16) | 512 | ~17 | ~0.017/s |
+
+**The requirement is self-consistency, not coverage or disjointness.** All the proof in §5.4.1 needs
+is that a node's traffic and its snapshots land in the same partitions — which is true by
+construction, since one set defines both. It does **not** need the shard sets to be disjoint, to
+cover all `M` partitions, or to be recomputed as the fleet changes. That is what makes this work
+without knowing `N`: nodes can be added or removed freely, collisions between shard sets are
+harmless, and only `M` and `K` are fixed configuration. `M` becomes fleet headroom rather than a
+correctness parameter — `M ≈ maxNodes × K` keeps overlap light.
+
+A restart reshuffles `S(X)`, since the nodeId is new (§5.4.5). That costs nothing: a new process has
+all-new connections, so there is nothing to keep co-located with anything.
+
+Repartitioning the topic is out of scope — it invalidates the co-location assumption, which the
+§5.4.1 assertion will catch and halt on rather than silently mis-prove.
+
+#### 5.4.5 nodeId stays a fresh UUID per process
+
+`CaptureProxy.getNodeId()` returns `UUID.randomUUID().toString()` — a new identity on every start.
+That is **deliberate and must not be "fixed" to a stable per-host id**, even though a stable id looks
+strictly more useful (a restarted proxy could then prove its predecessor's connections dead by
+omitting them).
+
+The reason is fencing. With a stable nodeId, consider a proxy that is not dead but merely stalled — a
+long GC pause, partitioned from Kafka, or a producer backed up behind a slow broker — while a
+replacement instance comes up carrying the same id. The replacement's snapshots omit the stalled
+process's still-open connections. The replayer proves them dead, commits past their records, and then
+the original process recovers and flushes the rest at higher offsets. Committed means skipped on
+restart, so the tail of every one of those connections is **silently lost**. A per-process UUID makes
+that unrepresentable: two processes never share an identity, and a snapshot can only ever speak about
+the connections of the process that emitted it. The nodeId *is* the fencing token.
+
+The framing that makes this obvious: when a proxy restarts, every connection it held has already been
+severed. For every purpose that matters here, the new process is a new host.
+
+**The consequence, stated plainly.** A dead proxy's connections can never be expired by liveness,
+because no successor is authorized to speak for them and the dead process emits nothing further. That
+residue belongs to the scanner's window-exhausted verdict (§5.2, condition 2), which is the other
+reason both mechanisms ship.
+
+### 5.5 Metrics
 
 Most of this already exists via the OTel context hierarchy (`RootReplayerContext` →
 `KafkaRecordContext` → `TrafficStreamsLifecycleContext` → `ReplayerHttpTransactionContext`)
@@ -340,7 +555,12 @@ and the heartbeat loggers. Confirm and fill gaps:
 | Backpressure engaged | `BlockingTrafficSource` heartbeat | ✔ |
 | Buffered records (ε utilization) | `kafkaRecordsLeftToCommitEventually` | ✔ |
 | Scanner: window distance, deaths confirmed/cycle, scan latency | — | **NEW** |
+| Scanner: verdicts by kind (liveness-omission / window-exhausted / inconclusive) | — | **NEW** |
 | Proxy: connections killed by duration cap | — | **NEW** |
+| Proxy: snapshot emit latency, entries per snapshot, snapshot bytes (p99 vs. the 1 MiB cap) | — | **NEW** |
+| Proxy: partitions in shard set, snapshots dropped by producer backpressure | — | **NEW** |
+| Replayer: nodeIds with live obligations but no snapshot in >2 intervals (suspected dead proxies) | — | **NEW** |
+| Replayer: liveness partition-mismatch assertions (§5.4.1) — must be zero | — | **NEW** |
 
 Scanner metrics should be top-level counters/histograms, not spans — it isn't per-request work.
 
@@ -471,6 +691,48 @@ partitions than the replay consumer, which makes its verdicts worthless — it w
 "is this connection alive?" about partitions nobody is replaying. One consumer with two
 logical cursors gives affinity for free.
 
+### Per-connection heartbeat observations
+
+The obvious first shape for §5.4: every N seconds, write a `HeartbeatObservation` into each open
+connection's own stream.
+
+**Why rejected — the offloader's flush is buffer-driven, not time-driven.**
+`StreamChannelConnectionCaptureSerializer.flushIfNeeded(requiredSize)` flushes only when
+`spaceLeft < requiredSize`; the only other flush call sites are per-request and connection-final
+(`ConditionallyReliableLoggingHttpHandler`, `LoggingHttpHandler`). So a heartbeat written into an idle
+connection's serializer sits in that connection's buffer indefinitely — the exact connections we need
+to hear about are the exact ones that never flush. Forcing a flush instead means one Kafka record per
+idle connection per interval plus a per-connection timer, which is strictly worse than the problem: at
+32K idle connections and a 30s interval that is ~1,090 records/s and 32K timers, versus one record.
+Snapshots coalesce all of it into a single write per partition and need no per-connection timers at
+all — just a periodic sweep of a map the proxy already maintains.
+
+### Broadcasting each snapshot to every partition
+
+Emit every node's snapshot to all `M` partitions, so any replayer sees any node's liveness.
+
+**Why rejected:** `N × M` records per interval (~1,090/s at N=32, M=1024, 30s), and the cost lands on
+every replayer partition regardless of whether any node's traffic is there. Node-sharded shard sets
+(§5.4.4) get the same guarantee for `N × K` because the proof only ever needs *same-partition*
+ordering, never fleet-wide visibility.
+
+### Dense-index bitmaps instead of id lists
+
+Assign each connection a small dense integer and ship a bitmap.
+
+**Why rejected:** Netty channel ids are not dense, so this requires the proxy to maintain its own
+index allocator — new mutable state, plus index recycling, which reintroduces exactly the
+identity-reuse ambiguity the id-based scheme avoids. The raw-suffix encoding (§5.4.3) already fits
+32K connections in ~557 KiB, so there is no problem left to solve.
+
+### A stable per-host nodeId
+
+Derive nodeId from hostname, MAC, or instance id so it survives restarts, letting a restarted proxy
+prove its predecessor's connections dead.
+
+**Why rejected:** it makes the liveness signal forgeable by a successor process and converts a proxy
+stall into silent data loss. Full argument in §5.4.5.
+
 ### Byte-count caps on the lookahead buffer
 
 Bound read-ahead by bytes rather than time.
@@ -552,7 +814,7 @@ the scanner's entire purpose while leaving it in the codebase looking authoritat
 
 ### 8.4 Smaller adjustments
 
-- **§5.4's metrics table should absorb #3231's observability work** rather than duplicate it.
+- **§5.5's metrics table should absorb #3231's observability work** rather than duplicate it.
   Its `TrackingKafkaConsumer` heartbeat reports the *worst* commit head across all partitions,
   which is strictly better than the arbitrary-first-partition behavior the table assumed.
   Caveat unchanged: that `age` derives from `peekHeadMetadata().addedAt` (wall-clock at
