@@ -59,6 +59,7 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         private final Deque<WorkEntry> admitted = new ArrayDeque<>();
         private Instant settledWatermark = Instant.MIN;
         private Instant idleWatermark = Instant.MIN;
+        private Instant admissionWatermark = Instant.MIN;
         private boolean revoking;
 
         private Instant constrainingWatermark() {
@@ -134,15 +135,8 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
                 );
                 return;
             }
-            if (!progress.admitted.isEmpty() && sourceTime.isBefore(progress.admitted.peekLast().sourceTime)) {
-                completion.completeExceptionally(
-                    new IllegalArgumentException(
-                        "source work must be admitted in nondecreasing time order for " + partition
-                    )
-                );
-                return;
-            }
-            var entry = new WorkEntry(workId, sourceTime);
+            progress.admissionWatermark = later(progress.admissionWatermark, sourceTime);
+            var entry = new WorkEntry(workId, progress.admissionWatermark);
             progress.admitted.addLast(entry);
             outstandingSnapshot.incrementAndGet();
             completion.complete(new OwnedWorkToken(partition, entry));
