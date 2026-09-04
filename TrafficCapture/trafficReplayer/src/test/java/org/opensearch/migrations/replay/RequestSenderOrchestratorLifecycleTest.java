@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -102,6 +103,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         orchestrator.abortActor(
             firstContext.getChannelKeyContext(),
             0,
+            AbortReason.SOURCE_REASSIGNMENT,
             new CancellationException("rebalance")
         ).get(Duration.ofSeconds(5));
 
@@ -161,6 +163,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         orchestrator.abortActor(
             context.getChannelKeyContext(),
             0,
+            AbortReason.SOURCE_REASSIGNMENT,
             new CancellationException("source reassigned")
         ).get(Duration.ofSeconds(2));
 
@@ -212,6 +215,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         orchestrator.abortActor(
             context.getChannelKeyContext(),
             0,
+            AbortReason.SOURCE_REASSIGNMENT,
             cancellation
         ).get(Duration.ofSeconds(2));
 
@@ -337,6 +341,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var abort = orchestrator.abortActor(
             context.getChannelKeyContext(),
             0,
+            AbortReason.SOURCE_REASSIGNMENT,
             new CancellationException("rebalance")
         );
 

@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 
 import org.junit.jupiter.api.Assertions;
@@ -88,7 +89,10 @@ class ConnectionActorTest {
         ).toCompletableFuture();
         mailbox.runUntilIdle();
 
-        var termination = actor.abort(new CancellationException("rebalance")).toCompletableFuture();
+        var termination = actor.abort(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("rebalance")
+        ).toCompletableFuture();
         mailbox.runUntilIdle();
         Assertions.assertFalse(termination.isDone());
         Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, second.join());
