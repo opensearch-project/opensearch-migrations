@@ -18,6 +18,8 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
@@ -47,7 +49,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
     /**
      * When a TrafficSourceReaderInterruptedClose fires for a connection in ACCUMULATING_WRITES
      * state, fireAccumulationsCallbacksAndClose must be called BEFORE onConnectionClose, so that
-     * finishedAccumulatingResponseFuture is completed and the OnlineRadixSorter can drain.
+     * finishedAccumulatingResponseFuture receives its terminal source outcome before actor abort.
      *
      * Before fix: accumulator bypasses state machine for synthetic closes — no
      * fireAccumulationsCallbacksAndClose is called, so onTrafficStreamsExpired/handleEndOfResponse
@@ -144,8 +146,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
                 .findFirst().orElse(null),
             "status must be TRAFFIC_SOURCE_READER_INTERRUPTED");
 
-        // The response callback (finishedAccumulatingResponseFuture completion) must fire
-        // before onConnectionClose so the sorter can drain
+        // The response callback must settle source state before connection abort is admitted.
         Assertions.assertTrue(responseAccumulatedCallbackFired.get(),
             "fireAccumulationsCallbacksAndClose must complete finishedAccumulatingResponseFuture " +
             "before onConnectionClose fires");
@@ -222,24 +223,29 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
     }
 
     // -------------------------------------------------------------------------
-    // Phase A: outstandingTrafficSourceReaderInterruptedCloseSessions counter tests
+    // Source termination obligation tests
     // -------------------------------------------------------------------------
 
     /**
-     * After draining trafficSourceReaderInterruptedCloseQueue, readNextTrafficStreamSynchronously must return
-     * empty list while outstandingTrafficSourceReaderInterruptedCloseSessions > 0.
-     * Before fix: counter doesn't exist, real records returned immediately.
+     * After draining trafficSourceReaderInterruptedCloseQueue, reads remain gated while an
+     * attributable source termination obligation is unresolved.
      */
     @Test
-    void emptyBatchReturnedWhileCounterPositive() throws Exception {
+    void emptyBatchReturnedWhileTerminationObligationIsPending() throws Exception {
         var mc = new org.apache.kafka.clients.consumer.MockConsumer<String, byte[]>(
             org.apache.kafka.clients.consumer.OffsetResetStrategy.EARLIEST);
         var tp = new org.apache.kafka.common.TopicPartition("test", 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, "test", Duration.ofHours(1))) {
-            // Simulate counter > 0
-            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+            source.pendingSessionTerminationObligations.put(
+                new SourceConnectionPartitionGenerationKey(
+                    new SourceConnectionKey("n", "c"),
+                    0,
+                    1
+                ),
+                new KafkaTrafficCaptureSource.SessionTerminationObligation(0)
+            );
 
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
@@ -262,7 +268,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
             var result = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
 
             Assertions.assertTrue(result.isEmpty(),
-                "must return empty batch while outstandingTrafficSourceReaderInterruptedCloseSessions > 0, got: " + result.size());
+                "must return an empty batch while a source termination obligation remains, got: " + result.size());
         }
     }
 

@@ -13,10 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/**
- * Verifies that ClientConnectionPool.closeConnection() uses the correct composite Key for cache invalidation,
- * and that scheduleClose() invalidates the cache immediately (before the Netty close completes).
- */
+/** Verifies generation-scoped session caching and actor-owned invalidation. */
 @Slf4j
 public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTest {
 
@@ -27,51 +24,24 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         return (LoadingCache<?, ?>) f.get(pool);
     }
 
-    @Test
-    @SneakyThrows
-    void closeConnection_evictsCacheEntry() {
-        // Dummy channel creator — never actually called since we don't send requests
-        var pool = new ClientConnectionPool(
-            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "dummy"),
-            "test-pool",
-            1
-        );
-
-        try {
-            var reqCtx = rootContext.getTestConnectionRequestContext("conn-A", 0);
-            var channelKeyCtx = reqCtx.getChannelKeyContext();
-
-            // Put an entry in the cache
-            pool.getCachedSession(channelKeyCtx, 0);
-            Assertions.assertEquals(1, getCache(pool).size(), "cache should have 1 entry after getCachedSession");
-
-            // Close the connection — this should evict the cache entry
-            pool.closeConnection(channelKeyCtx, 0);
-
-            // Cache entry is properly evicted because invalidate() uses the correct Key type
-            Assertions.assertEquals(0, getCache(pool).size(),
-                "cache entry should be evicted after closeConnection()");
-        } finally {
-            pool.shutdownNow().get();
-        }
-    }
-
     /**
-     * Verifies that scheduleClose() keeps the cache entry alive until the close actually runs,
+     * Verifies that actor close keeps the cache entry alive until the close actually runs,
      * so that in-flight response futures can complete on the same session.
      * Immediate invalidation caused deadlocks: new requests got a new session, leaving
      * finishedAccumulatingResponseFuture on the old session permanently incomplete.
      */
     @Test
     @SneakyThrows
-    void scheduleClose_cacheRemainsUntilCloseCompletes() throws Exception {        var pool = new ClientConnectionPool(
+    void actorClose_cacheRemainsUntilCloseCompletes() throws Exception {
+        var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool",
             1
         );
         var orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, ctx) -> null
+            (session, ctx) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations()
         );
 
         try {
@@ -81,7 +51,7 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             pool.getCachedSession(channelKeyCtx, 0);
             Assertions.assertEquals(1, getCache(pool).size());
 
-            var closeFuture = orchestrator.scheduleClose(channelKeyCtx, 0, 0, Instant.now());
+            var closeFuture = orchestrator.scheduleActorClose(channelKeyCtx, 0, Instant.now());
             closeFuture.get(Duration.ofSeconds(5));
 
             // After close completes, cache must be evicted
@@ -92,20 +62,18 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 
-    /**
-     * When scheduleRequest is called with a key whose generation is higher than the cached
-     * session's generation, the old session must be cancelled and a new one used.
-     * Before fix: generation is not threaded through scheduleRequest → getCachedSession,
-     * so the old session is always reused regardless of generation.
-     */
     @Test
     @SneakyThrows
-    void scheduleRequest_higherGenerationCancelsOldSession() throws Exception {
+    void differentGenerationsUseDifferentSessionsWithoutCancellingEither() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
         );
-        var orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
+        var orchestrator = new RequestSenderOrchestrator(
+            pool,
+            (session, ctx) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
 
         try {
             var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0).getChannelKeyContext();
@@ -114,25 +82,25 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
             Assertions.assertEquals(1, session1.generation);
 
-            // getCachedSession with generation 2 returns the same session (no cancellation in getCachedSession)
-            // Cancellation is handled by the synthetic close path to avoid finishedAccumulatingResponseFuture deadlocks
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
-            Assertions.assertSame(session1, session2,
-                "getCachedSession must not cancel on generation bump — synthetic close path handles that");
+            Assertions.assertNotSame(session1, session2);
+            Assertions.assertEquals(2, session2.generation);
+            Assertions.assertFalse(session1.isCancelled());
+            Assertions.assertFalse(session2.isCancelled());
+            Assertions.assertEquals(2, getCache(pool).size());
         } finally {
             pool.shutdownNow().get();
         }
     }
 
     /**
-     * Verifies that the generation from ITrafficStreamKey flows through scheduleRequest
-     * to getCachedSession, so new sessions are created with the correct generation.
+     * Verifies that a new source generation creates a session carrying that generation.
      * Session cancellation on generation bump is NOT done here (would cause deadlocks);
      * it is handled by the synthetic close path.
      */
     @Test
     @SneakyThrows
-    void scheduleRequest_generationFlowsThroughToSessionLookup() throws Exception {
+    void newGeneration_isCarriedByTheNewSession() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
@@ -157,14 +125,9 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 
-    /**
-     * getCachedSession stores the generation on the session for tracking purposes.
-     * Session cancellation on generation bump is handled by the synthetic close path,
-     * not by getCachedSession (which would cause finishedAccumulatingResponseFuture deadlocks).
-     */
     @Test
     @SneakyThrows
-    void higherGenerationCancelsOldSession() throws Exception {
+    void oldGenerationInvalidationCannotEvictNewGeneration() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
@@ -175,11 +138,12 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
             Assertions.assertEquals(1, session1.generation, "session must carry the generation it was created with");
 
-            // getCachedSession with a higher generation returns the SAME session (no cancellation here —
-            // cancellation is handled by the synthetic close path to avoid deadlocks)
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
-            Assertions.assertSame(session1, session2,
-                "getCachedSession must not cancel sessions on generation bump — that causes deadlocks");
+            pool.invalidateSession(channelKeyCtx.getConnectionId(), 0, 1);
+
+            Assertions.assertEquals(1, getCache(pool).size());
+            Assertions.assertSame(session2, pool.getCachedSession(channelKeyCtx, 0, 2));
+            Assertions.assertNotSame(session1, session2);
         } finally {
             pool.shutdownNow().get();
         }

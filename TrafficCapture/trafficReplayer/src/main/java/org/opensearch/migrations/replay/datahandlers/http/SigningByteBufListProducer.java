@@ -55,6 +55,16 @@ public class SigningByteBufListProducer extends ByteBufListProducer {
     }
 
     @Override
+    public AttemptPayload newAttempt() {
+        return AttemptPayload.owned(get());
+    }
+
+    @Override
+    public ByteBufList diagnosticSnapshot() {
+        return get();
+    }
+
+    @Override
     protected void deallocate() {
         bodyByteBufs.forEach(ReferenceCounted::release);
         bodyByteBufs.clear();

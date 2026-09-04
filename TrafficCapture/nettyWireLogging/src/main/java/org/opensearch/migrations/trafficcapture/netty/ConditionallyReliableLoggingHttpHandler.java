@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.function.Predicate;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -25,7 +26,34 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         @NonNull RequestCapturePredicate requestCapturePredicate,
         @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock
     ) throws IOException {
-        super(rootContext, nodeId, connectionId, trafficOffloaderFactory, requestCapturePredicate);
+        this(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            headerPredicateForWhenToBlock,
+            Duration.ZERO
+        );
+    }
+
+    public ConditionallyReliableLoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        @NonNull String nodeId,
+        String connectionId,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull Duration maximumConnectionDuration
+    ) throws IOException {
+        super(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            maximumConnectionDuration
+        );
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
     }
 

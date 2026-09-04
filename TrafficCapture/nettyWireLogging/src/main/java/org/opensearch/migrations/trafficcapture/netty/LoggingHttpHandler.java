@@ -1,7 +1,11 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
@@ -24,7 +28,6 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.Getter;
-import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -138,6 +141,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     protected final EmbeddedChannel httpDecoderChannel;
 
     protected IWireCaptureContexts.IHttpMessageContext messageContext;
+    private final Duration maximumConnectionDuration;
+    private CompletableFuture<T> captureCloseFuture;
+    private ScheduledFuture<?> durationCloseTask;
+    private boolean contextsClosed;
 
     public LoggingHttpHandler(
         @NonNull IRootWireLoggingContext rootContext,
@@ -146,8 +153,30 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
         @NonNull RequestCapturePredicate httpHeadersCapturePredicate
     ) throws IOException {
+        this(
+            rootContext,
+            nodeId,
+            channelKey,
+            trafficOffloaderFactory,
+            httpHeadersCapturePredicate,
+            Duration.ZERO
+        );
+    }
+
+    public LoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        String nodeId,
+        String channelKey,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
+        @NonNull Duration maximumConnectionDuration
+    ) throws IOException {
         var parentContext = rootContext.createConnectionContext(channelKey, nodeId);
         this.messageContext = parentContext.createInitialRequestContext();
+        if (maximumConnectionDuration.isNegative()) {
+            throw new IllegalArgumentException("maximumConnectionDuration must not be negative");
+        }
+        this.maximumConnectionDuration = maximumConnectionDuration;
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext);
         var captureState = new CaptureState();
@@ -166,40 +195,71 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     @Override
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        if (!maximumConnectionDuration.isZero()) {
+            durationCloseTask = ctx.executor().schedule(
+                () -> closeCaptureOnce(Instant.now()).whenComplete((ignored, throwable) -> {
+                    if (throwable != null) {
+                        log.atWarn()
+                            .setCause(throwable)
+                            .setMessage("Unable to finish capture before enforcing the connection duration cap")
+                            .log();
+                    }
+                    ctx.close();
+                }),
+                maximumConnectionDuration.toNanos(),
+                TimeUnit.NANOSECONDS
+            );
+        }
+        super.handlerAdded(ctx);
+    }
+
+    @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-        trafficOffloader.addCloseEvent(Instant.now());
         getConnectionContext().onUnregistered();
-        trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
-            if (t != null) {
-                log.warn("Got error: " + t.getMessage());
-                ctx.close();
-            } else {
-                try {
-                    super.channelUnregistered(ctx);
-                } catch (Exception e) {
-                    throw Lombok.sneakyThrow(e);
-                }
+        closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                log.atWarn().setCause(throwable).setMessage("Unable to finalize capture during channel teardown").log();
             }
         });
+        super.channelUnregistered(ctx);
     }
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        getConnectionContext().onRemoved();
-        messageContext.close();
-        messageContext.getLogicalEnclosingScope().close();
-
-        trafficOffloader.flushCommitAndResetStream(true).whenComplete((result, t) -> {
-            if (t != null) {
-                log.warn("Got error: " + t.getMessage());
-            }
-            try {
-                super.channelUnregistered(ctx);
-            } catch (Exception e) {
-                throw Lombok.sneakyThrow(e);
+        closeContextsOnce();
+        closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                log.atWarn().setCause(throwable).setMessage("Unable to finalize capture during handler removal").log();
             }
         });
         super.handlerRemoved(ctx);
+    }
+
+    private synchronized CompletableFuture<T> closeCaptureOnce(Instant timestamp) {
+        if (captureCloseFuture != null) {
+            return captureCloseFuture;
+        }
+        if (durationCloseTask != null) {
+            durationCloseTask.cancel(false);
+        }
+        try {
+            trafficOffloader.addCloseEvent(timestamp);
+            captureCloseFuture = trafficOffloader.flushCommitAndResetStream(true);
+        } catch (Throwable t) {
+            captureCloseFuture = CompletableFuture.failedFuture(t);
+        }
+        return captureCloseFuture;
+    }
+
+    private synchronized void closeContextsOnce() {
+        if (contextsClosed) {
+            return;
+        }
+        contextsClosed = true;
+        getConnectionContext().onRemoved();
+        messageContext.close();
+        messageContext.getLogicalEnclosingScope().close();
     }
 
     /**

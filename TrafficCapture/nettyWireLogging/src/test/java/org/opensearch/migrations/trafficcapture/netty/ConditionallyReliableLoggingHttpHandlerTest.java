@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -125,6 +126,43 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             getSingleByteAtATimeWriter(usePool, fullTrafficBytes),
             checkInstrumentation
         );
+    }
+
+    @Test
+    void durationCapUsesTheIdempotentCapturedClosePath() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    Duration.ofMillis(1)
+                )
+            );
+
+            Thread.sleep(5);
+            channel.runScheduledPendingTasks();
+            channel.runPendingTasks();
+
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, streamManager.flushCount.get());
+            var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
+            Assertions.assertTrue(finalStream.hasNumberOfThisLastChunk());
+            Assertions.assertEquals(
+                1,
+                finalStream.getSubStreamList().stream().filter(TrafficObservation::hasClose).count()
+            );
+
+            channel.close();
+            channel.runPendingTasks();
+            Assertions.assertEquals(1, streamManager.flushCount.get());
+            channel.finishAndReleaseAll();
+        }
     }
 
     private static Consumer<EmbeddedChannel> getSingleByteAtATimeWriter(boolean usePool, byte[] fullTrafficBytes) {

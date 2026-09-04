@@ -80,7 +80,11 @@ public class KafkaTopicDumper {
             while (true) {
                 try {
                     var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
-                    for (var tswk : chunks) {
+                    for (var sourceInput : chunks) {
+                        if (!(sourceInput instanceof org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey
+                            tswk)) {
+                            continue;
+                        }
                         System.out.println(TrafficStreamDumper.format(
                             tswk.getStream(), -1, -1, previewBytesRead, previewBytesWrite, getBaseEpoch(tswk.getStream())));
                     }
@@ -102,12 +106,15 @@ public class KafkaTopicDumper {
                 while (true) {
                     try {
                         var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
-                        for (var tswk : chunks) {
-                            if (emitRaw) {
+                        for (var sourceInput : chunks) {
+                            if (emitRaw
+                                && sourceInput
+                                    instanceof org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey
+                                        tswk) {
                                 System.out.println("RAW " + TrafficStreamDumper.format(
                                     tswk.getStream(), -1, -1, previewBytesRead, previewBytesWrite, getBaseEpoch(tswk.getStream())));
                             }
-                            accumulator.accept(tswk);
+                            accumulator.accept(sourceInput);
                         }
                     } catch (java.util.concurrent.ExecutionException e) {
                         if (e.getCause() instanceof java.io.EOFException) break;

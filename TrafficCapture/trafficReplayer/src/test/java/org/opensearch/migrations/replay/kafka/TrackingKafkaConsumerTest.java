@@ -9,9 +9,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
@@ -116,12 +119,14 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         consumer.onPartitionsAssigned(List.of(tp));
 
-        var trulyLostPartitions = new ArrayList<Integer>();
+        var trulyLostPartitions = new ArrayList<SourcePartitionKey>();
         consumer.setOnPartitionsTrulyLostCallback(trulyLostPartitions::addAll);
 
         consumer.onPartitionsLost(List.of(tp));
 
-        Assertions.assertEquals(List.of(0), trulyLostPartitions,
+        Assertions.assertEquals(List.of(
+            new SourcePartitionKey(TOPIC, 0, 1)
+        ), trulyLostPartitions,
             "onPartitionsLost must call onPartitionsTrulyLostCallback with the lost partition numbers");
     }
 
@@ -145,7 +150,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         int generationAtAssign = consumer.getConsumerConnectionGeneration();
 
         var observedGenerations = new ArrayList<Integer>();
-        var trulyLostPartitions = new ArrayList<Integer>();
+        var trulyLostPartitions = new ArrayList<SourcePartitionKey>();
         consumer.setOnPartitionsTrulyLostCallback(parts -> {
             observedGenerations.add(consumer.getConsumerConnectionGeneration());
             trulyLostPartitions.addAll(parts);
@@ -153,16 +158,102 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         consumer.onPartitionsRevoked(List.of(tp));
 
-        Assertions.assertEquals(List.of(0), trulyLostPartitions,
+        Assertions.assertEquals(List.of(
+            new SourcePartitionKey(
+                TOPIC,
+                0,
+                generationAtAssign
+            )
+        ), trulyLostPartitions,
             "onPartitionsRevoked must fire truly-lost callback for the revoked partition immediately");
         Assertions.assertEquals(List.of(generationAtAssign), observedGenerations,
             "callback must fire at the OLD generation (before any subsequent onPartitionsAssigned bump)");
 
         // A subsequent onPartitionsAssigned bumps the generation; the callback must NOT fire again.
         consumer.onPartitionsAssigned(List.of(tp));
-        Assertions.assertEquals(List.of(0), trulyLostPartitions,
+        Assertions.assertEquals(List.of(
+            new SourcePartitionKey(
+                TOPIC,
+                0,
+                generationAtAssign
+            )
+        ), trulyLostPartitions,
             "truly-lost callback must not fire a second time on subsequent assignment");
         Assertions.assertTrue(consumer.getConsumerConnectionGeneration() > generationAtAssign,
             "subsequent onPartitionsAssigned must bump the generation");
+    }
+
+    @Test
+    void cooperativeAssignmentsReportEachPartitionsActualGeneration() {
+        var consumer = buildConsumer(buildMockConsumer());
+        var partition0 = new TopicPartition(TOPIC, 0);
+        var partition1 = new TopicPartition(TOPIC, 1);
+        var assigned = new ArrayList<SourcePartitionKey>();
+        var revoked = new ArrayList<SourcePartitionKey>();
+        consumer.setSourcePartitionLifecycleListener(new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {
+                assigned.addAll(partitions);
+            }
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
+                revoked.addAll(partitions);
+            }
+        });
+
+        consumer.onPartitionsAssigned(List.of(partition0));
+        consumer.onPartitionsAssigned(List.of(partition1));
+        consumer.onPartitionsRevoked(List.of(partition0, partition1));
+
+        Assertions.assertEquals(
+            List.of(
+                new SourcePartitionKey(TOPIC, 0, 1),
+                new SourcePartitionKey(TOPIC, 1, 2)
+            ),
+            assigned
+        );
+        Assertions.assertEquals(assigned, revoked);
+    }
+
+    @Test
+    void scanAheadRestoresEveryReplayPosition() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mc.seek(partition, 2);
+        mc.updateEndOffsets(Map.of(partition, 4L));
+        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 2, "key-2", new byte[] { 2 }));
+        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 3, "key-3", new byte[] { 3 }));
+
+        var cycle = consumer.scanAhead(10, Duration.ofSeconds(1));
+
+        Assertions.assertTrue(cycle.stableGeneration());
+        Assertions.assertFalse(cycle.exhaustedBudget());
+        Assertions.assertEquals(List.of(2L, 3L), cycle.records().stream()
+            .map(ConsumerRecord::offset)
+            .toList());
+        Assertions.assertEquals(2, mc.position(partition));
+    }
+
+    @Test
+    void scanAheadDiscardsResultsWhenOwnershipChangesDuringPoll() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mc.seek(partition, 0);
+        mc.updateEndOffsets(Map.of(partition, 1L));
+        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "key", new byte[] { 1 }));
+        mc.schedulePollTask(() -> {
+            consumer.onPartitionsRevoked(List.of(partition));
+            mc.assign(List.of());
+        });
+
+        var cycle = consumer.scanAhead(10, Duration.ofSeconds(1));
+
+        Assertions.assertFalse(cycle.stableGeneration());
+        Assertions.assertTrue(cycle.records().isEmpty());
     }
 }

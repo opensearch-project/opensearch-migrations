@@ -199,6 +199,21 @@ public class CaptureProxy {
             arity = 1,
             description = "Name of the topic to write captured traffic to.")
         public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
+        @Parameter(required = false,
+            names = { "--traffic-partition-shard-width" },
+            arity = 1,
+            description = "Number of traffic-topic partitions used by this proxy. Defaults to every partition.")
+        public Integer trafficPartitionShardWidth;
+        @Parameter(required = false,
+            names = { "--liveness-snapshot-interval-seconds" },
+            arity = 1,
+            description = "Interval between complete proxy liveness declarations.")
+        public int livenessSnapshotIntervalSeconds = 30;
+        @Parameter(required = false,
+            names = { "--max-connection-duration-seconds" },
+            arity = 1,
+            description = "Maximum frontside connection duration. Zero disables the cap.")
+        public long maximumConnectionDurationSeconds;
         @ParametersDelegate
         public KafkaParameters kafkaParameters = new KafkaParameters();
     }
@@ -210,6 +225,15 @@ public class CaptureProxy {
             parser.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
             p.kafkaParameters.validateKafkaAuthFlags();
+            if (p.trafficPartitionShardWidth != null && p.trafficPartitionShardWidth <= 0) {
+                throw new ParameterException("--traffic-partition-shard-width must be positive");
+            }
+            if (p.livenessSnapshotIntervalSeconds <= 0) {
+                throw new ParameterException("--liveness-snapshot-interval-seconds must be positive");
+            }
+            if (p.maximumConnectionDurationSeconds < 0) {
+                throw new ParameterException("--max-connection-duration-seconds must not be negative");
+            }
             if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaBrokers, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
                 .sum() != 1) {
@@ -280,7 +304,9 @@ public class CaptureProxy {
                 nodeId,
                 new KafkaProducer<>(KafkaConfig.buildKafkaProperties(params.kafkaParameters)),
                 params.kafakTopicName,
-                params.maximumTrafficStreamSize
+                params.maximumTrafficStreamSize,
+                params.trafficPartitionShardWidth,
+                Duration.ofSeconds(params.livenessSnapshotIntervalSeconds)
             );
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
@@ -414,6 +440,7 @@ public class CaptureProxy {
 
         var sslEngineSupplier = buildSslEngineSupplier(params);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
+        var connectionCaptureFactory = getConnectionCaptureFactory(params, ctx);
         try {
             var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0
                 ? Duration.ZERO
@@ -433,9 +460,11 @@ public class CaptureProxy {
                 .build();
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
-                    params.headerOverrides, getConnectionCaptureFactory(params, ctx));
+                    params.headerOverrides, connectionCaptureFactory,
+                    Duration.ofSeconds(params.maximumConnectionDurationSeconds));
             proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
+            closeCaptureFactory(connectionCaptureFactory);
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
         }
@@ -443,6 +472,7 @@ public class CaptureProxy {
             try {
                 System.err.println("Received shutdown signal.  Trying to shutdown cleanly");
                 proxy.stop();
+                closeCaptureFactory(connectionCaptureFactory);
                 System.err.println("Done stopping the proxy.");
             } catch (InterruptedException e) {
                 System.err.println("Caught InterruptedException while shutting down, resetting interrupt status: " + e);
@@ -454,6 +484,16 @@ public class CaptureProxy {
         proxy.waitForClose();
     }
 
+    private static void closeCaptureFactory(IConnectionCaptureFactory<?> connectionCaptureFactory) {
+        if (connectionCaptureFactory instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception e) {
+                log.atWarn().setCause(e).setMessage("Unable to close the capture factory cleanly").log();
+            }
+        }
+    }
+
     @SuppressWarnings("java:S4030") // Collections removeStrings and addBufs are incorrectly reported as being unused
     static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
                                                                 BacksideConnectionPool backsideConnectionPool,
@@ -461,6 +501,25 @@ public class CaptureProxy {
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
                                                                 List<String> headerOverridesArgs,
                                                                 IConnectionCaptureFactory<T> connectionFactory)
+    {
+        return buildProxyChannelInitializer(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            headerCapturePredicate,
+            headerOverridesArgs,
+            connectionFactory,
+            Duration.ZERO
+        );
+    }
+
+    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
+                                                                BacksideConnectionPool backsideConnectionPool,
+                                                                Supplier<SSLEngine> sslEngineSupplier,
+                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
+                                                                List<String> headerOverridesArgs,
+                                                                IConnectionCaptureFactory<T> connectionFactory,
+                                                                Duration maximumConnectionDuration)
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
@@ -480,7 +539,8 @@ public class CaptureProxy {
             backsideConnectionPool,
             sslEngineSupplier,
             connectionFactory,
-            headerCapturePredicate
+            headerCapturePredicate,
+            maximumConnectionDuration
         ) {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {

@@ -25,6 +25,7 @@ import org.opensearch.migrations.replay.RequestTransformerAndSender;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -323,7 +324,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                         ctx,
                         Instant.now(),
                         Instant.now(),
-                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                        null,
+                        new AsyncPermitPool(1, Runnable::run));
                     log.info("requestFinishFuture=" + requestFinishFuture);
                     var aggregatedResponse = requestFinishFuture.get();
                     log.debug("Got aggregated response=" + aggregatedResponse);
@@ -437,7 +440,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ctx,
                 Instant.now(),
                 Instant.now(),
-                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                null,
+                new AsyncPermitPool(1, Runnable::run));
             var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
@@ -498,7 +503,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     ctx,
                     Instant.now(),
                     Instant.now(),
-                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                    null,
+                    new AsyncPermitPool(1, Runnable::run));
                 var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
                 var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
                 log.atInfo().setMessage("RequestFinishFuture finished for request {}").addArgument(i).log();

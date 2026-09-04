@@ -14,6 +14,8 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
@@ -225,11 +227,10 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                     + "so replayEngine.cancelConnection runs and the channel session is marked "
                     + "cancelled. Statuses=" + connectionCloseStatuses);
 
-            // The in-flight request's response future was completed by the synthetic close
-            // (drains the OnlineRadixSorter).
+            // The synthetic close settles the in-flight request's source-side future.
             Assertions.assertTrue(responsesCompleted.get() >= 1,
                 "fireAccumulationsCallbacksAndClose must complete the in-flight request's "
-                    + "finishedAccumulatingResponseFuture so the sorter can drain. completed="
+                    + "finishedAccumulatingResponseFuture so its transaction can settle. completed="
                     + responsesCompleted.get());
         } finally {
             producer.close();
@@ -252,8 +253,11 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
     ) throws Exception {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 if (!(ts instanceof TrafficSourceReaderInterruptedClose)
                     && targetConnId.equals(ts.getKey().getConnectionId())) {
                     return ts;
@@ -280,21 +284,22 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
         boolean sawReal = false;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 observed.add(ts);
                 if (targetConnId.equals(ts.getKey().getConnectionId())) {
                     if (ts instanceof TrafficSourceReaderInterruptedClose) {
                         sawSynthetic = true;
-                        // Simulate the channel-close callback: in production the wired
-                        // ConnectionReplaySession.onClose calls source.onNetworkConnectionClosed,
-                        // which decrements outstandingTrafficSourceReaderInterruptedCloseSessions
-                        // so subsequent polls can resume real Kafka traffic. This test doesn't
-                        // wire a real session pool, so we fire the callback explicitly.
-                        source.onNetworkConnectionClosed(
-                            targetConnId,
-                            KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
-                            ts.getKey().getSourceGeneration());
+                        source.acknowledgeSessionTermination(
+                            new ConnectionSessionKey(
+                                new SourceConnectionKey(ts.getKey().getNodeId(), targetConnId),
+                                0,
+                                ts.getKey().getSourceGeneration()
+                            )
+                        ).toCompletableFuture().get();
                     } else {
                         sawReal = true;
                     }

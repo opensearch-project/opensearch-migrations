@@ -136,6 +136,10 @@ public class KafkaConfig {
 
         kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConnection);
         kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaClientId);
+        // These are correctness settings: a properties file must not weaken same-partition ordering.
+        kafkaProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        kafkaProps.put(ProducerConfig.ACKS_CONFIG, "all");
+        kafkaProps.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         applySaslAuthProperties(kafkaProps, authType, kafkaUserName, kafkaPassword);
         return kafkaProps;
     }

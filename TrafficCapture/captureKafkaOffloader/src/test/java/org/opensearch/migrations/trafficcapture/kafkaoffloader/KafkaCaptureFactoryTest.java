@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,6 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import io.netty.buffer.Unpooled;
@@ -64,12 +66,7 @@ public class KafkaCaptureFactoryTest {
             new StringSerializer(),
             new ByteArraySerializer()
         );
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer,
-            maxAllowableMessageSize
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, maxAllowableMessageSize);
         var serializer = kafkaCaptureFactory.createOffloader(createCtx());
 
         var testStr =
@@ -122,12 +119,7 @@ public class KafkaCaptureFactoryTest {
     @Test
     public void testLinearOffloadingIsSuccessful() throws IOException, InterruptedException, ExecutionException,
         TimeoutException {
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            mockProducer,
-            1024 * 1024
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(mockProducer, 1024 * 1024);
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
@@ -201,12 +193,7 @@ public class KafkaCaptureFactoryTest {
     @Test
     public void testOffloaderFlushCommitIsNonBlockingOnKafkaProducer() throws IOException, InterruptedException,
         ExecutionException, TimeoutException {
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            mockProducer,
-            1024 * 1024
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(mockProducer, 1024 * 1024);
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
@@ -274,12 +261,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer,
-            maxAllowableMessageSize
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, maxAllowableMessageSize);
         var serializer = kafkaCaptureFactory.createOffloader(createCtx());
 
         // Create a payload that will fragment into multiple records (~2MB with 1MB buffer)
@@ -323,12 +305,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer1MB = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory factory1MB = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer1MB,
-            1024 * 1024
-        );
+        KafkaCaptureFactory factory1MB = createFactory(producer1MB, 1024 * 1024);
         var serializer1MB = factory1MB.createOffloader(createCtx());
         var bb1 = Unpooled.wrappedBuffer(fakeDataBytes);
         serializer1MB.addReadEvent(referenceTimestamp, bb1);
@@ -341,12 +318,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer8MB = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory factory8MB = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer8MB,
-            8 * 1024 * 1024
-        );
+        KafkaCaptureFactory factory8MB = createFactory(producer8MB, 8 * 1024 * 1024);
         var serializer8MB = factory8MB.createOffloader(createCtx());
         var bb8 = Unpooled.wrappedBuffer(fakeDataBytes);
         serializer8MB.addReadEvent(referenceTimestamp, bb8);
@@ -371,12 +343,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer,
-            maxMessageSize
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, maxMessageSize);
         var serializer = kafkaCaptureFactory.createOffloader(createCtx());
 
         // 7MB payload - should fit in a single 8MB buffer
@@ -409,12 +376,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer,
-            1024 * 1024
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, 1024 * 1024);
 
         var ctx1 = new ConnectionContext(new TestRootKafkaOffloaderContext(), "conn-alpha", "node1");
         var ctx2 = new ConnectionContext(new TestRootKafkaOffloaderContext(), "conn-beta", "node1");
@@ -452,12 +414,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer,
-            1024 * 1024
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, 1024 * 1024);
         var serializer = kafkaCaptureFactory.createOffloader(createCtx());
 
         // Small payload that fits in a single buffer — no fragmentation
@@ -470,6 +427,15 @@ public class KafkaCaptureFactoryTest {
             "Small payload should produce exactly 1 record");
         Assertions.assertEquals("test", producer.history().get(0).key(),
             "Single-fragment record key should be the connectionId");
+        var record = producer.history().get(0);
+        var stream = TrafficStream.parseFrom(record.value());
+        Assertions.assertTrue(stream.hasPartition());
+        Assertions.assertEquals(record.partition(), stream.getPartition());
+        Assertions.assertTrue(stream.hasRoutingPlanId());
+        Assertions.assertEquals(
+            kafkaCaptureFactory.getPublisher().getRoutingPlan().getRoutingPlanId(),
+            stream.getRoutingPlanId()
+        );
 
         bb.release();
         producer.close();
@@ -480,12 +446,7 @@ public class KafkaCaptureFactoryTest {
         MockProducer<String, byte[]> producer = new MockProducer<>(
             true, null, new StringSerializer(), new ByteArraySerializer()
         );
-        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
-            TestRootKafkaOffloaderContext.noTracking(),
-            TEST_NODE_ID_STRING,
-            producer,
-            1024 * 1024
-        );
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, 1024 * 1024);
         var nullCtx = new ConnectionContext(new TestRootKafkaOffloaderContext(), null, "test");
 
         var exception = Assertions.assertThrows(NullPointerException.class,
@@ -493,5 +454,25 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertTrue(exception.getMessage().contains("partition locality"));
 
         producer.close();
+    }
+
+    private KafkaCaptureFactory createFactory(Producer<String, byte[]> producer, int messageSize) {
+        var plan = PartitionRoutingPlan.forTopic(4, 4, TEST_NODE_ID_STRING);
+        var publisher = new CaptureKafkaPublisher(
+            producer,
+            KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC,
+            TEST_NODE_ID_STRING,
+            plan,
+            new ProxyLivenessRegistry(),
+            messageSize,
+            Duration.ofDays(1)
+        );
+        return new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC,
+            messageSize,
+            publisher
+        );
     }
 }

@@ -41,6 +41,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
 
+import static org.opensearch.migrations.replay.ActorRequestTestUtils.schedulePreparedRequest;
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
@@ -78,7 +79,8 @@ public class HttpRetryTest {
         var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT)
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
+            RequestSenderOrchestrator.noSourceTerminationObligations()
         );
         var baseTime = Instant.now();
         var requestContext = rootContext.getTestConnectionRequestContext(0);
@@ -91,8 +93,8 @@ public class HttpRetryTest {
             TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes),
                 () -> "static rrp"));
         log.info("Scheduling item to run at " + startTimeForThisRequest);
-        return senderOrchestrator.scheduleRequest(
-            requestContext.getReplayerRequestKey(),
+        return schedulePreparedRequest(
+            senderOrchestrator,
             requestContext,
             startTimeForThisRequest,
             Duration.ofMillis(1),

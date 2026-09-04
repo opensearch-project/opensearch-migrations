@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -25,6 +26,7 @@ import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
@@ -32,7 +34,6 @@ import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceC
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamCursorKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -97,7 +98,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     numSendingThreads,
                     targetConnectionPoolName
                 ),
-                new TrafficStreamLimiter(maxConcurrentOutstandingRequests),
+                maxConcurrentOutstandingRequests,
                 new OrderedWorkerTracker<>()
             );
             this.maxWaitTime = maxWaitTime;
@@ -267,7 +268,8 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     boolean isDone = false;
 
                     @Override
-                    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+                    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+                    readNextTrafficStreamChunk(
                         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
                     ) {
                         if (isDone) {
@@ -294,6 +296,18 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     @Override
                     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
                         return null;
+                    }
+
+                    @Override
+                    public CompletionStage<Void> acknowledgeSessionTermination(
+                        ConnectionSessionKey sessionKey
+                    ) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    @Override
+                    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+                        // This fixture has no per-connection source registry.
                     }
                 };
 

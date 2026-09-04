@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
@@ -77,9 +78,10 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
                 TimeUnit.MILLISECONDS
             );
             for (int j = 0; j < recordsList.size(); ++j) {
+                var trafficRecord = (ITrafficStreamWithKey) recordsList.get(j);
                 Assertions.assertEquals(
                     KafkaTestUtils.getConnectionId(i + j),
-                    recordsList.get(j).getStream().getConnectionId()
+                    trafficRecord.getStream().getConnectionId()
                 );
             }
             log.info("Got " + recordsList.size() + " records and already had " + i);

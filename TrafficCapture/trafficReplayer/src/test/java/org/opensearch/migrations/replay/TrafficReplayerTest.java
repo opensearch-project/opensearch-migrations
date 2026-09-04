@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
@@ -153,6 +154,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                     trafficProducer.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                         .get()
                         .stream()
+                        .map(ITrafficStreamWithKey.class::cast)
                         .forEach(ts -> {
                             var i = counter.incrementAndGet();
                             var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);

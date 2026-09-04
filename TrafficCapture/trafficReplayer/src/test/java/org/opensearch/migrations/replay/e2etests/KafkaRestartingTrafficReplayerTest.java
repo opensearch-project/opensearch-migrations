@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.e2etests;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -281,13 +280,14 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
             originalTrafficSource -> {
                 try {
                     for (int i = 0; i < recordCount; ++i) {
-                        List<ITrafficStreamWithKey> chunks = null;
-                        chunks = originalTrafficSource.readNextTrafficStreamChunk(rootCtx::createReadChunkContext)
-                            .get();
+                        var chunks = originalTrafficSource.readNextTrafficStreamChunk(
+                            rootCtx::createReadChunkContext
+                        ).get();
                         for (int j = 0; j < chunks.size(); ++j) {
+                            var trafficChunk = (ITrafficStreamWithKey) chunks.get(j);
                             KafkaTestUtils.writeTrafficStreamRecord(
                                 kafkaProducer,
-                                chunks.get(j).getStream(),
+                                trafficChunk.getStream(),
                                 TEST_TOPIC_NAME,
                                 "KEY_" + i + "_" + j
                             );

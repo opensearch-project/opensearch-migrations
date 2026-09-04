@@ -34,6 +34,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     protected final IRootWireLoggingContext rootContext;
     protected final BacksideConnectionPool backsideConnectionPool;
     protected final RequestCapturePredicate requestCapturePredicate;
+    protected final Duration maximumConnectionDuration;
     private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
 
     public ProxyChannelInitializer(
@@ -43,11 +44,30 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         IConnectionCaptureFactory<T> connectionCaptureFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate
     ) {
+        this(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionCaptureFactory,
+            requestCapturePredicate,
+            Duration.ZERO
+        );
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Duration maximumConnectionDuration
+    ) {
         this.rootContext = rootContext;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
         this.requestCapturePredicate = requestCapturePredicate;
+        this.maximumConnectionDuration = maximumConnectionDuration;
         this.unauthenticatedClientLogDeduper =
             new UnauthenticatedClientLogDeduper(UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW);
     }
@@ -77,7 +97,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
                     connectionId,
                     connectionCaptureFactory,
                     requestCapturePredicate,
-                    this::shouldGuaranteeMessageOffloading
+                    this::shouldGuaranteeMessageOffloading,
+                    maximumConnectionDuration
                 )
             );
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));

@@ -62,7 +62,7 @@ class QuiescentConnectionTest extends InstrumentationTest {
 
             var streams = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertFalse(streams.isEmpty());
-            var stream = streams.get(0);
+            var stream = (org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey) streams.get(0);
 
             Assertions.assertTrue(stream.isResumedConnection(),
                 "resumed connection (no open, not in active set) must have isResumedConnection=true");
@@ -101,7 +101,9 @@ class QuiescentConnectionTest extends InstrumentationTest {
 
             var streams = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertFalse(streams.isEmpty());
-            Assertions.assertFalse(streams.get(0).isResumedConnection(),
+            Assertions.assertFalse(
+                ((org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey) streams.get(0))
+                    .isResumedConnection(),
                 "fresh connection (starts with READ) must have isResumedConnection=false");
         }
     }
