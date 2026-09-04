@@ -193,10 +193,35 @@ public final class ReplayOutcomes {
     public sealed interface SessionOutcome
         permits SessionOutcome.Closed, SessionOutcome.Aborted, SessionOutcome.Failed {
 
-        record Closed() implements SessionOutcome {}
+        <R> R visit(Visitor<R> visitor);
 
-        record Aborted(@NonNull CancellationException cause) implements SessionOutcome {}
+        interface Visitor<R> {
+            R onClosed(Closed outcome);
 
-        record Failed(@NonNull Throwable cause) implements SessionOutcome {}
+            R onAborted(Aborted outcome);
+
+            R onFailed(Failed outcome);
+        }
+
+        record Closed() implements SessionOutcome {
+            @Override
+            public <R> R visit(Visitor<R> visitor) {
+                return visitor.onClosed(this);
+            }
+        }
+
+        record Aborted(@NonNull CancellationException cause) implements SessionOutcome {
+            @Override
+            public <R> R visit(Visitor<R> visitor) {
+                return visitor.onAborted(this);
+            }
+        }
+
+        record Failed(@NonNull Throwable cause) implements SessionOutcome {
+            @Override
+            public <R> R visit(Visitor<R> visitor) {
+                return visitor.onFailed(this);
+            }
+        }
     }
 }

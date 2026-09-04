@@ -130,6 +130,23 @@ class ConnectionActorTest {
         Assertions.assertInstanceOf(SessionOutcome.Closed.class, actor.termination().toCompletableFuture().join());
     }
 
+    @Test
+    void lateAdmissionCancelsPreparationWithoutExecutingIt() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        actor.admitClose(Instant.EPOCH);
+        mailbox.runUntilIdle();
+
+        var preparation = new CompletableFuture<PreparationOutcome<TestPrepared>>();
+        var request = actor.admitRequest(request(0), Instant.EPOCH, preparation).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(preparation.isCancelled());
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, request.join());
+        Assertions.assertTrue(exchange.executed.isEmpty());
+    }
+
     private static ConnectionSessionKey session() {
         return new ConnectionSessionKey(new SourceConnectionKey("node", "connection"), 0, 1);
     }

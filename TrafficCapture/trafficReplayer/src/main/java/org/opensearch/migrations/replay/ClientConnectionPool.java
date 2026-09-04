@@ -44,10 +44,15 @@ public class ClientConnectionPool {
     private static class Key {
         private final String connectionId;
         private final int sessionNumber;
+        private final int sourceGeneration;
     }
 
     private Key getKey(String connectionId, int sessionNumber) {
-        return new Key(connectionId, sessionNumber);
+        return getKey(connectionId, sessionNumber, 0);
+    }
+
+    private Key getKey(String connectionId, int sessionNumber, int sourceGeneration) {
+        return new Key(connectionId, sessionNumber, sourceGeneration);
     }
 
     public ClientConnectionPool(
@@ -101,7 +106,7 @@ public class ClientConnectionPool {
         int sessionNumber,
         int generation
     ) {
-        var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber);
+        var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber, generation);
         var crs = connectionId2ChannelCache.get(
             key,
             () -> buildConnectionReplaySession(channelKeyCtx, generation)
@@ -117,12 +122,21 @@ public class ClientConnectionPool {
     }
 
     public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
+        closeConnection(ctx, sessionNumber, ctx.getChannelKey().getSourceGeneration());
+    }
+
+    public void closeConnection(
+        IReplayContexts.IChannelKeyContext ctx,
+        int sessionNumber,
+        int sourceGeneration
+    ) {
         var connId = ctx.getConnectionId();
         log.atTrace().setMessage("closing connection for {}").addArgument(connId).log();
-        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        var key = getKey(connId, sessionNumber, sourceGeneration);
+        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(key);
         if (connectionReplaySession != null) {
             closeClientConnectionChannel(connectionReplaySession);
-            connectionId2ChannelCache.invalidate(getKey(connId, sessionNumber));
+            connectionId2ChannelCache.invalidate(key);
         } else {
             log.atTrace()
                 .setMessage("No ChannelFuture for {} in closeConnection.  " +
@@ -145,7 +159,8 @@ public class ClientConnectionPool {
      */
     public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
-        var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
+        var sourceGeneration = ctx.getChannelKey().getSourceGeneration();
+        var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber, sourceGeneration));
         if (session != null) {
             session.setCancelled(true);
             var cancellationCause = new java.util.concurrent.CancellationException(
@@ -162,13 +177,20 @@ public class ClientConnectionPool {
                     session.scheduleSequencer.cancelAllWork(cancellationCause);
                 });
             }
-            closeConnection(ctx, sessionNumber);
+            closeConnection(ctx, sessionNumber, sourceGeneration);
         }
         return TextTrackedFuture.completedFuture(null, () -> "cancelled");
     }
 
     public void invalidateSession(String connectionId, int sessionNumber) {
-        connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber));
+        connectionId2ChannelCache.asMap().keySet().stream()
+            .filter(key -> key.connectionId.equals(connectionId) && key.sessionNumber == sessionNumber)
+            .toList()
+            .forEach(connectionId2ChannelCache::invalidate);
+    }
+
+    public void invalidateSession(String connectionId, int sessionNumber, int sourceGeneration) {
+        connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber, sourceGeneration));
     }
 
     public CompletableFuture<Void> shutdownNow() {

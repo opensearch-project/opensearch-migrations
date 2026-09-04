@@ -3,11 +3,17 @@ package org.opensearch.migrations.replay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -18,8 +24,19 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.ChannelTask;
 import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
+import org.opensearch.migrations.replay.lifecycle.NettyEventLoopActorMailbox;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -29,6 +46,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.AllArgsConstructor;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -58,6 +76,7 @@ public class RequestSenderOrchestrator {
     private final Duration initialRetryDelay;
     private final Duration maxRetryDelay;
     private final BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory;
+    private final ConcurrentHashMap<ConnectionSessionKey, ActorRuntime> actorRuntimes = new ConcurrentHashMap<>();
 
     /**
      * Notice that the two arguments need to be in agreement with each other.  The clientConnectionPool will need to
@@ -149,6 +168,421 @@ public class RequestSenderOrchestrator {
         DONE, RETRY
     }
 
+    private final class PreparedActorRequest implements AutoCloseable {
+        private final IReplayContexts.IReplayerHttpTransactionContext context;
+        private final Instant start;
+        private final Duration interval;
+        private final ByteBufListProducer packetProducer;
+        private final RetryVisitor<Object> visitor;
+        private final AsyncPermitPool.Permit permit;
+        private final IReplayContexts.IScheduledContext scheduledContext;
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicBoolean started = new AtomicBoolean();
+
+        private PreparedActorRequest(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            Instant start,
+            Duration interval,
+            ByteBufListProducer packetProducer,
+            RetryVisitor<Object> visitor,
+            AsyncPermitPool.Permit permit,
+            IReplayContexts.IScheduledContext scheduledContext
+        ) {
+            this.context = context;
+            this.start = start;
+            this.interval = interval;
+            this.packetProducer = packetProducer;
+            this.visitor = visitor;
+            this.permit = permit;
+            this.scheduledContext = scheduledContext;
+        }
+
+        private void beginExecution() {
+            if (started.compareAndSet(false, true)) {
+                scheduledContext.close();
+            }
+        }
+
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) {
+                try {
+                    beginExecution();
+                } finally {
+                    try {
+                        packetProducer.release();
+                    } finally {
+                        permit.close();
+                    }
+                }
+            }
+        }
+    }
+
+    private final class ActorRuntime {
+        private final ConnectionSessionKey key;
+        private final ConnectionReplaySession session;
+        private final ConnectionActor<PreparedActorRequest, Object> actor;
+
+        private ActorRuntime(
+            ConnectionSessionKey key,
+            IReplayContexts.IChannelKeyContext channelContext
+        ) {
+            this.key = key;
+            this.session = clientConnectionPool.getCachedSession(
+                channelContext,
+                key.sessionNumber(),
+                key.sourceGeneration()
+            );
+            this.actor = new ConnectionActor<>(
+                key,
+                new NettyEventLoopActorMailbox(session.eventLoop),
+                new RuntimeTargetExchange(this)
+            );
+            actor.termination().whenComplete((outcome, failure) -> {
+                actorRuntimes.remove(key, this);
+                clientConnectionPool.invalidateSession(
+                    key.connection().connectionId(),
+                    key.sessionNumber(),
+                    key.sourceGeneration()
+                );
+            });
+        }
+    }
+
+    private final class RuntimeTargetExchange implements ConnectionActor.TargetExchange<PreparedActorRequest, Object> {
+        private final ActorRuntime runtime;
+        private CompletionStage<TargetOutcome<Object>> activeExchange;
+
+        private RuntimeTargetExchange(ActorRuntime runtime) {
+            this.runtime = runtime;
+        }
+
+        @Override
+        public CompletionStage<TargetOutcome<Object>> execute(PreparedActorRequest preparedRequest) {
+            preparedRequest.beginExecution();
+            @SuppressWarnings("unchecked")
+            var exchange = (TrackedFuture<String, Object>) (TrackedFuture<?, ?>) sendRequestWithRetries(
+                () -> packetConsumerFactory.apply(runtime.session, preparedRequest.context),
+                runtime.session.eventLoop,
+                preparedRequest.packetProducer,
+                preparedRequest.start,
+                initialRetryDelay,
+                preparedRequest.interval,
+                preparedRequest.visitor
+            );
+            CompletableFuture<TargetOutcome<Object>> normalized = exchange.future.handle((value, failure) -> {
+                if (failure == null) {
+                    return new TargetOutcome.Succeeded<Object>(value);
+                }
+                var cause = unwrap(failure);
+                if (cause instanceof CancellationException cancellation) {
+                    return new TargetOutcome.Cancelled<Object>(cancellation);
+                }
+                return new TargetOutcome.Failed<Object>(cause);
+            });
+            activeExchange = normalized;
+            normalized.whenComplete((value, failure) -> {
+                runtime.session.eventLoop.execute(() -> {
+                    if (activeExchange == normalized) {
+                        activeExchange = null;
+                    }
+                });
+            });
+            return normalized;
+        }
+
+        @Override
+        public CompletionStage<Void> close() {
+            return closeRuntimeChannel(runtime);
+        }
+
+        @Override
+        public CompletionStage<Void> abort(CancellationException cause) {
+            runtime.session.setCancelled(true);
+            var exchangeToJoin = activeExchange;
+            return closeRuntimeChannel(runtime).thenCompose(ignored ->
+                exchangeToJoin == null
+                    ? CompletableFuture.completedFuture(null)
+                    : exchangeToJoin.handle((outcome, failure) -> null)
+            );
+        }
+    }
+
+    private final class PreparationCoordinator<T> {
+        private final ActorRuntime runtime;
+        private final ReplayRequestId requestId;
+        private final IReplayContexts.IReplayerHttpTransactionContext context;
+        private final Instant preparationStart;
+        private final Instant sendStart;
+        private final Instant sendEnd;
+        private final AsyncPermitPool permitPool;
+        private final Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation;
+        private final Function<
+            TransformedOutputAndResult<ByteBufListProducer>,
+            RetryVisitor<T>
+        > retryVisitorFactory;
+        private final Function<HttpRequestTransformationStatus, T> filteredResultFactory;
+        private final AtomicReference<T> filteredResult;
+        private final CompletableFuture<PreparationOutcome<PreparedActorRequest>> completion =
+            new CompletableFuture<>();
+        private final IReplayContexts.IScheduledContext preparationScheduledContext;
+        private final IReplayContexts.IScheduledContext sendScheduledContext;
+        private ScheduledFuture<?> preparationTimer;
+        private CompletableFuture<?> transformationCompletion;
+        private AsyncPermitPool.Permit permit;
+        private boolean permitReady;
+        private boolean timerReady;
+        private boolean preparationStarted;
+        private boolean terminal;
+        private boolean preparationContextClosed;
+        private boolean sendContextTransferred;
+
+        private PreparationCoordinator(
+            ActorRuntime runtime,
+            ReplayRequestId requestId,
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            Instant preparationStart,
+            Instant sendStart,
+            Instant sendEnd,
+            AsyncPermitPool permitPool,
+            Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
+            Function<TransformedOutputAndResult<ByteBufListProducer>, RetryVisitor<T>> retryVisitorFactory,
+            Function<HttpRequestTransformationStatus, T> filteredResultFactory,
+            AtomicReference<T> filteredResult
+        ) {
+            this.runtime = runtime;
+            this.requestId = requestId;
+            this.context = context;
+            this.preparationStart = preparationStart;
+            this.sendStart = sendStart;
+            this.sendEnd = sendEnd;
+            this.permitPool = permitPool;
+            this.preparation = preparation;
+            this.retryVisitorFactory = retryVisitorFactory;
+            this.filteredResultFactory = filteredResultFactory;
+            this.filteredResult = filteredResult;
+            this.preparationScheduledContext = context.createScheduledContext(preparationStart);
+            this.sendScheduledContext = context.createScheduledContext(sendStart);
+        }
+
+        private CompletionStage<PreparationOutcome<PreparedActorRequest>> stage() {
+            return completion;
+        }
+
+        private void start() {
+            completion.whenComplete((outcome, failure) -> {
+                if (completion.isCancelled()) {
+                    runtime.session.eventLoop.execute(() ->
+                        cancel(new CancellationException("Preparation cancelled for " + requestId))
+                    );
+                }
+            });
+
+            permitPool.acquire(requestId, 1).whenComplete((acquiredPermit, failure) ->
+                runtime.session.eventLoop.execute(() -> onPermitSettled(acquiredPermit, failure))
+            );
+
+            try {
+                var delay = getDelayFromNowMs(preparationStart);
+                preparationTimer = runtime.session.eventLoop.schedule(
+                    this::onPreparationDue,
+                    delay.toMillis(),
+                    TimeUnit.MILLISECONDS
+                );
+            } catch (Throwable t) {
+                runtime.session.eventLoop.execute(() -> failPreparation(t));
+            }
+        }
+
+        private void onPermitSettled(AsyncPermitPool.Permit acquiredPermit, Throwable failure) {
+            if (terminal) {
+                if (acquiredPermit != null) {
+                    acquiredPermit.close();
+                }
+                return;
+            }
+            if (failure != null) {
+                failPreparation(unwrap(failure));
+                return;
+            }
+            permit = acquiredPermit;
+            permitReady = true;
+            tryStartPreparation();
+        }
+
+        private void onPreparationDue() {
+            if (terminal) {
+                return;
+            }
+            preparationTimer = null;
+            closePreparationContext();
+            timerReady = true;
+            tryStartPreparation();
+        }
+
+        private void tryStartPreparation() {
+            if (terminal || preparationStarted || !permitReady || !timerReady) {
+                return;
+            }
+            preparationStarted = true;
+            TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>> transformed;
+            try {
+                transformed = Objects.requireNonNull(
+                    preparation.get(),
+                    "preparation returned no future"
+                );
+            } catch (Throwable t) {
+                failPreparation(t);
+                return;
+            }
+            transformationCompletion = transformed.future;
+            transformed.future.whenComplete((result, failure) ->
+                runtime.session.eventLoop.execute(() -> onTransformed(result, failure))
+            );
+        }
+
+        private void onTransformed(
+            TransformedOutputAndResult<ByteBufListProducer> transformed,
+            Throwable failure
+        ) {
+            transformationCompletion = null;
+            if (terminal) {
+                releaseLateTransformation(transformed);
+                return;
+            }
+            if (failure != null) {
+                failPreparation(unwrap(failure));
+                return;
+            }
+            if (transformed == null) {
+                failPreparation(new NullPointerException("preparation completed without a result"));
+                return;
+            }
+            if (transformed.transformedOutput == null) {
+                try {
+                    filteredResult.set(filteredResultFactory.apply(transformed.transformationStatus));
+                    completeWithoutPreparedRequest(
+                        new PreparationOutcome.Filtered<>(
+                            transformed.transformationStatus.getClass().getSimpleName()
+                        )
+                    );
+                } catch (Throwable t) {
+                    failPreparation(t);
+                }
+                return;
+            }
+
+            var packetProducer = transformed.transformedOutput;
+            var packetCount = packetProducer.numByteBufs();
+            var interval = packetCount > 1
+                ? Duration.between(sendStart, sendEnd).dividedBy(packetCount - 1L)
+                : Duration.ZERO;
+            RetryVisitor<T> typedVisitor;
+            try {
+                typedVisitor = Objects.requireNonNull(
+                    retryVisitorFactory.apply(transformed),
+                    "retry visitor factory returned null"
+                );
+            } catch (Throwable t) {
+                packetProducer.release();
+                failPreparation(t);
+                return;
+            }
+
+            @SuppressWarnings("unchecked")
+            var actorVisitor = (RetryVisitor<Object>) (RetryVisitor<?>) typedVisitor;
+            var prepared = new PreparedActorRequest(
+                context,
+                sendStart,
+                interval,
+                packetProducer,
+                actorVisitor,
+                permit,
+                sendScheduledContext
+            );
+            permit = null;
+            sendContextTransferred = true;
+            terminal = true;
+            if (!completion.complete(new PreparationOutcome.Prepared<>(prepared))) {
+                prepared.close();
+            }
+        }
+
+        private void failPreparation(Throwable failure) {
+            var cause = unwrap(failure);
+            if (cause instanceof CancellationException cancellation) {
+                completeWithoutPreparedRequest(new PreparationOutcome.Cancelled<>(cancellation));
+            } else {
+                completeWithoutPreparedRequest(new PreparationOutcome.Failed<>(cause));
+            }
+        }
+
+        private void completeWithoutPreparedRequest(PreparationOutcome<PreparedActorRequest> outcome) {
+            if (terminal) {
+                return;
+            }
+            terminal = true;
+            cancelPreparationTimer();
+            closePreparationContext();
+            closeSendContext();
+            releasePermit();
+            completion.complete(outcome);
+        }
+
+        private void cancel(CancellationException cause) {
+            if (terminal) {
+                return;
+            }
+            terminal = true;
+            cancelPreparationTimer();
+            closePreparationContext();
+            closeSendContext();
+            if (transformationCompletion != null) {
+                transformationCompletion.cancel(false);
+                transformationCompletion = null;
+            }
+            permitPool.cancel(requestId::equals, cause);
+            releasePermit();
+        }
+
+        private void cancelPreparationTimer() {
+            if (preparationTimer != null) {
+                preparationTimer.cancel(false);
+                preparationTimer = null;
+            }
+        }
+
+        private void closePreparationContext() {
+            if (!preparationContextClosed) {
+                preparationContextClosed = true;
+                preparationScheduledContext.close();
+            }
+        }
+
+        private void closeSendContext() {
+            if (!sendContextTransferred) {
+                sendContextTransferred = true;
+                sendScheduledContext.close();
+            }
+        }
+
+        private void releasePermit() {
+            if (permit != null) {
+                permit.close();
+                permit = null;
+            }
+        }
+
+        private void releaseLateTransformation(
+            TransformedOutputAndResult<ByteBufListProducer> transformed
+        ) {
+            if (transformed != null && transformed.transformedOutput != null) {
+                transformed.transformedOutput.release();
+            }
+        }
+    }
+
     @AllArgsConstructor
     public static class DeterminedTransformedResponse<T> {
         RetryDirective directive;
@@ -163,6 +597,96 @@ public class RequestSenderOrchestrator {
          */
         TrackedFuture<String,DeterminedTransformedResponse<T>>
         visit(ByteBuf requestBytes, AggregatedRawResponse arr, Throwable t);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequestLifecycle(
+        @NonNull UniqueReplayerRequestKey requestKey,
+        @NonNull IReplayContexts.IReplayerHttpTransactionContext context,
+        @NonNull Instant preparationStart,
+        @NonNull Instant sendStart,
+        @NonNull Instant sendEnd,
+        @NonNull AsyncPermitPool permitPool,
+        @NonNull Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
+        @NonNull Function<TransformedOutputAndResult<ByteBufListProducer>, RetryVisitor<T>> retryVisitorFactory,
+        @NonNull Function<HttpRequestTransformationStatus, T> filteredResultFactory
+    ) {
+        var requestId = toReplayRequestId(requestKey);
+        var runtime = actorRuntime(requestId.session(), context.getChannelKeyContext());
+        var filteredResult = new AtomicReference<T>();
+        var coordinator = new PreparationCoordinator<>(
+            runtime,
+            requestId,
+            context,
+            preparationStart,
+            sendStart,
+            sendEnd,
+            permitPool,
+            preparation,
+            retryVisitorFactory,
+            filteredResultFactory,
+            filteredResult
+        );
+        var targetOutcome = runtime.actor.admitRequest(requestId, sendStart, coordinator.stage());
+        coordinator.start();
+        CompletionStage<T> result = targetOutcome.thenCompose(outcome ->
+            outcome.visit(new TargetOutcome.Visitor<Object, CompletionStage<T>>() {
+            @Override
+            public CompletionStage<T> onSucceeded(TargetOutcome.Succeeded<Object> succeeded) {
+                @SuppressWarnings("unchecked")
+                var value = (T) succeeded.value();
+                return CompletableFuture.completedFuture(value);
+            }
+
+            @Override
+            public CompletionStage<T> onFailed(TargetOutcome.Failed<Object> failed) {
+                return CompletableFuture.failedFuture(failed.cause());
+            }
+
+            @Override
+            public CompletionStage<T> onCancelled(TargetOutcome.Cancelled<Object> cancelled) {
+                return CompletableFuture.failedFuture(cancelled.cause());
+            }
+
+            @Override
+            public CompletionStage<T> onFiltered(TargetOutcome.Filtered<Object> filtered) {
+                return CompletableFuture.completedFuture(filteredResult.get());
+            }
+        }));
+        return new TextTrackedFuture<>(
+            result.toCompletableFuture(),
+            () -> "waiting for the connection actor to settle " + requestId
+        );
+    }
+
+    public TrackedFuture<String, Void> scheduleActorClose(
+        @NonNull IReplayContexts.IChannelKeyContext context,
+        int sessionNumber,
+        @NonNull Instant timestamp
+    ) {
+        var sessionKey = toConnectionSessionKey(context, sessionNumber);
+        var runtime = actorRuntime(sessionKey, context);
+        var result = runtime.actor.admitClose(timestamp).thenCompose(RequestSenderOrchestrator::mapSessionOutcome);
+        return new TextTrackedFuture<>(
+            result.toCompletableFuture(),
+            () -> "waiting for ordered actor close for " + sessionKey
+        );
+    }
+
+    public TrackedFuture<String, Void> abortActor(
+        @NonNull IReplayContexts.IChannelKeyContext context,
+        int sessionNumber,
+        @NonNull CancellationException cause
+    ) {
+        var sessionKey = toConnectionSessionKey(context, sessionNumber);
+        var runtime = actorRuntimes.get(sessionKey);
+        if (runtime == null) {
+            return TextTrackedFuture.completedFuture(null, () -> "no actor existed for " + sessionKey);
+        }
+        var result = runtime.actor.abort(cause).thenCompose(RequestSenderOrchestrator::mapAbortOutcome);
+        return new TextTrackedFuture<>(
+            result.toCompletableFuture(),
+            () -> "waiting for actor abort for " + sessionKey
+        );
     }
 
     public <T> TrackedFuture<String, T> scheduleRequest(
@@ -425,6 +949,96 @@ public class RequestSenderOrchestrator {
         return Duration.ofMillis(Math.min(d.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
     }
 
+    private ActorRuntime actorRuntime(
+        ConnectionSessionKey key,
+        IReplayContexts.IChannelKeyContext channelContext
+    ) {
+        return actorRuntimes.computeIfAbsent(key, ignored -> new ActorRuntime(key, channelContext));
+    }
+
+    private static ReplayRequestId toReplayRequestId(UniqueReplayerRequestKey requestKey) {
+        return new ReplayRequestId(
+            new ConnectionSessionKey(
+                new SourceConnectionKey(
+                    requestKey.trafficStreamKey.getNodeId(),
+                    requestKey.trafficStreamKey.getConnectionId()
+                ),
+                requestKey.sourceRequestIndexSessionIdentifier,
+                requestKey.trafficStreamKey.getSourceGeneration()
+            ),
+            requestKey.getReplayerRequestIndex()
+        );
+    }
+
+    private static ConnectionSessionKey toConnectionSessionKey(
+        IReplayContexts.IChannelKeyContext context,
+        int sessionNumber
+    ) {
+        return new ConnectionSessionKey(
+            new SourceConnectionKey(context.getNodeId(), context.getConnectionId()),
+            sessionNumber,
+            context.getChannelKey().getSourceGeneration()
+        );
+    }
+
+    private CompletionStage<Void> closeRuntimeChannel(ActorRuntime runtime) {
+        return clientConnectionPool.closeChannelForSession(runtime.session).future.handle((channel, failure) -> {
+            if (failure != null) {
+                throw new CompletionException(unwrap(failure));
+            }
+            return null;
+        });
+    }
+
+    private static CompletionStage<Void> mapSessionOutcome(SessionOutcome outcome) {
+        return outcome.visit(new SessionOutcome.Visitor<>() {
+            @Override
+            public CompletionStage<Void> onClosed(SessionOutcome.Closed closed) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletionStage<Void> onAborted(SessionOutcome.Aborted aborted) {
+                return CompletableFuture.failedFuture(aborted.cause());
+            }
+
+            @Override
+            public CompletionStage<Void> onFailed(SessionOutcome.Failed failed) {
+                return CompletableFuture.failedFuture(failed.cause());
+            }
+        });
+    }
+
+    private static CompletionStage<Void> mapAbortOutcome(SessionOutcome outcome) {
+        return outcome.visit(new SessionOutcome.Visitor<>() {
+            @Override
+            public CompletionStage<Void> onClosed(SessionOutcome.Closed closed) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletionStage<Void> onAborted(SessionOutcome.Aborted aborted) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletionStage<Void> onFailed(SessionOutcome.Failed failed) {
+                return CompletableFuture.failedFuture(failed.cause());
+            }
+        });
+    }
+
+    private static Throwable unwrap(Throwable throwable) {
+        var current = throwable;
+        while ((current instanceof CompletionException
+            || current instanceof java.util.concurrent.ExecutionException)
+            && current.getCause() != null)
+        {
+            current = current.getCause();
+        }
+        return current;
+    }
+
     private <T> TrackedFuture<String, T>
     sendRequestWithRetries(Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
                            EventLoop eventLoop,
@@ -438,15 +1052,23 @@ public class RequestSenderOrchestrator {
             return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
                 () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
         }
-        var byteBufList = packetProducer.get();
-        return sendPackets(senderSupplier.get(), eventLoop,
-            byteBufList.streamUnretained().iterator(), referenceStartTime, interval, new AtomicInteger())
+        var attempt = packetProducer.newAttempt();
+        var byteBufList = attempt.packets();
+        return sendPackets(
+            senderSupplier.get(),
+            eventLoop,
+            byteBufList.streamUnretained().iterator(),
+            referenceStartTime,
+            interval,
+            new AtomicInteger()
+        )
             .getDeferredFutureThroughHandle((response, t) -> {
                     try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
                         return visitor.visit(requestBytesHolder.get(), response, t);
                     }
                 },
                 () -> "checking response to determine if the request should be retried")
+            .whenComplete((response, failure) -> attempt.close(), () -> "releasing the request attempt payload")
             .getDeferredFutureThroughHandle((dtr,t) -> {
                 if (t != null) {
                     return TextTrackedFuture.failedFuture(t, () -> "failed future");

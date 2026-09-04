@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -151,6 +152,46 @@ public class RequestTransformerAndSender<T> {
         } catch (Exception e) {
             log.debug("Caught exception in transformAndSendRequest, so failing future");
             return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.writeToSocketAndClose");
+        }
+    }
+
+    public TrackedFuture<String, T> transformAndSendRequest(
+        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
+        ReplayEngine replayEngine,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        @NonNull Instant start,
+        @NonNull Instant end,
+        Supplier<Stream<byte[]>> packetsSupplier,
+        Duration quiescentDurationForRequest,
+        @NonNull AsyncPermitPool permitPool
+    ) {
+        try {
+            return replayEngine.scheduleRequestLifecycle(
+                ctx,
+                start,
+                end,
+                permitPool,
+                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier),
+                transformedRequest -> getRetryCheckVisitor(
+                    transformedRequest,
+                    finishedAccumulatingResponseFuture,
+                    response -> perResponseConsumer(
+                        response,
+                        transformedRequest.transformationStatus,
+                        ctx
+                    )
+                ),
+                transformationStatus -> {
+                    @SuppressWarnings("unchecked")
+                    var filtered = (T) new TransformedTargetRequestAndResponseList(null, transformationStatus);
+                    return filtered;
+                },
+                quiescentDurationForRequest
+            );
+        } catch (Exception e) {
+            log.debug("Caught exception while admitting the request lifecycle", e);
+            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.requestLifecycle");
         }
     }
 

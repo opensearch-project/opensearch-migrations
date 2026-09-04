@@ -4,10 +4,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -217,6 +221,46 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 
+    public <T> TrackedFuture<String, T> scheduleRequestLifecycle(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        AsyncPermitPool permitPool,
+        Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
+        Function<
+            TransformedOutputAndResult<ByteBufListProducer>,
+            RequestSenderOrchestrator.RetryVisitor<T>
+        > retryVisitorFactory,
+        Function<HttpRequestTransformationStatus, T> filteredResultFactory,
+        Duration quiescentDurationForRequest
+    ) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        final String label = "request lifecycle";
+        var start = timeShifter.transformSourceTimeToRealTime(originalStart);
+        if (quiescentDurationForRequest != null) {
+            start = start.plus(quiescentDurationForRequest);
+            log.atInfo().setMessage("Applying quiescent delay through {} for {}")
+                .addArgument(start)
+                .addArgument(ctx)
+                .log();
+        }
+        var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
+        var requestKey = ctx.getReplayerRequestKey();
+        logStartOfWork(requestKey, newCount, start, label);
+        var result = networkSendOrchestrator.scheduleRequestLifecycle(
+            requestKey,
+            ctx,
+            start.minus(EXPECTED_TRANSFORMATION_DURATION),
+            start,
+            end,
+            permitPool,
+            preparation,
+            retryVisitorFactory,
+            filteredResultFactory
+        );
+        return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
+    }
+
     /**
      * Immediately cancels a connection due to a traffic source reader interruption.
      * Unlike {@link #closeConnection}, this bypasses the OnlineRadixSorter and time-shifting —
@@ -227,7 +271,13 @@ public class ReplayEngine {
         int channelSessionNumber
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        var future = networkSendOrchestrator.cancelConnection(ctx, channelSessionNumber);
+        var future = networkSendOrchestrator.abortActor(
+            ctx,
+            channelSessionNumber,
+            new java.util.concurrent.CancellationException(
+                "Session cancelled due to source reassignment for " + ctx.getConnectionId()
+            )
+        );
         return hookWorkFinishingUpdates(future, Instant.now(), ctx.getChannelKey(), "cancel");
     }
 
@@ -242,7 +292,7 @@ public class ReplayEngine {
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
         var channelKey = ctx.getChannelKey();
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
-        var future = networkSendOrchestrator.scheduleClose(ctx, channelSessionNumber, channelInteractionNum, atTime);
+        var future = networkSendOrchestrator.scheduleActorClose(ctx, channelSessionNumber, atTime);
         return hookWorkFinishingUpdates(future, timestamp, channelKey, label);
     }
 

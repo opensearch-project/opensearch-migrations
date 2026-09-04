@@ -20,9 +20,9 @@ public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<Trans
     @Override
     public RequestSenderOrchestrator.RetryVisitor<TransformedTargetRequestAndResponseList>
     getRetryCheckVisitor(TransformedOutputAndResult<ByteBufListProducer> transformedResult,
-                         TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture) {
+        TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture) {
         var collector = new TransformedTargetRequestAndResponseList(
-            transformedResult.transformedOutput.get(),
+            transformedResult.transformedOutput.diagnosticSnapshot(),
             transformedResult.transformationStatus);
         return (requestBytes, aggResponse, t) -> {
             if (t != null) {

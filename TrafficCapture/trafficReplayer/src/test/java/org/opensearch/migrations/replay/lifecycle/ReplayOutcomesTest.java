@@ -97,4 +97,34 @@ class ReplayOutcomesTest {
             new ReplayOutcomes.EvidenceOutcome.NotRequired("discard").visit(evidenceVisitor)
         );
     }
+
+    @Test
+    void sessionVisitorMustAcknowledgeEveryOutcome() {
+        var visitor = new ReplayOutcomes.SessionOutcome.Visitor<String>() {
+            @Override
+            public String onClosed(ReplayOutcomes.SessionOutcome.Closed outcome) {
+                return "closed";
+            }
+
+            @Override
+            public String onAborted(ReplayOutcomes.SessionOutcome.Aborted outcome) {
+                return "aborted:" + outcome.cause().getMessage();
+            }
+
+            @Override
+            public String onFailed(ReplayOutcomes.SessionOutcome.Failed outcome) {
+                return "failed:" + outcome.cause().getMessage();
+            }
+        };
+
+        Assertions.assertEquals("closed", new ReplayOutcomes.SessionOutcome.Closed().visit(visitor));
+        Assertions.assertEquals(
+            "aborted:stop",
+            new ReplayOutcomes.SessionOutcome.Aborted(new CancellationException("stop")).visit(visitor)
+        );
+        Assertions.assertEquals(
+            "failed:bad",
+            new ReplayOutcomes.SessionOutcome.Failed(new IllegalStateException("bad")).visit(visitor)
+        );
+    }
 }

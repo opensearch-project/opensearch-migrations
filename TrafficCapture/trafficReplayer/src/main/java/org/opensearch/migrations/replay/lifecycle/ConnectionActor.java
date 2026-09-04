@@ -45,6 +45,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         private final ReplayRequestId requestId;
         private final Instant scheduledStart;
         private final CompletionGate<TargetOutcome<R>> completion = new CompletionGate<>();
+        private CompletableFuture<PreparationOutcome<P>> preparationCompletion;
         private PreparationOutcome<P> preparation;
         private boolean due;
         private boolean settled;
@@ -128,6 +129,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             throw new IllegalArgumentException("request belongs to a different session");
         }
         var command = new RequestCommand<P, R>(requestId, scheduledStart);
+        command.preparationCompletion = preparation.toCompletableFuture();
         mailbox.execute(() -> admit(command));
         preparation.whenComplete((outcome, failure) ->
             mailbox.execute(() -> onPreparationSettled(command, outcome, failure))
@@ -169,6 +171,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         var cause = new CancellationException("session is no longer accepting work: " + sessionKey);
         if (command instanceof RequestCommand<P, R> request) {
             request.settled = true;
+            request.preparationCompletion.cancel(false);
             request.completion.complete(new TargetOutcome.Cancelled<>(cause));
         } else if (command instanceof CloseCommand<P, R> close) {
             close.completion.complete(new SessionOutcome.Aborted(cause));
@@ -323,7 +326,6 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         }
         request.settled = true;
         activeRequest = null;
-        request.completion.complete(outcome);
         if (commands.peekFirst() != request) {
             throw new IllegalStateException("settled request was not the actor head");
         }
@@ -332,6 +334,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             state = State.OPEN;
         }
         startHead();
+        mailbox.execute(() -> request.completion.complete(outcome));
     }
 
     private void runOrderedClose(CloseCommand<P, R> close) {
@@ -395,6 +398,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
     private void cancelQueuedRequest(RequestCommand<P, R> request, CancellationException cause) {
         request.settled = true;
+        request.preparationCompletion.cancel(false);
         request.completion.complete(new TargetOutcome.Cancelled<>(cause));
         releasePreparedQuietly(request);
     }

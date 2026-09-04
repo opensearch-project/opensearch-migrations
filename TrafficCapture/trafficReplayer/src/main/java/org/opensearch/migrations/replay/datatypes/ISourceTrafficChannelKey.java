@@ -9,6 +9,10 @@ public interface ISourceTrafficChannelKey {
 
     String getConnectionId();
 
+    default int getSourceGeneration() {
+        return 0;
+    }
+
     @Getter
     @AllArgsConstructor
     @EqualsAndHashCode

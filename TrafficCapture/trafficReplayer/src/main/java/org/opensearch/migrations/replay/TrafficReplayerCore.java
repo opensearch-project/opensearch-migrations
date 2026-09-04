@@ -22,9 +22,6 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -174,44 +171,26 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             UniqueReplayerRequestKey requestKey,
             TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
             Duration quiescentDurationForRequest) {
-            var permitFuture = new TextTrackedFuture<AsyncPermitPool.Permit>(
-                permitPool.acquire(toReplayRequestId(requestKey), 1).toCompletableFuture(),
-                () -> "waiting for an asynchronous replay permit for " + ctx
-            );
-            log.atDebug().setMessage("[{}] Queuing request for an asynchronous replay permit")
+            log.atDebug().setMessage("[{}] Admitting request before asynchronous preparation")
                 .addArgument(ctx::getConnectionId)
                 .log();
-            var httpSentRequestFuture = permitFuture.thenCompose(
-                    permit -> transformAndSendRequest(
-                        replayEngine,
-                        request,
-                        finishedAccumulatingResponseFuture,
-                        ctx,
-                        quiescentDurationForRequest
-                    ).whenComplete(
-                        (value, failure) -> permit.close(),
-                        () -> "releasing the asynchronous replay permit"
-                    ),
-                    () -> "Waiting to get response from target"
-                );
+            var httpSentRequestFuture = TrafficReplayerCore.this.transformAndSendRequest(
+                inputRequestTransformerFactory,
+                replayEngine,
+                finishedAccumulatingResponseFuture,
+                ctx,
+                request.getFirstPacketTimestamp(),
+                request.getLastPacketTimestamp(),
+                request.packetBytes::stream,
+                quiescentDurationForRequest,
+                permitPool
+            );
             httpSentRequestFuture.future.whenComplete(
                 (v, t) -> log.atTrace()
                     .setMessage("Summary response value for {} returned={}")
                     .addArgument(requestKey).addArgument(v)
                     .log());
             return httpSentRequestFuture;
-        }
-
-        private ReplayRequestId toReplayRequestId(UniqueReplayerRequestKey requestKey) {
-            var streamKey = requestKey.trafficStreamKey;
-            return new ReplayRequestId(
-                new ConnectionSessionKey(
-                    new SourceConnectionKey(streamKey.getNodeId(), streamKey.getConnectionId()),
-                    requestKey.sourceRequestIndexSessionIdentifier,
-                    streamKey.getSourceGeneration()
-                ),
-                requestKey.getReplayerRequestIndex()
-            );
         }
 
         /**
