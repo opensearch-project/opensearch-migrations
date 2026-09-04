@@ -38,6 +38,7 @@ public class ReplayEngine {
      * and on a scheduled basis, submit work to each thread to find out if they're idle or not.
      */
     private final AtomicLong totalCountOfScheduledTasksOutstanding;
+    private final AtomicLong lastCompletedWallClockMs;
     ScheduledFuture<?> updateContentTimeControllerScheduledFuture;
     // Heartbeat: response status code counters (reset each heartbeat)
     private final java.util.concurrent.ConcurrentHashMap<Integer, AtomicLong> responseCodeCounters =
@@ -60,10 +61,12 @@ public class ReplayEngine {
         this.contentTimeController = contentTimeController;
         this.timeShifter = timeShifter;
         this.totalCountOfScheduledTasksOutstanding = new AtomicLong();
+        this.lastCompletedWallClockMs = new AtomicLong(0);
         this.lastCompletedSourceTimeEpochMs = new AtomicLong(0);
         this.lastIdleUpdatedTimestampEpochMs = new AtomicLong(0);
-        // this is gross, but really useful. Grab a thread out of the clientConnectionPool's event loop
-        // and run a daemon to update the contentTimeController if there isn't any work that will be doing that
+        // Periodically advance the backpressure gate based on wall-clock time.
+        // Runs unconditionally (even with work outstanding) so that stuck tasks cannot
+        // freeze the gate and starve source-time-based expiry of new packets.
         var bufferPeriodMs = getUpdatePeriodMs();
         updateContentTimeControllerScheduledFuture = networkSendOrchestrator.scheduleAtFixedRate(
             this::updateContentTimeControllerWhenIdling,
@@ -89,9 +92,6 @@ public class ReplayEngine {
     }
 
     private void updateContentTimeControllerWhenIdling() {
-        if (isWorkOutstanding()) {
-            return;
-        }
         var currentSourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
         if (currentSourceTimeOp.isEmpty()) {
             // do nothing - the traffic source shouldn't be blocking initially.
@@ -123,7 +123,10 @@ public class ReplayEngine {
         String taskDescription
     ) {
         return future.map(
-            f -> f.whenComplete((v, t) -> Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
+            f -> f.whenComplete((v, t) -> {
+                    Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli());
+                    Utils.setIfLater(lastCompletedWallClockMs, System.currentTimeMillis());
+                })
                 .whenComplete((v, t) -> {
                     var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
                     log.atDebug().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
@@ -257,8 +260,9 @@ public class ReplayEngine {
 
     /** Emit a periodic heartbeat log summarizing the replay engine state. */
     public void logHeartbeat() {
+        var outstanding = totalCountOfScheduledTasksOutstanding.get();
         var sb = new StringBuilder();
-        sb.append("tasksOutstanding=").append(totalCountOfScheduledTasksOutstanding.get());
+        sb.append("tasksOutstanding=").append(outstanding);
 
         // Scheduling lag: how far wall clock is ahead of source time
         var sourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
@@ -269,6 +273,12 @@ public class ReplayEngine {
             var lag = Duration.between(lastCompleted, currentSourceTime);
             sb.append(" schedulingLag=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(lag));
             sb.append(" lastCompletedSourceTime=").append(lastCompleted);
+        }
+
+        sb.append(" workOutstanding=").append(outstanding > 0 ? "yes" : "no");
+        var lastIdleMs = lastIdleUpdatedTimestampEpochMs.get();
+        if (lastIdleMs > 0) {
+            sb.append(" lastIdleUpdate=").append(Instant.ofEpochMilli(lastIdleMs));
         }
 
         sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(contentTimeController.getBufferTimeWindow()));
@@ -286,6 +296,15 @@ public class ReplayEngine {
                 }
             });
         sb.append("}");
+
+        var lastWallClockMs = lastCompletedWallClockMs.get();
+        if (outstanding > 0 && lastWallClockMs > 0) {
+            var staleDuration = Duration.ofMillis(System.currentTimeMillis() - lastWallClockMs);
+            if (staleDuration.compareTo(Duration.ofMinutes(1)) > 0) {
+                sb.append(" WARNING:no_completions_for=")
+                    .append(org.opensearch.migrations.Utils.formatDurationInSeconds(staleDuration));
+            }
+        }
 
         heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
     }
