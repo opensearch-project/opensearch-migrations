@@ -36,6 +36,28 @@ export function cloudProviderResolvedInput(): { cloudProvider: InputParamDef<str
     };
 }
 
+// Deployer-supplied AWS tags as a single "Key=Value,Key2=Value2" string, used to tag the AWS
+// resources that workflow templates cause EKS Auto Mode to create -- today, the capture proxy's
+// Network Load Balancer and its target group, listeners and security group.
+//
+// This has to travel through a ConfigMap rather than being baked in at build time because the tags
+// are chosen per deployment (aws-bootstrap.sh --tags -> the chart's aws.resourceTags -> the
+// provider-config ConfigMap). It resolves as a TEMPLATE INPUT for the same reason cloudProvider
+// does -- see the note above.
+//
+// Empty string means "no tags configured": consumers must omit the annotation entirely rather than
+// emit an empty one. The provider-config ConfigMap always renders the key (empty if unset) because
+// Argo v4 errors on a missing configMapKeyRef key even with optional:true.
+export function awsResourceTagsResolvedInput(): { awsResourceTags: InputParamDef<string, false> } {
+    return {
+        awsResourceTags: defineParam({
+            from: configMapKey(PROVIDER_CONFIG_MAP_NAME, "awsResourceTags"),
+            type: typeToken<string>(),
+            expression: "",
+        }),
+    };
+}
+
 export const WORKFLOW_SCRIPTS_ROOT_ENV = "WORKFLOW_SCRIPTS_ROOT";
 
 export function workflowScriptRootEnvVars(

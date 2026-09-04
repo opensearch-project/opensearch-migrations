@@ -67,6 +67,27 @@ aws:
   region: us-east-2
   account: "123456789012"
 
+  # Tags to stamp onto the AWS resources that EKS Auto Mode provisions for this release:
+  # EC2 instances, EBS volumes and the load balancers/target groups behind any Service or
+  # Ingress. Auto Mode creates those at runtime rather than through CloudFormation, so
+  # CloudFormation stack tags never reach them -- they have to be declared here instead.
+  # aws-bootstrap.sh populates this from its --tags flag; set it directly when installing
+  # the chart by hand. Requires the cluster IAM role to allow user tags on Auto Mode
+  # resources (the solution CloudFormation template grants this) and requires
+  # aws.nodeClassName to name a custom NodeClass, since the built-in "default" NodeClass
+  # is owned by EKS and cannot carry tags.
+  # Keys reserved by EKS/Karpenter are rejected: kubernetes.io/cluster/*, karpenter.sh/*,
+  # eks.amazonaws.com/*.
+  resourceTags: {}
+    # CostCenter: "1234"
+    # Owner: platform-team
+
+  # NodeClass that every NodePool in this chart references. "default" is the NodeClass EKS
+  # Auto Mode provisions for its built-in NodePools; it cannot be edited, so tagging nodes
+  # means pointing this at a custom NodeClass (aws-bootstrap.sh creates one when --tags is
+  # given) and disabling the built-in NodePools, whose nodes always use "default".
+  nodeClassName: default
+
 cloudProvider: ""
 
 gcp:
