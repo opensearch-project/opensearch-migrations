@@ -323,6 +323,18 @@ class OpenSearchDefaultRetryTest {
     }
 
     @Test
+    public void testBulkResponseIgnoresInterimContinue() {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var targetBytes = ("HTTP/1.1 100 Continue\r\n\r\n"
+            + makeBulkResponse(200, true, new String[] { "unavailable_shards_exception" }))
+            .getBytes(StandardCharsets.UTF_8);
+
+        var analysis = retryChecker.analyzeBulkResponse(Unpooled.wrappedBuffer(targetBytes));
+
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
+    }
+
+    @Test
     public void testBulkRequestWith404FallsToSuperclass() throws Exception {
         // Bulk request with target 404 (not 429/5xx, not 200) falls through to super.shouldRetry
         var retryChecker = new OpenSearchDefaultRetry();

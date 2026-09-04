@@ -19,6 +19,7 @@ import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringH
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
+import org.opensearch.migrations.replay.netty.InterimHttpResponseHandler;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
@@ -379,6 +380,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         addLoggingHandlerLast(pipeline, "C");
         pipeline.addLast(new RequestMethodAwareHttpResponseDecoder(outboundRequestMethod));
         addLoggingHandlerLast(pipeline, "D");
+        pipeline.addLast(new InterimHttpResponseHandler());
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "E");
         log.atTrace().setMessage("Added handlers to the pipeline: {}").addArgument(pipeline).log();
