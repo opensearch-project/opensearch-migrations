@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
@@ -35,6 +36,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoop;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
@@ -47,6 +49,8 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
+
+    private static final byte[] HEAD_METHOD_BYTES = "HEAD".getBytes(StandardCharsets.US_ASCII);
 
     /**
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
@@ -74,6 +78,58 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
     Duration readTimeoutDuration;
+    private final CompletableFuture<AggregatedRawResponse> responseFuture = new CompletableFuture<>();
+    private final OutboundRequestMethod outboundRequestMethod = new OutboundRequestMethod();
+
+    private static final class OutboundRequestMethod {
+        private int bytesRead;
+        private boolean couldBeHead = true;
+        private boolean complete;
+
+        private void accept(ByteBuf packetData) {
+            if (complete) {
+                return;
+            }
+            var bytes = packetData.duplicate();
+            while (bytes.isReadable()) {
+                var next = bytes.readUnsignedByte();
+                if (bytesRead == 0 && (next == '\r' || next == '\n')) {
+                    continue;
+                }
+                if (next == ' ' || next == '\t') {
+                    complete = true;
+                    return;
+                }
+                if (next == '\r' || next == '\n') {
+                    couldBeHead = false;
+                    complete = true;
+                    return;
+                }
+                if (bytesRead >= HEAD_METHOD_BYTES.length || next != HEAD_METHOD_BYTES[bytesRead]) {
+                    couldBeHead = false;
+                }
+                bytesRead++;
+            }
+        }
+
+        private boolean isHead() {
+            return complete && couldBeHead && bytesRead == HEAD_METHOD_BYTES.length;
+        }
+    }
+
+    private static final class RequestMethodAwareHttpResponseDecoder extends HttpResponseDecoder {
+        private final OutboundRequestMethod requestMethod;
+
+        private RequestMethodAwareHttpResponseDecoder(OutboundRequestMethod requestMethod) {
+            this.requestMethod = requestMethod;
+        }
+
+        @Override
+        protected boolean isContentAlwaysEmpty(HttpMessage message) {
+            return requestMethod.isHead() || super.isContentAlwaysEmpty(message);
+        }
+    }
+
 
     private static class ConnectionClosedListenerHandler extends ChannelInboundHandlerAdapter {
         private final IReplayContexts.ISocketContext socketContext;
@@ -321,7 +377,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         addLoggingHandlerLast(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "C");
-        pipeline.addLast(new HttpResponseDecoder());
+        pipeline.addLast(new RequestMethodAwareHttpResponseDecoder(outboundRequestMethod));
         addLoggingHandlerLast(pipeline, "D");
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "E");
@@ -373,6 +429,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public TrackedFuture<String, Void> consumeBytes(ByteBuf packetData) {
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
             if (channelException == null) {
+                outboundRequestMethod.accept(packetData);
                 log.atTrace().setMessage("[{}] outboundChannelFuture is ready. Writing packets (hash={}): {}: {}")
                     .addArgument(this::connId)
                     .addArgument(() -> System.identityHashCode(packetData))
@@ -436,14 +493,16 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
             }
 
-            var future = new CompletableFuture<AggregatedRawResponse>();
-            var rval = new TrackedFuture<>(future, () -> "NettyPacketToHttpConsumer.finalizeRequest()");
+            var rval = new TrackedFuture<>(
+                responseFuture,
+                () -> "NettyPacketToHttpConsumer.finalizeRequest()"
+            );
             if (t == null) {
                 var responseWatchHandler = (BacksideHttpWatcherHandler) channel.pipeline()
                     .get(BACKSIDE_HTTP_WATCHER_HANDLER_NAME);
-                responseWatchHandler.addCallback(future::complete);
+                responseWatchHandler.addCallback(responseFuture::complete);
             } else {
-                future.complete(responseBuilder.addErrorCause(t).build());
+                responseFuture.complete(responseBuilder.addErrorCause(t).build());
             }
             return rval;
         }, () -> "Waiting for previous consumes to set the future")
@@ -464,5 +523,10 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             .addArgument(ff)
             .log();
         return ff;
+    }
+
+    @Override
+    public void abort(CancellationException cause) {
+        responseFuture.completeExceptionally(cause);
     }
 }

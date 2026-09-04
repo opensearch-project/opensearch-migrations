@@ -79,6 +79,10 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         + "\r\n"
         + "0\r\n"
         + "\r\n";
+    private static final String HEAD_REQUEST_STRING = "HEAD /geonames HTTP/1.1\r\n"
+        + "Host: localhost\r\n"
+        + "Connection: Keep-Alive\r\n"
+        + "\r\n";
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -187,6 +191,54 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     );
 
                 }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void headResponseWithContentLengthAndNoBodyCompletes(boolean fragmentMethod) throws Exception {
+        var responseTimeout = Duration.ofMillis(250);
+        try (
+            var testServer = SimpleNettyHttpServer.makeServer(false, request -> {
+                Assertions.assertEquals("HEAD", request.getVerb());
+                return new SimpleHttpResponse(
+                    Map.of(HttpHeaderNames.CONTENT_LENGTH.toString(), "377"),
+                    new byte[0],
+                    "Not Found",
+                    404
+                );
+            })
+        ) {
+            var clientConnectionPool = new ClientConnectionPool(
+                NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint()),
+                "targetPool for headResponseWithContentLengthAndNoBodyCompletes",
+                1
+            );
+            try {
+                var requestContext = rootContext.getTestConnectionRequestContext(0);
+                var consumer = new NettyPacketToHttpConsumer(
+                    clientConnectionPool.buildConnectionReplaySession(requestContext.getChannelKeyContext()),
+                    requestContext,
+                    responseTimeout
+                );
+                if (fragmentMethod) {
+                    consumer.consumeBytes("HE".getBytes(StandardCharsets.US_ASCII)).get();
+                    consumer.consumeBytes(
+                        HEAD_REQUEST_STRING.substring(2).getBytes(StandardCharsets.US_ASCII)
+                    ).get();
+                } else {
+                    consumer.consumeBytes(HEAD_REQUEST_STRING.getBytes(StandardCharsets.US_ASCII)).get();
+                }
+
+                var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);
+
+                Assertions.assertNull(response.getError());
+                Assertions.assertNotNull(response.getRawResponse());
+                Assertions.assertEquals(404, response.getRawResponse().status().code());
+                Assertions.assertEquals("377", response.getRawResponse().headers().get(HttpHeaderNames.CONTENT_LENGTH));
+            } finally {
+                clientConnectionPool.shutdownNow().get();
             }
         }
     }

@@ -116,6 +116,112 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     }
 
     @Test
+    void abortCancelsAnAlreadyScheduledRetryWithoutWaitingForItsDelay() throws Exception {
+        var retryStarted = new CompletableFuture<Void>();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(30),
+            (session, context) -> new ImmediatePacketConsumer(
+                context.getReplayerRequestKey().getReplayerRequestIndex()
+            ),
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("cancel-retry", 0);
+        var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[] { 1 }));
+        var request = orchestrator.scheduleRequestLifecycle(
+            context.getReplayerRequestKey(),
+            context,
+            Instant.now().minusSeconds(1),
+            Instant.now().minusMillis(1),
+            Instant.now(),
+            permits,
+            () -> TextTrackedFuture.completedFuture(
+                new TransformedOutputAndResult<>(
+                    ByteBufListProducer.of(packets),
+                    HttpRequestTransformationStatus.completed()
+                ),
+                () -> "prepared request"
+            ),
+            transformed -> (requestBytes, response, failure) -> {
+                retryStarted.complete(null);
+                return TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.RETRY,
+                        "retry"
+                    ),
+                    () -> "force a delayed retry"
+                );
+            },
+            status -> status.getClass().getSimpleName()
+        );
+
+        retryStarted.get(5, TimeUnit.SECONDS);
+        orchestrator.abortActor(
+            context.getChannelKeyContext(),
+            0,
+            new CancellationException("source reassigned")
+        ).get(Duration.ofSeconds(2));
+
+        Assertions.assertTrue(request.future.isCompletedExceptionally());
+        Assertions.assertEquals(1, targetExchanges.get());
+        var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
+        probe.close();
+    }
+
+    @Test
+    void abortDoesNotWaitForAResponseFinalizerThatNeverCompletes() throws Exception {
+        var finalizationStarted = new CompletableFuture<Void>();
+        var consumerAborted = new CompletableFuture<CancellationException>();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> new IPacketFinalizingConsumer<>() {
+                @Override
+                public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+                    nextRequestPacket.release();
+                    return TextTrackedFuture.completedFuture(null, () -> "packet consumed");
+                }
+
+                @Override
+                public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
+                    finalizationStarted.complete(null);
+                    return new TextTrackedFuture<>(
+                        new CompletableFuture<>(),
+                        "response that never completes"
+                    );
+                }
+
+                @Override
+                public void abort(CancellationException cause) {
+                    consumerAborted.complete(cause);
+                }
+            },
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("cancel-finalizer", 0);
+        var request = schedule(
+            context,
+            permits,
+            CompletableFuture.completedFuture(transformedRequest())
+        );
+
+        finalizationStarted.get(5, TimeUnit.SECONDS);
+        var cancellation = new CancellationException("source reassigned");
+        orchestrator.abortActor(
+            context.getChannelKeyContext(),
+            0,
+            cancellation
+        ).get(Duration.ofSeconds(2));
+
+        Assertions.assertSame(cancellation, consumerAborted.get(2, TimeUnit.SECONDS));
+        Assertions.assertTrue(request.future.isCompletedExceptionally());
+        var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
+        probe.close();
+    }
+
+    @Test
     void filteredPreparationReleasesPermitWithoutOpeningTargetExchange() throws Exception {
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("filtered", 0);

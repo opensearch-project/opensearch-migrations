@@ -3,6 +3,9 @@ package org.opensearch.migrations.replay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -17,7 +20,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
@@ -268,7 +270,10 @@ public class RequestSenderOrchestrator {
 
     private final class RuntimeTargetExchange implements ConnectionActor.TargetExchange<PreparedActorRequest, Object> {
         private final ActorRuntime runtime;
-        private CompletionStage<TargetOutcome<Object>> activeExchange;
+        private final Map<ScheduledFuture<?>, CompletableFuture<Void>> cancellableSchedules = new LinkedHashMap<>();
+        private CompletableFuture<TargetOutcome<Object>> activeExchange;
+        private IPacketFinalizingConsumer<AggregatedRawResponse> activePacketReceiver;
+        private CancellationException cancellationCause;
 
         private RuntimeTargetExchange(ActorRuntime runtime) {
             this.runtime = runtime;
@@ -277,6 +282,9 @@ public class RequestSenderOrchestrator {
         @Override
         public CompletionStage<TargetOutcome<Object>> execute(PreparedActorRequest preparedRequest) {
             preparedRequest.beginExecution();
+            if (cancellationCause != null) {
+                return CompletableFuture.completedFuture(new TargetOutcome.Cancelled<>(cancellationCause));
+            }
             @SuppressWarnings("unchecked")
             var exchange = (TrackedFuture<String, Object>) (TrackedFuture<?, ?>) sendRequestWithRetries(
                 () -> packetConsumerFactory.apply(runtime.session, preparedRequest.context),
@@ -315,13 +323,38 @@ public class RequestSenderOrchestrator {
 
         @Override
         public CompletionStage<Void> abort(CancellationException cause) {
+            if (cancellationCause == null) {
+                cancellationCause = cause;
+            }
+            cancelScheduledWork(cancellationCause);
+            cancelActivePacketReceiver(cancellationCause);
             runtime.session.setCancelled(true);
             var exchangeToJoin = activeExchange;
+            if (exchangeToJoin != null) {
+                exchangeToJoin.complete(new TargetOutcome.Cancelled<>(cancellationCause));
+            }
             return closeRuntimeChannel().thenCompose(ignored ->
                 exchangeToJoin == null
                     ? CompletableFuture.completedFuture(null)
                     : exchangeToJoin.handle((outcome, failure) -> null)
             );
+        }
+
+        private void cancelActivePacketReceiver(CancellationException cause) {
+            var packetReceiver = activePacketReceiver;
+            activePacketReceiver = null;
+            if (packetReceiver != null) {
+                packetReceiver.abort(cause);
+            }
+        }
+
+        private void cancelScheduledWork(CancellationException cause) {
+            var schedules = List.copyOf(cancellableSchedules.entrySet());
+            cancellableSchedules.clear();
+            for (var entry : schedules) {
+                entry.getKey().cancel(false);
+                entry.getValue().completeExceptionally(cause);
+            }
         }
 
         private CompletionStage<Void> closeRuntimeChannel() {
@@ -342,6 +375,12 @@ public class RequestSenderOrchestrator {
             Duration interval,
             RetryVisitor<T> visitor
         ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> "request exchange was cancelled before another attempt could start"
+                );
+            }
             if (eventLoop.isShuttingDown()) {
                 return TextTrackedFuture.failedFuture(
                     new IllegalStateException("EventLoop is shutting down"),
@@ -350,8 +389,10 @@ public class RequestSenderOrchestrator {
             }
             var attempt = packetProducer.newAttempt();
             var byteBufList = attempt.packets();
+            var packetReceiver = senderSupplier.get();
+            activePacketReceiver = packetReceiver;
             return sendPackets(
-                senderSupplier.get(),
+                packetReceiver,
                 eventLoop,
                 byteBufList.streamUnretained().iterator(),
                 referenceStartTime,
@@ -364,7 +405,12 @@ public class RequestSenderOrchestrator {
                         }
                     },
                     () -> "checking response to determine if the request should be retried")
-                .whenComplete((response, failure) -> attempt.close(), () -> "releasing the request attempt payload")
+                .whenComplete((response, failure) -> {
+                    attempt.close();
+                    if (activePacketReceiver == packetReceiver) {
+                        activePacketReceiver = null;
+                    }
+                }, () -> "releasing the request attempt payload")
                 .getDeferredFutureThroughHandle((dtr, t) -> retryIfNeeded(
                     dtr,
                     t,
@@ -389,6 +435,12 @@ public class RequestSenderOrchestrator {
             Duration interval,
             RetryVisitor<T> visitor
         ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> "request exchange was cancelled while evaluating a retry"
+                );
+            }
             if (failure != null) {
                 return TextTrackedFuture.failedFuture(failure, () -> "failed future");
             }
@@ -406,7 +458,7 @@ public class RequestSenderOrchestrator {
                 : computedStartTime;
             log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
             var schedulingDelay = Duration.between(Instant.now(), newStartTime);
-            return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, schedulingDelay)
+            return scheduleCancellable(eventLoop, schedulingDelay, "retry")
                 .thenCompose(
                     ignored -> sendRequestWithRetries(
                         senderSupplier,
@@ -421,6 +473,39 @@ public class RequestSenderOrchestrator {
                 );
         }
 
+        private TrackedFuture<String, Void> scheduleCancellable(
+            EventLoop eventLoop,
+            Duration delay,
+            String operation
+        ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> operation + " schedule was cancelled before admission"
+                );
+            }
+            if (eventLoop.isShuttingDown()) {
+                return TextTrackedFuture.failedFuture(
+                    new CancellationException("event loop is already shutting down"),
+                    () -> operation + " schedule was rejected because the event loop is shutting down"
+                );
+            }
+
+            var completion = new CompletableFuture<Void>();
+            var delayMillis = Math.max(0, delay.toMillis());
+            var scheduled = eventLoop.schedule(() -> completion.complete(null), delayMillis, TimeUnit.MILLISECONDS);
+            cancellableSchedules.put(scheduled, completion);
+            completion.whenComplete((ignored, failure) -> cancellableSchedules.remove(scheduled));
+            if (cancellationCause != null) {
+                scheduled.cancel(false);
+                completion.completeExceptionally(cancellationCause);
+            }
+            return new TextTrackedFuture<>(
+                completion,
+                () -> operation + " scheduled in " + delay + " (clipped: " + delayMillis + "ms)"
+            );
+        }
+
         private Duration doubleRetryDelayCapped(Duration delay) {
             return Duration.ofMillis(Math.min(delay.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
         }
@@ -433,6 +518,12 @@ public class RequestSenderOrchestrator {
             Duration interval,
             AtomicInteger requestPacketCounter
         ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> "packet send was cancelled before the next packet"
+                );
+            }
             final var oldCounter = requestPacketCounter.getAndIncrement();
             log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
             assert iterator.hasNext() : "Should not have called this with no items to send";
@@ -440,12 +531,13 @@ public class RequestSenderOrchestrator {
             var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
             if (iterator.hasNext()) {
                 return consumeFuture.thenCompose(
-                    ignored -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(
+                    ignored -> scheduleCancellable(
                             eventLoop,
                             Duration.between(
                                 Instant.now(),
                                 referenceStartAt.plus(interval.multipliedBy(requestPacketCounter.get()))
-                            )
+                            ),
+                            "next packet"
                         )
                         .thenCompose(
                             value -> sendPackets(
