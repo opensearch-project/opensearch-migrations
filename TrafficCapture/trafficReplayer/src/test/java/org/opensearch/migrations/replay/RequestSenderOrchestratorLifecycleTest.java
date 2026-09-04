@@ -8,6 +8,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
@@ -32,6 +34,8 @@ import org.junit.jupiter.api.Test;
 class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     private final List<Integer> targetExecutionOrder = new CopyOnWriteArrayList<>();
     private final AtomicInteger targetExchanges = new AtomicInteger();
+    private final AtomicReference<Function<ConnectionSessionKey, java.util.concurrent.CompletionStage<Void>>>
+        sessionAcknowledger = new AtomicReference<>(ignored -> CompletableFuture.completedFuture(null));
     private ClientConnectionPool connectionPool;
     private RequestSenderOrchestrator orchestrator;
 
@@ -48,7 +52,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             connectionPool,
             (session, context) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
-            )
+            ),
+            sessionKey -> sessionAcknowledger.get().apply(sessionKey)
         );
     }
 
@@ -127,6 +132,114 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(5, TimeUnit.SECONDS);
         probe.close();
         closeActor(context);
+    }
+
+    @Test
+    void sessionTerminationWaitsForTransactionsAndSourceAcknowledgement() throws Exception {
+        var sourceAcknowledgement = new CompletableFuture<Void>();
+        var acknowledgementStarted = new CompletableFuture<ConnectionSessionKey>();
+        sessionAcknowledger.set(sessionKey -> {
+            acknowledgementStarted.complete(sessionKey);
+            return sourceAcknowledgement;
+        });
+        var context = rootContext.getTestConnectionRequestContext("termination", 0);
+        var runtime = orchestrator.transactionRuntime(
+            context.getReplayerRequestKey(),
+            context.getChannelKeyContext()
+        );
+        var transaction = new CompletableFuture<Void>();
+        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        var close = orchestrator.scheduleActorClose(
+            context.getChannelKeyContext(),
+            0,
+            Instant.now()
+        );
+
+        Assertions.assertFalse(close.future.isDone());
+        Assertions.assertFalse(acknowledgementStarted.isDone());
+
+        transaction.complete(null);
+        var acknowledgedSession = acknowledgementStarted.get(5, TimeUnit.SECONDS);
+        Assertions.assertEquals(runtime.requestId().session(), acknowledgedSession);
+        Assertions.assertFalse(close.future.isDone());
+
+        sourceAcknowledgement.complete(null);
+        close.get(Duration.ofSeconds(5));
+    }
+
+    @Test
+    void failedTransactionPreventsSourceAcknowledgement() throws Exception {
+        var acknowledgementStarted = new CompletableFuture<ConnectionSessionKey>();
+        sessionAcknowledger.set(sessionKey -> {
+            acknowledgementStarted.complete(sessionKey);
+            return CompletableFuture.completedFuture(null);
+        });
+        var context = rootContext.getTestConnectionRequestContext("failed-transaction", 0);
+        var runtime = orchestrator.transactionRuntime(
+            context.getReplayerRequestKey(),
+            context.getChannelKeyContext()
+        );
+        var transaction = new CompletableFuture<Void>();
+        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        var close = orchestrator.scheduleActorClose(
+            context.getChannelKeyContext(),
+            0,
+            Instant.now()
+        );
+
+        transaction.completeExceptionally(new IllegalStateException("disposition failed"));
+
+        var error = Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> close.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertEquals("disposition failed", error.getCause().getMessage());
+        Assertions.assertFalse(acknowledgementStarted.isDone());
+    }
+
+    @Test
+    void failedSourceAcknowledgementFailsTheSessionGate() {
+        sessionAcknowledger.set(sessionKey ->
+            CompletableFuture.failedFuture(new IllegalStateException("source acknowledgement failed"))
+        );
+        var context = rootContext.getTestConnectionRequestContext("failed-acknowledgement", 0);
+
+        var close = orchestrator.scheduleActorClose(
+            context.getChannelKeyContext(),
+            0,
+            Instant.now()
+        );
+
+        var error = Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> close.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertEquals("source acknowledgement failed", error.getCause().getMessage());
+    }
+
+    @Test
+    void absentActorStillProducesAnExplicitSourceAcknowledgement() throws Exception {
+        var sourceAcknowledgement = new CompletableFuture<Void>();
+        var acknowledgementStarted = new CompletableFuture<ConnectionSessionKey>();
+        sessionAcknowledger.set(sessionKey -> {
+            acknowledgementStarted.complete(sessionKey);
+            return sourceAcknowledgement;
+        });
+        var context = rootContext.getTestConnectionRequestContext("no-actor", 0);
+
+        var abort = orchestrator.abortActor(
+            context.getChannelKeyContext(),
+            0,
+            new CancellationException("rebalance")
+        );
+
+        var acknowledgedSession = acknowledgementStarted.get(5, TimeUnit.SECONDS);
+        Assertions.assertEquals("no-actor", acknowledgedSession.connection().connectionId());
+        Assertions.assertFalse(abort.future.isDone());
+
+        sourceAcknowledgement.complete(null);
+        abort.get(Duration.ofSeconds(5));
     }
 
     private TrackedFuture<String, String> schedule(

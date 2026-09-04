@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -201,8 +202,13 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
-        underlyingSource.onNetworkConnectionClosed(connectionId, sessionNumber, generation);
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        var completion = underlyingSource.acknowledgeSessionTermination(sessionKey);
+        completion.whenComplete((ignored, failure) -> {
+            readGate.drainPermits();
+            readGate.release();
+        });
+        return completion;
     }
 
     @Override

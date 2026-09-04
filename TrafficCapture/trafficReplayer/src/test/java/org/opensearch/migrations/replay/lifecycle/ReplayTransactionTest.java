@@ -156,6 +156,40 @@ class ReplayTransactionTest {
         Assertions.assertEquals(0, record.commits.get());
     }
 
+    @Test
+    void explicitFailureRejectsLateOutcomesAndReleasesResourcesOnce() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(6));
+        var resource = new TestResource();
+        register(ledger, record, request().toString());
+        var transaction = transaction(
+            mailbox,
+            ledger,
+            CompletableFuture.completedFuture(new EvidenceOutcome.Durable("unused")),
+            record.id(),
+            resource
+        );
+
+        var failureAcknowledgement = transaction.fail(new IllegalStateException("actor failed"))
+            .toCompletableFuture();
+        mailbox.runUntilIdle();
+        failureAcknowledgement.join();
+
+        var sourceAcknowledgement = transaction.settleSource(new SourceOutcome.Complete())
+            .toCompletableFuture();
+        var targetAcknowledgement = transaction.settleTarget(new TargetOutcome.Succeeded<>("late"))
+            .toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(sourceAcknowledgement.isCompletedExceptionally());
+        Assertions.assertTrue(targetAcknowledgement.isCompletedExceptionally());
+        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
+        Assertions.assertEquals(1, resource.closes);
+        Assertions.assertEquals(0, record.contextCloses.get());
+        Assertions.assertEquals(0, record.commits.get());
+    }
+
     private static ReplayTransaction<String> transaction(
         ActorMailbox mailbox,
         RecordDispositionLedger ledger,

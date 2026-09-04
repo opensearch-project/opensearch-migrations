@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,6 +16,8 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -74,7 +77,7 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
     }
 
     /**
-     * Verify that BlockingTrafficSource delegates onNetworkConnectionClosed and
+     * Verify that BlockingTrafficSource delegates session acknowledgement and
      * onConnectionAccumulationComplete to the underlying source.
      */
     @Test
@@ -82,11 +85,16 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         var delegatingSource = new DelegationTrackingSource(rootContext, 10);
         var blockingSource = new BlockingTrafficSource(delegatingSource, Duration.ofMillis(10));
 
-        blockingSource.onNetworkConnectionClosed("test-conn", 5, 3);
+        var sessionKey = new ConnectionSessionKey(
+            new SourceConnectionKey("test-node", "test-conn"),
+            5,
+            3
+        );
+        blockingSource.acknowledgeSessionTermination(sessionKey).toCompletableFuture().join();
         Assertions.assertEquals(1, delegatingSource.networkClosedCalls.get(),
-            "onNetworkConnectionClosed must be delegated to underlying source");
-        Assertions.assertEquals("test-conn:5:3", delegatingSource.lastNetworkClosedArgs,
-            "Delegation must pass exact arguments");
+            "session acknowledgement must be delegated to underlying source");
+        Assertions.assertEquals(sessionKey, delegatingSource.lastAcknowledgedSession,
+            "Delegation must preserve typed session identity");
 
         var mockKey = PojoTrafficStreamKeyAndContext.build(
             TrafficStream.newBuilder().setConnectionId("c").setNumberOfThisLastChunk(0).build(),
@@ -101,16 +109,17 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
     private static class DelegationTrackingSource extends TestTrafficCaptureSource {
         final AtomicInteger networkClosedCalls = new AtomicInteger();
         final AtomicInteger accumulationCompleteCalls = new AtomicInteger();
-        volatile String lastNetworkClosedArgs;
+        volatile ConnectionSessionKey lastAcknowledgedSession;
 
         DelegationTrackingSource(TestContext rootContext, int nStreams) {
             super(rootContext, nStreams);
         }
 
         @Override
-        public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
+        public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
             networkClosedCalls.incrementAndGet();
-            lastNetworkClosedArgs = connectionId + ":" + sessionNumber + ":" + generation;
+            lastAcknowledgedSession = sessionKey;
+            return CompletableFuture.completedFuture(null);
         }
 
         @Override
@@ -162,6 +171,16 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             // do nothing
             return CommitResult.IMMEDIATE;
+        }
+
+        @Override
+        public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+            // No per-connection registry in this fixture.
         }
     }
 }

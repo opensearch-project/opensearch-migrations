@@ -224,6 +224,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 List.of(),
                 List.of(ctx)
             );
+            runtime.register(transaction.completion()).whenComplete((ignored, failure) -> {
+                if (failure != null) {
+                    transaction.fail(unwrap(failure));
+                }
+            });
             var targetFuture = sendRequestAfterGoingThroughWorkQueue(
                 ctx,
                 request,

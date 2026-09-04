@@ -71,7 +71,8 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         );
         var orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, ctx) -> null
+            (session, ctx) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations()
         );
 
         try {
@@ -99,7 +100,11 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
         );
-        var orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
+        var orchestrator = new RequestSenderOrchestrator(
+            pool,
+            (session, ctx) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
 
         try {
             var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0).getChannelKeyContext();

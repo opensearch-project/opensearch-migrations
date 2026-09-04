@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -19,6 +20,7 @@ import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
@@ -124,6 +126,18 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
                     }
                     @Override
                     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) { return null; }
+
+                    @Override
+                    public CompletionStage<Void> acknowledgeSessionTermination(
+                        ConnectionSessionKey sessionKey
+                    ) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    @Override
+                    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+                        // This fixture has no per-connection source registry.
+                    }
                 };
 
             // Accept-all: use the base transformer directly (no filter = all pass)

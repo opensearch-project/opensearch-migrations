@@ -8,12 +8,14 @@ import java.io.InputStreamReader;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -98,6 +100,16 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
         // do nothing - this datasource isn't transactional
         channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
         return CommitResult.IMMEDIATE;
+    }
+
+    @Override
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        // Stream-backed input has no per-connection source registry.
     }
 
     @Override

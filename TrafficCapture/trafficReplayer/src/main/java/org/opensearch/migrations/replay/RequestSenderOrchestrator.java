@@ -38,6 +38,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayTransactionRegistry;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -77,6 +78,7 @@ public class RequestSenderOrchestrator {
     private final Duration initialRetryDelay;
     private final Duration maxRetryDelay;
     private final BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory;
+    private final Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger;
     private final ConcurrentHashMap<ConnectionSessionKey, ActorRuntime> actorRuntimes = new ConcurrentHashMap<>();
 
     /**
@@ -90,21 +92,34 @@ public class RequestSenderOrchestrator {
      */
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
-        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger
     ) {
-        this(clientConnectionPool, Duration.ofMillis(100), Duration.ofSeconds(300), packetConsumerFactory);
+        this(
+            clientConnectionPool,
+            Duration.ofMillis(100),
+            Duration.ofSeconds(300),
+            packetConsumerFactory,
+            sessionTerminationAcknowledger
+        );
     }
 
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
         Duration initialRetryDelay,
         Duration maxRetryDelay,
-        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger
     ) {
         this.clientConnectionPool = clientConnectionPool;
         this.initialRetryDelay = initialRetryDelay;
         this.maxRetryDelay = maxRetryDelay;
         this.packetConsumerFactory = packetConsumerFactory;
+        this.sessionTerminationAcknowledger = sessionTerminationAcknowledger;
+    }
+
+    public static Function<ConnectionSessionKey, CompletionStage<Void>> noSourceTerminationObligations() {
+        return ignored -> CompletableFuture.completedFuture(null);
     }
 
     public ScheduledFuture<?> scheduleAtFixedRate(Runnable runnable,
@@ -225,6 +240,10 @@ public class RequestSenderOrchestrator {
         private final ConnectionReplaySession session;
         private final ActorMailbox mailbox;
         private final ConnectionActor<PreparedActorRequest, Object> actor;
+        private final ReplayTransactionRegistry transactions;
+        private final CompletableFuture<SessionOutcome> terminationOwner = new CompletableFuture<>();
+        private final CompletionStage<SessionOutcome> termination = terminationOwner.minimalCompletionStage();
+        private boolean actorTerminated;
 
         private ActorRuntime(
             ConnectionSessionKey key,
@@ -237,19 +256,71 @@ public class RequestSenderOrchestrator {
                 key.sourceGeneration()
             );
             this.mailbox = new NettyEventLoopActorMailbox(session.eventLoop);
+            this.transactions = new ReplayTransactionRegistry(key, mailbox);
             this.actor = new ConnectionActor<>(
                 key,
                 mailbox,
                 new RuntimeTargetExchange(this)
             );
-            actor.termination().whenComplete((outcome, failure) -> {
-                actorRuntimes.remove(key, this);
-                clientConnectionPool.invalidateSession(
-                    key.connection().connectionId(),
-                    key.sessionNumber(),
-                    key.sourceGeneration()
+            actor.termination().whenComplete((outcome, failure) ->
+                mailbox.execute(() -> onActorTerminated(outcome, failure))
+            );
+        }
+
+        private CompletionStage<SessionOutcome> termination() {
+            return termination;
+        }
+
+        private void onActorTerminated(SessionOutcome outcome, Throwable actorFailure) {
+            if (actorTerminated) {
+                return;
+            }
+            actorTerminated = true;
+            clientConnectionPool.invalidateSession(
+                key.connection().connectionId(),
+                key.sessionNumber(),
+                key.sourceGeneration()
+            );
+            if (actorFailure != null) {
+                terminationOwner.completeExceptionally(unwrap(actorFailure));
+                return;
+            }
+            transactions.beginTermination().whenComplete((ignored, transactionFailure) ->
+                mailbox.execute(() -> {
+                    if (transactionFailure != null) {
+                        terminationOwner.completeExceptionally(unwrap(transactionFailure));
+                        return;
+                    }
+                    if (outcome instanceof SessionOutcome.Failed failed) {
+                        terminationOwner.complete(failed);
+                        return;
+                    }
+                    acknowledgeSourceTermination(outcome);
+                })
+            );
+        }
+
+        private void acknowledgeSourceTermination(SessionOutcome outcome) {
+            CompletionStage<Void> acknowledgement;
+            try {
+                acknowledgement = Objects.requireNonNull(
+                    sessionTerminationAcknowledger.apply(key),
+                    "session termination acknowledger returned no completion stage"
                 );
-            });
+            } catch (Throwable t) {
+                terminationOwner.completeExceptionally(t);
+                return;
+            }
+            acknowledgement.whenComplete((ignored, failure) ->
+                mailbox.execute(() -> {
+                    if (failure != null) {
+                        terminationOwner.completeExceptionally(unwrap(failure));
+                        return;
+                    }
+                    actorRuntimes.remove(key, this);
+                    terminationOwner.complete(outcome);
+                })
+            );
         }
     }
 
@@ -667,13 +738,36 @@ public class RequestSenderOrchestrator {
     ) {
         var requestId = toReplayRequestId(requestKey);
         var runtime = actorRuntime(requestId.session(), channelContext);
-        return new TransactionRuntime(requestId, runtime.mailbox);
+        return new TransactionRuntime(requestId, runtime.mailbox, runtime.transactions);
     }
 
-    public record TransactionRuntime(
-        @NonNull ReplayRequestId requestId,
-        @NonNull ActorMailbox mailbox
-    ) {}
+    public static final class TransactionRuntime {
+        private final ReplayRequestId requestId;
+        private final ActorMailbox mailbox;
+        private final ReplayTransactionRegistry registry;
+
+        private TransactionRuntime(
+            ReplayRequestId requestId,
+            ActorMailbox mailbox,
+            ReplayTransactionRegistry registry
+        ) {
+            this.requestId = requestId;
+            this.mailbox = mailbox;
+            this.registry = registry;
+        }
+
+        public ReplayRequestId requestId() {
+            return requestId;
+        }
+
+        public ActorMailbox mailbox() {
+            return mailbox;
+        }
+
+        public CompletionStage<Void> register(CompletionStage<?> transactionCompletion) {
+            return registry.register(requestId, transactionCompletion);
+        }
+    }
 
     public TrackedFuture<String, Void> scheduleActorClose(
         @NonNull IReplayContexts.IChannelKeyContext context,
@@ -682,7 +776,8 @@ public class RequestSenderOrchestrator {
     ) {
         var sessionKey = toConnectionSessionKey(context, sessionNumber);
         var runtime = actorRuntime(sessionKey, context);
-        var result = runtime.actor.admitClose(timestamp).thenCompose(RequestSenderOrchestrator::mapSessionOutcome);
+        runtime.actor.admitClose(timestamp);
+        var result = runtime.termination().thenCompose(RequestSenderOrchestrator::mapSessionOutcome);
         return new TextTrackedFuture<>(
             result.toCompletableFuture(),
             () -> "waiting for ordered actor close for " + sessionKey
@@ -697,9 +792,22 @@ public class RequestSenderOrchestrator {
         var sessionKey = toConnectionSessionKey(context, sessionNumber);
         var runtime = actorRuntimes.get(sessionKey);
         if (runtime == null) {
-            return TextTrackedFuture.completedFuture(null, () -> "no actor existed for " + sessionKey);
+            CompletionStage<Void> acknowledgement;
+            try {
+                acknowledgement = Objects.requireNonNull(
+                    sessionTerminationAcknowledger.apply(sessionKey),
+                    "session termination acknowledger returned no completion stage"
+                );
+            } catch (Throwable t) {
+                acknowledgement = CompletableFuture.failedFuture(t);
+            }
+            return new TextTrackedFuture<>(
+                acknowledgement.toCompletableFuture(),
+                () -> "acknowledging that no actor existed for " + sessionKey
+            );
         }
-        var result = runtime.actor.abort(cause).thenCompose(RequestSenderOrchestrator::mapAbortOutcome);
+        runtime.actor.abort(cause);
+        var result = runtime.termination().thenCompose(RequestSenderOrchestrator::mapAbortOutcome);
         return new TextTrackedFuture<>(
             result.toCompletableFuture(),
             () -> "waiting for actor abort for " + sessionKey

@@ -5,12 +5,14 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -37,6 +39,16 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
         // do nothing
         return CommitResult.IMMEDIATE;
+    }
+
+    @Override
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return trafficSource.acknowledgeSessionTermination(sessionKey);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        trafficSource.onConnectionAccumulationComplete(trafficStreamKey);
     }
 
     @Override

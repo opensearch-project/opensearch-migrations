@@ -6,7 +6,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.OnlineRadixSorter;
@@ -46,8 +45,6 @@ public class ConnectionReplaySession {
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
     /** Generation of the Kafka consumer assignment when this session was created. */
     public final int generation;
-    /** Called when the session's channel is closed (regardless of cause). */
-    public final Consumer<ConnectionReplaySession> onClose;
     /**
      * When true, this session has been cancelled due to a traffic source reader interruption.
      * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
@@ -104,24 +101,12 @@ public class ConnectionReplaySession {
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
         int generation
     ) {
-        this(eventLoop, channelKeyContext, channelFutureFutureFactory, generation, ignored -> {});
-    }
-
-    @SneakyThrows
-    public ConnectionReplaySession(
-        EventLoop eventLoop,
-        IReplayContexts.IChannelKeyContext channelKeyContext,
-        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
-        int generation,
-        Consumer<ConnectionReplaySession> onClose
-    ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter(0);
         this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
         this.generation = generation;
-        this.onClose = onClose;
     }
 
     public TrackedFuture<String, ChannelFuture> getChannelFutureInAnyState() {

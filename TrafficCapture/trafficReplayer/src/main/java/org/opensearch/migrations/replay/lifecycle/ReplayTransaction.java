@@ -90,6 +90,12 @@ public final class ReplayTransaction<R> {
     ) {
         var acknowledgement = new CompletableFuture<Void>();
         mailbox.execute(() -> {
+            if (state == State.TERMINATED) {
+                acknowledgement.completeExceptionally(
+                    new IllegalStateException("transaction already terminated for " + requestId)
+                );
+                return;
+            }
             if (sourceOutcome != null) {
                 acknowledgement.completeExceptionally(
                     new IllegalStateException("source outcome already settled for " + requestId)
@@ -115,6 +121,12 @@ public final class ReplayTransaction<R> {
     public CompletionStage<Void> settleTarget(@NonNull TargetOutcome<R> outcome) {
         var acknowledgement = new CompletableFuture<Void>();
         mailbox.execute(() -> {
+            if (state == State.TERMINATED) {
+                acknowledgement.completeExceptionally(
+                    new IllegalStateException("transaction already terminated for " + requestId)
+                );
+                return;
+            }
             if (targetOutcome != null) {
                 acknowledgement.completeExceptionally(
                     new IllegalStateException("target outcome already settled for " + requestId)

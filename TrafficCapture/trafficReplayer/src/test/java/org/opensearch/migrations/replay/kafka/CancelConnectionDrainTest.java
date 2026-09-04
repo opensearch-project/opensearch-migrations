@@ -3,9 +3,7 @@ package org.opensearch.migrations.replay.kafka;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.ClientConnectionPool;
@@ -47,7 +45,11 @@ class CancelConnectionDrainTest extends InstrumentationTest {
             (el, ctx) -> TextTrackedFuture.completedFuture(channel.newSucceededFuture(), () -> "test channel"),
             "test-pool", 1
         );
-        orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
+        orchestrator = new RequestSenderOrchestrator(
+            pool,
+            (session, ctx) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
     }
 
     @AfterEach
@@ -67,9 +69,6 @@ class CancelConnectionDrainTest extends InstrumentationTest {
     @Test
     @org.junit.jupiter.api.Timeout(10)
     void cancelConnection_drainsSorterSlots() throws Exception {
-        var onCloseFired = new CountDownLatch(1);
-        pool.setGlobalOnSessionClose(session -> onCloseFired.countDown());
-
         var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0).getChannelKeyContext();
 
         // Get the session before cancelling so we can inspect it after
@@ -98,10 +97,7 @@ class CancelConnectionDrainTest extends InstrumentationTest {
 
         // cancelConnection should drain all queued sorter slots
         pool.cancelConnection(channelKeyCtx, 0);
-
-        // onClose fires (null-channel path completes immediately)
-        boolean fired = onCloseFired.await(10, TimeUnit.SECONDS);
-        Assertions.assertTrue(fired, "onClose callback must fire after cancelConnection");
+        session.eventLoop.submit(() -> {}).sync();
 
         // After cancel, the sorter must drain
         // Before fix: orphaned scheduleFuture entries leave sorter slots pending indefinitely
@@ -117,10 +113,14 @@ class CancelConnectionDrainTest extends InstrumentationTest {
     @org.junit.jupiter.api.Timeout(10)
     void closeChannelDrainsPendingWorkWithoutStartingQueuedCallbacks() throws Exception {
         var sendStarted = new AtomicBoolean();
-        var closeOrchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> {
-            sendStarted.set(true);
-            return null;
-        });
+        var closeOrchestrator = new RequestSenderOrchestrator(
+            pool,
+            (session, ctx) -> {
+                sendStarted.set(true);
+                return null;
+            },
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
         var requestContext = rootContext.getTestConnectionRequestContext("conn-close", 0);
         var channelKeyContext = requestContext.getChannelKeyContext();
         var session = pool.getCachedSession(channelKeyContext, 0);

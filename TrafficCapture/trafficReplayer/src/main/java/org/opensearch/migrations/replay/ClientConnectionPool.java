@@ -4,7 +4,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
@@ -24,7 +23,6 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
-import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -35,9 +33,6 @@ public class ClientConnectionPool {
         channelCreator;
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
-    /** Called when any session's channel is closed. Default no-op; set by coordinator. */
-    @Setter
-    private Consumer<ConnectionReplaySession> globalOnSessionClose = session -> {};
 
     @EqualsAndHashCode
     @AllArgsConstructor
@@ -88,8 +83,7 @@ public class ClientConnectionPool {
         // event loop that was tied to the original channel to bind all future channels to
         // the same event loop. That means that we don't have to worry about concurrent
         // accesses/changes to the OTHER value that we're storing within the cache.
-        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation,
-            globalOnSessionClose);
+        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation);
     }
 
     @SneakyThrows
@@ -213,7 +207,6 @@ public class ClientConnectionPool {
                         .addArgument(session::getChannelKeyContext)
                         .log();
                     cancelPendingWork(session, cancellationCause);
-                    session.onClose.accept(session);
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
                 log.atTrace().setMessage("closing channel {} ({})...")
@@ -236,7 +229,6 @@ public class ClientConnectionPool {
                                 .log();
                         }
                         cancelPendingWork(session, cancellationCause);
-                        session.onClose.accept(session);
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");

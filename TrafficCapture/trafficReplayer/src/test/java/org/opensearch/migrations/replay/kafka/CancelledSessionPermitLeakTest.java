@@ -55,7 +55,11 @@ class CancelledSessionPermitLeakTest extends InstrumentationTest {
             (el, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no-op channel"),
             "test-pool", 1
         );
-        orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
+        orchestrator = new RequestSenderOrchestrator(
+            pool,
+            (session, ctx) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations()
+        );
         limiter = new TrafficStreamLimiter(PERMIT_COUNT);
     }
 

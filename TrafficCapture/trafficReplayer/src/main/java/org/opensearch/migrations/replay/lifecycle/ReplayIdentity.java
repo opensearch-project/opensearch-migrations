@@ -22,6 +22,21 @@ public final class ReplayIdentity {
         }
     }
 
+    public record SourceConnectionPartitionGenerationKey(
+        @NonNull SourceConnectionKey connection,
+        int partition,
+        int sourceGeneration
+    ) {
+        public SourceConnectionPartitionGenerationKey {
+            if (partition < 0) {
+                throw new IllegalArgumentException("partition must not be negative");
+            }
+            if (sourceGeneration < 0) {
+                throw new IllegalArgumentException("sourceGeneration must not be negative");
+            }
+        }
+    }
+
     public record ReplayRequestId(@NonNull ConnectionSessionKey session, int requestIndex) {
         public ReplayRequestId {
             if (requestIndex < 0) {

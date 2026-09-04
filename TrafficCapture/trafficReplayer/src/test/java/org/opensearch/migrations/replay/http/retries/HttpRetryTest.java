@@ -78,7 +78,8 @@ public class HttpRetryTest {
         var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT)
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
+            RequestSenderOrchestrator.noSourceTerminationObligations()
         );
         var baseTime = Instant.now();
         var requestContext = rootContext.getTestConnectionRequestContext(0);

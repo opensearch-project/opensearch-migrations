@@ -118,7 +118,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         var connectionToConsumerMap = new HashMap<Long, BlockingPacketConsumer>();
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (s, c) -> connectionToConsumerMap.get(c.getSourceRequestIndex())
+            (s, c) -> connectionToConsumerMap.get(c.getSourceRequestIndex()),
+            RequestSenderOrchestrator.noSourceTerminationObligations()
         );
         var baseTime = Instant.EPOCH;
         Instant lastEndTime = baseTime;
@@ -222,7 +223,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             );
             var senderOrchestrator = new RequestSenderOrchestrator(
                 clientConnectionPool,
-                (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT)
+                (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
+                RequestSenderOrchestrator.noSourceTerminationObligations()
             );
             var baseTime = Instant.now();
             Instant lastEndTime = baseTime;

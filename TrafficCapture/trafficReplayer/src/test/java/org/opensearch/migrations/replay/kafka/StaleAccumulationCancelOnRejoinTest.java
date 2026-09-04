@@ -16,6 +16,8 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
@@ -253,13 +255,9 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
      * all-synth or all-real (never mixed); this helper collects the cross-chunk delivery order
      * so callers can verify ordering at the source-layer level.
      *
-     * <p>In production the empty-batch park (gated by
-     * {@code outstandingTrafficSourceReaderInterruptedCloseSessions}) is drained by the
-     * channel-close callback wired through {@code TrafficReplayerTopLevel}. This unit test
-     * skips that wiring and the test session has no real {@code ConnectionReplaySession},
-     * so we simulate the close confirmation directly: as soon as a synth close is observed for
-     * {@code CONN_ID}, fire {@link KafkaTrafficCaptureSource#onNetworkConnectionClosed} so the
-     * counter drops back to zero and the next poll can fetch the broker's re-delivery.
+     * <p>This unit test has no real connection runtime, so it explicitly acknowledges the
+     * synthetic session after the accumulator consumes it. Production does this only after the
+     * runtime's transaction and channel completion gates settle.
      */
     private List<ITrafficStreamWithKey> drainUntilSyntheticAndRealForConn(
         KafkaTrafficCaptureSource source,
@@ -276,13 +274,13 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
                 if (CONN_ID.equals(ts.getKey().getConnectionId())) {
                     if (ts instanceof TrafficSourceReaderInterruptedClose) {
                         sawSynthetic = true;
-                        // Simulate the channel-close callback that, in production, drains
-                        // outstandingTrafficSourceReaderInterruptedCloseSessions for the
-                        // PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER session at the synth-close generation.
-                        source.onNetworkConnectionClosed(
-                            CONN_ID,
-                            KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
-                            ts.getKey().getSourceGeneration());
+                        source.acknowledgeSessionTermination(
+                            new ConnectionSessionKey(
+                                new SourceConnectionKey(ts.getKey().getNodeId(), CONN_ID),
+                                0,
+                                ts.getKey().getSourceGeneration()
+                            )
+                        ).toCompletableFuture().get();
                     } else {
                         sawReal = true;
                     }

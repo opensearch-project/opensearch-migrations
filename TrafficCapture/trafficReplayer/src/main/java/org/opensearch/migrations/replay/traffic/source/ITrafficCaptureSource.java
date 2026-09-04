@@ -9,6 +9,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TrafficStreamRecordId;
@@ -55,21 +56,13 @@ public interface ITrafficCaptureSource extends AutoCloseable {
      * for this connection. It does NOT mean the target-side Netty channel is closed yet.
      * Use this to clean up per-connection tracking state (e.g., {@code partitionToActiveConnections}).
      */
-    default void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {}
+    void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey);
 
     /**
-     * Called when a {@code ConnectionReplaySession}'s Netty channel has been closed and its
-     * cache entry invalidated, regardless of cause (source close, expiry, or synthetic
-     * reassignment close). Fires on the Netty event loop thread.
-     * <p>
-     * This is a target-side event: it means the TCP connection to the target cluster is gone.
-     * Use this to decrement {@code outstandingTrafficSourceReaderInterruptedCloseSessions} so the source knows it
-     * is safe to resume returning real Kafka records.
-     * <p>
-     * Note: {@code onConnectionAccumulationComplete} fires first (accumulator-level), then this fires later
-     * (after the Netty close completes). Both may fire for the same logical connection.
+     * Acknowledges that the complete target-side session lifecycle has settled: queued and
+     * active work, transaction disposition, channel close, and cache removal.
      */
-    default void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {}
+    CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey);
 
     default void close() throws Exception {}
 

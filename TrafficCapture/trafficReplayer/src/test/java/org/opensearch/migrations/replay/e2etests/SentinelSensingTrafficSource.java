@@ -4,11 +4,13 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -51,6 +53,16 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     @Override
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
         return underlyingSource.commitTrafficStream(trafficStreamKey);
+    }
+
+    @Override
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return underlyingSource.acknowledgeSessionTermination(sessionKey);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        underlyingSource.onConnectionAccumulationComplete(trafficStreamKey);
     }
 
     @Override

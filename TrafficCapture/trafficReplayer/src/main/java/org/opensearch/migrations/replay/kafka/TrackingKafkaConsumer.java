@@ -120,9 +120,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         org.slf4j.LoggerFactory.getLogger("KafkaHeartbeat");
     /** Called with revoked partition numbers so the source layer can synthesize interrupted-close
      *  events for any active connections on them. Always invoked at the OLD generation (before
-     *  any subsequent onPartitionsAssigned bumps it), which matches the session.generation that
-     *  was stamped on those channels — required for onNetworkConnectionClosed to find and clear
-     *  the pendingTrafficSourceReaderInterruptedCloses entries. */
+     *  any subsequent onPartitionsAssigned bumps it), matching the generation stamped on the
+     *  source termination obligations. */
     private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
     /** Set true by {@link #cleanupRevokedPartitions} when a rebalance callback fires inline
      *  during {@code kafkaConsumer.poll()}; cleared at the top of each poll. The post-poll

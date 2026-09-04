@@ -87,7 +87,8 @@ public class OpenSearchDefaultRetryE2ETest {
             "targetConnectionPool for OpenSearchDefaultRetryE2ETest");
         var retryFactory = new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry());
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT));
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
+            RequestSenderOrchestrator.noSourceTerminationObligations());
         var requestContext = rootContext.getTestConnectionRequestContext(0);
         var sourceRequestPackets = new ByteBufList(
             Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)));

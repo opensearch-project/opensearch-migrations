@@ -14,6 +14,8 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
@@ -286,15 +288,13 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                 if (targetConnId.equals(ts.getKey().getConnectionId())) {
                     if (ts instanceof TrafficSourceReaderInterruptedClose) {
                         sawSynthetic = true;
-                        // Simulate the channel-close callback: in production the wired
-                        // ConnectionReplaySession.onClose calls source.onNetworkConnectionClosed,
-                        // which decrements outstandingTrafficSourceReaderInterruptedCloseSessions
-                        // so subsequent polls can resume real Kafka traffic. This test doesn't
-                        // wire a real session pool, so we fire the callback explicitly.
-                        source.onNetworkConnectionClosed(
-                            targetConnId,
-                            KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
-                            ts.getKey().getSourceGeneration());
+                        source.acknowledgeSessionTermination(
+                            new ConnectionSessionKey(
+                                new SourceConnectionKey(ts.getKey().getNodeId(), targetConnId),
+                                0,
+                                ts.getKey().getSourceGeneration()
+                            )
+                        ).toCompletableFuture().get();
                     } else {
                         sawReal = true;
                     }

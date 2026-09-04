@@ -22,7 +22,6 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
-import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
@@ -229,21 +228,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         permitPoolRef.set(permitPool);
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
+            trafficSource::acknowledgeSessionTermination
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
         this.currentReplayEngine.set(replayEngine);
-        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain.
-        // The sessionNumber MUST match what KafkaTrafficCaptureSource registers in
-        // pendingTrafficSourceReaderInterruptedCloses; full GenerationalSessionKey wiring is Phase A4
-        // and will replace the constant at both call sites simultaneously.
-        clientConnectionPool.setGlobalOnSessionClose(session ->
-            trafficSource.onNetworkConnectionClosed(
-                session.getChannelKeyContext().getConnectionId(),
-                KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
-                session.generation
-            )
-        );
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,

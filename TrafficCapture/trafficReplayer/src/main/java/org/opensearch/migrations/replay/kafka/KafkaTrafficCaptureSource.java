@@ -17,22 +17,24 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -121,24 +123,33 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     /** Batches of synthetic close events to drain before returning real Kafka records.
      *  Each entry is one batch from a single partition-revocation event. */
     private final Queue<List<TrafficSourceReaderInterruptedClose>> trafficSourceReaderInterruptedCloseQueue = new ConcurrentLinkedQueue<>();
-    /**
-     * Registered synthetic closes keyed by (connectionId, sessionNumber, generation).
-     * The first onNetworkConnectionClosed call for a given key decrements the counter.
-     */
-    final ConcurrentHashMap<String, Boolean> pendingTrafficSourceReaderInterruptedCloses = new ConcurrentHashMap<>();
-    /**
-     * Placeholder sessionNumber used at synthetic-close registration AND at the matching close-callback
-     * lookup. Both sites must use this exact value or the close-callback's
-     * pendingTrafficSourceReaderInterruptedCloses.remove will miss, leak the outstanding counter, and
-     * permanently block the empty-batch drain in readNextTrafficStreamSynchronously. Replace at both
-     * sites together when wiring the real Accumulation.startingSourceRequestIndex through to
-     * GenerationalSessionKey (Phase A4 in the architecture doc's Planned Work section).
-     */
-    public static final int PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER = 0;
-    /** Consistent counter of registered-but-not-yet-closed synthetic closes. Uses AtomicInteger
-     *  for volatile visibility — decrementAndGet() on the Netty thread is immediately visible
-     *  to get() on kafkaExecutor, preventing a premature isEmpty() race. */
-    final AtomicInteger outstandingTrafficSourceReaderInterruptedCloseSessions = new AtomicInteger(0);
+    static final class SessionTerminationObligation {
+        private final int partition;
+        private final CompletableFuture<Void> completion = new CompletableFuture<>();
+
+        SessionTerminationObligation(int partition) {
+            this.partition = partition;
+        }
+
+        int partition() {
+            return partition;
+        }
+
+        CompletionStage<Void> completion() {
+            return completion.minimalCompletionStage();
+        }
+
+        boolean acknowledge() {
+            return completion.complete(null);
+        }
+
+        void fail(Throwable cause) {
+            completion.completeExceptionally(cause);
+        }
+    }
+
+    final ConcurrentHashMap<SourceConnectionPartitionGenerationKey, SessionTerminationObligation>
+        pendingSessionTerminationObligations = new ConcurrentHashMap<>();
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -189,10 +200,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
-                var sessionKey = connKey.connectionId + ":" + PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER
-                    + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
-                if (pendingTrafficSourceReaderInterruptedCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
-                    outstandingTrafficSourceReaderInterruptedCloseSessions.incrementAndGet();
+                var obligationKey = new SourceConnectionPartitionGenerationKey(
+                    new SourceConnectionKey(connKey.nodeId, connKey.connectionId),
+                    partition,
+                    trackingKafkaConsumer.getConsumerConnectionGeneration()
+                );
+                if (pendingSessionTerminationObligations.putIfAbsent(
+                    obligationKey,
+                    new SessionTerminationObligation(partition)
+                ) == null) {
                     batch.add(new TrafficSourceReaderInterruptedClose(key));
                 }
             }
@@ -203,14 +219,40 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {
-        var sessionKey = connectionId + ":" + sessionNumber + ":" + generation;
-        if (pendingTrafficSourceReaderInterruptedCloses.remove(sessionKey) != null) {
-            outstandingTrafficSourceReaderInterruptedCloseSessions.decrementAndGet();
-            log.atDebug().setMessage("Synthetic close confirmed for {}:{} gen={}, outstanding={}").
-                addArgument(connectionId).addArgument(sessionNumber).addArgument(generation)
-                .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        var acknowledgement = new CompletableFuture<Void>();
+        try {
+            kafkaExecutor.execute(() -> {
+                var matchingObligations = pendingSessionTerminationObligations.keySet()
+                    .stream()
+                    .filter(key -> key.connection().equals(sessionKey.connection()))
+                    .filter(key -> key.sourceGeneration() == sessionKey.sourceGeneration())
+                    .toList();
+                for (var obligationKey : matchingObligations) {
+                    var obligation = pendingSessionTerminationObligations.remove(obligationKey);
+                    if (obligation == null) {
+                        continue;
+                    }
+                    obligation.acknowledge();
+                    log.atDebug()
+                        .setMessage("Settled source termination obligation for {} on partition {}; outstanding={}")
+                        .addArgument(sessionKey)
+                        .addArgument(obligation::partition)
+                        .addArgument(pendingSessionTerminationObligations::size)
+                        .log();
+                }
+                if (matchingObligations.isEmpty()) {
+                    log.atTrace()
+                        .setMessage("No source termination obligation was registered for {}")
+                        .addArgument(sessionKey)
+                        .log();
+                }
+                acknowledgement.complete(null);
+            });
+        } catch (Throwable t) {
+            acknowledgement.completeExceptionally(t);
         }
+        return acknowledgement.minimalCompletionStage();
     }
 
     private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
@@ -354,10 +396,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 .addArgument(closeBatch::size).log();
             return Collections.unmodifiableList(closeBatch);
         }
-        // Block real data until all synthetic closes have been confirmed closed
-        if (outstandingTrafficSourceReaderInterruptedCloseSessions.get() > 0) {
-            log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
-                .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
+        // Block real data until all synthetic closes have completed their full session lifecycle.
+        if (!pendingSessionTerminationObligations.isEmpty()) {
+            log.atDebug().setMessage("Returning empty batch: {} source termination obligations still outstanding")
+                .addArgument(pendingSessionTerminationObligations::size).log();
             // We should be draining very fast and if we block, we risk falling out of the Kafka group,
             // which could then have knock-on effects throughout the fleet since we're recovering from
             // the last recovery/partition reassignment.
@@ -503,6 +545,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     acknowledgement.completeExceptionally(cause)
                 );
                 pendingCommitAcknowledgements.clear();
+                pendingSessionTerminationObligations.forEach((key, obligation) -> obligation.fail(cause));
+                pendingSessionTerminationObligations.clear();
                 kafkaExecutor.shutdownNow();
             }
         }
