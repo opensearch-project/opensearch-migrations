@@ -5,6 +5,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,7 @@ class RecordDispositionLedgerTest {
         ).toCompletableFuture().join();
         Assertions.assertEquals(1, handle.contextCloses.get());
         Assertions.assertEquals(0, handle.commits.get());
+        Assertions.assertEquals(1, handle.releasesWithoutCommit.get());
     }
 
     @Test
@@ -131,6 +133,77 @@ class RecordDispositionLedgerTest {
         Assertions.assertEquals(1, handle.commits.get());
     }
 
+    @Test
+    void revokedRunwayDowngradesAnUnacceptedCommitToRetain() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var handle = new TestRecordHandle(record(14));
+        ledger.onAssigned(java.util.List.of(handle.sourcePartition()));
+        ledger.register(handle, "transaction").toCompletableFuture().join();
+
+        ledger.onRevoked(java.util.List.of(handle.sourcePartition()));
+        var result = ledger.dispose(
+            handle.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        ).toCompletableFuture().join();
+
+        Assertions.assertInstanceOf(RecordDisposition.Retain.class, result.disposition());
+        Assertions.assertEquals("source-runway-lost-before-replay-succeeded", result.disposition().reasonCode());
+        Assertions.assertEquals(1, handle.contextCloses.get());
+        Assertions.assertEquals(0, handle.commits.get());
+        Assertions.assertEquals(1, handle.releasesWithoutCommit.get());
+    }
+
+    @Test
+    void revocationDoesNotRewriteACommitThatTheLedgerAlreadyAccepted() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var commitAcknowledgement = new CompletableFuture<Void>();
+        var handle = new TestRecordHandle(record(15), commitAcknowledgement);
+        ledger.onAssigned(java.util.List.of(handle.sourcePartition()));
+        ledger.register(handle, "transaction").toCompletableFuture().join();
+
+        var disposition = ledger.dispose(
+            handle.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        );
+        Assertions.assertEquals(1, handle.commits.get());
+
+        ledger.onRevoked(java.util.List.of(handle.sourcePartition()));
+        commitAcknowledgement.complete(null);
+
+        Assertions.assertInstanceOf(
+            RecordDisposition.Commit.class,
+            disposition.toCompletableFuture().join().disposition()
+        );
+        Assertions.assertEquals(0, handle.releasesWithoutCommit.get());
+    }
+
+    @Test
+    void acceptedCommitRetainsWhenTheSourceReportsGenerationLossBeforeAcknowledgement() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var commitAcknowledgement = new CompletableFuture<Void>();
+        var handle = new TestRecordHandle(record(16), commitAcknowledgement);
+        ledger.onAssigned(java.util.List.of(handle.sourcePartition()));
+        ledger.register(handle, "transaction").toCompletableFuture().join();
+
+        var disposition = ledger.dispose(
+            handle.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        );
+        ledger.onRevoked(java.util.List.of(handle.sourcePartition()));
+        commitAcknowledgement.completeExceptionally(new SourceRunwayLostException(handle.sourcePartition()));
+
+        var result = disposition.toCompletableFuture().join();
+        Assertions.assertInstanceOf(RecordDisposition.Retain.class, result.disposition());
+        Assertions.assertEquals("source-runway-lost-after-replay-succeeded", result.disposition().reasonCode());
+        Assertions.assertEquals(1, handle.releasesWithoutCommit.get());
+        Assertions.assertFalse(
+            ledger.unresolvedObligations().toCompletableFuture().join().containsKey(handle.id())
+        );
+    }
+
     private static KafkaRecordId record(long offset) {
         return new KafkaRecordId("topic", 0, offset, 1);
     }
@@ -140,6 +213,7 @@ class RecordDispositionLedgerTest {
         private final CompletableFuture<Void> commitAcknowledgement;
         private final AtomicInteger contextCloses = new AtomicInteger();
         private final AtomicInteger commits = new AtomicInteger();
+        private final AtomicInteger releasesWithoutCommit = new AtomicInteger();
 
         private TestRecordHandle(KafkaRecordId id) {
             this(id, CompletableFuture.completedFuture(null));
@@ -156,8 +230,18 @@ class RecordDispositionLedgerTest {
         }
 
         @Override
+        public SourcePartitionKey sourcePartition() {
+            return new SourcePartitionKey(id.topic(), id.partition(), id.sourceGeneration());
+        }
+
+        @Override
         public void closeContext() {
             contextCloses.incrementAndGet();
+        }
+
+        @Override
+        public void releaseWithoutCommit() {
+            releasesWithoutCommit.incrementAndGet();
         }
 
         @Override

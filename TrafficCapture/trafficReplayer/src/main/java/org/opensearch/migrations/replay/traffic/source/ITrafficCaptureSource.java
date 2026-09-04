@@ -42,6 +42,8 @@ public interface ITrafficCaptureSource extends AutoCloseable {
         }
     }
 
+    default void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {}
+
     default RecordId recordIdFor(ITrafficStreamKey trafficStreamKey) {
         return new TrafficStreamRecordId(
             new SourceConnectionKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId()),

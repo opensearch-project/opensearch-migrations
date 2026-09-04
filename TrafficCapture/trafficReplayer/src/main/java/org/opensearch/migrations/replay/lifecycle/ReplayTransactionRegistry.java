@@ -9,7 +9,9 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessi
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public final class ReplayTransactionRegistry {
     private final ConnectionSessionKey sessionKey;
     private final ActorMailbox mailbox;
@@ -58,6 +60,11 @@ public final class ReplayTransactionRegistry {
     public CompletionStage<Void> beginTermination() {
         mailbox.execute(() -> {
             terminating = true;
+            log.atDebug()
+                .setMessage("Beginning transaction-registry termination for {}; active={}")
+                .addArgument(sessionKey)
+                .addArgument(active::size)
+                .log();
             tryCompleteTermination();
         });
         return termination.stage();
@@ -78,6 +85,12 @@ public final class ReplayTransactionRegistry {
         if (active.remove(requestId) == null) {
             return;
         }
+        log.atDebug()
+            .setMessage("Transaction settled during session lifecycle for {}; failure={}; remaining={}")
+            .addArgument(requestId)
+            .addArgument(failure)
+            .addArgument(active::size)
+            .log();
         if (failure != null && firstFailure == null) {
             firstFailure = unwrap(failure);
         }

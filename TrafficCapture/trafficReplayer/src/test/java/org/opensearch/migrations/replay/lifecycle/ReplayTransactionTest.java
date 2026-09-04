@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
@@ -18,30 +17,19 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartition
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
-import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ReplayTransactionTest {
     @Test
-    void progressTokenSettlesOnlyAfterTheWholeTransaction() {
-        var flowController = new RecordingFlowController();
-        var readGate = new ReplayReadGate(Duration.ofSeconds(30), flowController);
-        var progress = new ReplayProgressController(Runnable::run, readGate);
-        var partition = new SourcePartitionKey("topic", 0, 1);
-        progress.onAssigned(List.of(partition));
-        var progressToken = progress.admit(
-            partition,
-            request(),
-            Instant.ofEpochSecond(10)
-        ).toCompletableFuture().join();
-
+    void ownedResourcesSettleOnlyAfterTheWholeTransaction() {
         var mailbox = new QueuedMailbox();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(0));
         record.commitCompletion = new CompletableFuture<>();
         var evidence = new CompletableFuture<EvidenceOutcome>();
+        var resource = new TestResource();
         register(ledger, record, request().toString());
         var transaction = new ReplayTransaction<String>(
             request(),
@@ -50,32 +38,27 @@ class ReplayTransactionTest {
             new ReplayDispositionPolicy(),
             ledger,
             List.of(record.id()),
-            List.of(progressToken)
+            List.of(resource)
         );
 
         transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
         mailbox.runUntilIdle();
-        progress.advanceIdlePartitions(Instant.ofEpochSecond(100));
-        Assertions.assertTrue(progress.isWorkOutstanding());
-        Assertions.assertEquals(Instant.ofEpochSecond(40), readGate.frontier());
+        Assertions.assertEquals(0, resource.closes);
 
         transaction.settleSource(new SourceOutcome.Complete());
         mailbox.runUntilIdle();
-        Assertions.assertTrue(progress.isWorkOutstanding());
+        Assertions.assertEquals(0, resource.closes);
 
         evidence.complete(new EvidenceOutcome.Durable("receipt"));
         mailbox.runUntilIdle();
-        Assertions.assertTrue(progress.isWorkOutstanding());
+        Assertions.assertEquals(0, resource.closes);
         Assertions.assertFalse(transaction.completion().toCompletableFuture().isDone());
 
         record.commitCompletion.complete(null);
         mailbox.runUntilIdle();
 
         transaction.completion().toCompletableFuture().join();
-        Assertions.assertFalse(progress.isWorkOutstanding());
-        progressToken.settled().toCompletableFuture().join();
-        progress.advanceIdlePartitions(Instant.ofEpochSecond(100));
-        Assertions.assertEquals(Instant.ofEpochSecond(130), readGate.frontier());
+        Assertions.assertEquals(1, resource.closes);
     }
 
     @Test
@@ -238,6 +221,31 @@ class ReplayTransactionTest {
     }
 
     @Test
+    void revokedRunwayRetainsAnOtherwiseSuccessfulTransaction() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(8));
+        var evidence = new CompletableFuture<EvidenceOutcome>();
+        ledger.onAssigned(List.of(record.sourcePartition()));
+        register(ledger, record, request().toString());
+        var transaction = transaction(mailbox, ledger, evidence, record.id(), new TestResource());
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runUntilIdle();
+
+        ledger.onRevoked(List.of(record.sourcePartition()));
+        evidence.complete(new EvidenceOutcome.Durable("receipt"));
+        mailbox.runUntilIdle();
+
+        var outcome = transaction.completion().toCompletableFuture().join();
+        Assertions.assertInstanceOf(RecordDisposition.Retain.class, outcome.disposition());
+        Assertions.assertEquals(0, record.commits.get());
+        Assertions.assertEquals(1, record.contextCloses.get());
+        Assertions.assertFalse(outcome.haltReplay());
+    }
+
+    @Test
     void explicitFailureRejectsLateOutcomesAndReleasesResourcesOnce() {
         var mailbox = new QueuedMailbox();
         var ledger = new RecordDispositionLedger(Runnable::run);
@@ -317,20 +325,6 @@ class ReplayTransactionTest {
         }
     }
 
-    private static final class RecordingFlowController implements BufferedFlowController {
-        private final List<Instant> frontiers = new ArrayList<>();
-
-        @Override
-        public void stopReadsPast(Instant pointInTime) {
-            frontiers.add(pointInTime);
-        }
-
-        @Override
-        public Duration getBufferTimeWindow() {
-            return Duration.ZERO;
-        }
-    }
-
     private static final class TestRecordHandle implements RecordDispositionLedger.RecordHandle {
         private final KafkaRecordId id;
         private final AtomicInteger contextCloses = new AtomicInteger();
@@ -347,8 +341,18 @@ class ReplayTransactionTest {
         }
 
         @Override
+        public SourcePartitionKey sourcePartition() {
+            return new SourcePartitionKey(id.topic(), id.partition(), id.sourceGeneration());
+        }
+
+        @Override
         public void closeContext() {
             contextCloses.incrementAndGet();
+        }
+
+        @Override
+        public void releaseWithoutCommit() {
+            // Test handles have no source-owned parent context.
         }
 
         @Override

@@ -12,6 +12,7 @@ import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.http.FullHttpResponse;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -165,6 +166,28 @@ public class HttpByteBufFormatterTest {
                 cappedMsg.content().toString(StandardCharsets.UTF_8));
             cappedMsg.release();
             fullMsg.release();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 100, 102, 103 })
+    void parsesFinalResponseAfterInterimResponse(int interimStatus) {
+        var responseBytes = ("HTTP/1.1 " + interimStatus + " Interim\r\n\r\n"
+            + "HTTP/1.1 200 OK\r\n"
+            + "Content-Length: 16\r\n"
+            + "Content-Type: application/json\r\n"
+            + "\r\n"
+            + "{\"errors\":false}").getBytes(StandardCharsets.US_ASCII);
+
+        FullHttpResponse response = HttpByteBufFormatter.parseHttpResponseFromBufs(
+            Stream.of(Unpooled.wrappedBuffer(responseBytes)),
+            responseBytes.length
+        );
+        try {
+            Assertions.assertEquals(200, response.status().code());
+            Assertions.assertEquals("{\"errors\":false}", response.content().toString(StandardCharsets.US_ASCII));
+        } finally {
+            response.release();
         }
     }
 

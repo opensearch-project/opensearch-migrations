@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 class OffsetLifecycleTracker {
     private final PriorityQueue<Long> pQueue = new PriorityQueue<>();
     private final Map<Long, OffsetMetadata> offsetMetadataMap = new HashMap<>();
-    private long cursorHighWatermark;
+    private long cursorHighWatermark = -1;
     final int consumerConnectionGeneration;
     private final Clock clock;
 
@@ -117,6 +117,12 @@ class OffsetLifecycleTracker {
     long getHighWatermark() {
         synchronized (pQueue) {
             return cursorHighWatermark;
+        }
+    }
+
+    boolean hasAlreadyObserved(long offset) {
+        synchronized (pQueue) {
+            return cursorHighWatermark >= offset;
         }
     }
 

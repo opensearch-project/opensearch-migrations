@@ -20,4 +20,19 @@ public interface SourcePartitionLifecycleListener {
     void onAssigned(Collection<SourcePartitionKey> partitions);
 
     void onRevoked(Collection<SourcePartitionKey> partitions);
+
+    static SourcePartitionLifecycleListener combine(SourcePartitionLifecycleListener... listeners) {
+        var immutableListeners = java.util.List.of(listeners);
+        return new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(Collection<SourcePartitionKey> partitions) {
+                immutableListeners.forEach(listener -> listener.onAssigned(partitions));
+            }
+
+            @Override
+            public void onRevoked(Collection<SourcePartitionKey> partitions) {
+                immutableListeners.forEach(listener -> listener.onRevoked(partitions));
+            }
+        };
+    }
 }
