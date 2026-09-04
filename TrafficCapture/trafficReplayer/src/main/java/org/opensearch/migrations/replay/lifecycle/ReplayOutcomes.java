@@ -7,6 +7,53 @@ import lombok.NonNull;
 public final class ReplayOutcomes {
     private ReplayOutcomes() {}
 
+    public sealed interface PreparationOutcome<T>
+        permits PreparationOutcome.Prepared,
+            PreparationOutcome.Filtered,
+            PreparationOutcome.Failed,
+            PreparationOutcome.Cancelled {
+
+        <R> R visit(Visitor<T, R> visitor);
+
+        interface Visitor<T, R> {
+            R onPrepared(Prepared<T> outcome);
+
+            R onFiltered(Filtered<T> outcome);
+
+            R onFailed(Failed<T> outcome);
+
+            R onCancelled(Cancelled<T> outcome);
+        }
+
+        record Prepared<T>(@NonNull T value) implements PreparationOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onPrepared(this);
+            }
+        }
+
+        record Filtered<T>(@NonNull String reason) implements PreparationOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onFiltered(this);
+            }
+        }
+
+        record Failed<T>(@NonNull Throwable cause) implements PreparationOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onFailed(this);
+            }
+        }
+
+        record Cancelled<T>(@NonNull CancellationException cause) implements PreparationOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onCancelled(this);
+            }
+        }
+    }
+
     public sealed interface TargetOutcome<T>
         permits TargetOutcome.Succeeded, TargetOutcome.Failed, TargetOutcome.Cancelled, TargetOutcome.Filtered {
 
@@ -141,5 +188,15 @@ public final class ReplayOutcomes {
                 return visitor.onNotRequired(this);
             }
         }
+    }
+
+    public sealed interface SessionOutcome
+        permits SessionOutcome.Closed, SessionOutcome.Aborted, SessionOutcome.Failed {
+
+        record Closed() implements SessionOutcome {}
+
+        record Aborted(@NonNull CancellationException cause) implements SessionOutcome {}
+
+        record Failed(@NonNull Throwable cause) implements SessionOutcome {}
     }
 }
