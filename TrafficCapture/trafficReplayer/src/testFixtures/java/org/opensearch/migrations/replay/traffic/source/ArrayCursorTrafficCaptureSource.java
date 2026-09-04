@@ -38,7 +38,7 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         var idx = readCursor.getAndIncrement();
@@ -52,7 +52,9 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
             pQueue.add(key);
             cursorHighWatermark = idx;
         }
-        return CompletableFuture.supplyAsync(() -> List.of(new PojoTrafficStreamAndKey(stream, key)));
+        return CompletableFuture.supplyAsync(() -> List.of(
+            (SourceInput) new PojoTrafficStreamAndKey(stream, key)
+        ));
     }
 
     @Override

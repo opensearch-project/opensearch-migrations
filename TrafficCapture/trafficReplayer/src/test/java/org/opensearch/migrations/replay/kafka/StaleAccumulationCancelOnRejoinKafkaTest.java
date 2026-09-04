@@ -253,8 +253,11 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
     ) throws Exception {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 if (!(ts instanceof TrafficSourceReaderInterruptedClose)
                     && targetConnId.equals(ts.getKey().getConnectionId())) {
                     return ts;
@@ -281,8 +284,11 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
         boolean sawReal = false;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 observed.add(ts);
                 if (targetConnId.equals(ts.getKey().getConnectionId())) {
                     if (ts instanceof TrafficSourceReaderInterruptedClose) {

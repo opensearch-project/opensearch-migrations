@@ -55,7 +55,11 @@ public final class ReplayOutcomes {
     }
 
     public sealed interface TargetOutcome<T>
-        permits TargetOutcome.Succeeded, TargetOutcome.Failed, TargetOutcome.Cancelled, TargetOutcome.Filtered {
+        permits TargetOutcome.Succeeded,
+            TargetOutcome.Failed,
+            TargetOutcome.Cancelled,
+            TargetOutcome.Filtered,
+            TargetOutcome.ClassifiedSkip {
 
         <R> R visit(Visitor<T, R> visitor);
 
@@ -67,6 +71,8 @@ public final class ReplayOutcomes {
             R onCancelled(Cancelled<T> outcome);
 
             R onFiltered(Filtered<T> outcome);
+
+            R onClassifiedSkip(ClassifiedSkip<T> outcome);
         }
 
         record Succeeded<T>(T value) implements TargetOutcome<T> {
@@ -94,6 +100,13 @@ public final class ReplayOutcomes {
             @Override
             public <R> R visit(Visitor<T, R> visitor) {
                 return visitor.onFiltered(this);
+            }
+        }
+
+        record ClassifiedSkip<T>(T value, @NonNull String reason) implements TargetOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onClassifiedSkip(this);
             }
         }
     }

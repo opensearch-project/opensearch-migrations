@@ -13,6 +13,7 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
@@ -182,7 +183,10 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         Assertions.assertEquals(from, keysReceived.size());
         for (int i = 0; i < count;) {
             var trafficStreams = trafficSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : trafficStreams) {
+            for (var sourceInput : trafficStreams) {
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 if (ts instanceof TrafficSourceReaderInterruptedClose) {
                     var key = ts.getKey();
                     log.atInfo().setMessage("Draining synthetic close for {}").addArgument(key).log();

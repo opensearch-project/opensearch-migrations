@@ -29,7 +29,8 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+    readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         if (stopReadingRef.get()) {
@@ -37,7 +38,10 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
         }
         return underlyingSource.readNextTrafficStreamChunk(contextSupplier).thenApply(v -> {
             if (v != null) {
-                return v.stream().takeWhile(ts -> {
+                return v.stream().takeWhile(input -> {
+                    if (!(input instanceof ITrafficStreamWithKey ts)) {
+                        return true;
+                    }
                     var isSentinel = ts.getStream().getConnectionId().equals(SENTINEL_CONNECTION_ID);
                     if (isSentinel) {
                         stopReadingRef.set(true);

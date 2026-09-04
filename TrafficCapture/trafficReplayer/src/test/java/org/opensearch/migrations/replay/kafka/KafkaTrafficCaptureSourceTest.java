@@ -96,6 +96,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                     protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                         .get()
                         .stream()
+                        .map(ITrafficStreamWithKey.class::cast)
                         .forEach(streamWithKey -> {
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
@@ -125,10 +126,10 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
                 addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
             });
-            var key = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                 .get(5, TimeUnit.SECONDS)
-                .get(0)
-                .getKey();
+                .get(0);
+            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
             Assertions.assertEquals(
                 new KafkaRecordId(TEST_TOPIC_NAME, 0, 0, 1),
                 source.recordIdFor(key)
@@ -199,6 +200,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                     protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                         .get()
                         .stream()
+                        .map(ITrafficStreamWithKey.class::cast)
                         .forEach(streamWithKey -> {
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());

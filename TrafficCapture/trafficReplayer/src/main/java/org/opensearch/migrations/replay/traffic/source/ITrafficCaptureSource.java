@@ -27,7 +27,7 @@ public interface ITrafficCaptureSource extends AutoCloseable {
         IGNORED
     }
 
-    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     );
 
@@ -63,6 +63,19 @@ public interface ITrafficCaptureSource extends AutoCloseable {
     }
 
     default void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {}
+
+    default void updateScanBlocker(
+        ITrafficStreamKey trafficStreamKey,
+        FollowUpRequirement followUpRequirement
+    ) {}
+
+    default boolean usesStructuralExpiration() {
+        return false;
+    }
+
+    default boolean hasPendingSourceControl() {
+        return false;
+    }
 
     /**
      * Called by the accumulator when a connection's lifecycle is complete — either because a

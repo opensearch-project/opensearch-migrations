@@ -28,6 +28,11 @@ class ReplayOutcomesTest {
             public String onFiltered(ReplayOutcomes.TargetOutcome.Filtered<String> outcome) {
                 return "filtered:" + outcome.reason();
             }
+
+            @Override
+            public String onClassifiedSkip(ReplayOutcomes.TargetOutcome.ClassifiedSkip<String> outcome) {
+                return "classified:" + outcome.reason();
+            }
         };
 
         Assertions.assertEquals("success:value", new ReplayOutcomes.TargetOutcome.Succeeded<>("value").visit(visitor));
@@ -42,6 +47,10 @@ class ReplayOutcomesTest {
         Assertions.assertEquals(
             "filtered:policy",
             new ReplayOutcomes.TargetOutcome.Filtered<String>("policy").visit(visitor)
+        );
+        Assertions.assertEquals(
+            "classified:allowlisted",
+            new ReplayOutcomes.TargetOutcome.ClassifiedSkip<String>("response", "allowlisted").visit(visitor)
         );
     }
 

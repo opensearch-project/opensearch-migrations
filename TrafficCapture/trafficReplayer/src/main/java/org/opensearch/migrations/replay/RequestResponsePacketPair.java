@@ -23,6 +23,7 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
 
     public enum ReconstructionStatus {
         COMPLETE,
+        CONFIRMED_DEAD,
         EXPIRED_PREMATURELY,
         CLOSED_PREMATURELY,
         /** Connection closed due to Kafka partition reassignment — not a source-side close. */
@@ -37,6 +38,7 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
+    String structuralProofId;
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
     private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;

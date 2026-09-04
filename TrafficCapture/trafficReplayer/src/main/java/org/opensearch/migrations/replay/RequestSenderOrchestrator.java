@@ -667,6 +667,13 @@ public class RequestSenderOrchestrator {
             public CompletionStage<T> onFiltered(TargetOutcome.Filtered<Object> filtered) {
                 return CompletableFuture.completedFuture(filteredResult.get());
             }
+
+            @Override
+            public CompletionStage<T> onClassifiedSkip(TargetOutcome.ClassifiedSkip<Object> classifiedSkip) {
+                @SuppressWarnings("unchecked")
+                var value = (T) classifiedSkip.value();
+                return CompletableFuture.completedFuture(value);
+            }
         }));
         return new TextTrackedFuture<>(
             result.toCompletableFuture(),

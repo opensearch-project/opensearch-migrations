@@ -64,7 +64,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
      * EOFException if the input has been exhausted.
      */
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         return CompletableFuture.supplyAsync(() -> {
@@ -81,7 +81,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
             }
             trafficStreamsRead.incrementAndGet();
             log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.get(), ts);
-            return List.<ITrafficStreamWithKey>of(
+            return List.<SourceInput>of(
                 new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts, tsk -> {
                     var channelCtx = channelContextManager.retainOrCreateContext(tsk);
                     return channelContextManager.getGlobalContext()
@@ -89,7 +89,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
                 }))
             );
         }).exceptionally(e -> {
-            var ecf = new CompletableFuture<List<ITrafficStreamWithKey>>();
+            var ecf = new CompletableFuture<List<SourceInput>>();
             ecf.completeExceptionally(e.getCause());
             return ecf.join();
         });

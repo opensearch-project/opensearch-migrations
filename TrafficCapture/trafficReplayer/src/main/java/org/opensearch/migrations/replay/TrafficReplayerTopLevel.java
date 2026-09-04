@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
@@ -122,6 +123,30 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         IStreamableWorkTracker<Void> workTracker,
         BulkItemErrorClassifier errorClassifier
     ) {
+        this(
+            context,
+            serverUri,
+            authTransformerFactory,
+            jsonTransformerSupplier,
+            clientConnectionPool,
+            maxConcurrentRequests,
+            workTracker,
+            errorClassifier,
+            ExceptionTypeAllowlist.empty()
+        );
+    }
+
+    public TrafficReplayerTopLevel(
+        IRootReplayerContext context,
+        URI serverUri,
+        IAuthTransformerFactory authTransformerFactory,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
+        ClientConnectionPool clientConnectionPool,
+        int maxConcurrentRequests,
+        IStreamableWorkTracker<Void> workTracker,
+        BulkItemErrorClassifier errorClassifier,
+        ExceptionTypeAllowlist poisonAllowlist
+    ) {
         super(
             context,
             serverUri,
@@ -129,7 +154,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             jsonTransformerSupplier,
             maxConcurrentRequests,
             workTracker,
-            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier))
+            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier)),
+            new TargetResponseClassifier(errorClassifier, poisonAllowlist)
         );
         this.clientConnectionPool = clientConnectionPool;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
@@ -248,7 +274,9 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                 new TrafficReplayerAccumulationCallbacks(replayEngine, tupleWriter, resultTupleConsumer,
-                    tupleObserver, trafficSource, quiescentDuration, permitPool)
+                    tupleObserver, trafficSource, quiescentDuration, permitPool),
+                trafficSource.usesStructuralExpiration(),
+                trafficSource::updateScanBlocker
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
         try {

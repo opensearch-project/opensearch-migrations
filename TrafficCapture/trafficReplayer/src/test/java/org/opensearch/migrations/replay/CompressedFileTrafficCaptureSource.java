@@ -52,14 +52,19 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+    readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
     ) {
         if (numberOfTrafficStreamsToRead.get() <= 0) {
             return CompletableFuture.failedFuture(new EOFException());
         }
         return trafficSource.readNextTrafficStreamChunk(readChunkContextSupplier).thenApply(ltswk -> {
-            var transformedTrafficStream = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());
+            var transformedTrafficStream = ltswk.stream()
+                .map(input -> input instanceof ITrafficStreamWithKey traffic
+                    ? modifyTrafficStream(traffic)
+                    : input)
+                .collect(Collectors.toList());
             var oldValue = numberOfTrafficStreamsToRead.get();
             var newValue = oldValue - transformedTrafficStream.size();
             var exchangeResult = numberOfTrafficStreamsToRead.compareAndExchange(oldValue, newValue);

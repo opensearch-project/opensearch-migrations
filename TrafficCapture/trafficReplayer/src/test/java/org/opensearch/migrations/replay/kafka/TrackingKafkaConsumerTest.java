@@ -14,6 +14,7 @@ import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListen
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
@@ -213,5 +214,46 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             assigned
         );
         Assertions.assertEquals(assigned, revoked);
+    }
+
+    @Test
+    void scanAheadRestoresEveryReplayPosition() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mc.seek(partition, 2);
+        mc.updateEndOffsets(Map.of(partition, 4L));
+        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 2, "key-2", new byte[] { 2 }));
+        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 3, "key-3", new byte[] { 3 }));
+
+        var cycle = consumer.scanAhead(10, Duration.ofSeconds(1));
+
+        Assertions.assertTrue(cycle.stableGeneration());
+        Assertions.assertFalse(cycle.exhaustedBudget());
+        Assertions.assertEquals(List.of(2L, 3L), cycle.records().stream()
+            .map(ConsumerRecord::offset)
+            .toList());
+        Assertions.assertEquals(2, mc.position(partition));
+    }
+
+    @Test
+    void scanAheadDiscardsResultsWhenOwnershipChangesDuringPoll() {
+        var mc = buildMockConsumer();
+        var consumer = buildConsumer(mc);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mc.seek(partition, 0);
+        mc.updateEndOffsets(Map.of(partition, 1L));
+        mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "key", new byte[] { 1 }));
+        mc.schedulePollTask(() -> {
+            consumer.onPartitionsRevoked(List.of(partition));
+            mc.assign(List.of());
+        });
+
+        var cycle = consumer.scanAhead(10, Duration.ofSeconds(1));
+
+        Assertions.assertFalse(cycle.stableGeneration());
+        Assertions.assertTrue(cycle.records().isEmpty());
     }
 }

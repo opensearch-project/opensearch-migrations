@@ -62,7 +62,8 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
         var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
         var readGate = new ReplayReadGate(Duration.ofMinutes(5), blockingSource);
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
-        var itemQueue = new LinkedBlockingQueue<List<ITrafficStreamWithKey>>();
+        var itemQueue = new LinkedBlockingQueue<
+            List<org.opensearch.migrations.replay.traffic.source.SourceInput>>();
         readGate.advanceTo(Instant.EPOCH.plus(Duration.ofMillis(1)));
 
         new Thread(() -> {
@@ -75,7 +76,7 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
                     log.info("PUTMSG\n\n");
                     var chunks = itemQueue.take();
                     Assertions.assertEquals(1, chunks.size());
-                    var ts = chunks.get(0);
+                    var ts = (ITrafficStreamWithKey) chunks.get(0);
                     Thread.sleep(DEFAULT_POLL_INTERVAL_MS * 2);
                     log.info("committing " + ts.getKey());
                     blockingSource.commitTrafficStream(ts.getKey());

@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -19,6 +20,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -43,6 +45,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.SourceInput;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -73,10 +76,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     public final IRootReplayerContext topLevelContext;
     protected final IWorkTracker<Void> requestWorkTracker;
     protected IJsonTransformer responsePostProcessor;
+    private final TargetResponseClassifier targetResponseClassifier;
 
 
     protected final AtomicBoolean stopReadingRef;
-    protected final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
+    protected final AtomicReference<CompletableFuture<List<SourceInput>>> nextChunkFutureRef;
     protected final AtomicReference<AsyncPermitPool> permitPoolRef;
     protected final AtomicReference<ReplayIntakeMailbox> intakeMailboxRef;
 
@@ -88,6 +92,31 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         int maxConcurrentRequests,
         IWorkTracker<Void> requestWorkTracker,
         IRetryVisitorFactory retryVisitorFactory
+    ) {
+        this(
+            context,
+            serverUri,
+            authTransformer,
+            jsonTransformerSupplier,
+            maxConcurrentRequests,
+            requestWorkTracker,
+            retryVisitorFactory,
+            new TargetResponseClassifier(
+                new org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier(),
+                ExceptionTypeAllowlist.empty()
+            )
+        );
+    }
+
+    protected TrafficReplayerCore(
+        IRootReplayerContext context,
+        URI serverUri,
+        IAuthTransformerFactory authTransformer,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
+        int maxConcurrentRequests,
+        IWorkTracker<Void> requestWorkTracker,
+        IRetryVisitorFactory retryVisitorFactory,
+        TargetResponseClassifier targetResponseClassifier
     ) {
         super(retryVisitorFactory);
         this.topLevelContext = context;
@@ -113,6 +142,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         stopReadingRef = new AtomicBoolean();
         permitPoolRef = new AtomicReference<>();
         intakeMailboxRef = new AtomicReference<>();
+        this.targetResponseClassifier = Objects.requireNonNull(targetResponseClassifier);
     }
 
     protected abstract CompletableFuture<Void> shutdown(Error error);
@@ -279,7 +309,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture.future.complete(rrPair);
                 registerTransactionRecords(transaction, rrPair.getTrafficStreamsHeld())
                     .thenCompose(recordIds -> transaction.settleSource(
-                        toSourceOutcome(rrPair.completionStatus),
+                        toSourceOutcome(rrPair),
                         recordIds
                     ))
                     .whenComplete((ignored, failure) -> {
@@ -351,7 +381,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             TransactionEvidenceState state,
             ReplayTransaction.TransactionOutcome outcome
         ) {
-            countFinalOutcome(state.target, state.targetFailure);
+            countFinalOutcome(state.target, state.targetFailure, outcome.targetOutcome());
             recordTargetResponseCodes(state.target);
             if (!outcome.haltReplay()) {
                 return CompletableFuture.completedFuture(null);
@@ -405,12 +435,23 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             if (summary != null && summary.getTransformationStatus().isError()) {
                 return new TargetOutcome.Failed<>(summary.getTransformationStatus().getException());
             }
-            return new TargetOutcome.Succeeded<>(summary);
+            if (summary == null) {
+                return new TargetOutcome.Failed<>(
+                    new IllegalStateException("Target exchange completed without a result")
+                );
+            }
+            return targetResponseClassifier.classify(summary);
         }
 
-        private SourceOutcome toSourceOutcome(RequestResponsePacketPair.ReconstructionStatus status) {
-            return switch (status) {
+        private SourceOutcome toSourceOutcome(RequestResponsePacketPair rrPair) {
+            return switch (rrPair.completionStatus) {
                 case COMPLETE -> new SourceOutcome.Complete();
+                case CONFIRMED_DEAD -> new SourceOutcome.ConfirmedDead(
+                    Objects.requireNonNull(
+                        rrPair.structuralProofId,
+                        "Confirmed-dead source outcomes require a structural proof identity"
+                    )
+                );
                 case EXPIRED_PREMATURELY ->
                     new SourceOutcome.Inconclusive("timestamp-only source expiry has no structural proof");
                 case CLOSED_PREMATURELY ->
@@ -474,8 +515,15 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             return httpSentRequestFuture;
         }
 
-        private void countFinalOutcome(TransformedTargetRequestAndResponseList summary, Throwable t) {
+        private void countFinalOutcome(
+            TransformedTargetRequestAndResponseList summary,
+            Throwable t,
+            TargetOutcome<?> targetOutcome
+        ) {
             if (t != null) {
+                exceptionRequestCount.incrementAndGet();
+            } else if (targetOutcome instanceof TargetOutcome.Failed<?>
+                || targetOutcome instanceof TargetOutcome.ClassifiedSkip<?>) {
                 exceptionRequestCount.incrementAndGet();
             } else if (summary == null || summary.getResponseList().isEmpty()) {
                 // no response to count
@@ -639,6 +687,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ) {
             return switch (status) {
                 case COMPLETE -> new RecordDisposition.Commit(operation);
+                case CONFIRMED_DEAD -> new RecordDisposition.Commit("source-confirmed-dead");
                 case EXPIRED_PREMATURELY ->
                     new RecordDisposition.Retain("source-expired-without-structural-proof");
                 case CLOSED_PREMATURELY ->
@@ -808,7 +857,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 this.nextChunkFutureRef.set(
                     trafficChunkStream.readNextTrafficStreamChunk(topLevelContext::createReadChunkContext)
                 );
-                List<ITrafficStreamWithKey> trafficStreams;
+                List<SourceInput> trafficStreams;
                 try {
                     trafficStreams = intakeMailbox.await(this.nextChunkFutureRef.get());
                 } catch (ExecutionException ex) {
@@ -824,6 +873,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 if (log.isDebugEnabled()) {
                     Optional.of(
                         trafficStreams.stream()
+                            .filter(ITrafficStreamWithKey.class::isInstance)
+                            .map(ITrafficStreamWithKey.class::cast)
                             .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
                             .collect(Collectors.joining(";"))
                     )

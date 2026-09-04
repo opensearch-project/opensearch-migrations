@@ -215,6 +215,29 @@ class ReplayTransactionTest {
     }
 
     @Test
+    void classifiedPoisonCommitsOnlyAfterDurableEvidence() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(7));
+        var evidence = new CompletableFuture<EvidenceOutcome>();
+        register(ledger, record, request().toString());
+        var transaction = transaction(mailbox, ledger, evidence, record.id(), new TestResource());
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        transaction.settleTarget(new TargetOutcome.ClassifiedSkip<>("response", "allowlisted"));
+        mailbox.runUntilIdle();
+        Assertions.assertFalse(transaction.completion().toCompletableFuture().isDone());
+
+        evidence.complete(new EvidenceOutcome.Durable("receipt"));
+        mailbox.runUntilIdle();
+
+        var outcome = transaction.completion().toCompletableFuture().join();
+        Assertions.assertInstanceOf(RecordDisposition.Commit.class, outcome.disposition());
+        Assertions.assertEquals("target-classified-skip", outcome.disposition().reasonCode());
+        Assertions.assertEquals(1, record.commits.get());
+    }
+
+    @Test
     void explicitFailureRejectsLateOutcomesAndReleasesResourcesOnce() {
         var mailbox = new QueuedMailbox();
         var ledger = new RecordDispositionLedger(Runnable::run);

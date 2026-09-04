@@ -48,8 +48,10 @@ public class NettyScanningHttpProxy {
         try {
             mainChannel.closeFuture().sync();
         } finally {
-            workerGroup.shutdownGracefully();
-            bossGroup.shutdownGracefully();
+            var workerShutdown = workerGroup.shutdownGracefully();
+            var bossShutdown = bossGroup.shutdownGracefully();
+            workerShutdown.sync();
+            bossShutdown.sync();
         }
     }
 

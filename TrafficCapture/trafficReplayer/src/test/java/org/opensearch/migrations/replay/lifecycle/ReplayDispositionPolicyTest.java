@@ -44,7 +44,8 @@ class ReplayDispositionPolicyTest {
             new TargetOutcome.Succeeded<>("response"),
             new TargetOutcome.Failed<>(new IllegalStateException("target")),
             new TargetOutcome.Cancelled<>(new CancellationException("cancelled")),
-            new TargetOutcome.Filtered<>("filter")
+            new TargetOutcome.Filtered<>("filter"),
+            new TargetOutcome.ClassifiedSkip<>("response", "allowlisted")
         );
         var evidence = java.util.List.<EvidenceOutcome>of(
             new EvidenceOutcome.Durable("receipt"),
@@ -61,7 +62,7 @@ class ReplayDispositionPolicyTest {
                 }
             }
         }
-        Assertions.assertEquals(72, decisions);
+        Assertions.assertEquals(90, decisions);
     }
 
     private static Stream<Arguments> decisions() {
@@ -79,6 +80,20 @@ class ReplayDispositionPolicyTest {
                 new EvidenceOutcome.Durable("receipt"),
                 RecordDisposition.Commit.class,
                 false
+            ),
+            Arguments.of(
+                new SourceOutcome.Complete(),
+                new TargetOutcome.ClassifiedSkip<>("response", "allowlisted"),
+                new EvidenceOutcome.Durable("receipt"),
+                RecordDisposition.Commit.class,
+                false
+            ),
+            Arguments.of(
+                new SourceOutcome.Complete(),
+                new TargetOutcome.ClassifiedSkip<>("response", "allowlisted"),
+                new EvidenceOutcome.NotRequired("missing"),
+                RecordDisposition.Retain.class,
+                true
             ),
             Arguments.of(
                 new SourceOutcome.Complete(),

@@ -268,8 +268,11 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
         boolean sawReal = false;
         for (int attempt = 0; attempt < 32; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (ITrafficStreamWithKey ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 observed.add(ts);
                 if (CONN_ID.equals(ts.getKey().getConnectionId())) {
                     if (ts instanceof TrafficSourceReaderInterruptedClose) {
@@ -300,8 +303,11 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
         for (int attempt = 0; attempt < 16; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             if (!batch.isEmpty()) {
-                for (ITrafficStreamWithKey ts : batch) {
-                    accumulator.accept(ts);
+                for (var sourceInput : batch) {
+                    accumulator.accept(sourceInput);
+                    if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                        continue;
+                    }
                 }
                 return;
             }

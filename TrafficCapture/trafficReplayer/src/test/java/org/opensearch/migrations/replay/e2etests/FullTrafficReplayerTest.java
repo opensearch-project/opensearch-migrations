@@ -268,7 +268,8 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     boolean isDone = false;
 
                     @Override
-                    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+                    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+                    readNextTrafficStreamChunk(
                         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
                     ) {
                         if (isDone) {

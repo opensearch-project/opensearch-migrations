@@ -155,6 +155,11 @@ public final class ReplayDispositionPolicy {
             public Decision onFiltered(TargetOutcome.Filtered<T> outcome) {
                 return commit("request-filtered");
             }
+
+            @Override
+            public Decision onClassifiedSkip(TargetOutcome.ClassifiedSkip<T> outcome) {
+                return commit("target-classified-skip");
+            }
         });
     }
 
@@ -179,6 +184,11 @@ public final class ReplayDispositionPolicy {
             public Decision onFiltered(TargetOutcome.Filtered<T> outcome) {
                 return retain("durable-evidence-missing", true);
             }
+
+            @Override
+            public Decision onClassifiedSkip(TargetOutcome.ClassifiedSkip<T> outcome) {
+                return retain("durable-evidence-missing", true);
+            }
         });
     }
 
@@ -201,6 +211,11 @@ public final class ReplayDispositionPolicy {
 
             @Override
             public Boolean onFiltered(TargetOutcome.Filtered<T> outcome) {
+                return true;
+            }
+
+            @Override
+            public Boolean onClassifiedSkip(TargetOutcome.ClassifiedSkip<T> outcome) {
                 return true;
             }
         });

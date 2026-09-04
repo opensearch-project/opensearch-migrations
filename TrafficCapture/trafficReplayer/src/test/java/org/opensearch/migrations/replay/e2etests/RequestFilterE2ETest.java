@@ -115,7 +115,8 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
                 rc -> new ISimpleTrafficCaptureSource() {
                     boolean isDone = false;
                     @Override
-                    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+                    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+                    readNextTrafficStreamChunk(
                         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
                         if (isDone) return CompletableFuture.failedFuture(new EOFException());
                         isDone = true;

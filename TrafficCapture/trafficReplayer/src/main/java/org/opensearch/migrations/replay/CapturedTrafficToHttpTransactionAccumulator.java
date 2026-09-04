@@ -7,15 +7,20 @@ import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.kafka.KafkaLivenessSnapshotRecord;
 import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
+import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
+import org.opensearch.migrations.replay.traffic.source.SourceInput;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -57,6 +62,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final ExpiringTrafficStreamMap liveStreams;
     private final SpanWrappingAccumulationCallbacks listener;
     private final Duration connectionTimeout;
+    private final boolean structuralExpiration;
+    private final BiConsumer<ITrafficStreamKey, FollowUpRequirement> scanBlockerListener;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -138,7 +145,19 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         String hintStringToConfigureTimeout,
         AccumulationCallbacks accumulationCallbacks
     ) {
+        this(minTimeout, hintStringToConfigureTimeout, accumulationCallbacks, false, (key, requirement) -> {});
+    }
+
+    public CapturedTrafficToHttpTransactionAccumulator(
+        Duration minTimeout,
+        String hintStringToConfigureTimeout,
+        AccumulationCallbacks accumulationCallbacks,
+        boolean structuralExpiration,
+        BiConsumer<ITrafficStreamKey, FollowUpRequirement> scanBlockerListener
+    ) {
         this.connectionTimeout = minTimeout;
+        this.structuralExpiration = structuralExpiration;
+        this.scanBlockerListener = scanBlockerListener;
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY, new BehavioralPolicy() {
             @Override
             public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
@@ -252,8 +271,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .toString();
     }
 
-    public void accept(ITrafficStreamWithKey trafficStreamAndKey) {
+    public void accept(SourceInput sourceInput) {
+        if (sourceInput instanceof SourceControlEvent.ConfirmedDead confirmedDead) {
+            acceptConfirmedDead(confirmedDead);
+            return;
+        }
+        var trafficStreamAndKey = (ITrafficStreamWithKey) sourceInput;
         var tsk = trafficStreamAndKey.getKey();
+        if (trafficStreamAndKey instanceof KafkaLivenessSnapshotRecord) {
+            listener.onTrafficStreamIgnored(tsk);
+            return;
+        }
         // Synthetic close from partition reassignment
         if (trafficStreamAndKey instanceof TrafficSourceReaderInterruptedClose) {
             var existingAccum = liveStreams.getIfPresent(tsk);
@@ -308,6 +336,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
         var trafficStream = trafficStreamAndKey.getStream();
+        boolean connectionClosed = false;
         for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {
             var o = trafficStream.getSubStreamList().get(i);
             log.atTrace().setMessage("Processing obs {} of {} for {}:{} state={} type={}")
@@ -325,6 +354,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     .addArgument(connectionId)
                     .log();
                 liveStreams.remove(partitionId, connectionId);
+                connectionClosed = true;
                 break;
             }
         }
@@ -336,6 +366,49 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 || trafficStream.getSubStreamCount() == 0;
             listener.onTrafficStreamIgnored(tsk);
         }
+        if (!connectionClosed) {
+            scanBlockerListener.accept(tsk, followUpRequirementFor(accum));
+        }
+    }
+
+    private void acceptConfirmedDead(SourceControlEvent.ConfirmedDead confirmedDead) {
+        var evidence = confirmedDead.evidence();
+        var connection = evidence.connection();
+        var accumulation = liveStreams.getIfPresent(connection.nodeId(), connection.connectionId());
+        if (accumulation == null
+            || accumulation.sourceGeneration != evidence.partition().sourceGeneration()) {
+            log.atDebug()
+                .setMessage("Ignoring stale confirmed-dead control for {} in generation {}")
+                .addArgument(connection)
+                .addArgument(evidence.partition()::sourceGeneration)
+                .log();
+            return;
+        }
+        var proof = (org.opensearch.migrations.replay.traffic.source.AbsenceProof.LivenessOmission)
+            evidence.proof();
+        if (accumulation.hasRrPair()) {
+            accumulation.getRrPair().structuralProofId = proof.proofId();
+        }
+        connectionsExpiredCounter.incrementAndGet();
+        log.atInfo()
+            .setMessage("Closing source accumulation for {} from structural proof {}")
+            .addArgument(connection)
+            .addArgument(proof::proofId)
+            .log();
+        fireAccumulationsCallbacksAndClose(
+            accumulation,
+            RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD
+        );
+        liveStreams.remove(connection.nodeId(), connection.connectionId());
+    }
+
+    private FollowUpRequirement followUpRequirementFor(Accumulation accumulation) {
+        return switch (accumulation.state) {
+            case ACCUMULATING_READS -> FollowUpRequirement.REQUEST_COMPLETION;
+            case ACCUMULATING_WRITES -> FollowUpRequirement.RESPONSE_COMPLETION;
+            case WAITING_FOR_NEXT_READ_CHUNK, IGNORING_LAST_REQUEST ->
+                FollowUpRequirement.CONNECTION_TERMINATION;
+        };
     }
 
     private Accumulation createInitialAccumulation(ITrafficStreamWithKey streamWithKey) {
@@ -374,7 +447,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .addArgument(accum.state)
             .log();
         var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
-        liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
+        if (structuralExpiration) {
+            liveStreams.observeWithoutExpiration(accum, timestamp);
+        } else {
+            liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
+        }
 
         return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp).or(
             () -> handleObservationForSkipState(accum, observation)

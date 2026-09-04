@@ -101,7 +101,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
      */
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
     ) {
         var readContext = readChunkContextSupplier.get();
@@ -118,6 +118,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 return;
             }
             var maxLocallyObservedTimestamp = v.stream()
+                .filter(ITrafficStreamWithKey.class::isInstance)
+                .map(ITrafficStreamWithKey.class::cast)
                 .flatMap(tswk -> tswk.getStream().getSubStreamList().stream())
                 .map(TrafficObservation::getTs)
                 .max(Comparator.comparingLong(Timestamp::getSeconds).thenComparingInt(Timestamp::getNanos))
@@ -146,7 +148,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             .addArgument(lastTimestampSecondsRef)
             .log();
         ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
-        while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
+        while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())
+            && !underlyingSource.hasPendingSourceControl()) {
             if (blockContext == null) {
                 blockContext = readContext.createBackPressureContext();
             }
@@ -249,6 +252,24 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
         underlyingSource.setSourcePartitionLifecycleListener(listener);
+    }
+
+    @Override
+    public void updateScanBlocker(
+        ITrafficStreamKey trafficStreamKey,
+        FollowUpRequirement followUpRequirement
+    ) {
+        underlyingSource.updateScanBlocker(trafficStreamKey, followUpRequirement);
+    }
+
+    @Override
+    public boolean usesStructuralExpiration() {
+        return underlyingSource.usesStructuralExpiration();
+    }
+
+    @Override
+    public boolean hasPendingSourceControl() {
+        return underlyingSource.hasPendingSourceControl();
     }
 
     @Override
