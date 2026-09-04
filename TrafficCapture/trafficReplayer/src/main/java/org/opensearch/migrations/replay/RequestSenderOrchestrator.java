@@ -221,6 +221,12 @@ public class RequestSenderOrchestrator {
                 return;
             }
             actorTerminated = true;
+            log.atDebug()
+                .setMessage("Connection actor settled for {}; outcome={}; failure={}")
+                .addArgument(key)
+                .addArgument(outcome)
+                .addArgument(actorFailure)
+                .log();
             clientConnectionPool.invalidateSession(
                 key.connection().connectionId(),
                 key.sessionNumber(),
@@ -232,6 +238,11 @@ public class RequestSenderOrchestrator {
             }
             transactions.beginTermination().whenComplete((ignored, transactionFailure) ->
                 mailbox.execute(() -> {
+                    log.atDebug()
+                        .setMessage("Transaction registry settled for {}; failure={}")
+                        .addArgument(key)
+                        .addArgument(transactionFailure)
+                        .log();
                     if (transactionFailure != null) {
                         terminationOwner.completeExceptionally(unwrap(transactionFailure));
                         return;
@@ -248,6 +259,11 @@ public class RequestSenderOrchestrator {
         private void acknowledgeSourceTermination(SessionOutcome outcome) {
             CompletionStage<Void> acknowledgement;
             try {
+                log.atDebug()
+                    .setMessage("Acknowledging source termination for {}; outcome={}")
+                    .addArgument(key)
+                    .addArgument(outcome)
+                    .log();
                 acknowledgement = Objects.requireNonNull(
                     sessionTerminationAcknowledger.apply(key),
                     "session termination acknowledger returned no completion stage"
@@ -258,6 +274,11 @@ public class RequestSenderOrchestrator {
             }
             acknowledgement.whenComplete((ignored, failure) ->
                 mailbox.execute(() -> {
+                    log.atDebug()
+                        .setMessage("Source termination acknowledgement settled for {}; failure={}")
+                        .addArgument(key)
+                        .addArgument(failure)
+                        .log();
                     if (failure != null) {
                         terminationOwner.completeExceptionally(unwrap(failure));
                         return;
@@ -981,6 +1002,10 @@ public class RequestSenderOrchestrator {
         var sessionKey = toConnectionSessionKey(context, sessionNumber);
         var runtime = actorRuntimes.get(sessionKey);
         if (runtime == null) {
+            log.atDebug()
+                .setMessage("Aborting replay session {} without an existing actor")
+                .addArgument(sessionKey)
+                .log();
             CompletionStage<Void> acknowledgement;
             try {
                 acknowledgement = Objects.requireNonNull(
@@ -995,6 +1020,10 @@ public class RequestSenderOrchestrator {
                 () -> "acknowledging that no actor existed for " + sessionKey
             );
         }
+        log.atDebug()
+            .setMessage("Aborting replay session {} through its connection actor")
+            .addArgument(sessionKey)
+            .log();
         runtime.actor.abort(reason, cause);
         var result = runtime.termination().thenCompose(RequestSenderOrchestrator::mapAbortOutcome);
         return new TextTrackedFuture<>(

@@ -283,6 +283,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
         var acknowledgement = new CompletableFuture<Void>();
+        log.atDebug()
+            .setMessage("Queueing source termination acknowledgement for {}; outstanding={}")
+            .addArgument(sessionKey)
+            .addArgument(pendingSessionTerminationObligations::size)
+            .log();
         try {
             kafkaExecutor.execute(() -> {
                 var matchingObligations = pendingSessionTerminationObligations.keySet()
@@ -290,12 +295,24 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     .filter(key -> key.connection().equals(sessionKey.connection()))
                     .filter(key -> key.sourceGeneration() == sessionKey.sourceGeneration())
                     .toList();
+                log.atDebug()
+                    .setMessage("Applying source termination acknowledgement for {}; matching={}; outstanding={}")
+                    .addArgument(sessionKey)
+                    .addArgument(matchingObligations::size)
+                    .addArgument(pendingSessionTerminationObligations::size)
+                    .log();
                 for (var obligationKey : matchingObligations) {
                     var obligation = pendingSessionTerminationObligations.remove(obligationKey);
                     if (obligation == null) {
                         continue;
                     }
                     obligation.acknowledge();
+                    log.atDebug()
+                        .setMessage("Settled source termination obligation for {} on partition {}; outstanding={}")
+                        .addArgument(sessionKey)
+                        .addArgument(obligation::partition)
+                        .addArgument(pendingSessionTerminationObligations::size)
+                        .log();
                 }
                 if (matchingObligations.isEmpty()) {
                     log.atTrace()

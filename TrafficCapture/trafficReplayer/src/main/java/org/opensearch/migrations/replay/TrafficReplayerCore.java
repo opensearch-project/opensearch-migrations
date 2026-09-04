@@ -736,6 +736,20 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .future
                     .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome);
             }
+            sourceDisposition.whenComplete((ignored, failure) ->
+                log.atDebug()
+                    .setMessage("Source close disposition settled for {}; failure={}")
+                    .addArgument(sessionKey)
+                    .addArgument(failure)
+                    .log()
+            );
+            actorTermination.whenComplete((ignored, failure) ->
+                log.atDebug()
+                    .setMessage("Target actor termination settled for {}; failure={}")
+                    .addArgument(sessionKey)
+                    .addArgument(failure)
+                    .log()
+            );
             var ownedProgressToken = progressToken;
             combineConnectionCloseOperations(sourceDisposition, actorTermination)
                 .whenComplete((ignored, failure) -> {
