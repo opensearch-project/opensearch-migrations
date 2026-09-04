@@ -8,7 +8,10 @@
 and hardens §10's capture-side liveness design. In particular, it removes finite-window exhaustion as
 a commit proof: without an external producer fence, a scan cannot distinguish a dead proxy from a
 stalled proxy that may append records later. It also makes liveness snapshots complete, chunked, and
-ordered through the same producer-submission path as traffic.
+ordered through the same producer-submission path as traffic. The cancellation review additionally
+made two contracts explicit: aborting an active target exchange must actively settle and clean up
+every owned sub-operation rather than wait for the normal response path, and reassignment/shutdown
+revokes a transaction's generation-scoped runway independently of source and target outcomes.
 
 **Companion mapping:** [replayerCurrentToProposedArchitectureMap.md](replayerCurrentToProposedArchitectureMap.md)
 — which current class becomes what, and in which migration slice.
@@ -128,8 +131,8 @@ time, in admission order.
 
 **A replay transaction** owns everything about one request: source request and response state, the
 Kafka records carrying it, the concurrency permit, the transformed request buffers, the target
-outcome, the evidence outcome, the tracing contexts, and — crucially — the final decision about
-that request's Kafka offsets.
+outcome, the evidence outcome, its generation-scoped runway state, the tracing contexts, and —
+crucially — the final decision about that request's Kafka offsets.
 
 Everything else becomes a *producer of typed messages* to one of those two. The assembler produces
 source outcomes. Preparation produces a `Prepared` message. Netty produces a target outcome. The
@@ -148,8 +151,10 @@ Three consequences make this worth doing:
   Cancellation becomes a first-class outcome that can never select a commit.
 
 - **"Done" becomes checkable.** Aborting an actor returns a gate that completes only after its
-  queue is settled, its in-flight exchange is joined, its channel is closed, and its source
-  acknowledgement is delivered. Gates await real completions instead of counting.
+  queue is settled, its in-flight exchange has been actively cancelled and its owned cleanup joined,
+  its channel is closed, every transaction has dispositioned, and its source acknowledgement is
+  delivered. Gates await real completions instead of counting or passively waiting for a normal
+  callback that cancellation made impossible.
 
 The design also carries the expiration-hardening policy: read-ahead bounded by a small epsilon and
 coupled to replay progress; expiration commits requiring proxy-issued structural proof and never
@@ -210,6 +215,14 @@ This ambiguity is a real source of bugs, so the design keeps the five lexically 
   which is the other half of F2.
 - **Out of runway** — we lost the right or the time to finish this work (partition reassigned,
   process shutting down). Never commit-eligible: someone else must be able to pick it up.
+- **Runway state** — generation-scoped authority to enter a commit disposition. The authoritative
+  state is owned by `RecordDispositionLedger` on the Kafka executor; `KafkaSourceActor` invokes its
+  revocation when assignment or shutdown changes. It starts `Available` and may transition once to
+  `Lost(REASSIGNMENT)` or `Lost(SHUTDOWN)`. Transactions hold only a monotonic local observation
+  delivered as `RunwayLost`, so the ledger always rechecks the authoritative state when accepting a
+  commit. Runway is orthogonal to source and target outcomes: reassignment can occur after both have
+  already settled but before evidence or disposition has finished. Losing runway never rewrites an
+  existing outcome; it vetoes any commit that the ledger has not already accepted.
 - **Confirmed dead** — the owning proxy produced complete, offset-ordered declarations proving that
   it no longer owns the connection. Commit-eligible, because it is structural proof. Silence, elapsed
   time, and scanning to the current end of an unfenced producer's log are not confirmation.
@@ -236,9 +249,10 @@ All working names; the crosswalk maps them to current classes.
 | `AsyncPermitPool` | Cancellable, future-based concurrency permits |
 | `RequestPreparationService` | Transformation and signing; yields an owned prepared request |
 | `ConnectionActor` | FIFO command queue, one head timer, channel, one live exchange |
+| `TargetExchange` | Owner-controlled target attempt, retry, response/finalizer, abort, and cleanup lifecycle |
 | `ReplayTransaction` | One request's resources, outcomes, and disposition |
 | `EvidenceWriter` | Durable whole-tuple output; internal adapters may model future parts |
-| `RecordDispositionLedger` | Accepts record obligations; closes contexts; commits or retains |
+| `RecordDispositionLedger` | Owns generation runway and record obligations; closes contexts; commits or retains |
 
 ---
 
@@ -290,9 +304,11 @@ machinery — it is §2 traced concretely.
 8. **Join and write evidence.** With every required outcome terminal, the transaction asks
    `EvidenceWriter` to persist the tuple and waits for an `EvidenceOutcome`.
 
-9. **Dispose exactly once.** The transaction hands its record obligations plus all three outcomes
-   to `RecordDispositionLedger`. The ledger closes each record's contexts and — this row being
-   (Complete, Succeeded, Durable) — emits `Commit`. The commit adapter stages the offset.
+9. **Dispose exactly once.** The transaction hands its record obligations, all three outcomes, and
+   its runway observation to `RecordDispositionLedger`. The ledger rechecks authoritative runway,
+   closes each record's contexts and — this row being (Available, Complete, Succeeded, Durable) —
+   accepts `Commit`. The commit adapter stages the offset and the ledger joins the generation-valid
+   broker acknowledgement.
 
 10. **Release.** The transaction closes its owned resources exactly once: prepared request, permit,
     tracing contexts. Its completion gate completes only after disposition has settled, and the
@@ -304,29 +320,38 @@ machinery — it is §2 traced concretely.
 
 ### 4.2 The same request, cancelled by a partition reassignment
 
-This is the path that is broken today, and it shows where each mechanism earns its keep.
+This is the failure path that motivated the design, and it shows where each mechanism earns its keep.
 
 1. `KafkaSourceActor`'s rebalance callback fires: this partition is revoked. It stops admitting
    records from the old generation and emits an **interruption control event** into the same
    serialized intake the real records use — so it is *ordered against* them rather than racing
    them.
 
-2. The assembler applies the interruption to the matching generation and emits
-   `SourceOutcome.Interrupted` to the affected transactions.
+2. On the Kafka executor, the source actor first marks the old generation's authoritative runway
+   `Lost(REASSIGNMENT)` in the disposition ledger. The assembler then applies the interruption to
+   the matching generation. An unfinished source side settles as `SourceOutcome.Interrupted`; an
+   already terminal source outcome is not rewritten. Independently, the coordinator posts
+   `RunwayLost(REASSIGNMENT)` to every still-active transaction in the generation. This covers a
+   request whose source and target already completed but whose evidence or record disposition has
+   not, while the ledger fence closes the cross-executor race.
 
 3. The coordinator aborts the matching connection actors **by typed `ConnectionSessionKey`** — not
    by a concatenated string, not via a placeholder session number. `abort()` returns a **session
    termination gate**.
 
 4. Each actor, on its own event loop: marks itself terminal; settles every queued command as
-   `TargetOutcome.Cancelled(REASSIGNMENT)` **without invoking their send callbacks**; explicitly
-   closes and *joins* the in-flight exchange; closes the channel and awaits it; removes itself from
-   the cache.
+   `TargetOutcome.Cancelled(REASSIGNMENT)` **without invoking their send callbacks**; actively aborts
+   the in-flight exchange; joins its owned cleanup; closes the channel and awaits it; removes itself
+   from the cache. "Abort" means settling retry and pacing timers, channel acquisition, packet
+   sending, response decoding/finalization, attempt resources, and the owner-controlled exchange
+   result. It does not mean closing the channel and then waiting for the ordinary response future.
 
-5. Each transaction now has a terminal source outcome (`Interrupted`) and target outcome
-   (`Cancelled`), so it reaches `DISPOSING`. It cannot be skipped, because disposition is not
-   downstream of successful tuple packaging. The ledger closes every record context and emits
-   `Retain`: the new partition owner must be able to replay these records.
+5. Each active transaction drains its owned children and reaches `DISPOSING`. Transactions that were
+   still reconstructing usually have source `Interrupted` and target `Cancelled`; transactions that
+   had progressed further may retain earlier terminal source or target outcomes. In both cases lost
+   runway selects `Retain` unless the disposition ledger had already accepted a commit. The ledger
+   closes every record context exactly once. Any already accepted commit remains ledger-owned and
+   must reach a generation-valid broker acknowledgement or fail before the session can terminate.
 
 6. Only now — after step 5 has settled for *every* transaction of the session — does the actor deliver
    its source acknowledgement and its session termination gate complete. Per §6.4 rule 5, transaction
@@ -337,16 +362,15 @@ This is the path that is broken today, and it shows where each mechanism earns i
 7. The coordinator awaits every session termination gate for the revoked generation, including an
    explicit acknowledgement for connections that never opened a session at all. Real records for
    the new generation resume only after all of them complete — which, by step 6, means after every
-   affected record has been dispositioned.
+   affected record has been dispositioned and no actor, transaction, target exchange, timer, permit,
+   target context, or in-memory source obligation from the old generation remains.
 
-**Compare with the current code.** Two of these three gaps are still open on this branch, and one has
-been partially closed, which is worth stating precisely rather than overclaiming:
-
-| Step | Before this branch | On this branch | Still missing |
-| --- | --- | --- | --- |
-| 4 | `schedule.clear()` dropped pending futures; queued work waited forever (**F4**) | `drainWithCancellation` settles schedule entries and `cancelAllWork` settles sorter slots; a cancelled sorter outcome makes the next slot's start signal fail, so the queued request/close callback is **not** invoked | Suppression is *emergent* — it follows from a failed start signal rather than each queued command carrying its own terminal `Cancelled` outcome. Nothing in the types prevents a future path from re-introducing the callback |
-| 5 | Tuple packaging threw and the offset decision was skipped entirely | Unchanged | Disposition is still downstream of packaging succeeding |
-| 7 | Gate was an `AtomicInteger` a missing callback could leave nonzero forever | Close callbacks now forward through `BlockingTrafficSource` (F3 fixed), so the common leak is closed | The gate is still a counter, and still has no per-obligation attribution when it does stick |
+**What joining an exchange means.** The exchange adapter owns a terminal result and a cleanup gate
+that it can settle without cooperation from the normal response path. A library future may be
+uncancellable, but it is not allowed to own the session lifecycle: abort fences its late completion,
+settles the adapter's result as `Cancelled`, closes or detaches every owner-held context, and joins the
+adapter's cleanup. A late callback may release a self-owned library resource; it may not restart work,
+complete a transaction a second time, or find mutable state belonging to a newer generation.
 
 ---
 
@@ -379,6 +403,7 @@ from §1.1, that is named.
 | --- | --- |
 | Every mutable state object has one executor or thread owner | Concurrent mutation of accumulator or session state — the class of bug that a `volatile` on one flag does not fix |
 | Cross-thread completions post typed messages to the owner; they never mutate foreign state | A second thread calling into single-threaded machinery (the wall-clock heartbeat-expiry hazard) |
+| Generation runway authority is owned by `RecordDispositionLedger`; transactions hold only a local observation | A transaction and the commit adapter disagree about whether an old generation may still commit |
 | Every resource is released by whoever accepted ownership of it | The refcount leaks of §13 (R16–R18) |
 | No required lifecycle notification is an optional no-op callback | **F3** — a `default {}` method silently swallowing every close notification |
 
@@ -398,7 +423,7 @@ from §1.1, that is named.
 | Closing a traffic-stream context and committing its offset are separate actions | Retained records leak open contexts — F1/F2 territory |
 | Every accepted record is deliberately committed or deliberately retained | Records with no decision at all: offsets pinned, dashboards clean (**F1**) |
 | Normal replay commits only after required evidence is durable | Committing data whose evidence was never written |
-| Cancellation, reassignment, shutdown, and unclassified failure do not commit | Teardown masquerading as successful replay — silent data loss |
+| Work whose runway is lost before ledger acceptance, and any unclassified failure, does not commit | Teardown masquerading as successful replay — silent data loss |
 | A deterministic poison record commits only under an explicit classifier, with durable, loud skip evidence | Either an unskippable crash loop or a silent skip — and no way for an operator to choose which |
 | Proxy-confirmed absence delivered by the scanner may commit because it is evidence; elapsed time may not | Impatience committing live data |
 
@@ -420,11 +445,17 @@ while work is still in flight.
    it.
 4. Requesting cancellation does not complete the gate. The gate completes only after queued and
    active children have reached terminal outcomes *and* their owned resources have been released.
+   The owner must actively drive cancellable children to those outcomes; waiting on the normal
+   success path after making success impossible is not a cancellation implementation.
 5. Session termination completes only after queued commands, active work, channel closure, cache
-   removal, transaction settlement, and source acknowledgement have all settled.
-6. A timeout or watchdog may report or fail the operation. It may never reset state or complete the
+   removal, transaction settlement, and source acknowledgement have all settled. No mutable or
+   resource-owning object from the terminated generation may remain reachable by the next generation.
+6. Active target-exchange abort is total over every phase: before channel acquisition, during
+   acquisition, pacing, packet send, response wait, retry delay, response finalization, and late
+   completion. Its gate describes owned cleanup, not merely the exchange result.
+7. A timeout or watchdog may report or fail the operation. It may never reset state or complete the
    gate successfully while postconditions remain false.
-7. Reusable shutdown does not rely on process exit for cleanup.
+8. Reusable shutdown does not rely on process exit for cleanup.
 
 Callers chain subsequent lifecycle work from the gate. They do not infer completion from a callback
 firing, a counter reaching zero, a cache entry disappearing, or the cancellation of a separate
@@ -439,13 +470,17 @@ was a convention that one code path did not follow:
   or complete the gate directly.
 - Each child enters the owner's pending set *before* its asynchronous work is launched, and leaves
   that set exactly once when its terminal message is processed.
+- Pending-child diagnostics include the child identity and phase, so a stuck response finalizer,
+  retry delay, context close, disposition acknowledgement, or source acknowledgement is distinguishable
+  without a thread dump.
 - One owner-thread method — `tryCompleteTermination()` — is the only code allowed to complete the
   gate successfully.
 - That method asserts the operation is terminal, the pending set is empty, all required resources
   are released, and all required acknowledgements and dispositions have settled.
 
 Tests must attempt early completion, caller-side cancellation, child failure, late child
-completion, and timeout paths, and prove that none can produce a false successful result.
+completion, timeout paths, and multiple consecutive generation terminations, and prove that none can
+produce a false successful result or leave state that the next generation can observe.
 
 ---
 
@@ -492,10 +527,12 @@ flowchart TD
 
     KAFKA -->|"source record"| READ_GATE
     KAFKA -->|"ScanEvidence or source-control message"| ASSEMBLER
+    KAFKA -->|"revoke generation runway"| LEDGER
     READ_GATE -->|"admitted record"| ASSEMBLER
     ASSEMBLER --> COORDINATOR
     COORDINATOR -->|"create transaction"| TXN
     COORDINATOR -->|"admit ordered command"| ACTOR
+    COORDINATOR -->|"RunwayLost on termination"| TXN
     COORDINATOR -->|"register work token"| PROGRESS
     TXN -->|"acquire or release"| PERMITS
     PERMITS -->|"permit granted"| PREP
@@ -536,6 +573,9 @@ flow.
 
 Two details that are easy to misread:
 
+- Runway has two views with different owners. `RecordDispositionLedger` owns the authoritative
+  generation state on the Kafka executor and rejects stale commits. `ReplayTransaction` receives a
+  `RunwayLost` message so it can drain promptly, but that local observation is not the commit fence.
 - `ReplayProgressController` receives admitted and settled work-token events and computes the
   contiguous settled watermark. `ReplayReadGate` separately uses that watermark plus epsilon to
   decide whether another source record may enter the assembler. The transaction and session arrows
@@ -551,7 +591,7 @@ Two details that are easy to misread:
 
 **The design introduces no new thread pool.** It reuses the existing Kafka executor, replay intake
 thread, transformation workers, Netty event-loop group, and evidence-sink executor. That constraint
-is load-bearing, so acceptance criterion 11 checks it.
+is load-bearing and is checked explicitly by the acceptance criteria.
 
 When the first command for a `ConnectionSessionKey` is admitted, `ReplayCoordinator` assigns a
 `ConnectionRuntime` to one existing Netty event loop and records that assignment in the session
@@ -570,14 +610,14 @@ not a dedicated thread.**
 | `EvidenceWriter` | Sink-specific executor | Sink-local buffering and durability |
 | `ReplayProgressController` | Main replay intake thread | Admitted-work tokens and contiguous settled watermark |
 | `ReplayReadGate` | Main replay intake thread | Source admission using settled watermark, epsilon, and lifecycle state |
-| `RecordDispositionLedger` | Kafka executor, behind `KafkaSourceActor` | Record obligations, context closure, commit staging, retained-record release |
+| `RecordDispositionLedger` | Kafka executor, behind `KafkaSourceActor` | Generation runway, record obligations, context closure, commit staging, retained-record release |
 
 Cross-thread completions are converted into messages: `Prepared`, `SourceSettled`,
-`EvidenceSettled`, `PermitReleased`, `AbortRequested`. Target exchange callbacks already run on the
-assigned Netty event loop, so **the actor and transaction communicate with no extra executor
-hop** — this is why co-locating the transaction with its actor matters rather than giving
-transactions their own executor. Thread-affinity assertions must reject any actor or transaction
-transition that runs off its assigned event loop.
+`EvidenceSettled`, `PermitReleased`, `RunwayLost`, `AbortRequested`. Target exchange callbacks
+already run on the assigned Netty event loop, so **the actor and transaction communicate with no
+extra executor hop** — this is why co-locating the transaction with its actor matters rather than
+giving transactions their own executor. Thread-affinity assertions must reject any actor or
+transaction transition that runs off its assigned event loop.
 
 The normal logical handoffs are bounded and explicit:
 
@@ -996,7 +1036,8 @@ OPEN
 OPEN / ACTIVE
   -> ABORTING
   -> queued commands cancelled
-  -> active exchange settled or force-closed
+  -> active exchange abort requested
+  -> active exchange cleanup joined
   -> channel closed
   -> source acknowledged
   -> TERMINATED
@@ -1009,6 +1050,7 @@ The actor owns:
 * **one** active target exchange,
 * channel creation and reconnection policy,
 * the cancellation token,
+* the target-exchange abort and cleanup gate,
 * the session close acknowledgement,
 * the termination completion gate.
 
@@ -1032,9 +1074,46 @@ The actor never blocks its Netty thread. It reacts when the head's preparation f
   **transaction**; the actor does not advance as though it succeeded.
 * Session abort settles queued commands as cancelled **without invoking their send callbacks** — a
   cancelled command must never look like it ran.
-* An active exchange is explicitly closed *and joined* before session termination completes.
+* An active exchange is explicitly aborted and its owned cleanup joined before session termination
+  completes. Channel close is one child of that cleanup, not a substitute for it.
 * Late preparation or target callbacks observe terminal session state, release their own resources,
   and do not restart the session.
+
+### 11.5 Active target-exchange abort contract
+
+`TargetExchange` is the adapter between actor lifecycle and the existing Netty/request machinery. It
+owns the wrapper result returned to the actor and a separate cleanup gate:
+
+```java
+interface TargetExchange<P, R> {
+    CompletionStage<TargetOutcome<R>> execute(P request);
+    CompletionStage<Void> close();
+    CompletionStage<Void> abort(CancellationException cause);
+}
+```
+
+Successful `abort` completion proves all of the following:
+
+1. The owner-controlled `execute` result is terminal exactly once, normally as
+   `TargetOutcome.Cancelled` carrying the original cause.
+2. No new pacing timer, retry delay, channel acquisition, packet send, response decode, or response
+   finalization for that exchange can start.
+3. Every scheduled timer is cancelled and the future or mailbox obligation depending on it is
+   settled. Cancelling only the scheduler handle is insufficient.
+4. An active packet receiver/decoder/finalizer has received the cancellation signal and released its
+   target request/response contexts. Its cancellation path must not depend on receiving another byte
+   or a normal end-of-response callback.
+5. Channel acquisition and close are accounted for. A channel that arrives after abort is immediately
+   closed and cannot be installed into the runtime.
+6. Attempt payloads, response buffers, tracing scopes, and other exchange-owned resources are closed
+   exactly once.
+7. Any uncancellable foreign callback is fenced by the exchange identity and generation. It may
+   perform only self-cleanup when it eventually runs; the session gate does not wait for a semantic
+   result that the adapter has already replaced with cancellation.
+
+`abort` and `close` are idempotent. Repeated calls join the same cleanup rather than starting another
+teardown. This contract is what makes a never-completing response finalizer a test case instead of a
+permanent session drain.
 
 ---
 
@@ -1096,13 +1175,14 @@ A `ReplayTransaction` owns:
 * transformed-request ownership,
 * the target outcome,
 * the tuple/evidence outcome,
+* the latest monotonic observation of generation-scoped runway,
 * tracing contexts,
 * the final disposition.
 
 No other component commits or closes transaction-owned traffic-stream contexts. All transaction
 transitions execute on the same assigned Netty event loop as the owning connection actor. Source,
-preparation, evidence, and abort outcomes arriving from other threads are mailbox messages; target
-outcomes are delivered directly on that event loop.
+preparation, evidence, runway-loss, and abort inputs arriving from other threads are mailbox
+messages; target outcomes are delivered directly on that event loop.
 
 ### 13.2 State model
 
@@ -1118,22 +1198,31 @@ stateDiagram-v2
     WRITING_EVIDENCE --> DISPOSING
     DISPOSING --> TERMINATED
 
-    ADMITTED --> CANCELLING
-    PREPARING --> CANCELLING
-    READY --> CANCELLING
-    TARGET_ACTIVE --> CANCELLING
-    WAITING_FOR_JOIN --> CANCELLING
-    CANCELLING --> DISPOSING
+    ADMITTED --> DRAINING: runway lost
+    PREPARING --> DRAINING: runway lost
+    READY --> DRAINING: runway lost
+    TARGET_ACTIVE --> DRAINING: runway lost
+    WAITING_FOR_JOIN --> DRAINING: runway lost
+    WRITING_EVIDENCE --> DRAINING: runway lost
+    DRAINING --> DISPOSING: outcomes and owned child cleanup settled
+    DISPOSING --> DISPOSING: runway lost, ledger acceptance order decides
 ```
 
-Note what is deliberately *not* in this diagram: **source settlement is an orthogonal outcome, not a
-linear state.** It may occur before, during, or after target work. The guard on
-`WAITING_FOR_JOIN -> WRITING_EVIDENCE` requires every outcome needed by the request's policy to be
-terminal, including source completion, target completion or explicit target omission, and any required
-preparation result.
+Two facts are deliberately *not* linear states:
+
+* **Source settlement is orthogonal.** It may occur before, during, or after target work. The guard on
+  `WAITING_FOR_JOIN -> WRITING_EVIDENCE` requires every outcome needed by the request's policy to be
+  terminal, including source completion, target completion or explicit target omission, and any
+  required preparation result.
+* **Runway is orthogonal.** Reassignment or shutdown may arrive in any phase, including while evidence
+  or disposition is in flight. It does not overwrite a terminal source or target outcome. It moves
+  unfinished work through `DRAINING`, where cancellable children are actively settled and
+  uncancellable children are joined or failed loudly before disposition. If disposition has already
+  been submitted, the transaction remains `DISPOSING`; the Kafka executor's ordering of authoritative
+  runway revocation versus ledger acceptance decides whether a commit was accepted.
 
 The invariant that matters: **`DISPOSING` is reached once and only once, from every path.**
-Cancellation does not bypass it — it routes to it.
+Cancellation does not bypass it — it drains into it.
 
 ### 13.3 Outcomes
 
@@ -1158,11 +1247,20 @@ sealed interface EvidenceOutcome {
     record Failed(...) implements EvidenceOutcome {}
     record NotRequired(...) implements EvidenceOutcome {}
 }
+
+sealed interface RunwayObservation {
+    record Available(int sourceGeneration) implements RunwayObservation {}
+    record Lost(int sourceGeneration, RunwayLossReason reason) implements RunwayObservation {}
+}
 ```
 
 Visitors or exhaustive switches must handle every subtype. This is where `Cancelled` stops being a
 gap: it is a value the disposition matrix must have a row for, and the compiler forces every new
-outcome to be considered everywhere.
+outcome to be considered everywhere. `RunwayObservation` is different: it is monotonic local state,
+not a replacement outcome or the authoritative Kafka generation fence. Its only transition is
+`Available -> Lost`, and the transaction mailbox serializes that transition with entry into
+disposition. The ledger still validates the generation's authoritative runway before accepting a
+commit.
 
 `SourceOutcome` is also where the overloaded-status problem is fixed — but the problem is narrower than
 "today everything collapses into one status," so it is worth stating exactly.
@@ -1176,6 +1274,11 @@ outcome to be considered everywhere.
 * **Shutdown has no value of its own.** It currently arrives as reader-interruption, which happens to
   suppress commits and therefore happens to be safe — a correct outcome reached by coincidence of
   another cause's policy rather than by stating it.
+
+Those source values remain useful because they describe how reconstruction ended. They do not replace
+runway state: a source-complete request may still lose commit authority while evidence is being
+written, and a target-success outcome must not be rewritten as cancellation merely to make the
+disposition policy retain it.
 
 ---
 
@@ -1202,26 +1305,37 @@ did this commit?" answerable from metrics.
 
 ### 14.2 Decision matrix
 
-| Source outcome | Target outcome | Evidence outcome | Disposition |
-| --- | --- | --- | --- |
-| Complete | Succeeded | Durable | Commit |
-| Confirmed dead after complete request | Succeeded | Durable | Commit |
-| Confirmed dead before complete request | Not sent | Not required; structural proof present | Commit as confirmed-dead discard |
-| Captured explicit drop/ignore | Not sent | Durable discard evidence | Commit as deliberate discard |
-| Deterministic poison | Failed | Durable classified-skip evidence | Commit only when configured |
-| Transient failure | Failed | Any | Retain and halt after retry exhaustion |
-| Reassignment interruption | Cancelled | Optional diagnostic evidence | Retain |
-| Shutdown | Cancelled | Optional diagnostic evidence | Retain |
-| Tuple/evidence failure | Any | Failed | Retain and halt |
-| Unknown combination | Any | Any | **Retain and halt** |
+Runway is evaluated first. The column refers to the ledger's authoritative state at disposition
+acceptance; the transaction's local observation controls draining but cannot authorize a commit. A
+lost-runway row supersedes the source/target/evidence rows below it:
 
-Two properties to internalize:
+| Runway state | Source outcome | Target outcome | Evidence outcome | Disposition |
+| --- | --- | --- | --- | --- |
+| Lost by reassignment before ledger acceptance | Any | Any | Any | Retain |
+| Lost by shutdown before ledger acceptance | Any | Any | Any | Retain |
+| Available | Complete | Succeeded | Durable | Commit |
+| Available | Confirmed dead after complete request | Succeeded | Durable | Commit |
+| Available | Confirmed dead before complete request | Not sent | Not required; structural proof present | Commit as confirmed-dead discard |
+| Available | Captured explicit drop/ignore | Not sent | Durable discard evidence | Commit as deliberate discard |
+| Available | Deterministic poison | Failed | Durable classified-skip evidence | Commit only when configured |
+| Available | Transient failure | Failed | Any | Retain and halt after retry exhaustion |
+| Available | Tuple/evidence failure | Any | Failed | Retain and halt |
+| Any | Unknown combination | Any | Any | **Retain and halt** |
+
+Properties to internalize:
 
 - **Context closure happens for both `Commit` and `Retain`.** Kafka commit happens only for `Commit`.
   Separating the two actions is the point; conflating them is how retained records leaked open
   contexts.
 - **The default is fail-closed.** An unrecognized combination retains and halts loudly. A failure
   that forces a human to look is strictly better than a silent skip.
+- **Runway loss is not represented by rewriting outcomes.** A request may legitimately retain
+  `SourceOutcome.Complete`, `TargetOutcome.Succeeded`, and even durable evidence while still being
+  retained because reassignment arrived before the ledger accepted its commit.
+- **Ledger acceptance is the linearization point.** Runway loss and commit acceptance are serialized
+  by the generation-owning Kafka side. Once the ledger accepts a commit, reassignment does not relabel
+  it as retain; the lifecycle gate joins its generation-valid broker acknowledgement or fails loudly.
+  If runway loss wins first, no commit is submitted.
 
 Failure classification cannot be judged at catch time, so it comes from retries plus an
 operator-declared poison classifier — see §19.1.
@@ -1239,9 +1353,12 @@ not expand `EvidenceWriter` merely to persist an empty result.
 2. Tracks their current owner.
 3. **Rejects duplicate disposition** — this is F2, structurally prevented.
 4. Closes record and traffic-stream contexts exactly once.
-5. Sends commit-eligible records to the Kafka commit adapter.
-6. Releases retained records locally without advancing Kafka when ownership is lost.
-7. Exposes unresolved obligations for shutdown and diagnostics.
+5. Serializes generation revocation with commit acceptance on the Kafka executor.
+6. Sends accepted commit-eligible records to the Kafka commit adapter and joins the broker
+   acknowledgement.
+7. Rejects a commit from a lost or stale generation before submission.
+8. Releases retained records locally without advancing Kafka when ownership is lost.
+9. Exposes unresolved obligations for shutdown and diagnostics.
 
 The existing `OffsetLifecycleTracker` may remain behind the commit adapter initially.
 
@@ -1282,7 +1399,10 @@ make each transition a distinct object with a distinct owner, so "who releases t
 answer per handle.
 
 The same ownership rule applies to tracing contexts, permits, timers, sink handles, and record
-obligations.
+obligations. `TargetExchange` owns target request/response contexts, attempt payloads, response
+finalization, and any adapter future that fences a foreign callback. `ReplayTransaction` owns the
+prepared request, permit, record obligations, evidence handle, and transaction tracing scopes. A
+resource must not be owned by both merely because both have a completion callback that can see it.
 
 ---
 
@@ -1297,18 +1417,30 @@ nonzero (F3); shutdown relies on process exit.
 For each revoked partition:
 
 1. Stop admitting new records from the old generation.
-2. Emit interruption events through the serialized source-control path.
-3. Abort matching connection actors **by typed `ConnectionSessionKey`**.
-4. Settle queued and active transactions as reassignment cancellation, and let each reach its
-   disposition (`Retain`).
-5. Close target channels and remove actors from the registry.
-6. Acknowledge **every** registered old-generation session — including an explicit acknowledgement
+2. On the Kafka executor, mark the old generation's authoritative runway lost in the disposition
+   ledger. This is the linearization point after which any newly submitted old-generation commit is
+   rejected.
+3. Deliver `RunwayLost` to every active old-generation transaction through its assigned mailbox.
+   Await the mailbox acknowledgement so each transaction begins draining promptly; correctness does
+   not depend on this notification winning a race with commit submission because step 2 is
+   authoritative.
+4. Emit interruption events through the serialized source-control path. These settle unfinished
+   source sides without rewriting source outcomes that were already terminal.
+5. Abort matching connection actors **by typed `ConnectionSessionKey`**.
+6. Settle queued and active target work as reassignment cancellation, join exchange cleanup, and let
+   every transaction drain to its disposition. Lost runway selects `Retain` unless the ledger had
+   already accepted a commit.
+7. Close target channels and remove actors from the registry.
+8. Acknowledge **every** registered old-generation session — including an explicit acknowledgement
    for sessions that never existed, so absence is an *answer* rather than a missing callback. A
    session's acknowledgement comes after its transactions have dispositioned, per §6.4 rule 5; steps
-   4 and 5 are children of the termination gate, not substitutes for it.
-7. Resume real records only after all termination completion gates complete successfully — which
+   6 and 7 are children of the termination gate, not substitutes for it.
+9. Resume real records only after all termination completion gates complete successfully — which
    therefore means after every affected record has been dispositioned.
-8. Do not commit unfinished old-generation obligations.
+10. Before admitting the next generation, assert that old-generation actor, transaction, exchange,
+   timer, permit, target-context, and in-memory source-obligation registries are empty. Deliberately
+   retained Kafka records are not live in-memory obligations.
+11. Do not commit unfinished old-generation obligations.
 
 **No timeout is allowed to reset the drain gate and continue lossily.** A timeout may halt loudly. A
 watchdog that discards records on a timer is impatience wearing a safety vest; when it eventually
@@ -1320,11 +1452,13 @@ Shutdown is a structured operation:
 
 1. Stop source admission and scanner cycles.
 2. Snapshot transaction and connection registries.
-3. Abort all actors.
-4. Await their termination completion gates.
-5. Finalize every transaction with retain/no-commit unless already durably committed.
-6. Flush eligible Kafka commits.
-7. Close Kafka, evidence sinks, transformation resources, and event loops.
+3. On the Kafka executor, revoke authoritative runway for every unfinished generation.
+4. Deliver `RunwayLost(SHUTDOWN)` to unfinished transactions.
+5. Abort all actors.
+6. Await their termination completion gates.
+7. Finalize every transaction with retain/no-commit unless the ledger already accepted its commit.
+8. Flush and acknowledge eligible Kafka commits.
+9. Close Kafka, evidence sinks, transformation resources, and event loops.
 
 Fatal process termination may interrupt this sequence, but the reusable API and the tests must not
 depend on JVM exit for correctness — otherwise shutdown is untestable and the replayer is not
@@ -1371,11 +1505,11 @@ callbacks: the commit policy must stay with the disposition owner.
 | --- | --- |
 | Source | replay position, settled watermark, epsilon utilization, records buffered |
 | Scanner | scan distance, latency, bytes discarded, follow-up found, confirmed absent, inconclusive |
-| Actor | queued commands, head wait reason, active duration, abort duration, channel state |
-| Transaction | count by phase, terminal outcome, retry class, disposition reason |
+| Actor | queued commands, head wait reason, active duration, abort duration, active-exchange phase, pending abort child, channel state |
+| Transaction | count by phase, runway state/loss reason, terminal outcome, retry class, disposition reason |
 | Permits | available, queued, held duration, cancellation count |
 | Evidence | tuple-write latency, failures, retries, durable receipts |
-| Kafka | unresolved obligations, commit head identity/age, staged commits, commit latency |
+| Kafka | unresolved obligations, commit head identity/age, staged commits, pending commit acknowledgements by generation, commit latency |
 | Capture proxy | open connections, snapshot chunks/bytes, incomplete snapshots, publisher failures, routing-plan identity |
 | Resources | owned buffer counts/bytes, duplicate-close attempts, leaked-owner assertions |
 
@@ -1389,8 +1523,16 @@ Use fake clocks, fake event loops, and manually controlled futures to enumerate:
 
 * every permutation of preparation, source completion, target completion, close, and abort;
 * request/close admission order with out-of-order preparation;
-* cancellation before permit, transformation, send, response, and evidence durability;
-* late callbacks after actor termination;
+* cancellation before permit, transformation, channel acquisition, pacing, send, response,
+  retry delay, response finalization, and evidence durability;
+* a response finalizer and channel acquisition that never complete normally, proving abort settles
+  the owner-controlled exchange and cleanup gates;
+* late callbacks after actor termination and after a new generation has reused the same source
+  connection identity;
+* runway loss after source completion, target completion, evidence durability, and immediately
+  before disposition acceptance;
+* at least two consecutive generation terminations in one process, with the second beginning only
+  after every first-generation registry and ownership counter has returned to baseline;
 * duplicate and missing lifecycle events;
 * scanner follow-up, confirmed-absent, inconclusive, and generation-change results;
 * liveness omission cases: one omission only (must not expire), two omissions with an intervening
@@ -1411,10 +1553,14 @@ Assertions:
 * one terminal outcome per command and transaction,
 * one disposition per record,
 * every actor and transaction transition occurs on its assigned Netty event loop,
-* no callback starts after cancellation,
+* no send, retry, decode, or finalization work starts after the actor accepts abort; already queued
+  foreign callbacks may perform only fenced self-cleanup,
+* active-exchange abort does not complete before all owner-held contexts and resources are released,
+* runway loss before ledger acceptance prevents commit submission,
 * no commit on teardown,
 * no owned resource remains,
-* completion gates do not complete successfully before their postconditions hold.
+* completion gates do not complete successfully before their postconditions hold,
+* a new generation cannot observe, settle, or be blocked by state from a terminated generation.
 
 ### 18.3 Property tests
 
@@ -1427,6 +1573,8 @@ fired).
 ### 18.4 Integration tests
 
 * Kafka rebalance with active requests, and with no replay session at all.
+* Two or more consecutive rebalances or topic delete/recreate cycles in one long-lived replayer,
+  proving that each generation drains independently and later Kafka reads resume.
 * Same-consumer partition round trip.
 * Dead and slow targets under epsilon lookahead.
 * Long legitimate connection with scanner follow-up present.
@@ -1446,7 +1594,8 @@ fired).
 ### 18.5 Leak tests
 
 Enable Netty leak detection and instrument permits, contexts, actor entries, record obligations, and
-evidence handles. Every test finishes with all registries empty.
+evidence handles. Every test finishes with all registries empty. Repeated-generation tests assert
+that the same baseline is reached after each cycle, not only when the process exits.
 
 ### 18.6 Acceptance criteria
 
@@ -1454,27 +1603,31 @@ The redesigned path is ready to replace the current path when:
 
 1. The responsibility audit maps every concern to one proposed owner.
 2. All deterministic terminal-transition tests pass.
-3. Rebalance and shutdown completion gates prove their documented drain postconditions.
-4. No teardown test commits unfinished records.
-5. Epsilon lookahead remains bounded during a stalled target.
-6. Scanner expiry commits only with complete structural evidence — every commit-eligible expiration
+3. Active target-exchange abort passes at every phase, including retry delay, channel acquisition,
+   response wait, and a finalizer that never completes normally.
+4. Rebalance and shutdown completion gates prove their documented drain postconditions.
+5. Consecutive generation turnovers in one long-lived process return all ownership counters and
+   registries to baseline before the next generation is admitted.
+6. No teardown test commits work whose runway was lost before disposition acceptance.
+7. Epsilon lookahead remains bounded during a stalled target.
+8. Scanner expiry commits only with complete structural evidence — every commit-eligible expiration
    carries a well-formed `AbsenceProof`, and no proof is constructable from elapsed time.
-7. Long live connections found by the scanner are not expired.
-8. A silent, unfenced `nodeId` never causes an expiration, regardless of duration cap or scan
+9. Long live connections found by the scanner are not expired.
+10. A silent, unfenced `nodeId` never causes an expiration, regardless of duration cap or scan
    distance.
-9. Incomplete snapshots, publisher failure, partition mismatch, and routing-plan mismatch halt instead
+11. Incomplete snapshots, publisher failure, partition mismatch, and routing-plan mismatch halt instead
    of expiring.
-10. Capture traffic, registry transitions, and snapshot chunks enter Kafka through one
+12. Capture traffic, registry transitions, and snapshot chunks enter Kafka through one
     ordering-preserving publisher.
-11. Netty leak detection and ownership counters remain clean.
-12. Existing replay timing and ordering integration tests pass, or have an explicitly approved policy
+13. Netty leak detection and ownership counters remain clean.
+14. Existing replay timing and ordering integration tests pass, or have an explicitly approved policy
     change.
-13. The old sorter/schedule/callback orchestration can be **deleted** rather than retained as a
+15. The old sorter/schedule/callback orchestration can be **deleted** rather than retained as a
     fallback inside the new path.
-14. Executor inventory shows no new replayer thread pool, and affinity tests show each actor and its
+16. Executor inventory shows no new replayer thread pool, and affinity tests show each actor and its
     transactions remain on one existing Netty event loop.
 
-Criterion 13 is the real gate. A migration that leaves the old orchestration reachable has added a
+Criterion 15 is the real gate. A migration that leaves the old orchestration reachable has added a
 second way to be wrong rather than removing the first.
 
 ---
