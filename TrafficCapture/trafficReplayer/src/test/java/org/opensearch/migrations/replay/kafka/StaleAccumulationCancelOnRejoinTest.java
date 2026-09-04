@@ -235,8 +235,8 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
             Assertions.assertEquals(CONN_ID, connectionCloseConnIds.get(0),
                 "the close must target the mid-flight connection on the round-tripped partition");
 
-            // The in-flight request's response future must be completed exactly once so the
-            // OnlineRadixSorter can drain.
+            // The in-flight request's response future must settle exactly once so its transaction
+            // can reach a terminal source outcome.
             Assertions.assertEquals(1, responsesCompleted.get(),
                 "fireAccumulationsCallbacksAndClose must complete the in-flight request's "
                     + "finishedAccumulatingResponseFuture exactly once");

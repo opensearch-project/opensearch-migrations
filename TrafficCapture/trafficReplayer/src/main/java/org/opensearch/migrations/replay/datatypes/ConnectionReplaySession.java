@@ -1,14 +1,8 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import java.util.Collections;
-import java.util.Set;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.utils.OnlineRadixSorter;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
@@ -16,7 +10,6 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
 import lombok.Setter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -36,11 +29,9 @@ public class ConnectionReplaySession {
      * EventLoop so that we can route all calls for this object into that loop/thread.
      */
     public final EventLoop eventLoop;
-    public final OnlineRadixSorter scheduleSequencer;
     @Getter
     private final BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
-    public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
     /** Generation of the Kafka consumer assignment when this session was created. */
@@ -52,40 +43,8 @@ public class ConnectionReplaySession {
      */
     @Getter
     @Setter
-    private volatile boolean cancelled = false;
+    private boolean cancelled;
 
-    /**
-     * Tracks standalone transformation-phase timer futures created by
-     * {@code RequestSenderOrchestrator.scheduleWork}. These timers are NOT part of
-     * {@link #schedule} (intentionally, for out-of-order transformation), so
-     * {@link TimeToResponseFulfillmentFutureMap#drainWithCancellation} does not reach them.
-     * Entries are self-cleaning: each future removes itself on completion.
-     */
-    private final Set<CompletableFuture<Void>> pendingTransformationTimers =
-        Collections.newSetFromMap(new ConcurrentHashMap<>());
-
-    public void addPendingTransformationTimer(CompletableFuture<Void> future) {
-        pendingTransformationTimers.add(future);
-    }
-
-    public void removePendingTransformationTimer(CompletableFuture<Void> future) {
-        pendingTransformationTimers.remove(future);
-    }
-
-    public boolean hasPendingTransformationTimers() {
-        return !pendingTransformationTimers.isEmpty();
-    }
-
-    public void drainTransformationTimers(CancellationException cause) {
-        var iterator = pendingTransformationTimers.iterator();
-        while (iterator.hasNext()) {
-            var f = iterator.next();
-            iterator.remove();
-            f.completeExceptionally(cause);
-        }
-    }
-
-    @SneakyThrows
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
@@ -94,7 +53,6 @@ public class ConnectionReplaySession {
         this(eventLoop, channelKeyContext, channelFutureFutureFactory, 0);
     }
 
-    @SneakyThrows
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
@@ -103,8 +61,6 @@ public class ConnectionReplaySession {
     ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
-        this.scheduleSequencer = new OnlineRadixSorter(0);
-        this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
         this.generation = generation;
     }
@@ -142,11 +98,4 @@ public class ConnectionReplaySession {
         return trigger;
     }
 
-    public boolean hasWorkRemaining() {
-        return !scheduleSequencer.isEmpty() || schedule.hasPendingTransmissions();
-    }
-
-    public long calculateSizeSlowly() {
-        return (long) schedule.timeToRunnableMap.size() + scheduleSequencer.size();
-    }
 }

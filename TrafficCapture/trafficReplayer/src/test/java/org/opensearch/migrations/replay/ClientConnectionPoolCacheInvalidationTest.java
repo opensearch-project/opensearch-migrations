@@ -13,10 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/**
- * Verifies that ClientConnectionPool.closeConnection() uses the correct composite Key for cache invalidation,
- * and that scheduleClose() invalidates the cache immediately (before the Netty close completes).
- */
+/** Verifies generation-scoped session caching and actor-owned invalidation. */
 @Slf4j
 public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTest {
 
@@ -27,44 +24,16 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         return (LoadingCache<?, ?>) f.get(pool);
     }
 
-    @Test
-    @SneakyThrows
-    void closeConnection_evictsCacheEntry() {
-        // Dummy channel creator — never actually called since we don't send requests
-        var pool = new ClientConnectionPool(
-            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "dummy"),
-            "test-pool",
-            1
-        );
-
-        try {
-            var reqCtx = rootContext.getTestConnectionRequestContext("conn-A", 0);
-            var channelKeyCtx = reqCtx.getChannelKeyContext();
-
-            // Put an entry in the cache
-            pool.getCachedSession(channelKeyCtx, 0);
-            Assertions.assertEquals(1, getCache(pool).size(), "cache should have 1 entry after getCachedSession");
-
-            // Close the connection — this should evict the cache entry
-            pool.closeConnection(channelKeyCtx, 0);
-
-            // Cache entry is properly evicted because invalidate() uses the correct Key type
-            Assertions.assertEquals(0, getCache(pool).size(),
-                "cache entry should be evicted after closeConnection()");
-        } finally {
-            pool.shutdownNow().get();
-        }
-    }
-
     /**
-     * Verifies that scheduleClose() keeps the cache entry alive until the close actually runs,
+     * Verifies that actor close keeps the cache entry alive until the close actually runs,
      * so that in-flight response futures can complete on the same session.
      * Immediate invalidation caused deadlocks: new requests got a new session, leaving
      * finishedAccumulatingResponseFuture on the old session permanently incomplete.
      */
     @Test
     @SneakyThrows
-    void scheduleClose_cacheRemainsUntilCloseCompletes() throws Exception {        var pool = new ClientConnectionPool(
+    void actorClose_cacheRemainsUntilCloseCompletes() throws Exception {
+        var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool",
             1
@@ -82,7 +51,7 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             pool.getCachedSession(channelKeyCtx, 0);
             Assertions.assertEquals(1, getCache(pool).size());
 
-            var closeFuture = orchestrator.scheduleClose(channelKeyCtx, 0, 0, Instant.now());
+            var closeFuture = orchestrator.scheduleActorClose(channelKeyCtx, 0, Instant.now());
             closeFuture.get(Duration.ofSeconds(5));
 
             // After close completes, cache must be evicted
@@ -125,14 +94,13 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
     }
 
     /**
-     * Verifies that the generation from ITrafficStreamKey flows through scheduleRequest
-     * to getCachedSession, so new sessions are created with the correct generation.
+     * Verifies that a new source generation creates a session carrying that generation.
      * Session cancellation on generation bump is NOT done here (would cause deadlocks);
      * it is handled by the synthetic close path.
      */
     @Test
     @SneakyThrows
-    void scheduleRequest_generationFlowsThroughToSessionLookup() throws Exception {
+    void newGeneration_isCarriedByTheNewSession() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1

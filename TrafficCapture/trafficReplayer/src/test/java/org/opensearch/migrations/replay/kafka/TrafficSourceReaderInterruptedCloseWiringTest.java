@@ -49,7 +49,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
     /**
      * When a TrafficSourceReaderInterruptedClose fires for a connection in ACCUMULATING_WRITES
      * state, fireAccumulationsCallbacksAndClose must be called BEFORE onConnectionClose, so that
-     * finishedAccumulatingResponseFuture is completed and the OnlineRadixSorter can drain.
+     * finishedAccumulatingResponseFuture receives its terminal source outcome before actor abort.
      *
      * Before fix: accumulator bypasses state machine for synthetic closes — no
      * fireAccumulationsCallbacksAndClose is called, so onTrafficStreamsExpired/handleEndOfResponse
@@ -146,8 +146,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
                 .findFirst().orElse(null),
             "status must be TRAFFIC_SOURCE_READER_INTERRUPTED");
 
-        // The response callback (finishedAccumulatingResponseFuture completion) must fire
-        // before onConnectionClose so the sorter can drain
+        // The response callback must settle source state before connection abort is admitted.
         Assertions.assertTrue(responseAccumulatedCallbackFired.get(),
             "fireAccumulationsCallbacksAndClose must complete finishedAccumulatingResponseFuture " +
             "before onConnectionClose fires");

@@ -8,8 +8,11 @@ import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -64,7 +67,9 @@ class ReplayEngineQuiescentTest {
         var orchestrator = mock(RequestSenderOrchestrator.class);
         var engine = buildEngine(orchestrator);
 
-        when(orchestrator.scheduleRequest(any(), any(), any(), any(), any(), any()))
+        when(orchestrator.scheduleRequestLifecycle(
+            any(), any(), any(), any(), any(), any(), any(), any(), any()
+        ))
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
         var sourceRequestTime = Instant.parse("2025-01-01T00:00:00.100Z");
@@ -73,11 +78,28 @@ class ReplayEngineQuiescentTest {
 
         var ctx = buildMockCtx();
         var packets = new ByteBufList(Unpooled.wrappedBuffer("test".getBytes()));
-        engine.scheduleRequest(ctx, sourceRequestTime, sourceRequestTime.plusMillis(50),
-            1, ByteBufListProducer.of(packets), (reqBytes, arr, t) -> null, quiescentDuration);
+        var producer = ByteBufListProducer.of(packets);
+        engine.scheduleRequestLifecycle(
+            ctx,
+            sourceRequestTime,
+            sourceRequestTime.plusMillis(50),
+            new AsyncPermitPool(1, Runnable::run),
+            () -> TextTrackedFuture.completedFuture(
+                new TransformedOutputAndResult<>(
+                    producer,
+                    HttpRequestTransformationStatus.completed()
+                ),
+                () -> "prepared"
+            ),
+            ignored -> (reqBytes, arr, t) -> null,
+            ignored -> null,
+            quiescentDuration
+        );
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());
+        verify(orchestrator).scheduleRequestLifecycle(
+            any(), any(), any(), startCaptor.capture(), any(), any(), any(), any(), any()
+        );
 
         var effectiveStart = startCaptor.getValue();
         // The time-shifted start is sourceRequestTime (TimeShifter is identity in tests)
@@ -85,6 +107,7 @@ class ReplayEngineQuiescentTest {
         var expectedMinStart = sourceRequestTime.plus(quiescentDuration);
         Assertions.assertFalse(effectiveStart.isBefore(expectedMinStart),
             "Effective start time (" + effectiveStart + ") must be >= timeShiftedStart + quiescentDuration (" + expectedMinStart + ")");
+        producer.release();
     }
 
     /**
@@ -96,20 +119,39 @@ class ReplayEngineQuiescentTest {
         var orchestrator = mock(RequestSenderOrchestrator.class);
         var engine = buildEngine(orchestrator);
 
-        when(orchestrator.scheduleRequest(any(), any(), any(), any(), any(), any()))
+        when(orchestrator.scheduleRequestLifecycle(
+            any(), any(), any(), any(), any(), any(), any(), any(), any()
+        ))
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
         var sourceRequestTime = Instant.parse("2025-01-01T00:00:01Z");
 
         var ctx = buildMockCtx();
         var packets = new ByteBufList(Unpooled.wrappedBuffer("test".getBytes()));
+        var producer = ByteBufListProducer.of(packets);
 
         // No quiescentUntil — normal timing
-        engine.scheduleRequest(ctx, sourceRequestTime, sourceRequestTime.plusMillis(50),
-            1, ByteBufListProducer.of(packets), (reqBytes, arr, t) -> null, null);
+        engine.scheduleRequestLifecycle(
+            ctx,
+            sourceRequestTime,
+            sourceRequestTime.plusMillis(50),
+            new AsyncPermitPool(1, Runnable::run),
+            () -> TextTrackedFuture.completedFuture(
+                new TransformedOutputAndResult<>(
+                    producer,
+                    HttpRequestTransformationStatus.completed()
+                ),
+                () -> "prepared"
+            ),
+            ignored -> (reqBytes, arr, t) -> null,
+            ignored -> null,
+            null
+        );
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());
+        verify(orchestrator).scheduleRequestLifecycle(
+            any(), any(), any(), startCaptor.capture(), any(), any(), any(), any(), any()
+        );
 
         var effectiveStart = startCaptor.getValue();
         // Without quiescentUntil, the start should be the normal time-shifted value (close to now + 1s)
@@ -117,5 +159,6 @@ class ReplayEngineQuiescentTest {
         Assertions.assertTrue(effectiveStart.isBefore(Instant.now().plusSeconds(5)),
             "Without quiescentUntil, start time should be the normal time-shifted value, not delayed. " +
             "Got " + effectiveStart);
+        producer.release();
     }
 }

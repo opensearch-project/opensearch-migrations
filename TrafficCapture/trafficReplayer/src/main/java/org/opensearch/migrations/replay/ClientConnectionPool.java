@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
@@ -115,65 +114,9 @@ public class ClientConnectionPool {
         return crs;
     }
 
-    public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
-        closeConnection(ctx, sessionNumber, ctx.getChannelKey().getSourceGeneration());
-    }
-
-    public void closeConnection(
-        IReplayContexts.IChannelKeyContext ctx,
-        int sessionNumber,
-        int sourceGeneration
-    ) {
-        var connId = ctx.getConnectionId();
-        log.atTrace().setMessage("closing connection for {}").addArgument(connId).log();
-        var key = getKey(connId, sessionNumber, sourceGeneration);
-        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(key);
-        if (connectionReplaySession != null) {
-            closeClientConnectionChannel(connectionReplaySession);
-            connectionId2ChannelCache.invalidate(key);
-        } else {
-            log.atTrace()
-                .setMessage("No ChannelFuture for {} in closeConnection.  " +
-                        "The connection may have already been closed")
-                .addArgument(ctx)
-                .log();
-        }
-    }
-
     /** Closes the Netty channel for a session without touching the cache. */
     public TrackedFuture<String, Channel> closeChannelForSession(ConnectionReplaySession session) {
         return closeClientConnectionChannel(session);
-    }
-
-    /**
-     * Immediately cancels a connection: marks the session cancelled (prevents reconnection),
-     * completes all pending scheduleFuture entries exceptionally so the OnlineRadixSorter
-     * drains fast (releasing requestWorkTracker entries and TrafficStreamLimiter slots),
-     * then closes the channel and invalidates the cache.
-     */
-    public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
-        var connId = ctx.getConnectionId();
-        var sourceGeneration = ctx.getChannelKey().getSourceGeneration();
-        var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber, sourceGeneration));
-        if (session != null) {
-            session.setCancelled(true);
-            var cancellationCause = new java.util.concurrent.CancellationException(
-                "Session cancelled due to partition reassignment for " + connId);
-            // Drain transformation-phase timers immediately (thread-safe, no event-loop needed).
-            session.drainTransformationTimers(cancellationCause);
-            // Drain send-schedule and sorter slots on the event loop thread.
-            if (session.eventLoop.isShuttingDown()) {
-                session.schedule.drainWithCancellation(cancellationCause);
-                session.scheduleSequencer.cancelAllWork(cancellationCause);
-            } else {
-                session.eventLoop.submit(() -> {
-                    session.schedule.drainWithCancellation(cancellationCause);
-                    session.scheduleSequencer.cancelAllWork(cancellationCause);
-                });
-            }
-            closeConnection(ctx, sessionNumber, sourceGeneration);
-        }
-        return TextTrackedFuture.completedFuture(null, () -> "cancelled");
     }
 
     public void invalidateSession(String connectionId, int sessionNumber) {
@@ -198,15 +141,11 @@ public class ClientConnectionPool {
         return session
             .getChannelFutureInAnyState() // this could throw, especially if the even loop has begun to shut down
             .thenCompose(channelFuture -> {
-                var cancellationCause = new CancellationException(
-                    "Connection closed with pending work for " + session.getChannelKeyContext()
-                );
                 if (channelFuture == null) {
                     log.atTrace().setMessage("Couldn't find the channel for {} to close it.  " +
                             "It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
-                    cancelPendingWork(session, cancellationCause);
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
                 log.atTrace().setMessage("closing channel {} ({})...")
@@ -221,24 +160,8 @@ public class ClientConnectionPool {
                             .addArgument(session::getChannelKeyContext)
                             .addArgument(v)
                             .log();
-                        if (session.hasWorkRemaining()) {
-                            log.atWarn().setMessage("Work items are still remaining for this connection session " +
-                                    "(last associated with connection={}). {} requests that were enqueued won't be run")
-                                .addArgument(session::getChannelKeyContext)
-                                .addArgument(session::calculateSizeSlowly)
-                                .log();
-                        }
-                        cancelPendingWork(session, cancellationCause);
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");
-    }
-
-    private static void cancelPendingWork(
-        @NonNull ConnectionReplaySession session,
-        @NonNull CancellationException cancellationCause
-    ) {
-        session.schedule.drainWithCancellation(cancellationCause);
-        session.scheduleSequencer.cancelAllWork(cancellationCause);
     }
 }

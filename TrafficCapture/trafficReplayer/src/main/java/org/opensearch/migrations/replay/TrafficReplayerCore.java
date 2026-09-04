@@ -671,36 +671,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
     }
 
-    /**
-     * @see RequestTransformerAndSender#transformAndSendRequest
-     */
-    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
-        ReplayEngine replayEngine,
-        HttpMessageAndTimestamp request,
-        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx,
-        Duration quiescentDurationForRequest
-    ) {
-        return transformAndSendRequest(
-            inputRequestTransformerFactory,
-            replayEngine,
-            finishedAccumulatingResponseFuture,
-            ctx,
-            request.getFirstPacketTimestamp(),
-            request.getLastPacketTimestamp(),
-            request.packetBytes::stream,
-            quiescentDurationForRequest);
-    }
-
-    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
-        ReplayEngine replayEngine,
-        HttpMessageAndTimestamp request,
-        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx
-    ) {
-        return transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, null);
-    }
-
     @Override
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,

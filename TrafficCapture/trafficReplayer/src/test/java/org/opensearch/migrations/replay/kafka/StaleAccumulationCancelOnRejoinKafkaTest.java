@@ -227,11 +227,10 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                     + "so replayEngine.cancelConnection runs and the channel session is marked "
                     + "cancelled. Statuses=" + connectionCloseStatuses);
 
-            // The in-flight request's response future was completed by the synthetic close
-            // (drains the OnlineRadixSorter).
+            // The synthetic close settles the in-flight request's source-side future.
             Assertions.assertTrue(responsesCompleted.get() >= 1,
                 "fireAccumulationsCallbacksAndClose must complete the in-flight request's "
-                    + "finishedAccumulatingResponseFuture so the sorter can drain. completed="
+                    + "finishedAccumulatingResponseFuture so its transaction can settle. completed="
                     + responsesCompleted.get());
         } finally {
             producer.close();

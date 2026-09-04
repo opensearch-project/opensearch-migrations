@@ -26,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static org.opensearch.migrations.replay.ActorRequestTestUtils.schedulePreparedRequest;
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
@@ -98,8 +99,9 @@ public class OpenSearchDefaultRetryE2ETest {
             new TransformedOutputAndResult<>(packetProducer, HttpRequestTransformationStatus.skipped()),
             TextTrackedFuture.completedFuture(
                 new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes), () -> "static rrp"));
-        return senderOrchestrator.scheduleRequest(
-            requestContext.getReplayerRequestKey(), requestContext,
+        return schedulePreparedRequest(
+            senderOrchestrator,
+            requestContext,
             Instant.now().plus(Duration.ofMillis(10)), Duration.ofMillis(1),
             packetProducer, retryVisitor)
             .whenComplete((v, t) -> {
