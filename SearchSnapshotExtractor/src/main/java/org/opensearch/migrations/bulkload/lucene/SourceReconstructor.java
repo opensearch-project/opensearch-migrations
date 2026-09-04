@@ -603,6 +603,21 @@ public class SourceReconstructor {
                     continue;
                 }
                 for (String targetField : rankedTargets) {
+                    // A fan-in target (more than one source field copies into it) holds the UNION
+                    // of its contributors' values with no record of who contributed what, so
+                    // attributing it back to a single source field fabricates data. This matters
+                    // most when the source field has its own Lucene footprint: tiers 1-4 already
+                    // failed for it, which means this document genuinely had no value there, and
+                    // writing the union in would invent exact, term-queryable values — every
+                    // sibling the document left empty inherits the values of the siblings it did
+                    // populate. Source fields with no footprint of their own keep the existing
+                    // best-effort (lossy) recovery — their absence from tiers 1-4 says nothing
+                    // about whether the document had a value.
+                    if (mappingContext.getCopyToSources(targetField).size() > 1
+                            && sourceMapping != null
+                            && (sourceMapping.indexed() || sourceMapping.docValues())) {
+                        continue;
+                    }
                     ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
                             mappingContext, termIndex);
                     if (recovered == null) {
