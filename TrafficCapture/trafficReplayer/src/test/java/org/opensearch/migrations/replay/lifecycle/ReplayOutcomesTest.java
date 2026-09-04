@@ -64,6 +64,11 @@ class ReplayOutcomesTest {
             }
 
             @Override
+            public String onInconclusive(ReplayOutcomes.SourceOutcome.Inconclusive outcome) {
+                return outcome.reason();
+            }
+
+            @Override
             public String onInterrupted(ReplayOutcomes.SourceOutcome.Interrupted outcome) {
                 return outcome.reason();
             }

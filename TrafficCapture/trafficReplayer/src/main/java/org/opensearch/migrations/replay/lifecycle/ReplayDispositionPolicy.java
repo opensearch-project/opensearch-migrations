@@ -50,6 +50,11 @@ public final class ReplayDispositionPolicy {
             }
 
             @Override
+            public Boolean onInconclusive(SourceOutcome.Inconclusive outcome) {
+                return targetRequiresEvidence(target);
+            }
+
+            @Override
             public Boolean onInterrupted(SourceOutcome.Interrupted outcome) {
                 return false;
             }
@@ -79,6 +84,11 @@ public final class ReplayDispositionPolicy {
             }
 
             @Override
+            public Decision onInconclusive(SourceOutcome.Inconclusive outcome) {
+                return retain("source-inconclusive", true);
+            }
+
+            @Override
             public Decision onInterrupted(SourceOutcome.Interrupted outcome) {
                 return retain("source-interrupted", false);
             }
@@ -105,6 +115,11 @@ public final class ReplayDispositionPolicy {
             @Override
             public Decision onCapturedClose(SourceOutcome.CapturedClose outcome) {
                 return retainForTargetWithoutEvidence(target);
+            }
+
+            @Override
+            public Decision onInconclusive(SourceOutcome.Inconclusive outcome) {
+                return retain("source-inconclusive", true);
             }
 
             @Override

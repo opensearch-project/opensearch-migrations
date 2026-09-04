@@ -12,9 +12,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -106,6 +108,43 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 }
             });
             Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
+        }
+    }
+
+    @Test
+    void asyncCommitCompletesOnlyAfterKafkaAcknowledgesIt() throws Exception {
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
+            });
+            var key = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0)
+                .getKey();
+            Assertions.assertEquals(
+                new KafkaRecordId(TEST_TOPIC_NAME, 0, 0, 1),
+                source.recordIdFor(key)
+            );
+            key.getTrafficStreamsContext().close();
+
+            var acknowledgement = source.commitTrafficStreamAsync(key);
+            Assertions.assertFalse(acknowledgement.isDone());
+
+            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS);
+
+            acknowledgement.get(5, TimeUnit.SECONDS);
+            Assertions.assertEquals(1L, mockConsumer.committed(
+                Collections.singleton(new TopicPartition(TEST_TOPIC_NAME, 0))
+            ).get(new TopicPartition(TEST_TOPIC_NAME, 0)).offset());
         }
     }
 

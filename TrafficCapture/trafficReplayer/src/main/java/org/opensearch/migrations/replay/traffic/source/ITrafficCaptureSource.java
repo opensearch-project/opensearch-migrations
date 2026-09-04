@@ -5,9 +5,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TrafficStreamRecordId;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 public interface ITrafficCaptureSource extends AutoCloseable {
@@ -24,6 +28,23 @@ public interface ITrafficCaptureSource extends AutoCloseable {
     );
 
     CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
+
+    default CompletionStage<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
+        try {
+            commitTrafficStream(trafficStreamKey);
+            return CompletableFuture.completedFuture(null);
+        } catch (IOException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    default RecordId recordIdFor(ITrafficStreamKey trafficStreamKey) {
+        return new TrafficStreamRecordId(
+            new SourceConnectionKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId()),
+            trafficStreamKey.getTrafficStreamIndex(),
+            trafficStreamKey.getSourceGeneration()
+        );
+    }
 
     /**
      * Called by the accumulator when a connection's lifecycle is complete — either because a

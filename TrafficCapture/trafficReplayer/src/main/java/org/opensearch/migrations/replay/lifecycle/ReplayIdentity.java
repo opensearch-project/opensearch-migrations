@@ -30,12 +30,14 @@ public final class ReplayIdentity {
         }
     }
 
+    public sealed interface RecordId permits KafkaRecordId, TrafficStreamRecordId, SourceControlRecordId {}
+
     public record KafkaRecordId(
         @NonNull String topic,
         int partition,
         long offset,
         int sourceGeneration
-    ) {
+    ) implements RecordId {
         public KafkaRecordId {
             if (partition < 0) {
                 throw new IllegalArgumentException("partition must not be negative");
@@ -43,6 +45,33 @@ public final class ReplayIdentity {
             if (offset < 0) {
                 throw new IllegalArgumentException("offset must not be negative");
             }
+            if (sourceGeneration < 0) {
+                throw new IllegalArgumentException("sourceGeneration must not be negative");
+            }
+        }
+    }
+
+    public record TrafficStreamRecordId(
+        @NonNull SourceConnectionKey connection,
+        int trafficStreamIndex,
+        int sourceGeneration
+    ) implements RecordId {
+        public TrafficStreamRecordId {
+            if (trafficStreamIndex < 0) {
+                throw new IllegalArgumentException("trafficStreamIndex must not be negative");
+            }
+            if (sourceGeneration < 0) {
+                throw new IllegalArgumentException("sourceGeneration must not be negative");
+            }
+        }
+    }
+
+    public record SourceControlRecordId(
+        @NonNull SourceConnectionKey connection,
+        @NonNull String controlType,
+        int sourceGeneration
+    ) implements RecordId {
+        public SourceControlRecordId {
             if (sourceGeneration < 0) {
                 throw new IllegalArgumentException("sourceGeneration must not be negative");
             }

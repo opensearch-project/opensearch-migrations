@@ -28,6 +28,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.lifecycle.ActorMailbox;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
 import org.opensearch.migrations.replay.lifecycle.NettyEventLoopActorMailbox;
@@ -222,6 +223,7 @@ public class RequestSenderOrchestrator {
     private final class ActorRuntime {
         private final ConnectionSessionKey key;
         private final ConnectionReplaySession session;
+        private final ActorMailbox mailbox;
         private final ConnectionActor<PreparedActorRequest, Object> actor;
 
         private ActorRuntime(
@@ -234,9 +236,10 @@ public class RequestSenderOrchestrator {
                 key.sessionNumber(),
                 key.sourceGeneration()
             );
+            this.mailbox = new NettyEventLoopActorMailbox(session.eventLoop);
             this.actor = new ConnectionActor<>(
                 key,
-                new NettyEventLoopActorMailbox(session.eventLoop),
+                mailbox,
                 new RuntimeTargetExchange(this)
             );
             actor.termination().whenComplete((outcome, failure) -> {
@@ -657,6 +660,20 @@ public class RequestSenderOrchestrator {
             () -> "waiting for the connection actor to settle " + requestId
         );
     }
+
+    public TransactionRuntime transactionRuntime(
+        @NonNull UniqueReplayerRequestKey requestKey,
+        @NonNull IReplayContexts.IChannelKeyContext channelContext
+    ) {
+        var requestId = toReplayRequestId(requestKey);
+        var runtime = actorRuntime(requestId.session(), channelContext);
+        return new TransactionRuntime(requestId, runtime.mailbox);
+    }
+
+    public record TransactionRuntime(
+        @NonNull ReplayRequestId requestId,
+        @NonNull ActorMailbox mailbox
+    ) {}
 
     public TrackedFuture<String, Void> scheduleActorClose(
         @NonNull IReplayContexts.IChannelKeyContext context,

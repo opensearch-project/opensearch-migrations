@@ -60,7 +60,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
         RequestResponsePacketPair sourcePair,
         TransformedTargetRequestAndResponseList transformedTargetRequestAndResponseList,
-        Exception topLevelErrorCause
+        Throwable topLevelErrorCause
     ) {
         this.context = tupleHandlingContext;
         this.sourcePair = sourcePair;

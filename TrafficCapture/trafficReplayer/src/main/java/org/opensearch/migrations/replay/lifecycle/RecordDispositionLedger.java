@@ -6,13 +6,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 
 import lombok.NonNull;
 
 public final class RecordDispositionLedger {
     public interface RecordHandle {
-        KafkaRecordId id();
+        RecordId id();
 
         void closeContext();
 
@@ -20,16 +20,19 @@ public final class RecordDispositionLedger {
     }
 
     public record DispositionResult(
-        @NonNull KafkaRecordId recordId,
+        @NonNull RecordId recordId,
         @NonNull String owner,
         @NonNull RecordDisposition disposition
     ) {}
 
     private record Obligation(RecordHandle handle, String owner) {}
 
+    private record PendingDisposition(Obligation obligation, DispositionResult result) {}
+
     private final Executor ownerExecutor;
-    private final Map<KafkaRecordId, Obligation> unresolved = new LinkedHashMap<>();
-    private final Map<KafkaRecordId, DispositionResult> resolved = new LinkedHashMap<>();
+    private final Map<RecordId, Obligation> unresolved = new LinkedHashMap<>();
+    private final Map<RecordId, PendingDisposition> pending = new LinkedHashMap<>();
+    private final Map<RecordId, DispositionResult> resolved = new LinkedHashMap<>();
 
     public RecordDispositionLedger(@NonNull Executor ownerExecutor) {
         this.ownerExecutor = ownerExecutor;
@@ -38,7 +41,9 @@ public final class RecordDispositionLedger {
     public CompletionStage<Void> register(@NonNull RecordHandle handle, @NonNull String owner) {
         var completion = new CompletableFuture<Void>();
         ownerExecutor.execute(() -> {
-            if (unresolved.containsKey(handle.id()) || resolved.containsKey(handle.id())) {
+            if (unresolved.containsKey(handle.id())
+                || pending.containsKey(handle.id())
+                || resolved.containsKey(handle.id())) {
                 completion.completeExceptionally(
                     new IllegalStateException("record obligation already exists for " + handle.id())
                 );
@@ -51,7 +56,7 @@ public final class RecordDispositionLedger {
     }
 
     public CompletionStage<Void> transfer(
-        @NonNull KafkaRecordId id,
+        @NonNull RecordId id,
         @NonNull String expectedOwner,
         @NonNull String newOwner
     ) {
@@ -67,7 +72,7 @@ public final class RecordDispositionLedger {
     }
 
     public CompletionStage<DispositionResult> dispose(
-        @NonNull KafkaRecordId id,
+        @NonNull RecordId id,
         @NonNull String owner,
         @NonNull RecordDisposition disposition
     ) {
@@ -80,7 +85,7 @@ public final class RecordDispositionLedger {
 
             unresolved.remove(id);
             var result = new DispositionResult(id, owner, disposition);
-            resolved.put(id, result);
+            pending.put(id, new PendingDisposition(obligation, result));
             try {
                 obligation.handle().closeContext();
             } catch (Throwable t) {
@@ -89,9 +94,17 @@ public final class RecordDispositionLedger {
             }
 
             if (disposition instanceof RecordDisposition.Commit) {
-                obligation.handle().commit().whenComplete((ignored, failure) ->
+                CompletionStage<Void> commitStage;
+                try {
+                    commitStage = obligation.handle().commit();
+                } catch (Throwable t) {
+                    completion.completeExceptionally(t);
+                    return;
+                }
+                commitStage.whenComplete((ignored, failure) ->
                     ownerExecutor.execute(() -> {
                         if (failure == null) {
+                            resolve(id, result);
                             completion.complete(result);
                         } else {
                             completion.completeExceptionally(failure);
@@ -99,27 +112,35 @@ public final class RecordDispositionLedger {
                     })
                 );
             } else {
+                resolve(id, result);
                 completion.complete(result);
             }
         });
         return completion.minimalCompletionStage();
     }
 
-    public CompletionStage<Map<KafkaRecordId, String>> unresolvedObligations() {
-        var completion = new CompletableFuture<Map<KafkaRecordId, String>>();
+    public CompletionStage<Map<RecordId, String>> unresolvedObligations() {
+        var completion = new CompletableFuture<Map<RecordId, String>>();
         ownerExecutor.execute(() -> {
-            var snapshot = new LinkedHashMap<KafkaRecordId, String>();
+            var snapshot = new LinkedHashMap<RecordId, String>();
             unresolved.forEach((id, obligation) -> snapshot.put(id, obligation.owner()));
+            pending.forEach((id, disposition) -> snapshot.put(id, disposition.obligation().owner()));
             completion.complete(Map.copyOf(snapshot));
         });
         return completion.minimalCompletionStage();
     }
 
     private <T> Obligation requireOwnedObligation(
-        KafkaRecordId id,
+        RecordId id,
         String expectedOwner,
         CompletableFuture<T> completion
     ) {
+        if (pending.containsKey(id)) {
+            completion.completeExceptionally(
+                new IllegalStateException("record disposition is awaiting acknowledgement: " + id)
+            );
+            return null;
+        }
         if (resolved.containsKey(id)) {
             completion.completeExceptionally(new IllegalStateException("record was already disposed: " + id));
             return null;
@@ -138,5 +159,10 @@ public final class RecordDispositionLedger {
             return null;
         }
         return obligation;
+    }
+
+    private void resolve(RecordId id, DispositionResult result) {
+        pending.remove(id);
+        resolved.put(id, result);
     }
 }

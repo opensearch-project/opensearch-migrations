@@ -9,7 +9,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy.Decision;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
@@ -48,7 +48,7 @@ public final class ReplayTransaction<R> {
     private final EvidenceWriter<R> evidenceWriter;
     private final ReplayDispositionPolicy dispositionPolicy;
     private final RecordDispositionLedger dispositionLedger;
-    private final List<KafkaRecordId> recordIds;
+    private final List<RecordId> recordIds;
     private final Deque<AutoCloseable> ownedResources = new ArrayDeque<>();
     private final CompletionGate<TransactionOutcome> completion = new CompletionGate<>();
     private SourceOutcome sourceOutcome;
@@ -63,7 +63,7 @@ public final class ReplayTransaction<R> {
         @NonNull EvidenceWriter<R> evidenceWriter,
         @NonNull ReplayDispositionPolicy dispositionPolicy,
         @NonNull RecordDispositionLedger dispositionLedger,
-        @NonNull Collection<KafkaRecordId> recordIds,
+        @NonNull Collection<? extends RecordId> recordIds,
         @NonNull Collection<? extends AutoCloseable> resources
     ) {
         this.requestId = requestId;
@@ -72,7 +72,7 @@ public final class ReplayTransaction<R> {
         this.evidenceWriter = evidenceWriter;
         this.dispositionPolicy = dispositionPolicy;
         this.dispositionLedger = dispositionLedger;
-        this.recordIds = List.copyOf(recordIds);
+        this.recordIds = new ArrayList<>(recordIds);
         resources.forEach(ownedResources::addLast);
     }
 
@@ -81,6 +81,13 @@ public final class ReplayTransaction<R> {
     }
 
     public CompletionStage<Void> settleSource(@NonNull SourceOutcome outcome) {
+        return settleSource(outcome, List.of());
+    }
+
+    public CompletionStage<Void> settleSource(
+        @NonNull SourceOutcome outcome,
+        @NonNull Collection<? extends RecordId> additionalRecordIds
+    ) {
         var acknowledgement = new CompletableFuture<Void>();
         mailbox.execute(() -> {
             if (sourceOutcome != null) {
@@ -88,6 +95,15 @@ public final class ReplayTransaction<R> {
                     new IllegalStateException("source outcome already settled for " + requestId)
                 );
                 return;
+            }
+            for (var recordId : additionalRecordIds) {
+                if (recordIds.contains(recordId)) {
+                    acknowledgement.completeExceptionally(
+                        new IllegalStateException("record already belongs to " + requestId + ": " + recordId)
+                    );
+                    return;
+                }
+                recordIds.add(recordId);
             }
             sourceOutcome = outcome;
             acknowledgement.complete(null);
@@ -114,6 +130,26 @@ public final class ReplayTransaction<R> {
 
     public CompletionStage<TransactionOutcome> completion() {
         return completion.stage();
+    }
+
+    public CompletionStage<Void> fail(@NonNull Throwable cause) {
+        var acknowledgement = new CompletableFuture<Void>();
+        mailbox.execute(() -> {
+            if (state == State.TERMINATED) {
+                acknowledgement.completeExceptionally(
+                    new IllegalStateException("transaction already terminated for " + requestId)
+                );
+                return;
+            }
+            state = State.TERMINATED;
+            var releaseFailure = releaseResources();
+            if (releaseFailure != null) {
+                cause.addSuppressed(releaseFailure);
+            }
+            completion.completeExceptionally(cause);
+            acknowledgement.complete(null);
+        });
+        return acknowledgement.minimalCompletionStage();
     }
 
     private void tryAdvance() {
@@ -170,6 +206,9 @@ public final class ReplayTransaction<R> {
 
     private void finish(Decision decision, Throwable dispositionFailure) {
         assertInMailbox();
+        if (state == State.TERMINATED) {
+            return;
+        }
         Throwable releaseFailure = releaseResources();
         state = State.TERMINATED;
         if (dispositionFailure != null) {

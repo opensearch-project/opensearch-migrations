@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
@@ -217,6 +218,21 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             readGate.release();
         }
         return commitResult;
+    }
+
+    @Override
+    public CompletionStage<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
+        var completion = underlyingSource.commitTrafficStreamAsync(trafficStreamKey);
+        readGate.drainPermits();
+        readGate.release();
+        return completion;
+    }
+
+    @Override
+    public org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId recordIdFor(
+        ITrafficStreamKey trafficStreamKey
+    ) {
+        return underlyingSource.recordIdFor(trafficStreamKey);
     }
 
     @Override

@@ -261,6 +261,15 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 
+    public RequestSenderOrchestrator.TransactionRuntime transactionRuntime(
+        IReplayContexts.IReplayerHttpTransactionContext context
+    ) {
+        return networkSendOrchestrator.transactionRuntime(
+            context.getReplayerRequestKey(),
+            context.getChannelKeyContext()
+        );
+    }
+
     /**
      * Immediately cancels a connection due to a traffic source reader interruption.
      * Unlike {@link #closeConnection}, this bypasses the OnlineRadixSorter and time-shifting —
