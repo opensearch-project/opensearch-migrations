@@ -23,7 +23,6 @@ import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -669,8 +668,7 @@ public class TrafficReplayer {
                 params,
                 Duration.ofSeconds(params.lookaheadTimeSeconds)
             );
-            var authTransformer = buildAuthTransformerFactory(params);
-            var trafficStreamLimiter = new TrafficStreamLimiter(params.maxConcurrentRequests)
+            var authTransformer = buildAuthTransformerFactory(params)
         ) {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
@@ -707,7 +705,7 @@ public class TrafficReplayer {
                     params.allowInsecureConnections,
                     params.numClientThreads
                 ),
-                trafficStreamLimiter,
+                params.maxConcurrentRequests,
                 orderedRequestTracker,
                 errorClassifier
             );

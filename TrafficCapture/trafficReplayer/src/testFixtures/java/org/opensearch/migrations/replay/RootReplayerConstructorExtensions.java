@@ -7,7 +7,6 @@ import java.time.Duration;
 
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -57,7 +56,7 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
             authTransformerFactory,
             () -> jsonTransformer,
             clientConnectionPool,
-            new TrafficStreamLimiter(maxConcurrentOutstandingRequests),
+            maxConcurrentOutstandingRequests,
             workTracker
         );
     }

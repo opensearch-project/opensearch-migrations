@@ -32,7 +32,6 @@ import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceC
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamCursorKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -97,7 +96,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     numSendingThreads,
                     targetConnectionPoolName
                 ),
-                new TrafficStreamLimiter(maxConcurrentOutstandingRequests),
+                maxConcurrentOutstandingRequests,
                 new OrderedWorkerTracker<>()
             );
             this.maxWaitTime = maxWaitTime;

@@ -21,12 +21,16 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -53,7 +57,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
-    protected final TrafficStreamLimiter liveTrafficStreamLimiter;
+    protected final int maxConcurrentRequests;
     protected final AtomicInteger successfulRequestCount;
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
@@ -63,13 +67,15 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
     protected final AtomicBoolean stopReadingRef;
     protected final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
+    protected final AtomicReference<AsyncPermitPool> permitPoolRef;
+    protected final AtomicReference<ReplayIntakeMailbox> intakeMailboxRef;
 
     protected TrafficReplayerCore(
         IRootReplayerContext context,
         URI serverUri,
         IAuthTransformerFactory authTransformer,
         Supplier<IJsonTransformer> jsonTransformerSupplier,
-        TrafficStreamLimiter trafficStreamLimiter,
+        int maxConcurrentRequests,
         IWorkTracker<Void> requestWorkTracker,
         IRetryVisitorFactory retryVisitorFactory
     ) {
@@ -85,13 +91,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         if (serverUri.getScheme() == null) {
             throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
         }
-        this.liveTrafficStreamLimiter = trafficStreamLimiter;
+        if (maxConcurrentRequests <= 0) {
+            throw new IllegalArgumentException("maxConcurrentRequests must be positive");
+        }
+        this.maxConcurrentRequests = maxConcurrentRequests;
         this.requestWorkTracker = requestWorkTracker;
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformerSupplier, authTransformer);
         successfulRequestCount = new AtomicInteger();
         exceptionRequestCount = new AtomicInteger();
         nextChunkFutureRef = new AtomicReference<>();
         stopReadingRef = new AtomicBoolean();
+        permitPoolRef = new AtomicReference<>();
+        intakeMailboxRef = new AtomicReference<>();
     }
 
     protected abstract CompletableFuture<Void> shutdown(Error error);
@@ -107,6 +118,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private ITrafficCaptureSource trafficCaptureSource;
         /** How long to delay the first request on a resumed connection. Configurable via CLI. */
         private final Duration quiescentDuration;
+        private final AsyncPermitPool permitPool;
 
         @Override
         public Consumer<RequestResponsePacketPair> onRequestReceived(
@@ -162,21 +174,25 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             UniqueReplayerRequestKey requestKey,
             TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
             Duration quiescentDurationForRequest) {
-            var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
-                () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
+            var permitFuture = new TextTrackedFuture<AsyncPermitPool.Permit>(
+                permitPool.acquire(toReplayRequestId(requestKey), 1).toCompletableFuture(),
+                () -> "waiting for an asynchronous replay permit for " + ctx
             );
-            log.atDebug().setMessage("[{}] Queuing request to TrafficStreamLimiter, permits={}")
+            log.atDebug().setMessage("[{}] Queuing request for an asynchronous replay permit")
                 .addArgument(ctx::getConnectionId)
-                .addArgument(liveTrafficStreamLimiter.liveTrafficStreamCostGate::availablePermits)
                 .log();
-            var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
-            var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),
+            var httpSentRequestFuture = permitFuture.thenCompose(
+                    permit -> transformAndSendRequest(
+                        replayEngine,
+                        request,
+                        finishedAccumulatingResponseFuture,
+                        ctx,
+                        quiescentDurationForRequest
+                    ).whenComplete(
+                        (value, failure) -> permit.close(),
+                        () -> "releasing the asynchronous replay permit"
+                    ),
                     () -> "Waiting to get response from target"
-                )
-                .whenComplete(
-                    (v, t) -> liveTrafficStreamLimiter.doneProcessing(wi),
-                    () -> "releasing work item for the traffic limiter"
                 );
             httpSentRequestFuture.future.whenComplete(
                 (v, t) -> log.atTrace()
@@ -184,6 +200,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .addArgument(requestKey).addArgument(v)
                     .log());
             return httpSentRequestFuture;
+        }
+
+        private ReplayRequestId toReplayRequestId(UniqueReplayerRequestKey requestKey) {
+            var streamKey = requestKey.trafficStreamKey;
+            return new ReplayRequestId(
+                new ConnectionSessionKey(
+                    new SourceConnectionKey(streamKey.getNodeId(), streamKey.getConnectionId()),
+                    requestKey.sourceRequestIndexSessionIdentifier,
+                    streamKey.getSourceGeneration()
+                ),
+                requestKey.getReplayerRequestIndex()
+            );
         }
 
         /**
@@ -567,49 +595,67 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ITrafficCaptureSource trafficChunkStream,
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator
     ) throws InterruptedException {
-        while (true) {
-            log.trace("Reading next chunk from TrafficStream supplier");
-            if (stopReadingRef.get()) {
-                break;
-            }
-            this.nextChunkFutureRef.set(
-                trafficChunkStream.readNextTrafficStreamChunk(topLevelContext::createReadChunkContext)
-            );
-            List<ITrafficStreamWithKey> trafficStreams = null;
-            try {
-                trafficStreams = this.nextChunkFutureRef.get().get();
-            } catch (ExecutionException ex) {
-                if (ex.getCause() instanceof EOFException) {
-                    log.atWarn().setCause(ex.getCause())
-                        .setMessage("Got an EOF on the stream.  " + "Done reading traffic streams.").log();
+        pullCaptureFromSourceToAccumulator(
+            trafficChunkStream,
+            trafficToHttpTransactionAccumulator,
+            new ReplayIntakeMailbox()
+        );
+    }
+
+    @SneakyThrows
+    public void pullCaptureFromSourceToAccumulator(
+        ITrafficCaptureSource trafficChunkStream,
+        CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator,
+        ReplayIntakeMailbox intakeMailbox
+    ) throws InterruptedException {
+        try {
+            while (true) {
+                log.trace("Reading next chunk from TrafficStream supplier");
+                if (stopReadingRef.get()) {
                     break;
-                } else {
-                    log.atWarn().setCause(ex).setMessage("Done reading traffic streams due to exception.").log();
-                    throw ex.getCause();
                 }
-            }
-            if (log.isDebugEnabled()) {
-                Optional.of(
-                    trafficStreams.stream()
-                        .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
-                        .collect(Collectors.joining(";"))
-                )
-                    .filter(s -> !s.isEmpty())
-                    .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
-            }
-            log.atDebug().setMessage("Read {} traffic stream(s) from source")
-                .addArgument(trafficStreams::size)
-                .log();
-            var batchStart = System.nanoTime();
-            trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
-            var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
-            if (batchDurationMs > 5_000) {
-                log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
-                        "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
-                    .addArgument(batchDurationMs)
+                this.nextChunkFutureRef.set(
+                    trafficChunkStream.readNextTrafficStreamChunk(topLevelContext::createReadChunkContext)
+                );
+                List<ITrafficStreamWithKey> trafficStreams;
+                try {
+                    trafficStreams = intakeMailbox.await(this.nextChunkFutureRef.get());
+                } catch (ExecutionException ex) {
+                    if (ex.getCause() instanceof EOFException) {
+                        log.atWarn().setCause(ex.getCause())
+                            .setMessage("Got an EOF on the stream.  " + "Done reading traffic streams.").log();
+                        break;
+                    } else {
+                        log.atWarn().setCause(ex).setMessage("Done reading traffic streams due to exception.").log();
+                        throw ex.getCause();
+                    }
+                }
+                if (log.isDebugEnabled()) {
+                    Optional.of(
+                        trafficStreams.stream()
+                            .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
+                            .collect(Collectors.joining(";"))
+                    )
+                        .filter(s -> !s.isEmpty())
+                        .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
+                }
+                log.atDebug().setMessage("Read {} traffic stream(s) from source")
                     .addArgument(trafficStreams::size)
                     .log();
+                var batchStart = System.nanoTime();
+                trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
+                intakeMailbox.runUntilIdle();
+                var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
+                if (batchDurationMs > 5_000) {
+                    log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
+                            "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
+                        .addArgument(batchDurationMs)
+                        .addArgument(trafficStreams::size)
+                        .log();
+                }
             }
+        } finally {
+            intakeMailbox.runUntilIdle();
         }
     }
 
