@@ -126,7 +126,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                 )
             );
         }
-        var record = new ProducerRecord<>(
+        var producerRecord = new ProducerRecord<>(
             topic,
             partition,
             null,
@@ -135,7 +135,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             recordHeaders(TRAFFIC_RECORD_TYPE)
         );
         return enqueueSend(
-            record,
+            producerRecord,
             finalRecord ? () -> livenessRegistry.remove(connectionId, partition) : () -> {}
         );
     }
@@ -153,7 +153,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                 );
                 for (var chunk : chunks) {
                     var key = nodeId + ":liveness:" + partition;
-                    var record = new ProducerRecord<>(
+                    var producerRecord = new ProducerRecord<>(
                         topic,
                         partition,
                         null,
@@ -161,7 +161,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                         chunk.toByteArray(),
                         recordHeaders(LIVENESS_RECORD_TYPE)
                     );
-                    sends.add(sendFromPublisherThread(record, () -> {}));
+                    sends.add(sendFromPublisherThread(producerRecord, () -> {}));
                 }
             }
             CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
@@ -239,11 +239,11 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     }
 
     private CompletableFuture<RecordMetadata> enqueueSend(
-        ProducerRecord<String, byte[]> record,
+        ProducerRecord<String, byte[]> producerRecord,
         Runnable acknowledgedAction
     ) {
         var result = new CompletableFuture<RecordMetadata>();
-        executeOnPublisher(() -> sendFromPublisherThread(record, acknowledgedAction)
+        executeOnPublisher(() -> sendFromPublisherThread(producerRecord, acknowledgedAction)
             .whenComplete((metadata, throwable) -> {
                 if (throwable == null) {
                     result.complete(metadata);
@@ -255,7 +255,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     }
 
     private CompletableFuture<RecordMetadata> sendFromPublisherThread(
-        ProducerRecord<String, byte[]> record,
+        ProducerRecord<String, byte[]> producerRecord,
         Runnable acknowledgedAction
     ) {
         var result = new CompletableFuture<RecordMetadata>();
@@ -265,7 +265,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             return result;
         }
         try {
-            producer.send(record, (metadata, exception) -> {
+            producer.send(producerRecord, (metadata, exception) -> {
                 if (exception != null) {
                     failPublisher(exception);
                     result.completeExceptionally(exception);
@@ -275,13 +275,13 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                     try {
                         acknowledgedAction.run();
                         result.complete(metadata);
-                    } catch (Throwable t) {
+                    } catch (Exception t) {
                         failPublisher(t);
                         result.completeExceptionally(t);
                     }
                 }, result);
             });
-        } catch (Throwable t) {
+        } catch (Exception t) {
             failPublisher(t);
             result.completeExceptionally(t);
         }
@@ -306,7 +306,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                 } else {
                     try {
                         action.run();
-                    } catch (Throwable t) {
+                    } catch (Exception t) {
                         failPublisher(t);
                         result.completeExceptionally(t);
                     }
@@ -376,7 +376,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                     try {
                         producer.flush();
                         flush.complete(null);
-                    } catch (Throwable t) {
+                    } catch (Exception t) {
                         flush.completeExceptionally(t);
                     }
                 });

@@ -523,7 +523,6 @@ public class CaptureProxy {
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
-        final var removeStrings = new ArrayList<String>(headers.size());
         final var addBufs = new ArrayList<ByteBuf>(headers.size());
 
         for (var kvp : headers) {
@@ -531,7 +530,6 @@ public class CaptureProxy {
                 Unpooled.unreleasableBuffer(
                     Unpooled.wrappedBuffer(
                         (kvp.getKey() + ": " + kvp.getValue()).getBytes(StandardCharsets.UTF_8))));
-            removeStrings.add(kvp.getKey() + ":");
         }
 
         return new ProxyChannelInitializer<>(
@@ -552,10 +550,9 @@ public class CaptureProxy {
                         new HeaderAdderHandler(addBufs.get(i++)));
                 }
 
-                i = 0;
                 for (var kvp : headers) {
                     pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
-                        new HeaderRemoverHandler(removeStrings.get(i++)));
+                        new HeaderRemoverHandler(kvp.getKey() + ":"));
                 }
             }
         };

@@ -61,7 +61,7 @@ public final class ReplayIntakeMailbox implements Executor {
     private void dispatchQueued(Runnable command) {
         try {
             dispatch(command);
-        } catch (Throwable t) {
+        } catch (Exception t) {
             if (queuedFailure == null) {
                 queuedFailure = t;
             } else {

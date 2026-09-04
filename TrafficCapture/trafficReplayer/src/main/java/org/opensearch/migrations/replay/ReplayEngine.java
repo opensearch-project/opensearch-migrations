@@ -209,7 +209,7 @@ public class ReplayEngine {
     /** Emit a periodic heartbeat log summarizing the replay engine state. */
     public void logHeartbeat() {
         var sb = new StringBuilder();
-        var progress = progressController.snapshot();
+        var progress = progressController.currentSnapshot();
         sb.append("tasksOutstanding=").append(progress.outstandingWork());
         sb.append(" assignedPartitions=").append(progress.assignedPartitions());
         if (!progress.settledWatermark().equals(Instant.MIN)) {

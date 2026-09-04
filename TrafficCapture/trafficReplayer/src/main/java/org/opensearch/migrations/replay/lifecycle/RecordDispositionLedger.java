@@ -9,6 +9,8 @@ import java.util.concurrent.Executor;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 
 import lombok.NonNull;
+import lombok.Value;
+import lombok.experimental.Accessors;
 
 public final class RecordDispositionLedger {
     public interface RecordHandle {
@@ -19,15 +21,43 @@ public final class RecordDispositionLedger {
         CompletionStage<Void> commit();
     }
 
-    public record DispositionResult(
-        @NonNull RecordId recordId,
-        @NonNull String owner,
-        @NonNull RecordDisposition disposition
-    ) {}
+    @Value
+    @Accessors(fluent = true)
+    public static class DispositionResult {
+        @NonNull RecordId recordId;
+        @NonNull String owner;
+        @NonNull RecordDisposition disposition;
+    }
 
-    private record Obligation(RecordHandle handle, String owner) {}
+    private static final class Obligation {
+        private final RecordHandle handle;
+        private final String owner;
 
-    private record PendingDisposition(Obligation obligation, DispositionResult result) {}
+        private Obligation(RecordHandle handle, String owner) {
+            this.handle = handle;
+            this.owner = owner;
+        }
+
+        private RecordHandle handle() {
+            return handle;
+        }
+
+        private String owner() {
+            return owner;
+        }
+    }
+
+    private static final class PendingDisposition {
+        private final Obligation obligation;
+
+        private PendingDisposition(Obligation obligation) {
+            this.obligation = obligation;
+        }
+
+        private Obligation obligation() {
+            return obligation;
+        }
+    }
 
     private final Executor ownerExecutor;
     private final Map<RecordId, Obligation> unresolved = new LinkedHashMap<>();
@@ -77,46 +107,69 @@ public final class RecordDispositionLedger {
         @NonNull RecordDisposition disposition
     ) {
         var completion = new CompletableFuture<DispositionResult>();
-        ownerExecutor.execute(() -> {
-            var obligation = requireOwnedObligation(id, owner, completion);
-            if (obligation == null) {
-                return;
-            }
-
-            unresolved.remove(id);
-            var result = new DispositionResult(id, owner, disposition);
-            pending.put(id, new PendingDisposition(obligation, result));
-            try {
-                obligation.handle().closeContext();
-            } catch (Throwable t) {
-                completion.completeExceptionally(t);
-                return;
-            }
-
-            if (disposition instanceof RecordDisposition.Commit) {
-                CompletionStage<Void> commitStage;
-                try {
-                    commitStage = obligation.handle().commit();
-                } catch (Throwable t) {
-                    completion.completeExceptionally(t);
-                    return;
-                }
-                commitStage.whenComplete((ignored, failure) ->
-                    ownerExecutor.execute(() -> {
-                        if (failure == null) {
-                            resolve(id, result);
-                            completion.complete(result);
-                        } else {
-                            completion.completeExceptionally(failure);
-                        }
-                    })
-                );
-            } else {
-                resolve(id, result);
-                completion.complete(result);
-            }
-        });
+        ownerExecutor.execute(() -> disposeOnOwner(id, owner, disposition, completion));
         return completion.minimalCompletionStage();
+    }
+
+    private void disposeOnOwner(
+        RecordId id,
+        String owner,
+        RecordDisposition disposition,
+        CompletableFuture<DispositionResult> completion
+    ) {
+        var obligation = requireOwnedObligation(id, owner, completion);
+        if (obligation == null) {
+            return;
+        }
+
+        unresolved.remove(id);
+        var result = new DispositionResult(id, owner, disposition);
+        pending.put(id, new PendingDisposition(obligation));
+        try {
+            obligation.handle().closeContext();
+        } catch (Exception e) {
+            completion.completeExceptionally(e);
+            return;
+        }
+
+        if (disposition instanceof RecordDisposition.Commit) {
+            commit(id, obligation, result, completion);
+        } else {
+            resolve(id, result);
+            completion.complete(result);
+        }
+    }
+
+    private void commit(
+        RecordId id,
+        Obligation obligation,
+        DispositionResult result,
+        CompletableFuture<DispositionResult> completion
+    ) {
+        final CompletionStage<Void> commitStage;
+        try {
+            commitStage = obligation.handle().commit();
+        } catch (Exception e) {
+            completion.completeExceptionally(e);
+            return;
+        }
+        commitStage.whenComplete((ignored, failure) ->
+            ownerExecutor.execute(() -> completeCommit(id, result, failure, completion))
+        );
+    }
+
+    private void completeCommit(
+        RecordId id,
+        DispositionResult result,
+        Throwable failure,
+        CompletableFuture<DispositionResult> completion
+    ) {
+        if (failure == null) {
+            resolve(id, result);
+            completion.complete(result);
+        } else {
+            completion.completeExceptionally(failure);
+        }
     }
 
     public CompletionStage<Map<RecordId, String>> unresolvedObligations() {

@@ -289,13 +289,13 @@ public class RequestSenderOrchestrator {
             );
             CompletableFuture<TargetOutcome<Object>> normalized = exchange.future.handle((value, failure) -> {
                 if (failure == null) {
-                    return new TargetOutcome.Succeeded<Object>(value);
+                    return new TargetOutcome.Succeeded<>(value);
                 }
                 var cause = unwrap(failure);
                 if (cause instanceof CancellationException cancellation) {
-                    return new TargetOutcome.Cancelled<Object>(cancellation);
+                    return new TargetOutcome.Cancelled<>(cancellation);
                 }
-                return new TargetOutcome.Failed<Object>(cause);
+                return new TargetOutcome.Failed<>(cause);
             });
             activeExchange = normalized;
             normalized.whenComplete((value, failure) -> {
@@ -310,17 +310,160 @@ public class RequestSenderOrchestrator {
 
         @Override
         public CompletionStage<Void> close() {
-            return closeRuntimeChannel(runtime);
+            return closeRuntimeChannel();
         }
 
         @Override
         public CompletionStage<Void> abort(CancellationException cause) {
             runtime.session.setCancelled(true);
             var exchangeToJoin = activeExchange;
-            return closeRuntimeChannel(runtime).thenCompose(ignored ->
+            return closeRuntimeChannel().thenCompose(ignored ->
                 exchangeToJoin == null
                     ? CompletableFuture.completedFuture(null)
                     : exchangeToJoin.handle((outcome, failure) -> null)
+            );
+        }
+
+        private CompletionStage<Void> closeRuntimeChannel() {
+            return clientConnectionPool.closeChannelForSession(runtime.session).future.handle((channel, failure) -> {
+                if (failure != null) {
+                    throw new CompletionException(unwrap(failure));
+                }
+                return null;
+            });
+        }
+
+        private <T> TrackedFuture<String, T> sendRequestWithRetries(
+            Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
+            EventLoop eventLoop,
+            ByteBufListProducer packetProducer,
+            Instant referenceStartTime,
+            Duration nextRetryDelay,
+            Duration interval,
+            RetryVisitor<T> visitor
+        ) {
+            if (eventLoop.isShuttingDown()) {
+                return TextTrackedFuture.failedFuture(
+                    new IllegalStateException("EventLoop is shutting down"),
+                    () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop"
+                );
+            }
+            var attempt = packetProducer.newAttempt();
+            var byteBufList = attempt.packets();
+            return sendPackets(
+                senderSupplier.get(),
+                eventLoop,
+                byteBufList.streamUnretained().iterator(),
+                referenceStartTime,
+                interval,
+                new AtomicInteger()
+            )
+                .getDeferredFutureThroughHandle((response, t) -> {
+                        try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
+                            return visitor.visit(requestBytesHolder.get(), response, t);
+                        }
+                    },
+                    () -> "checking response to determine if the request should be retried")
+                .whenComplete((response, failure) -> attempt.close(), () -> "releasing the request attempt payload")
+                .getDeferredFutureThroughHandle((dtr, t) -> retryIfNeeded(
+                    dtr,
+                    t,
+                    senderSupplier,
+                    eventLoop,
+                    packetProducer,
+                    referenceStartTime,
+                    nextRetryDelay,
+                    interval,
+                    visitor
+                ), () -> "determining if the response must be retried or if it should be returned now");
+        }
+
+        private <T> TrackedFuture<String, T> retryIfNeeded(
+            DeterminedTransformedResponse<T> result,
+            Throwable failure,
+            Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
+            EventLoop eventLoop,
+            ByteBufListProducer packetProducer,
+            Instant referenceStartTime,
+            Duration nextRetryDelay,
+            Duration interval,
+            RetryVisitor<T> visitor
+        ) {
+            if (failure != null) {
+                return TextTrackedFuture.failedFuture(failure, () -> "failed future");
+            }
+            if (result.directive != RetryDirective.RETRY) {
+                return TextTrackedFuture.completedFuture(
+                    result.value,
+                    () -> "done retrying and returning received response"
+                );
+            }
+
+            var computedStartTime = referenceStartTime.plus(nextRetryDelay);
+            var currentTime = Instant.now();
+            var newStartTime = computedStartTime.isBefore(currentTime)
+                ? currentTime.plus(nextRetryDelay)
+                : computedStartTime;
+            log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
+            var schedulingDelay = Duration.between(Instant.now(), newStartTime);
+            return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, schedulingDelay)
+                .thenCompose(
+                    ignored -> sendRequestWithRetries(
+                        senderSupplier,
+                        eventLoop,
+                        packetProducer,
+                        newStartTime,
+                        doubleRetryDelayCapped(nextRetryDelay),
+                        interval,
+                        visitor
+                    ),
+                    () -> "retrying request with delay of " + schedulingDelay
+                );
+        }
+
+        private Duration doubleRetryDelayCapped(Duration delay) {
+            return Duration.ofMillis(Math.min(delay.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
+        }
+
+        private TrackedFuture<String, AggregatedRawResponse> sendPackets(
+            IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
+            EventLoop eventLoop,
+            Iterator<ByteBuf> iterator,
+            Instant referenceStartAt,
+            Duration interval,
+            AtomicInteger requestPacketCounter
+        ) {
+            final var oldCounter = requestPacketCounter.getAndIncrement();
+            log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
+            assert iterator.hasNext() : "Should not have called this with no items to send";
+
+            var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
+            if (iterator.hasNext()) {
+                return consumeFuture.thenCompose(
+                    ignored -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(
+                            eventLoop,
+                            Duration.between(
+                                Instant.now(),
+                                referenceStartAt.plus(interval.multipliedBy(requestPacketCounter.get()))
+                            )
+                        )
+                        .thenCompose(
+                            value -> sendPackets(
+                                packetReceiver,
+                                eventLoop,
+                                iterator,
+                                referenceStartAt,
+                                interval,
+                                requestPacketCounter
+                            ),
+                            () -> "sending next packet"
+                        ),
+                    () -> "recursing, once ready"
+                );
+            }
+            return consumeFuture.getDeferredFutureThroughHandle(
+                (value, failure) -> packetReceiver.finalizeRequest(),
+                () -> "finalizing, once ready"
             );
         }
     }
@@ -409,6 +552,10 @@ public class RequestSenderOrchestrator {
             } catch (Throwable t) {
                 runtime.session.eventLoop.execute(() -> failPreparation(t));
             }
+        }
+
+        private Duration getDelayFromNowMs(Instant target) {
+            return Duration.ofMillis(Math.max(0, Duration.between(Instant.now(), target).toMillis()));
         }
 
         private void onPermitSettled(AsyncPermitPool.Permit acquiredPermit, Throwable failure) {
@@ -763,18 +910,6 @@ public class RequestSenderOrchestrator {
         );
     }
 
-    private Instant now() {
-        return Instant.now();
-    }
-
-    private Duration getDelayFromNowMs(Instant to) {
-        return Duration.ofMillis(Math.max(0, Duration.between(now(), to).toMillis()));
-    }
-
-    private Duration doubleRetryDelayCapped(Duration d) {
-        return Duration.ofMillis(Math.min(d.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
-    }
-
     private ActorRuntime actorRuntime(
         ConnectionSessionKey key,
         IReplayContexts.IChannelKeyContext channelContext
@@ -805,15 +940,6 @@ public class RequestSenderOrchestrator {
             sessionNumber,
             context.getChannelKey().getSourceGeneration()
         );
-    }
-
-    private CompletionStage<Void> closeRuntimeChannel(ActorRuntime runtime) {
-        return clientConnectionPool.closeChannelForSession(runtime.session).future.handle((channel, failure) -> {
-            if (failure != null) {
-                throw new CompletionException(unwrap(failure));
-            }
-            return null;
-        });
     }
 
     private static CompletionStage<Void> mapSessionOutcome(SessionOutcome outcome) {
@@ -865,93 +991,4 @@ public class RequestSenderOrchestrator {
         return current;
     }
 
-    private <T> TrackedFuture<String, T>
-    sendRequestWithRetries(Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
-                           EventLoop eventLoop,
-                           ByteBufListProducer packetProducer,
-                           Instant referenceStartTime,
-                           Duration nextRetryDelay,
-                           Duration interval,
-                           RetryVisitor<T> visitor)
-    {
-        if (eventLoop.isShuttingDown()) {
-            return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
-                () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
-        }
-        var attempt = packetProducer.newAttempt();
-        var byteBufList = attempt.packets();
-        return sendPackets(
-            senderSupplier.get(),
-            eventLoop,
-            byteBufList.streamUnretained().iterator(),
-            referenceStartTime,
-            interval,
-            new AtomicInteger()
-        )
-            .getDeferredFutureThroughHandle((response, t) -> {
-                    try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
-                        return visitor.visit(requestBytesHolder.get(), response, t);
-                    }
-                },
-                () -> "checking response to determine if the request should be retried")
-            .whenComplete((response, failure) -> attempt.close(), () -> "releasing the request attempt payload")
-            .getDeferredFutureThroughHandle((dtr,t) -> {
-                if (t != null) {
-                    return TextTrackedFuture.failedFuture(t, () -> "failed future");
-                }
-                if (dtr.directive == RetryDirective.RETRY) {
-                    var computedStartTime = referenceStartTime.plus(nextRetryDelay);
-                    // Ensure retry is not scheduled in the past to prevent tight retry loops
-                    // that monopolize event loop threads when referenceStartTime is far in the past
-                    var now = now();
-                    var newStartTime = computedStartTime.isBefore(now)
-                        ? now.plus(nextRetryDelay)
-                        : computedStartTime;
-                    log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
-                    var schedulingDelay = Duration.between(now(), newStartTime);
-                    return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
-                        eventLoop, schedulingDelay)
-                        .thenCompose(
-                            v -> sendRequestWithRetries(senderSupplier, eventLoop, packetProducer, newStartTime,
-                                doubleRetryDelayCapped(nextRetryDelay), interval, visitor),
-                            () -> "retrying request with delay of " + schedulingDelay);
-                } else {
-                    return TextTrackedFuture.completedFuture(dtr.value,
-                        () -> "done retrying and returning received response");
-                }
-            }, () -> "determining if the response must be retried or if it should be returned now");
-    }
-
-    private TrackedFuture<String, AggregatedRawResponse> sendPackets(
-        IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
-        EventLoop eventLoop,
-        Iterator<ByteBuf> iterator,
-        Instant referenceStartAt,
-        Duration interval,
-        AtomicInteger requestPacketCounter
-    ) {
-        final var oldCounter = requestPacketCounter.getAndIncrement();
-        log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
-        assert iterator.hasNext() : "Should not have called this with no items to send";
-
-        var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
-        if (iterator.hasNext()) {
-            return consumeFuture.thenCompose(
-                tf -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(
-                        eventLoop,
-                        Duration.between(now(), referenceStartAt.plus(interval.multipliedBy(requestPacketCounter.get())))
-                    )
-                    .thenCompose(
-                        v -> sendPackets(packetReceiver, eventLoop, iterator, referenceStartAt, interval, requestPacketCounter),
-                        () -> "sending next packet"
-                    ),
-                () -> "recursing, once ready"
-            );
-        } else {
-            return consumeFuture.getDeferredFutureThroughHandle(
-                (v, t) -> packetReceiver.finalizeRequest(),
-                () -> "finalizing, once ready"
-            );
-        }
-    }
 }

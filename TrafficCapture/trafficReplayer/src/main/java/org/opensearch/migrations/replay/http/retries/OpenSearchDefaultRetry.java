@@ -26,6 +26,8 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.Value;
+import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -51,10 +53,12 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         ONLY_NON_RETRYABLE_ERRORS
     }
 
-    public record BulkResponseInspection(
-        BulkResponseAnalysis analysis,
-        Set<String> errorTypes
-    ) {}
+    @Value
+    @Accessors(fluent = true)
+    public static class BulkResponseInspection {
+        BulkResponseAnalysis analysis;
+        Set<String> errorTypes;
+    }
 
     /**
      * Streaming JSON analyzer that processes bulk response chunks as they arrive.

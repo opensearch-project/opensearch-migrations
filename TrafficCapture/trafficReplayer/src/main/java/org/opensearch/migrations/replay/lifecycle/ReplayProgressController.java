@@ -17,6 +17,8 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 
 import lombok.NonNull;
+import lombok.Value;
+import lombok.experimental.Accessors;
 
 /**
  * Owns generation-scoped work ledgers and publishes the minimum safe source-time watermark.
@@ -33,11 +35,13 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         void close();
     }
 
-    public record Snapshot(
-        int assignedPartitions,
-        int outstandingWork,
-        @NonNull Instant settledWatermark
-    ) {}
+    @Value
+    @Accessors(fluent = true)
+    public static class Snapshot {
+        int assignedPartitions;
+        int outstandingWork;
+        @NonNull Instant settledWatermark;
+    }
 
     private static final class WorkEntry {
         private final ReplayWorkId workId;
@@ -165,28 +169,8 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         return outstandingSnapshot.get() > 0;
     }
 
-    public Snapshot snapshot() {
+    public Snapshot currentSnapshot() {
         return snapshot.get();
-    }
-
-    private void settle(SourcePartitionKey partition, WorkEntry entry) {
-        var progress = partitions.get(partition);
-        if (progress == null) {
-            throw new IllegalStateException("source partition was retired before work settled: " + partition);
-        }
-        if (entry.settled) {
-            return;
-        }
-        entry.settled = true;
-        entry.completion.complete(null);
-        outstandingSnapshot.decrementAndGet();
-        while (!progress.admitted.isEmpty() && progress.admitted.peekFirst().settled) {
-            progress.settledWatermark = progress.admitted.removeFirst().sourceTime;
-        }
-        if (progress.revoking && progress.admitted.isEmpty()) {
-            partitions.remove(partition);
-        }
-        publish();
     }
 
     private void publish() {
@@ -234,8 +218,28 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         @Override
         public void close() {
             if (closeRequested.compareAndSet(false, true)) {
-                ownerExecutor.execute(() -> settle(partition, entry));
+                ownerExecutor.execute(this::settle);
             }
+        }
+
+        private void settle() {
+            var progress = partitions.get(partition);
+            if (progress == null) {
+                throw new IllegalStateException("source partition was retired before work settled: " + partition);
+            }
+            if (entry.settled) {
+                return;
+            }
+            entry.settled = true;
+            entry.completion.complete(null);
+            outstandingSnapshot.decrementAndGet();
+            while (!progress.admitted.isEmpty() && progress.admitted.peekFirst().settled) {
+                progress.settledWatermark = progress.admitted.removeFirst().sourceTime;
+            }
+            if (progress.revoking && progress.admitted.isEmpty()) {
+                partitions.remove(partition);
+            }
+            publish();
         }
     }
 }
