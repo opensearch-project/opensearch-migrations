@@ -37,10 +37,39 @@ public final class ReplayIdentity {
         }
     }
 
-    public record ReplayRequestId(@NonNull ConnectionSessionKey session, int requestIndex) {
+    public record SourcePartitionKey(
+        @NonNull String sourceId,
+        int partition,
+        int sourceGeneration
+    ) {
+        public SourcePartitionKey {
+            if (partition < 0) {
+                throw new IllegalArgumentException("partition must not be negative");
+            }
+            if (sourceGeneration < 0) {
+                throw new IllegalArgumentException("sourceGeneration must not be negative");
+            }
+        }
+    }
+
+    public sealed interface ReplayWorkId permits ReplayRequestId, ReplaySessionWorkId {}
+
+    public record ReplayRequestId(@NonNull ConnectionSessionKey session, int requestIndex) implements ReplayWorkId {
         public ReplayRequestId {
             if (requestIndex < 0) {
                 throw new IllegalArgumentException("requestIndex must not be negative");
+            }
+        }
+    }
+
+    public record ReplaySessionWorkId(
+        @NonNull ConnectionSessionKey session,
+        int interactionIndex,
+        @NonNull String operation
+    ) implements ReplayWorkId {
+        public ReplaySessionWorkId {
+            if (interactionIndex < 0) {
+                throw new IllegalArgumentException("interactionIndex must not be negative");
             }
         }
     }

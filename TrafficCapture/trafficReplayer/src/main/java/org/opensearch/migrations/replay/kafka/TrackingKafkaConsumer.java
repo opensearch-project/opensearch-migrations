@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
@@ -22,6 +23,8 @@ import java.util.stream.StreamSupport;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
@@ -122,7 +125,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      *  events for any active connections on them. Always invoked at the OLD generation (before
      *  any subsequent onPartitionsAssigned bumps it), matching the generation stamped on the
      *  source termination obligations. */
-    private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
+    private java.util.function.Consumer<Collection<SourcePartitionKey>> onPartitionsTrulyLostCallback = ignored -> {};
+    private SourcePartitionLifecycleListener sourcePartitionLifecycleListener =
+        SourcePartitionLifecycleListener.NO_OP;
     /** Set true by {@link #cleanupRevokedPartitions} when a rebalance callback fires inline
      *  during {@code kafkaConsumer.poll()}; cleared at the top of each poll. The post-poll
      *  recovery in {@link #safePollWithSwallowedRuntimeExceptions} reads this to decide
@@ -156,8 +161,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return consumerConnectionGeneration.get();
     }
 
-    public void setOnPartitionsTrulyLostCallback(java.util.function.Consumer<Collection<Integer>> callback) {
+    public void setOnPartitionsTrulyLostCallback(
+        java.util.function.Consumer<Collection<SourcePartitionKey>> callback
+    ) {
         this.onPartitionsTrulyLostCallback = callback;
+    }
+
+    public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
+        this.sourcePartitionLifecycleListener = listener;
     }
 
     @Override
@@ -186,17 +197,22 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         // If we're inside poll(), flag the post-poll recovery so it can drop records and rewind.
         rebalanceDuringPoll.set(true);
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
-        var partitionNums = new ArrayList<Integer>(partitions.size());
+        var revokedPartitions = new ArrayList<SourcePartitionKey>(partitions.size());
         synchronized (commitDataLock) {
             if (attemptCommit) {
                 safeCommit(globalContext::createCommitContext);
             }
             partitions.forEach(p -> {
                 var tp = new TopicPartition(topic, p.partition());
+                var tracker = partitionToOffsetLifecycleTrackerMap.get(p.partition());
+                if (tracker != null) {
+                    revokedPartitions.add(
+                        new SourcePartitionKey(topic, p.partition(), tracker.consumerConnectionGeneration)
+                    );
+                }
                 nextSetOfCommitsMap.remove(tp);
                 nextSetOfKeysContextsBeingCommitted.remove(tp);
                 partitionToOffsetLifecycleTrackerMap.remove(p.partition());
-                partitionNums.add(p.partition());
             });
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
@@ -208,7 +224,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
-        onPartitionsTrulyLostCallback.accept(partitionNums);
+        var immutableRevokedPartitions = List.copyOf(revokedPartitions);
+        sourcePartitionLifecycleListener.onRevoked(immutableRevokedPartitions);
+        onPartitionsTrulyLostCallback.accept(immutableRevokedPartitions);
     }
 
     @Override
@@ -221,6 +239,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         // doesn't invalidate any pre-rebalance buffer; a round-trip is already tagged on the
         // revoke side.
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsAssigned(newPartitions);
+        List<SourcePartitionKey> assignedPartitions;
         synchronized (commitDataLock) {
             consumerConnectionGeneration.incrementAndGet();
             newPartitions.forEach(
@@ -229,12 +248,19 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                     x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get())
                 )
             );
+            assignedPartitions = newPartitions.stream()
+                .map(p -> {
+                    var tracker = partitionToOffsetLifecycleTrackerMap.get(p.partition());
+                    return new SourcePartitionKey(topic, p.partition(), tracker.consumerConnectionGeneration);
+                })
+                .toList();
             log.atInfo()
                 .setMessage("{} partitions added for {}")
                 .addArgument(this)
                 .addArgument(() -> newPartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
+        sourcePartitionLifecycleListener.onAssigned(assignedPartitions);
     }
 
     public void close() {

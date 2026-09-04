@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -48,7 +49,8 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         var testSource = new TestTrafficCaptureSource(rootContext, nStreamsToCreate);
 
         var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS));
-        blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
+        var readGate = new ReplayReadGate(Duration.ofMillis(BUFFER_MILLIS), blockingSource);
+        readGate.advanceTo(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i <= BUFFER_MILLIS + SHIFT; ++i) {
             var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
@@ -61,13 +63,13 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
             var blockedFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
             Assertions.assertFalse(blockedFuture.isDone(), "for i=" + i + " and coounter=" + testSource.counter.get());
             Assertions.assertEquals(i + BUFFER_MILLIS + SHIFT, testSource.counter.get());
-            blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i)));
+            readGate.advanceTo(sourceStartTime.plus(Duration.ofMillis(i)));
             log.atInfo().setMessage("after stopReadsPast blockingSource={}").addArgument(blockingSource).log();
             var completedFutureValue = blockedFuture.get(10000, TimeUnit.MILLISECONDS);
             lastTime = TrafficStreamUtils.getFirstTimestamp(completedFutureValue.get(0).getStream()).get();
         }
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate - SHIFT)), lastTime);
-        blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
+        readGate.advanceTo(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(
             ExecutionException.class,
             () -> blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext)

@@ -36,6 +36,8 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
@@ -186,8 +188,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         trackingKafkaConsumer.setOnPartitionsTrulyLostCallback(this::enqueueTrafficSourceReaderInterruptedClosesForPartitions);
     }
 
-    private void enqueueTrafficSourceReaderInterruptedClosesForPartitions(Collection<Integer> lostPartitions) {
-        for (int partition : lostPartitions) {
+    private void enqueueTrafficSourceReaderInterruptedClosesForPartitions(
+        Collection<SourcePartitionKey> lostPartitions
+    ) {
+        for (var lostPartition : lostPartitions) {
+            int partition = lostPartition.partition();
             var active = partitionToActiveConnections.remove(partition);
             if (active == null) continue;
             var batch = new ArrayList<TrafficSourceReaderInterruptedClose>();
@@ -199,11 +204,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
-                }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
+                }, ts, new PojoKafkaCommitOffsetData(lostPartition.sourceGeneration(), partition, -1));
                 var obligationKey = new SourceConnectionPartitionGenerationKey(
                     new SourceConnectionKey(connKey.nodeId, connKey.connectionId),
                     partition,
-                    trackingKafkaConsumer.getConsumerConnectionGeneration()
+                    lostPartition.sourceGeneration()
                 );
                 if (pendingSessionTerminationObligations.putIfAbsent(
                     obligationKey,
@@ -523,6 +528,23 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             kafkaRecord.getOffset(),
             kafkaRecord.getGeneration()
         );
+    }
+
+    @Override
+    public SourcePartitionKey sourcePartitionFor(ITrafficStreamKey trafficStreamKey) {
+        if (!(trafficStreamKey instanceof KafkaCommitOffsetData kafkaRecord)) {
+            return ISimpleTrafficCaptureSource.super.sourcePartitionFor(trafficStreamKey);
+        }
+        return new SourcePartitionKey(
+            trackingKafkaConsumer.topic,
+            kafkaRecord.getPartition(),
+            kafkaRecord.getGeneration()
+        );
+    }
+
+    @Override
+    public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
+        trackingKafkaConsumer.setSourcePartitionLifecycleListener(listener);
     }
 
     /**

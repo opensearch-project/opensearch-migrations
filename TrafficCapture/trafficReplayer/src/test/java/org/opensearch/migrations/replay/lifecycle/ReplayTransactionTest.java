@@ -3,6 +3,8 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -12,14 +14,70 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessi
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ReplayTransactionTest {
+    @Test
+    void progressTokenSettlesOnlyAfterTheWholeTransaction() {
+        var flowController = new RecordingFlowController();
+        var readGate = new ReplayReadGate(Duration.ofSeconds(30), flowController);
+        var progress = new ReplayProgressController(Runnable::run, readGate);
+        var partition = new SourcePartitionKey("topic", 0, 1);
+        progress.onAssigned(List.of(partition));
+        var progressToken = progress.admit(
+            partition,
+            request(),
+            Instant.ofEpochSecond(10)
+        ).toCompletableFuture().join();
+
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(0));
+        record.commitCompletion = new CompletableFuture<>();
+        var evidence = new CompletableFuture<EvidenceOutcome>();
+        register(ledger, record, request().toString());
+        var transaction = new ReplayTransaction<String>(
+            request(),
+            mailbox,
+            (id, source, target) -> evidence,
+            new ReplayDispositionPolicy(),
+            ledger,
+            List.of(record.id()),
+            List.of(progressToken)
+        );
+
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runUntilIdle();
+        progress.advanceIdlePartitions(Instant.ofEpochSecond(100));
+        Assertions.assertTrue(progress.isWorkOutstanding());
+        Assertions.assertEquals(Instant.ofEpochSecond(40), readGate.frontier());
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        mailbox.runUntilIdle();
+        Assertions.assertTrue(progress.isWorkOutstanding());
+
+        evidence.complete(new EvidenceOutcome.Durable("receipt"));
+        mailbox.runUntilIdle();
+        Assertions.assertTrue(progress.isWorkOutstanding());
+        Assertions.assertFalse(transaction.completion().toCompletableFuture().isDone());
+
+        record.commitCompletion.complete(null);
+        mailbox.runUntilIdle();
+
+        transaction.completion().toCompletableFuture().join();
+        Assertions.assertFalse(progress.isWorkOutstanding());
+        progressToken.settled().toCompletableFuture().join();
+        progress.advanceIdlePartitions(Instant.ofEpochSecond(100));
+        Assertions.assertEquals(Instant.ofEpochSecond(130), readGate.frontier());
+    }
+
     @Test
     void successfulTransactionWaitsForEvidenceAndCommitBeforeCompleting() {
         var mailbox = new QueuedMailbox();
@@ -233,6 +291,20 @@ class ReplayTransactionTest {
         @Override
         public void close() {
             closes++;
+        }
+    }
+
+    private static final class RecordingFlowController implements BufferedFlowController {
+        private final List<Instant> frontiers = new ArrayList<>();
+
+        @Override
+        public void stopReadsPast(Instant pointInTime) {
+            frontiers.add(pointInTime);
+        }
+
+        @Override
+        public Duration getBufferTimeWindow() {
+            return Duration.ZERO;
         }
     }
 

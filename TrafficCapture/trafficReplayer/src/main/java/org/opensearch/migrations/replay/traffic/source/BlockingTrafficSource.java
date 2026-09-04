@@ -18,6 +18,8 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -34,8 +36,8 @@ import org.slf4j.event.Level;
  * and for a high-watermark (stopReadingAt) that has been supplied externally.  If the last
  * timestamp was PAST the high-watermark, calls to read the next chunk (readNextTrafficStreamChunk)
  * will return a CompletableFuture that is blocking and won't be released until
- * somebody advances the high-watermark by calling stopReadsPast, which takes in a
- * point-in-time (in System time) and adds some buffer to it.
+ * somebody advances the high-watermark by calling stopReadsPast with an exact source-time
+ * frontier. ReplayReadGate owns the lookahead calculation.
  *
  * This class is designed to only be threadsafe for any number of callers to call stopReadsPast
  * and independently for one caller to call readNextTrafficStreamChunk() and to wait for the result
@@ -71,28 +73,26 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     /**
-     * This will move the current high-watermark on reads that we can do to the specified time PLUS the
-     * bufferTimeWindow (which was set in the c'tor)
+     * Moves the current high-watermark to the supplied exact source-time frontier.
      * @param pointInTime
      */
     @Override
     public void stopReadsPast(Instant pointInTime) {
-        var prospectiveBarrier = pointInTime.plus(bufferTimeWindow);
-        var newValue = Utils.setIfLater(stopReadingAtRef, prospectiveBarrier);
-        if (newValue.equals(prospectiveBarrier)) {
+        var prospectiveBarrier = pointInTime;
+        var previous = stopReadingAtRef.getAndSet(prospectiveBarrier);
+        if (prospectiveBarrier.isAfter(previous)) {
             log.atLevel(Level.TRACE)
                 .setMessage("Releasing the block on readNextTrafficStreamChunk and set the new stopReadingAtRef={}")
-                .addArgument(newValue)
+                .addArgument(prospectiveBarrier)
                 .log();
             // No reason to signal more than one reader. We don't support concurrent reads with the current contract
             readGate.drainPermits();
             readGate.release();
-        } else {
+        } else if (prospectiveBarrier.isBefore(previous)) {
             log.atTrace()
-                .setMessage("stopReadsPast: {} [buffer={}] didn't move the cursor because the value was already at {}")
+                .setMessage("Lowered the source read frontier from {} to {} after assignment changed")
+                .addArgument(previous)
                 .addArgument(pointInTime)
-                .addArgument(prospectiveBarrier)
-                .addArgument(newValue)
                 .log();
         }
     }
@@ -239,6 +239,16 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         ITrafficStreamKey trafficStreamKey
     ) {
         return underlyingSource.recordIdFor(trafficStreamKey);
+    }
+
+    @Override
+    public SourcePartitionKey sourcePartitionFor(ITrafficStreamKey trafficStreamKey) {
+        return underlyingSource.sourcePartitionFor(trafficStreamKey);
+    }
+
+    @Override
+    public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
+        underlyingSource.setSourcePartitionLifecycleListener(listener);
     }
 
     @Override

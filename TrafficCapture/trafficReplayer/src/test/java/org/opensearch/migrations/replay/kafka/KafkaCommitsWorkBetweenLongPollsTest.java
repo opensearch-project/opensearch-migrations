@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
@@ -59,16 +60,17 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
             Duration.ofMillis(DEFAULT_POLL_INTERVAL_MS / 3)
         );
         var blockingSource = new BlockingTrafficSource(kafkaSource, Duration.ofMinutes(5));
+        var readGate = new ReplayReadGate(Duration.ofMinutes(5), blockingSource);
         var kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
         var itemQueue = new LinkedBlockingQueue<List<ITrafficStreamWithKey>>();
-        blockingSource.stopReadsPast(Instant.EPOCH.plus(Duration.ofMillis(1)));
+        readGate.advanceTo(Instant.EPOCH.plus(Duration.ofMillis(1)));
 
         new Thread(() -> {
             try {
                 for (int i = 0; i < NUM_RUNS; ++i) {
                     sendNextMessage(kafkaProducer, i);
                     if (i > 0) {
-                        blockingSource.stopReadsPast(getTimeAtPoint(i - 1).plus(Duration.ofMillis(1)));
+                        readGate.advanceTo(getTimeAtPoint(i - 1).plus(Duration.ofMillis(1)));
                     }
                     log.info("PUTMSG\n\n");
                     var chunks = itemQueue.take();
@@ -77,7 +79,7 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
                     Thread.sleep(DEFAULT_POLL_INTERVAL_MS * 2);
                     log.info("committing " + ts.getKey());
                     blockingSource.commitTrafficStream(ts.getKey());
-                    blockingSource.stopReadsPast(getTimeAtPoint(i));
+                    readGate.advanceTo(getTimeAtPoint(i));
                 }
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);

@@ -27,11 +27,16 @@ import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
 import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplaySessionWorkId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -125,6 +130,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final AsyncPermitPool permitPool;
         private final ReplayDispositionPolicy dispositionPolicy;
         private final RecordDispositionLedger dispositionLedger;
+        private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new LinkedHashMap<>();
 
         TrafficReplayerAccumulationCallbacks(
             ReplayEngine replayEngine,
@@ -213,6 +219,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
 
             var runtime = replayEngine.transactionRuntime(ctx);
+            var partition = trafficCaptureSource.sourcePartitionFor(requestKey.trafficStreamKey);
+            sessionPartitions.put(runtime.requestId().session(), partition);
+            var progressToken = replayEngine.admitWork(
+                partition,
+                runtime.requestId(),
+                request.getFirstPacketTimestamp()
+            );
             var evidenceState = new TransactionEvidenceState(ctx);
             var transaction = new ReplayTransaction<TransformedTargetRequestAndResponseList>(
                 runtime.requestId(),
@@ -222,7 +235,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 dispositionPolicy,
                 dispositionLedger,
                 List.of(),
-                List.of(ctx)
+                List.of(progressToken, ctx)
             );
             runtime.register(transaction.completion()).whenComplete((ignored, failure) -> {
                 if (failure != null) {
@@ -495,24 +508,52 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull Instant timestamp,
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
+            var sessionKey = sessionKey(ctx, channelSessionNumber);
+            WorkToken progressToken = null;
+            CompletionStage<Void> sourceDisposition;
+            TrackedFuture<String, Void> actorTermination;
             if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
-                disposeSourceRecords(
+                sourceDisposition = disposeSourceRecords(
                     trafficStreamKeysBeingHeld,
                     new RecordDisposition.Retain("source-reassigned"),
                     "interrupted connection close"
                 );
                 notifyConnectionDone(trafficStreamKeysBeingHeld);
-                replayEngine.cancelConnection(ctx, channelSessionNumber);
-                return;
+                actorTermination = replayEngine.cancelConnection(ctx, channelSessionNumber);
+            } else {
+                progressToken = admitSessionWork(
+                    sessionKey,
+                    channelInteractionNum,
+                    "captured-close",
+                    timestamp,
+                    trafficStreamKeysBeingHeld
+                );
+                notifyConnectionDone(trafficStreamKeysBeingHeld);
+                sourceDisposition = disposeSourceRecords(
+                    trafficStreamKeysBeingHeld,
+                    sourceOnlyDisposition(status, "captured connection close"),
+                    "captured connection close"
+                );
+                replayEngine.setFirstTimestamp(timestamp);
+                actorTermination = replayEngine.closeConnection(
+                    ctx,
+                    channelSessionNumber,
+                    timestamp
+                );
             }
-            notifyConnectionDone(trafficStreamKeysBeingHeld);
-            disposeSourceRecords(
-                trafficStreamKeysBeingHeld,
-                sourceOnlyDisposition(status, "captured connection close"),
-                "captured connection close"
-            );
-            replayEngine.setFirstTimestamp(timestamp);
-            replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
+            var ownedProgressToken = progressToken;
+            CompletableFuture.allOf(
+                sourceDisposition.toCompletableFuture(),
+                actorTermination.future
+            ).whenComplete((ignored, failure) -> {
+                sessionPartitions.remove(sessionKey);
+                if (ownedProgressToken != null) {
+                    ownedProgressToken.close();
+                }
+                if (failure != null) {
+                    failReplayForSessionLifecycle(sessionKey, unwrap(failure));
+                }
+            });
         }
 
         @Override
@@ -542,6 +583,54 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 new RecordDisposition.Commit("source-record-ignored"),
                 "ignored source record"
             );
+        }
+
+        private WorkToken admitSessionWork(
+            ConnectionSessionKey sessionKey,
+            int interactionIndex,
+            String operation,
+            Instant sourceTime,
+            List<ITrafficStreamKey> keys
+        ) {
+            var partition = keys == null || keys.isEmpty()
+                ? sessionPartitions.get(sessionKey)
+                : trafficCaptureSource.sourcePartitionFor(keys.get(0));
+            if (partition == null) {
+                partition = new SourcePartitionKey(
+                    "unpartitioned-session",
+                    0,
+                    sessionKey.sourceGeneration()
+                );
+            }
+            return replayEngine.admitWork(
+                partition,
+                new ReplaySessionWorkId(sessionKey, interactionIndex, operation),
+                sourceTime
+            );
+        }
+
+        private ConnectionSessionKey sessionKey(
+            IReplayContexts.IChannelKeyContext context,
+            int sessionNumber
+        ) {
+            return new ConnectionSessionKey(
+                new SourceConnectionKey(context.getNodeId(), context.getConnectionId()),
+                sessionNumber,
+                context.getChannelKey().getSourceGeneration()
+            );
+        }
+
+        private void failReplayForSessionLifecycle(ConnectionSessionKey sessionKey, Throwable failure) {
+            var fatalError = new Error(
+                "Fatal replay session lifecycle failure for " + sessionKey,
+                failure
+            );
+            log.atError()
+                .setCause(failure)
+                .setMessage("Replay session lifecycle failed for {}; shutting down")
+                .addArgument(sessionKey)
+                .log();
+            shutdown(fatalError);
         }
 
         private RecordDisposition sourceOnlyDisposition(

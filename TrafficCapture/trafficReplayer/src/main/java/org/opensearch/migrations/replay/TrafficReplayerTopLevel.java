@@ -24,6 +24,8 @@ import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -231,7 +233,15 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
             trafficSource::acknowledgeSessionTermination
         );
-        var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
+        var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
+        var progressController = new ReplayProgressController(intakeMailbox, readGate);
+        trafficSource.setSourcePartitionLifecycleListener(progressController);
+        var replayEngine = new ReplayEngine(
+            senderOrchestrator,
+            trafficSource,
+            timeShifter,
+            progressController
+        );
         this.currentReplayEngine.set(replayEngine);
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(

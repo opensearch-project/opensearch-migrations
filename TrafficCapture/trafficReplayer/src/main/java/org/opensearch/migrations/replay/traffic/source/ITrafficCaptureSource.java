@@ -10,9 +10,12 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TrafficStreamRecordId;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 public interface ITrafficCaptureSource extends AutoCloseable {
@@ -46,6 +49,20 @@ public interface ITrafficCaptureSource extends AutoCloseable {
             trafficStreamKey.getSourceGeneration()
         );
     }
+
+    default SourcePartitionKey sourcePartitionFor(ITrafficStreamKey trafficStreamKey) {
+        var recordId = recordIdFor(trafficStreamKey);
+        if (recordId instanceof KafkaRecordId kafkaRecordId) {
+            return new SourcePartitionKey(
+                kafkaRecordId.topic(),
+                kafkaRecordId.partition(),
+                kafkaRecordId.sourceGeneration()
+            );
+        }
+        return new SourcePartitionKey("non-kafka-source", 0, trafficStreamKey.getSourceGeneration());
+    }
+
+    default void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {}
 
     /**
      * Called by the accumulator when a connection's lifecycle is complete — either because a
