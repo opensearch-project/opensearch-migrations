@@ -217,12 +217,32 @@ public final class ReplayTransaction<R> {
             );
         }
         CompletableFuture.allOf(dispositionStages.toArray(CompletableFuture[]::new))
-            .whenComplete((ignored, failure) ->
-                mailbox.execute(() -> finish(decision, failure == null ? null : unwrap(failure)))
-            );
+            .whenComplete((ignored, failure) -> mailbox.execute(() -> {
+                var dispositionFailure = failure == null ? null : unwrap(failure);
+                var acceptedDisposition = dispositionFailure == null
+                    ? acceptedDisposition(decision.disposition(), dispositionStages)
+                    : decision.disposition();
+                finish(decision, acceptedDisposition, dispositionFailure);
+            }));
     }
 
-    private void finish(Decision decision, Throwable dispositionFailure) {
+    private RecordDisposition acceptedDisposition(
+        RecordDisposition requestedDisposition,
+        List<CompletableFuture<RecordDispositionLedger.DispositionResult>> dispositionStages
+    ) {
+        return dispositionStages.stream()
+            .map(CompletableFuture::join)
+            .map(RecordDispositionLedger.DispositionResult::disposition)
+            .filter(RecordDisposition.Retain.class::isInstance)
+            .findFirst()
+            .orElse(requestedDisposition);
+    }
+
+    private void finish(
+        Decision decision,
+        RecordDisposition acceptedDisposition,
+        Throwable dispositionFailure
+    ) {
         assertInMailbox();
         if (state == State.TERMINATED) {
             return;
@@ -246,7 +266,7 @@ public final class ReplayTransaction<R> {
                 sourceOutcome,
                 targetOutcome,
                 evidenceOutcome,
-                decision.disposition(),
+                acceptedDisposition,
                 decision.haltReplay()
             )
         );

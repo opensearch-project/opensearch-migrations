@@ -38,6 +38,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.lifecycle.SourceRunwayLostException;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
@@ -225,6 +226,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         Collection<SourcePartitionKey> lostPartitions
     ) {
         for (var lostPartition : lostPartitions) {
+            failPendingCommitAcknowledgements(lostPartition);
             int partition = lostPartition.partition();
             activeConnectionScanStates.entrySet().removeIf(entry ->
                 entry.getValue().partition().equals(lostPartition)
@@ -265,6 +267,19 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
     }
 
+    private void failPendingCommitAcknowledgements(SourcePartitionKey lostPartition) {
+        var cause = new SourceRunwayLostException(lostPartition);
+        pendingCommitAcknowledgements.forEach((key, acknowledgement) -> {
+            if (!(key instanceof KafkaCommitOffsetData kafkaKey)
+                || kafkaKey.getPartition() != lostPartition.partition()
+                || kafkaKey.getGeneration() != lostPartition.sourceGeneration()
+                || !pendingCommitAcknowledgements.remove(key, acknowledgement)) {
+                return;
+            }
+            acknowledgement.completeExceptionally(cause);
+        });
+    }
+
     @Override
     public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
         var acknowledgement = new CompletableFuture<Void>();
@@ -281,12 +296,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                         continue;
                     }
                     obligation.acknowledge();
-                    log.atDebug()
-                        .setMessage("Settled source termination obligation for {} on partition {}; outstanding={}")
-                        .addArgument(sessionKey)
-                        .addArgument(obligation::partition)
-                        .addArgument(pendingSessionTerminationObligations::size)
-                        .log();
                 }
                 if (matchingObligations.isEmpty()) {
                     log.atTrace()
@@ -305,21 +314,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
         var acknowledgement = pendingCommitAcknowledgements.remove(trafficStreamKey);
         try {
-            var looseParentScope = trafficStreamKey.getTrafficStreamsContext().getEnclosingScope();
-            if (!(looseParentScope instanceof ReplayContexts.KafkaRecordContext)) {
-                throw new IllegalArgumentException(
-                    "Expected parent context of type "
-                        + ReplayContexts.KafkaRecordContext.class
-                        + " instead of "
-                        + looseParentScope
-                        + " (of type="
-                        + looseParentScope.getClass()
-                        + ")"
-                );
-            }
-            var kafkaCtx = (ReplayContexts.KafkaRecordContext) looseParentScope;
-            kafkaCtx.close();
-            channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
+            releaseRecordContext(trafficStreamKey);
             if (acknowledgement != null) {
                 acknowledgement.complete(null);
             }
@@ -330,6 +325,29 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 throw t;
             }
         }
+    }
+
+    @Override
+    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
+        releaseRecordContext(trafficStreamKey);
+    }
+
+    private void releaseRecordContext(ITrafficStreamKey trafficStreamKey) {
+        var looseParentScope = trafficStreamKey.getTrafficStreamsContext().getEnclosingScope();
+        if (!(looseParentScope instanceof ReplayContexts.KafkaRecordContext)) {
+            throw new IllegalArgumentException(
+                "Expected parent context of type "
+                    + ReplayContexts.KafkaRecordContext.class
+                    + " instead of "
+                    + looseParentScope
+                    + " (of type="
+                    + looseParentScope.getClass()
+                    + ")"
+            );
+        }
+        var kafkaCtx = (ReplayContexts.KafkaRecordContext) looseParentScope;
+        kafkaCtx.close();
+        channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
     }
 
     /**
@@ -676,7 +694,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     public boolean hasPendingSourceControl() {
-        return !sourceControlQueue.isEmpty();
+        return !sourceControlQueue.isEmpty() || !trafficSourceReaderInterruptedCloseQueue.isEmpty();
     }
 
     @Override
@@ -712,7 +730,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             if (result == CommitResult.IGNORED) {
                 pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
                 acknowledgement.completeExceptionally(
-                    new IllegalStateException("Kafka ownership changed before commit for " + trafficStreamKey)
+                    new SourceRunwayLostException(sourcePartitionFor(trafficStreamKey))
                 );
             } else if (result == CommitResult.IMMEDIATE) {
                 pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);

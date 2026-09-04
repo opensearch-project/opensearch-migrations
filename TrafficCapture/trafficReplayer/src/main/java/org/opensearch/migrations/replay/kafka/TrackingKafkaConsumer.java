@@ -602,6 +602,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             if (rebalanceDuringPoll.getAndSet(false)) {
                 records = recoverFromInlineRebalance(records, prePollPositions);
             }
+            records = recoverFromSourceEpochReset(records);
             pollsSinceLastHeartbeat.incrementAndGet();
             if (records.isEmpty()) {
                 emptyPollsSinceLastHeartbeat.incrementAndGet();
@@ -688,47 +689,90 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
     }
 
-    ITrafficCaptureSource.CommitResult commitKafkaKey(ITrafficStreamKey streamKey, KafkaCommitOffsetData kafkaTsk) {
-        OffsetLifecycleTracker tracker;
+    /**
+     * Kafka can retain a cooperative assignment while deleting and recreating its topic. In that
+     * case no revoke/assign callback fences the old application generation, but fetched offsets
+     * move backward. Treat that rewind as a source epoch boundary before exposing either epoch's
+     * records to the replay lifecycle.
+     */
+    private ConsumerRecords<String, byte[]> recoverFromSourceEpochReset(
+        ConsumerRecords<String, byte[]> polled
+    ) {
+        var minimumReturned = new HashMap<TopicPartition, Long>();
+        for (var record : polled) {
+            var partition = new TopicPartition(record.topic(), record.partition());
+            minimumReturned.merge(partition, record.offset(), Math::min);
+        }
+        var resetPartitions = minimumReturned.entrySet()
+            .stream()
+            .filter(entry -> hasAlreadyObserved(entry.getKey(), entry.getValue()))
+            .map(Map.Entry::getKey)
+            .toList();
+        if (resetPartitions.isEmpty()) {
+            return polled;
+        }
+
+        log.atWarn()
+            .setMessage("Kafka offsets moved backward for {}; fencing the old source generation")
+            .addArgument(() -> resetPartitions.stream()
+                .map(partition -> partition + "->" + minimumReturned.get(partition))
+                .collect(Collectors.joining(",")))
+            .log();
+        cleanupRevokedPartitions(resetPartitions, /*attemptCommit=*/ false);
+        onPartitionsAssigned(resetPartitions);
+
+        for (var entry : minimumReturned.entrySet()) {
+            if (kafkaConsumer.assignment().contains(entry.getKey())) {
+                kafkaConsumer.seek(entry.getKey(), entry.getValue());
+            }
+        }
+        rebalanceDuringPoll.set(false);
+        return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
+    }
+
+    private boolean hasAlreadyObserved(TopicPartition partition, long offset) {
         synchronized (commitDataLock) {
-            tracker = partitionToOffsetLifecycleTrackerMap.get(kafkaTsk.getPartition());
+            var tracker = partitionToOffsetLifecycleTrackerMap.get(partition.partition());
+            return tracker != null && tracker.hasAlreadyObserved(offset);
         }
-        if (tracker == null || tracker.consumerConnectionGeneration != kafkaTsk.getGeneration()) {
-            log.atWarn()
-                .setMessage(
-                    () -> "trafficKey's generation ({}) is not current ({})." +
-                        "  Dropping this commit request since the record would "
-                        + "have been handled again by a current consumer within this process or another. Full key={}")
-                .addArgument(kafkaTsk::getGeneration)
-                .addArgument((Optional.ofNullable(tracker)
-                    .map(t -> "new generation=" + t.consumerConnectionGeneration)
-                    .orElse("Partition unassigned")))
-                .addArgument(kafkaTsk)
-                .log();
-            return ITrafficCaptureSource.CommitResult.IGNORED;
-        }
+    }
 
-        var p = kafkaTsk.getPartition();
-        Optional<Long> newHeadValue;
-
-        var k = new TopicPartition(topic, p);
-
-        newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk.getOffset());
-        return newHeadValue.map(o -> {
-            var v = new OffsetAndMetadata(o);
-            log.atDebug().setMessage("Adding new commit {}->{} to map").addArgument(k).addArgument(v).log();
-            synchronized (commitDataLock) {
-                addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
-                nextSetOfCommitsMap.put(k, v);
+    ITrafficCaptureSource.CommitResult commitKafkaKey(ITrafficStreamKey streamKey, KafkaCommitOffsetData kafkaTsk) {
+        synchronized (commitDataLock) {
+            var tracker = partitionToOffsetLifecycleTrackerMap.get(kafkaTsk.getPartition());
+            if (tracker == null || tracker.consumerConnectionGeneration != kafkaTsk.getGeneration()) {
+                log.atWarn()
+                    .setMessage(
+                        () -> "trafficKey's generation ({}) is not current ({})." +
+                            "  Dropping this commit request since the record would "
+                            + "have been handled again by a current consumer within this process or another. Full key={}")
+                    .addArgument(kafkaTsk::getGeneration)
+                    .addArgument((Optional.ofNullable(tracker)
+                        .map(t -> "new generation=" + t.consumerConnectionGeneration)
+                        .orElse("Partition unassigned")))
+                    .addArgument(kafkaTsk)
+                    .log();
+                return ITrafficCaptureSource.CommitResult.IGNORED;
             }
-            kafkaRecordsReadyToCommit.set(true);
-            return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
-        }).orElseGet(() -> {
-            synchronized (commitDataLock) {
-                addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
+
+            var partition = new TopicPartition(topic, kafkaTsk.getPartition());
+            var newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk.getOffset());
+            if (newHeadValue.isPresent()) {
+                var nextOffset = new OffsetAndMetadata(newHeadValue.get());
+                log.atDebug()
+                    .setMessage("Adding new commit {}->{} to map")
+                    .addArgument(partition)
+                    .addArgument(nextOffset)
+                    .log();
+                addKeyContextForEventualCommit(streamKey, kafkaTsk, partition);
+                nextSetOfCommitsMap.put(partition, nextOffset);
+                kafkaRecordsReadyToCommit.set(true);
+                return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
             }
+
+            addKeyContextForEventualCommit(streamKey, kafkaTsk, partition);
             return ITrafficCaptureSource.CommitResult.BLOCKED_BY_OTHER_COMMITS;
-        });
+        }
     }
 
     private void addKeyContextForEventualCommit(

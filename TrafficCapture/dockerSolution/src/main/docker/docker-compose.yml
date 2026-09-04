@@ -49,6 +49,8 @@ services:
       - "/usr/share/captureProxy/config/pub.pem"
       - "--sslKeyFile"
       - "/usr/share/captureProxy/config/key.pem"
+      - "--max-connection-duration-seconds"
+      - "130"
     depends_on:
       - kafka
       - elasticsearch

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -7,16 +8,21 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 
 import lombok.NonNull;
 import lombok.Value;
 import lombok.experimental.Accessors;
 
-public final class RecordDispositionLedger {
+public final class RecordDispositionLedger implements SourcePartitionLifecycleListener {
     public interface RecordHandle {
         RecordId id();
 
+        SourcePartitionKey sourcePartition();
+
         void closeContext();
+
+        void releaseWithoutCommit();
 
         CompletionStage<Void> commit();
     }
@@ -63,9 +69,20 @@ public final class RecordDispositionLedger {
     private final Map<RecordId, Obligation> unresolved = new LinkedHashMap<>();
     private final Map<RecordId, PendingDisposition> pending = new LinkedHashMap<>();
     private final Map<RecordId, DispositionResult> resolved = new LinkedHashMap<>();
+    private final Map<SourcePartitionKey, Boolean> generationRunway = new LinkedHashMap<>();
 
     public RecordDispositionLedger(@NonNull Executor ownerExecutor) {
         this.ownerExecutor = ownerExecutor;
+    }
+
+    @Override
+    public void onAssigned(@NonNull Collection<SourcePartitionKey> partitions) {
+        ownerExecutor.execute(() -> partitions.forEach(partition -> generationRunway.put(partition, true)));
+    }
+
+    @Override
+    public void onRevoked(@NonNull Collection<SourcePartitionKey> partitions) {
+        ownerExecutor.execute(() -> partitions.forEach(partition -> generationRunway.put(partition, false)));
     }
 
     public CompletionStage<Void> register(@NonNull RecordHandle handle, @NonNull String owner) {
@@ -79,6 +96,7 @@ public final class RecordDispositionLedger {
                 );
                 return;
             }
+            generationRunway.putIfAbsent(handle.sourcePartition(), true);
             unresolved.put(handle.id(), new Obligation(handle, owner));
             completion.complete(null);
         });
@@ -123,7 +141,8 @@ public final class RecordDispositionLedger {
         }
 
         unresolved.remove(id);
-        var result = new DispositionResult(id, owner, disposition);
+        var acceptedDisposition = acceptDisposition(obligation, disposition);
+        var result = new DispositionResult(id, owner, acceptedDisposition);
         pending.put(id, new PendingDisposition(obligation));
         try {
             obligation.handle().closeContext();
@@ -132,12 +151,36 @@ public final class RecordDispositionLedger {
             return;
         }
 
-        if (disposition instanceof RecordDisposition.Commit) {
+        if (acceptedDisposition instanceof RecordDisposition.Commit) {
             commit(id, obligation, result, completion);
         } else {
+            releaseWithoutCommit(id, obligation, result, completion);
+        }
+    }
+
+    private void releaseWithoutCommit(
+        RecordId id,
+        Obligation obligation,
+        DispositionResult result,
+        CompletableFuture<DispositionResult> completion
+    ) {
+        try {
+            obligation.handle().releaseWithoutCommit();
             resolve(id, result);
             completion.complete(result);
+        } catch (Exception e) {
+            completion.completeExceptionally(e);
         }
+    }
+
+    private RecordDisposition acceptDisposition(Obligation obligation, RecordDisposition requested) {
+        if (requested instanceof RecordDisposition.Commit
+            && !generationRunway.getOrDefault(obligation.handle().sourcePartition(), false)) {
+            return new RecordDisposition.Retain(
+                "source-runway-lost-before-" + requested.reasonCode()
+            );
+        }
+        return requested;
     }
 
     private void commit(
@@ -154,12 +197,13 @@ public final class RecordDispositionLedger {
             return;
         }
         commitStage.whenComplete((ignored, failure) ->
-            ownerExecutor.execute(() -> completeCommit(id, result, failure, completion))
+            ownerExecutor.execute(() -> completeCommit(id, obligation, result, failure, completion))
         );
     }
 
     private void completeCommit(
         RecordId id,
+        Obligation obligation,
         DispositionResult result,
         Throwable failure,
         CompletableFuture<DispositionResult> completion
@@ -167,6 +211,19 @@ public final class RecordDispositionLedger {
         if (failure == null) {
             resolve(id, result);
             completion.complete(result);
+        } else if (SourceRunwayLostException.causedBy(failure)) {
+            releaseWithoutCommit(
+                id,
+                obligation,
+                new DispositionResult(
+                    result.recordId(),
+                    result.owner(),
+                    new RecordDisposition.Retain(
+                        "source-runway-lost-after-" + result.disposition().reasonCode()
+                    )
+                ),
+                completion
+            );
         } else {
             completion.completeExceptionally(failure);
         }

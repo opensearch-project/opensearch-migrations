@@ -27,6 +27,7 @@ import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -261,7 +262,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
         var progressController = new ReplayProgressController(intakeMailbox, readGate);
-        trafficSource.setSourcePartitionLifecycleListener(progressController);
         var replayEngine = new ReplayEngine(
             senderOrchestrator,
             trafficSource,
@@ -269,12 +269,26 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             progressController
         );
         this.currentReplayEngine.set(replayEngine);
+        var accumulationCallbacks = new TrafficReplayerAccumulationCallbacks(
+            replayEngine,
+            tupleWriter,
+            resultTupleConsumer,
+            tupleObserver,
+            trafficSource,
+            quiescentDuration,
+            permitPool
+        );
+        trafficSource.setSourcePartitionLifecycleListener(
+            SourcePartitionLifecycleListener.combine(
+                progressController,
+                accumulationCallbacks.sourcePartitionLifecycleListener()
+            )
+        );
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, tupleWriter, resultTupleConsumer,
-                    tupleObserver, trafficSource, quiescentDuration, permitPool),
+                accumulationCallbacks,
                 trafficSource.usesStructuralExpiration(),
                 trafficSource::updateScanBlocker
             );

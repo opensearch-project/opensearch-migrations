@@ -42,6 +42,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
@@ -110,6 +111,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 return CompletableFuture.failedFuture(failed.cause());
             }
         });
+    }
+
+    static void settleProgressWhenTargetCompletes(
+        @NonNull CompletionStage<?> targetCompletion,
+        @NonNull WorkToken progressToken
+    ) {
+        targetCompletion.whenComplete((ignored, failure) -> progressToken.close());
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -253,14 +261,28 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
 
             @Override
+            public SourcePartitionKey sourcePartition() {
+                return trafficCaptureSource.sourcePartitionFor(key);
+            }
+
+            @Override
             public void closeContext() {
                 key.getTrafficStreamsContext().close();
+            }
+
+            @Override
+            public void releaseWithoutCommit() {
+                trafficCaptureSource.releaseTrafficStreamWithoutCommit(key);
             }
 
             @Override
             public CompletionStage<Void> commit() {
                 return trafficCaptureSource.commitTrafficStreamAsync(key);
             }
+        }
+
+        SourcePartitionLifecycleListener sourcePartitionLifecycleListener() {
+            return dispositionLedger;
         }
 
         @Override
@@ -308,7 +330,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 dispositionPolicy,
                 dispositionLedger,
                 List.of(),
-                List.of(progressToken, ctx)
+                List.of(ctx)
             );
             runtime.register(transaction.completion()).whenComplete((ignored, failure) -> {
                 if (failure != null) {
@@ -322,6 +344,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture,
                 quiescentDurationForRequest
             );
+            settleProgressWhenTargetCompletes(targetFuture.future, progressToken);
             settleTransactionTarget(
                 transaction,
                 targetFuture,
@@ -682,6 +705,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             CompletionStage<Void> sourceDisposition;
             CompletionStage<Void> actorTermination;
             if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
+                log.atInfo()
+                    .setMessage("Cancelling replay session {} after source generation interruption; heldRecords={}")
+                    .addArgument(sessionKey)
+                    .addArgument(trafficStreamKeysBeingHeld::size)
+                    .log();
                 sourceDisposition = disposeSourceRecords(
                     trafficStreamKeysBeingHeld,
                     new RecordDisposition.Retain("source-reassigned"),

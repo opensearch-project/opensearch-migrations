@@ -7,10 +7,16 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +26,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 /**
  * Unit tests for TrackingKafkaConsumer rebalance callbacks.
@@ -28,6 +35,29 @@ import org.junit.jupiter.api.Test;
 class TrackingKafkaConsumerTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
+
+    private static class BlockingOffsetLifecycleTracker extends OffsetLifecycleTracker {
+        private final CountDownLatch removeEntered = new CountDownLatch(1);
+        private final CountDownLatch allowRemoval = new CountDownLatch(1);
+
+        BlockingOffsetLifecycleTracker(int generation) {
+            super(generation);
+        }
+
+        @Override
+        Optional<Long> removeAndReturnNewHead(long offsetToRemove) {
+            removeEntered.countDown();
+            try {
+                if (!allowRemoval.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to retire the offset");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting to retire the offset", e);
+            }
+            return super.removeAndReturnNewHead(offsetToRemove);
+        }
+    }
 
     private MockConsumer<String, byte[]> buildMockConsumer() {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -214,6 +244,124 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             assigned
         );
         Assertions.assertEquals(assigned, revoked);
+    }
+
+    @Test
+    void backwardOffsetFencesTheOldGenerationBeforeRedelivery() {
+        var mockConsumer = buildMockConsumer();
+        var consumer = buildConsumer(mockConsumer);
+        var partition = new TopicPartition(TOPIC, 0);
+        var assigned = new ArrayList<SourcePartitionKey>();
+        var revoked = new ArrayList<SourcePartitionKey>();
+        var trulyLost = new ArrayList<SourcePartitionKey>();
+        consumer.setSourcePartitionLifecycleListener(new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {
+                assigned.addAll(partitions);
+            }
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
+                revoked.addAll(partitions);
+            }
+        });
+        consumer.setOnPartitionsTrulyLostCallback(trulyLost::addAll);
+        consumer.onPartitionsAssigned(List.of(partition));
+
+        mockConsumer.seek(partition, 5);
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 5, "old", new byte[] { 5 }));
+        List<KafkaCommitOffsetData> oldRecords;
+        try (var context = rootContext.createReadChunkContext()) {
+            oldRecords = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+        Assertions.assertEquals(1, oldRecords.size());
+        Assertions.assertEquals(1, oldRecords.get(0).getGeneration());
+
+        mockConsumer.seek(partition, 0);
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "new", new byte[] { 0 }));
+        List<KafkaCommitOffsetData> resetBatch;
+        try (var context = rootContext.createReadChunkContext()) {
+            resetBatch = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+
+        Assertions.assertTrue(resetBatch.isEmpty());
+        Assertions.assertEquals(List.of(new SourcePartitionKey(TOPIC, 0, 1)), revoked);
+        Assertions.assertEquals(revoked, trulyLost);
+        Assertions.assertEquals(
+            List.of(
+                new SourcePartitionKey(TOPIC, 0, 1),
+                new SourcePartitionKey(TOPIC, 0, 2)
+            ),
+            assigned
+        );
+        Assertions.assertEquals(0, mockConsumer.position(partition));
+
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "new", new byte[] { 0 }));
+        List<KafkaCommitOffsetData> newRecords;
+        try (var context = rootContext.createReadChunkContext()) {
+            newRecords = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+        Assertions.assertEquals(1, newRecords.size());
+        Assertions.assertEquals(2, newRecords.get(0).getGeneration());
+    }
+
+    @Test
+    void sourceGenerationCleanupCannotRaceWithCommitEnqueue() throws Exception {
+        var consumer = buildConsumer(buildMockConsumer());
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+
+        var tracker = new BlockingOffsetLifecycleTracker(1);
+        tracker.add(0);
+        consumer.partitionToOffsetLifecycleTrackerMap.put(partition.partition(), tracker);
+
+        var commitResult = new AtomicReference<ITrafficCaptureSource.CommitResult>();
+        var commitFailure = new AtomicReference<Throwable>();
+        var commitThread = new Thread(() -> {
+            try {
+                commitResult.set(consumer.commitKafkaKey(
+                    Mockito.mock(ITrafficStreamKey.class),
+                    new PojoKafkaCommitOffsetData(1, partition.partition(), 0)
+                ));
+            } catch (Throwable t) {
+                commitFailure.set(t);
+            }
+        });
+        var revokeFailure = new AtomicReference<Throwable>();
+        var revokeStarted = new CountDownLatch(1);
+        var revokeThread = new Thread(() -> {
+            revokeStarted.countDown();
+            try {
+                consumer.onPartitionsLost(List.of(partition));
+            } catch (Throwable t) {
+                revokeFailure.set(t);
+            }
+        });
+
+        commitThread.start();
+        Assertions.assertTrue(tracker.removeEntered.await(5, TimeUnit.SECONDS));
+        revokeThread.start();
+        Assertions.assertTrue(revokeStarted.await(5, TimeUnit.SECONDS));
+        try {
+            revokeThread.join(100);
+            Assertions.assertTrue(
+                revokeThread.isAlive(),
+                "partition cleanup must wait until commit validation and enqueueing are complete"
+            );
+        } finally {
+            tracker.allowRemoval.countDown();
+            commitThread.join(5_000);
+            revokeThread.join(5_000);
+        }
+
+        Assertions.assertFalse(commitThread.isAlive());
+        Assertions.assertFalse(revokeThread.isAlive());
+        Assertions.assertNull(commitFailure.get());
+        Assertions.assertNull(revokeFailure.get());
+        Assertions.assertEquals(ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ, commitResult.get());
+        Assertions.assertFalse(consumer.partitionToOffsetLifecycleTrackerMap.containsKey(partition.partition()));
+        Assertions.assertFalse(consumer.nextSetOfCommitsMap.containsKey(partition));
+        Assertions.assertFalse(consumer.nextSetOfKeysContextsBeingCommitted.containsKey(partition));
     }
 
     @Test

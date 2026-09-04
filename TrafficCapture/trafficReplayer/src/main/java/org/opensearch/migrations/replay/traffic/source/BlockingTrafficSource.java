@@ -238,6 +238,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
+    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
+        underlyingSource.releaseTrafficStreamWithoutCommit(trafficStreamKey);
+    }
+
+    @Override
     public org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId recordIdFor(
         ITrafficStreamKey trafficStreamKey
     ) {
