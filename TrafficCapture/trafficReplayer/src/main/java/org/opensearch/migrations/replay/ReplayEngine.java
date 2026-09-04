@@ -182,7 +182,7 @@ public class ReplayEngine {
         return networkSendOrchestrator.abortActor(
             ctx,
             channelSessionNumber,
-            new java.util.concurrent.CancellationException(
+            new SourceReassignmentCancellationException(
                 "Session cancelled due to source reassignment for " + ctx.getConnectionId()
             )
         );

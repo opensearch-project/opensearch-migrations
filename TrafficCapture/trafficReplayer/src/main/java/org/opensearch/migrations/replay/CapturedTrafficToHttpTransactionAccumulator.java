@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -337,26 +336,33 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
         var trafficStream = trafficStreamAndKey.getStream();
         boolean connectionClosed = false;
-        for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {
-            var o = trafficStream.getSubStreamList().get(i);
-            log.atTrace().setMessage("Processing obs {} of {} for {}:{} state={} type={}")
-                .addArgument(i)
-                .addArgument(trafficStream::getSubStreamCount)
-                .addArgument(partitionId)
-                .addArgument(connectionId)
-                .addArgument(accum.state)
-                .addArgument(() -> o.getCaptureCase().name())
-                .log();
-            var connectionStatus = addObservationToAccumulation(accum, tsk, o);
-            if (CONNECTION_STATUS.CLOSED == connectionStatus) {
-                log.atDebug().setMessage("Connection terminated: removing {}:{} from liveStreams map")
+        try {
+            for (int i = 0; i < trafficStream.getSubStreamCount(); ++i) {
+                var o = trafficStream.getSubStreamList().get(i);
+                log.atTrace().setMessage("Processing obs {} of {} for {}:{} state={} type={}")
+                    .addArgument(i)
+                    .addArgument(trafficStream::getSubStreamCount)
                     .addArgument(partitionId)
                     .addArgument(connectionId)
+                    .addArgument(accum.state)
+                    .addArgument(() -> o.getCaptureCase().name())
                     .log();
-                liveStreams.remove(partitionId, connectionId);
-                connectionClosed = true;
-                break;
+                var connectionStatus = addObservationToAccumulation(accum, tsk, o);
+                if (CONNECTION_STATUS.CLOSED == connectionStatus) {
+                    log.atDebug().setMessage("Connection terminated: removing {}:{} from liveStreams map")
+                        .addArgument(partitionId)
+                        .addArgument(connectionId)
+                        .log();
+                    liveStreams.remove(partitionId, connectionId);
+                    connectionClosed = true;
+                    break;
+                }
             }
+        } catch (RuntimeException | Error e) {
+            if (accum.hasRrPair()) {
+                accum.getRrPair().holdTrafficStream(tsk);
+            }
+            throw e;
         }
         if (accum.hasRrPair()) {
             accum.getRrPair().holdTrafficStream(tsk);
@@ -492,7 +498,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     private static List<ITrafficStreamKey> getTrafficStreamsHeldByAccum(Accumulation accum) {
-        return accum.hasRrPair() ? accum.getRrPair().trafficStreamKeysBeingHeld : List.of();
+        return accum.hasRrPair() ? accum.getRrPair().getTrafficStreamsHeld() : List.of();
     }
 
     private Optional<CONNECTION_STATUS> handleCloseObservationThatAffectEveryState(
@@ -772,7 +778,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         listener.onTrafficStreamsExpired(
                             status,
                             accumulation.trafficChannelKey.getTrafficStreamsContext(),
-                            Collections.unmodifiableList(accumulation.getRrPair().trafficStreamKeysBeingHeld)
+                            accumulation.getRrPair().getTrafficStreamsHeld()
                         );
                         // Null the rrPair so the finally-block's onConnectionClose (which
                         // always runs despite the return) does not double-commit the same
