@@ -32,18 +32,44 @@ class ReplayProgressControllerTest {
         ).toCompletableFuture().join();
 
         second.close();
-        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.currentSnapshot().settledWatermark());
         Assertions.assertEquals(List.of(Instant.ofEpochSecond(40)), fixture.flowController.frontiers);
 
         first.close();
         Assertions.assertEquals(
             Instant.ofEpochSecond(20),
-            fixture.controller.snapshot().settledWatermark()
+            fixture.controller.currentSnapshot().settledWatermark()
         );
         Assertions.assertEquals(
             List.of(Instant.ofEpochSecond(40), Instant.ofEpochSecond(50)),
             fixture.flowController.frontiers
         );
+    }
+
+    @Test
+    void outOfOrderSourceTimesUseTheMonotonicAdmissionFrontier() {
+        var fixture = new Fixture(Duration.ZERO);
+        var partition = partition(0, 1);
+        fixture.controller.onAssigned(List.of(partition));
+        var first = fixture.controller.admit(
+            partition,
+            request(0),
+            Instant.ofEpochSecond(20)
+        ).toCompletableFuture().join();
+        var second = fixture.controller.admit(
+            partition,
+            request(1),
+            Instant.ofEpochSecond(10)
+        ).toCompletableFuture().join();
+
+        Assertions.assertEquals(Instant.ofEpochSecond(20), fixture.controller.currentSnapshot().settledWatermark());
+
+        first.close();
+        Assertions.assertEquals(Instant.ofEpochSecond(20), fixture.controller.currentSnapshot().settledWatermark());
+
+        second.close();
+        Assertions.assertEquals(Instant.ofEpochSecond(20), fixture.controller.currentSnapshot().settledWatermark());
+        Assertions.assertEquals(List.of(Instant.ofEpochSecond(20)), fixture.flowController.frontiers);
     }
 
     @Test
@@ -82,13 +108,13 @@ class ReplayProgressControllerTest {
         ).toCompletableFuture().join();
 
         second.close();
-        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.currentSnapshot().settledWatermark());
 
         first.close();
-        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.currentSnapshot().settledWatermark());
 
         fixture.controller.advanceIdlePartitions(Instant.ofEpochSecond(40));
-        Assertions.assertEquals(Instant.ofEpochSecond(40), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(40), fixture.controller.currentSnapshot().settledWatermark());
         Assertions.assertEquals(Instant.ofEpochSecond(45), fixture.readGate.frontier());
     }
 
@@ -106,12 +132,12 @@ class ReplayProgressControllerTest {
 
         fixture.controller.advanceIdlePartitions(Instant.ofEpochSecond(100));
 
-        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.currentSnapshot().settledWatermark());
         Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.readGate.frontier());
 
         active.close();
         fixture.controller.advanceIdlePartitions(Instant.ofEpochSecond(100));
-        Assertions.assertEquals(Instant.ofEpochSecond(100), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(100), fixture.controller.currentSnapshot().settledWatermark());
     }
 
     @Test
@@ -121,7 +147,7 @@ class ReplayProgressControllerTest {
 
         fixture.controller.onAssigned(List.of(partition(0, 1)));
 
-        Assertions.assertEquals(Instant.ofEpochSecond(100), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(100), fixture.controller.currentSnapshot().settledWatermark());
         Assertions.assertEquals(Instant.ofEpochSecond(105), fixture.readGate.frontier());
     }
 
@@ -136,7 +162,7 @@ class ReplayProgressControllerTest {
         ).toCompletableFuture().join();
 
         fixture.controller.onRevoked(List.of(partition));
-        Assertions.assertEquals(1, fixture.controller.snapshot().assignedPartitions());
+        Assertions.assertEquals(1, fixture.controller.currentSnapshot().assignedPartitions());
         var failure = Assertions.assertThrows(
             java.util.concurrent.CompletionException.class,
             () -> fixture.controller.admit(
@@ -148,7 +174,7 @@ class ReplayProgressControllerTest {
         Assertions.assertTrue(failure.getCause().getMessage().contains("revoking"));
 
         token.close();
-        Assertions.assertEquals(0, fixture.controller.snapshot().assignedPartitions());
+        Assertions.assertEquals(0, fixture.controller.currentSnapshot().assignedPartitions());
     }
 
     @Test
@@ -167,13 +193,13 @@ class ReplayProgressControllerTest {
         var newGeneration = partition(0, 2);
         fixture.controller.onAssigned(List.of(newGeneration));
 
-        Assertions.assertEquals(Instant.MIN, fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.MIN, fixture.controller.currentSnapshot().settledWatermark());
         var newToken = fixture.controller.admit(
             newGeneration,
             request(1),
             Instant.ofEpochSecond(10)
         ).toCompletableFuture().join();
-        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.snapshot().settledWatermark());
+        Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.controller.currentSnapshot().settledWatermark());
         Assertions.assertEquals(Instant.ofEpochSecond(10), fixture.readGate.frontier());
         newToken.close();
     }

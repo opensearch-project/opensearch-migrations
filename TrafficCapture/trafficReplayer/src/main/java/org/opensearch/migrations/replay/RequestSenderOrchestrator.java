@@ -3,6 +3,9 @@ package org.opensearch.migrations.replay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -17,7 +20,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
@@ -268,7 +270,10 @@ public class RequestSenderOrchestrator {
 
     private final class RuntimeTargetExchange implements ConnectionActor.TargetExchange<PreparedActorRequest, Object> {
         private final ActorRuntime runtime;
-        private CompletionStage<TargetOutcome<Object>> activeExchange;
+        private final Map<ScheduledFuture<?>, CompletableFuture<Void>> cancellableSchedules = new LinkedHashMap<>();
+        private CompletableFuture<TargetOutcome<Object>> activeExchange;
+        private IPacketFinalizingConsumer<AggregatedRawResponse> activePacketReceiver;
+        private CancellationException cancellationCause;
 
         private RuntimeTargetExchange(ActorRuntime runtime) {
             this.runtime = runtime;
@@ -277,6 +282,9 @@ public class RequestSenderOrchestrator {
         @Override
         public CompletionStage<TargetOutcome<Object>> execute(PreparedActorRequest preparedRequest) {
             preparedRequest.beginExecution();
+            if (cancellationCause != null) {
+                return CompletableFuture.completedFuture(new TargetOutcome.Cancelled<>(cancellationCause));
+            }
             @SuppressWarnings("unchecked")
             var exchange = (TrackedFuture<String, Object>) (TrackedFuture<?, ?>) sendRequestWithRetries(
                 () -> packetConsumerFactory.apply(runtime.session, preparedRequest.context),
@@ -289,13 +297,13 @@ public class RequestSenderOrchestrator {
             );
             CompletableFuture<TargetOutcome<Object>> normalized = exchange.future.handle((value, failure) -> {
                 if (failure == null) {
-                    return new TargetOutcome.Succeeded<Object>(value);
+                    return new TargetOutcome.Succeeded<>(value);
                 }
                 var cause = unwrap(failure);
                 if (cause instanceof CancellationException cancellation) {
-                    return new TargetOutcome.Cancelled<Object>(cancellation);
+                    return new TargetOutcome.Cancelled<>(cancellation);
                 }
-                return new TargetOutcome.Failed<Object>(cause);
+                return new TargetOutcome.Failed<>(cause);
             });
             activeExchange = normalized;
             normalized.whenComplete((value, failure) -> {
@@ -310,17 +318,244 @@ public class RequestSenderOrchestrator {
 
         @Override
         public CompletionStage<Void> close() {
-            return closeRuntimeChannel(runtime);
+            return closeRuntimeChannel();
         }
 
         @Override
         public CompletionStage<Void> abort(CancellationException cause) {
+            if (cancellationCause == null) {
+                cancellationCause = cause;
+            }
+            cancelScheduledWork(cancellationCause);
+            cancelActivePacketReceiver(cancellationCause);
             runtime.session.setCancelled(true);
             var exchangeToJoin = activeExchange;
-            return closeRuntimeChannel(runtime).thenCompose(ignored ->
+            if (exchangeToJoin != null) {
+                exchangeToJoin.complete(new TargetOutcome.Cancelled<>(cancellationCause));
+            }
+            return closeRuntimeChannel().thenCompose(ignored ->
                 exchangeToJoin == null
                     ? CompletableFuture.completedFuture(null)
                     : exchangeToJoin.handle((outcome, failure) -> null)
+            );
+        }
+
+        private void cancelActivePacketReceiver(CancellationException cause) {
+            var packetReceiver = activePacketReceiver;
+            activePacketReceiver = null;
+            if (packetReceiver != null) {
+                packetReceiver.abort(cause);
+            }
+        }
+
+        private void cancelScheduledWork(CancellationException cause) {
+            var schedules = List.copyOf(cancellableSchedules.entrySet());
+            cancellableSchedules.clear();
+            for (var entry : schedules) {
+                entry.getKey().cancel(false);
+                entry.getValue().completeExceptionally(cause);
+            }
+        }
+
+        private CompletionStage<Void> closeRuntimeChannel() {
+            return clientConnectionPool.closeChannelForSession(runtime.session).future.handle((channel, failure) -> {
+                if (failure != null) {
+                    throw new CompletionException(unwrap(failure));
+                }
+                return null;
+            });
+        }
+
+        private <T> TrackedFuture<String, T> sendRequestWithRetries(
+            Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
+            EventLoop eventLoop,
+            ByteBufListProducer packetProducer,
+            Instant referenceStartTime,
+            Duration nextRetryDelay,
+            Duration interval,
+            RetryVisitor<T> visitor
+        ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> "request exchange was cancelled before another attempt could start"
+                );
+            }
+            if (eventLoop.isShuttingDown()) {
+                return TextTrackedFuture.failedFuture(
+                    new IllegalStateException("EventLoop is shutting down"),
+                    () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop"
+                );
+            }
+            var attempt = packetProducer.newAttempt();
+            var byteBufList = attempt.packets();
+            var packetReceiver = senderSupplier.get();
+            activePacketReceiver = packetReceiver;
+            return sendPackets(
+                packetReceiver,
+                eventLoop,
+                byteBufList.streamUnretained().iterator(),
+                referenceStartTime,
+                interval,
+                new AtomicInteger()
+            )
+                .getDeferredFutureThroughHandle((response, t) -> {
+                        try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
+                            return visitor.visit(requestBytesHolder.get(), response, t);
+                        }
+                    },
+                    () -> "checking response to determine if the request should be retried")
+                .whenComplete((response, failure) -> {
+                    attempt.close();
+                    if (activePacketReceiver == packetReceiver) {
+                        activePacketReceiver = null;
+                    }
+                }, () -> "releasing the request attempt payload")
+                .getDeferredFutureThroughHandle((dtr, t) -> retryIfNeeded(
+                    dtr,
+                    t,
+                    senderSupplier,
+                    eventLoop,
+                    packetProducer,
+                    referenceStartTime,
+                    nextRetryDelay,
+                    interval,
+                    visitor
+                ), () -> "determining if the response must be retried or if it should be returned now");
+        }
+
+        private <T> TrackedFuture<String, T> retryIfNeeded(
+            DeterminedTransformedResponse<T> result,
+            Throwable failure,
+            Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
+            EventLoop eventLoop,
+            ByteBufListProducer packetProducer,
+            Instant referenceStartTime,
+            Duration nextRetryDelay,
+            Duration interval,
+            RetryVisitor<T> visitor
+        ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> "request exchange was cancelled while evaluating a retry"
+                );
+            }
+            if (failure != null) {
+                return TextTrackedFuture.failedFuture(failure, () -> "failed future");
+            }
+            if (result.directive != RetryDirective.RETRY) {
+                return TextTrackedFuture.completedFuture(
+                    result.value,
+                    () -> "done retrying and returning received response"
+                );
+            }
+
+            var computedStartTime = referenceStartTime.plus(nextRetryDelay);
+            var currentTime = Instant.now();
+            var newStartTime = computedStartTime.isBefore(currentTime)
+                ? currentTime.plus(nextRetryDelay)
+                : computedStartTime;
+            log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
+            var schedulingDelay = Duration.between(Instant.now(), newStartTime);
+            return scheduleCancellable(eventLoop, schedulingDelay, "retry")
+                .thenCompose(
+                    ignored -> sendRequestWithRetries(
+                        senderSupplier,
+                        eventLoop,
+                        packetProducer,
+                        newStartTime,
+                        doubleRetryDelayCapped(nextRetryDelay),
+                        interval,
+                        visitor
+                    ),
+                    () -> "retrying request with delay of " + schedulingDelay
+                );
+        }
+
+        private TrackedFuture<String, Void> scheduleCancellable(
+            EventLoop eventLoop,
+            Duration delay,
+            String operation
+        ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> operation + " schedule was cancelled before admission"
+                );
+            }
+            if (eventLoop.isShuttingDown()) {
+                return TextTrackedFuture.failedFuture(
+                    new CancellationException("event loop is already shutting down"),
+                    () -> operation + " schedule was rejected because the event loop is shutting down"
+                );
+            }
+
+            var completion = new CompletableFuture<Void>();
+            var delayMillis = Math.max(0, delay.toMillis());
+            var scheduled = eventLoop.schedule(() -> completion.complete(null), delayMillis, TimeUnit.MILLISECONDS);
+            cancellableSchedules.put(scheduled, completion);
+            completion.whenComplete((ignored, failure) -> cancellableSchedules.remove(scheduled));
+            if (cancellationCause != null) {
+                scheduled.cancel(false);
+                completion.completeExceptionally(cancellationCause);
+            }
+            return new TextTrackedFuture<>(
+                completion,
+                () -> operation + " scheduled in " + delay + " (clipped: " + delayMillis + "ms)"
+            );
+        }
+
+        private Duration doubleRetryDelayCapped(Duration delay) {
+            return Duration.ofMillis(Math.min(delay.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
+        }
+
+        private TrackedFuture<String, AggregatedRawResponse> sendPackets(
+            IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
+            EventLoop eventLoop,
+            Iterator<ByteBuf> iterator,
+            Instant referenceStartAt,
+            Duration interval,
+            AtomicInteger requestPacketCounter
+        ) {
+            if (cancellationCause != null) {
+                return TextTrackedFuture.failedFuture(
+                    cancellationCause,
+                    () -> "packet send was cancelled before the next packet"
+                );
+            }
+            final var oldCounter = requestPacketCounter.getAndIncrement();
+            log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
+            assert iterator.hasNext() : "Should not have called this with no items to send";
+
+            var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
+            if (iterator.hasNext()) {
+                return consumeFuture.thenCompose(
+                    ignored -> scheduleCancellable(
+                            eventLoop,
+                            Duration.between(
+                                Instant.now(),
+                                referenceStartAt.plus(interval.multipliedBy(requestPacketCounter.get()))
+                            ),
+                            "next packet"
+                        )
+                        .thenCompose(
+                            value -> sendPackets(
+                                packetReceiver,
+                                eventLoop,
+                                iterator,
+                                referenceStartAt,
+                                interval,
+                                requestPacketCounter
+                            ),
+                            () -> "sending next packet"
+                        ),
+                    () -> "recursing, once ready"
+                );
+            }
+            return consumeFuture.getDeferredFutureThroughHandle(
+                (value, failure) -> packetReceiver.finalizeRequest(),
+                () -> "finalizing, once ready"
             );
         }
     }
@@ -409,6 +644,10 @@ public class RequestSenderOrchestrator {
             } catch (Throwable t) {
                 runtime.session.eventLoop.execute(() -> failPreparation(t));
             }
+        }
+
+        private Duration getDelayFromNowMs(Instant target) {
+            return Duration.ofMillis(Math.max(0, Duration.between(Instant.now(), target).toMillis()));
         }
 
         private void onPermitSettled(AsyncPermitPool.Permit acquiredPermit, Throwable failure) {
@@ -763,18 +1002,6 @@ public class RequestSenderOrchestrator {
         );
     }
 
-    private Instant now() {
-        return Instant.now();
-    }
-
-    private Duration getDelayFromNowMs(Instant to) {
-        return Duration.ofMillis(Math.max(0, Duration.between(now(), to).toMillis()));
-    }
-
-    private Duration doubleRetryDelayCapped(Duration d) {
-        return Duration.ofMillis(Math.min(d.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
-    }
-
     private ActorRuntime actorRuntime(
         ConnectionSessionKey key,
         IReplayContexts.IChannelKeyContext channelContext
@@ -805,15 +1032,6 @@ public class RequestSenderOrchestrator {
             sessionNumber,
             context.getChannelKey().getSourceGeneration()
         );
-    }
-
-    private CompletionStage<Void> closeRuntimeChannel(ActorRuntime runtime) {
-        return clientConnectionPool.closeChannelForSession(runtime.session).future.handle((channel, failure) -> {
-            if (failure != null) {
-                throw new CompletionException(unwrap(failure));
-            }
-            return null;
-        });
     }
 
     private static CompletionStage<Void> mapSessionOutcome(SessionOutcome outcome) {
@@ -865,93 +1083,4 @@ public class RequestSenderOrchestrator {
         return current;
     }
 
-    private <T> TrackedFuture<String, T>
-    sendRequestWithRetries(Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
-                           EventLoop eventLoop,
-                           ByteBufListProducer packetProducer,
-                           Instant referenceStartTime,
-                           Duration nextRetryDelay,
-                           Duration interval,
-                           RetryVisitor<T> visitor)
-    {
-        if (eventLoop.isShuttingDown()) {
-            return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
-                () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
-        }
-        var attempt = packetProducer.newAttempt();
-        var byteBufList = attempt.packets();
-        return sendPackets(
-            senderSupplier.get(),
-            eventLoop,
-            byteBufList.streamUnretained().iterator(),
-            referenceStartTime,
-            interval,
-            new AtomicInteger()
-        )
-            .getDeferredFutureThroughHandle((response, t) -> {
-                    try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
-                        return visitor.visit(requestBytesHolder.get(), response, t);
-                    }
-                },
-                () -> "checking response to determine if the request should be retried")
-            .whenComplete((response, failure) -> attempt.close(), () -> "releasing the request attempt payload")
-            .getDeferredFutureThroughHandle((dtr,t) -> {
-                if (t != null) {
-                    return TextTrackedFuture.failedFuture(t, () -> "failed future");
-                }
-                if (dtr.directive == RetryDirective.RETRY) {
-                    var computedStartTime = referenceStartTime.plus(nextRetryDelay);
-                    // Ensure retry is not scheduled in the past to prevent tight retry loops
-                    // that monopolize event loop threads when referenceStartTime is far in the past
-                    var now = now();
-                    var newStartTime = computedStartTime.isBefore(now)
-                        ? now.plus(nextRetryDelay)
-                        : computedStartTime;
-                    log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
-                    var schedulingDelay = Duration.between(now(), newStartTime);
-                    return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
-                        eventLoop, schedulingDelay)
-                        .thenCompose(
-                            v -> sendRequestWithRetries(senderSupplier, eventLoop, packetProducer, newStartTime,
-                                doubleRetryDelayCapped(nextRetryDelay), interval, visitor),
-                            () -> "retrying request with delay of " + schedulingDelay);
-                } else {
-                    return TextTrackedFuture.completedFuture(dtr.value,
-                        () -> "done retrying and returning received response");
-                }
-            }, () -> "determining if the response must be retried or if it should be returned now");
-    }
-
-    private TrackedFuture<String, AggregatedRawResponse> sendPackets(
-        IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
-        EventLoop eventLoop,
-        Iterator<ByteBuf> iterator,
-        Instant referenceStartAt,
-        Duration interval,
-        AtomicInteger requestPacketCounter
-    ) {
-        final var oldCounter = requestPacketCounter.getAndIncrement();
-        log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
-        assert iterator.hasNext() : "Should not have called this with no items to send";
-
-        var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
-        if (iterator.hasNext()) {
-            return consumeFuture.thenCompose(
-                tf -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(
-                        eventLoop,
-                        Duration.between(now(), referenceStartAt.plus(interval.multipliedBy(requestPacketCounter.get())))
-                    )
-                    .thenCompose(
-                        v -> sendPackets(packetReceiver, eventLoop, iterator, referenceStartAt, interval, requestPacketCounter),
-                        () -> "sending next packet"
-                    ),
-                () -> "recursing, once ready"
-            );
-        } else {
-            return consumeFuture.getDeferredFutureThroughHandle(
-                (v, t) -> packetReceiver.finalizeRequest(),
-                () -> "finalizing, once ready"
-            );
-        }
-    }
 }

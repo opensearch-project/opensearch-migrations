@@ -92,6 +92,9 @@ services:
       - "logging-traffic-topic"
       - "--kafka-traffic-group-id"
       - "logging-group-default"
+      - "--request-filter-config"
+      - >-
+        {"JsonJMESPathPredicateProvider":{"script":"URI != '/_search/scroll'"}}
       - "--transformer-config"
       - '[{"TypeMappingSanitizationTransformerProvider":{"sourceProperties":{"version":{"major":7,"minor":10}}}}]'
 

@@ -5,9 +5,18 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 
 import lombok.NonNull;
+import lombok.Value;
+import lombok.experimental.Accessors;
 
 public final class ReplayDispositionPolicy {
-    public record Decision(@NonNull RecordDisposition disposition, boolean haltReplay) {}
+    private static final String DURABLE_EVIDENCE_MISSING = "durable-evidence-missing";
+
+    @Value
+    @Accessors(fluent = true)
+    public static class Decision {
+        @NonNull RecordDisposition disposition;
+        boolean haltReplay;
+    }
 
     public <T> Decision decide(
         @NonNull SourceOutcome source,
@@ -167,7 +176,7 @@ public final class ReplayDispositionPolicy {
         return target.visit(new TargetOutcome.Visitor<T, Decision>() {
             @Override
             public Decision onSucceeded(TargetOutcome.Succeeded<T> outcome) {
-                return retain("durable-evidence-missing", true);
+                return retain(DURABLE_EVIDENCE_MISSING, true);
             }
 
             @Override
@@ -182,12 +191,12 @@ public final class ReplayDispositionPolicy {
 
             @Override
             public Decision onFiltered(TargetOutcome.Filtered<T> outcome) {
-                return retain("durable-evidence-missing", true);
+                return retain(DURABLE_EVIDENCE_MISSING, true);
             }
 
             @Override
             public Decision onClassifiedSkip(TargetOutcome.ClassifiedSkip<T> outcome) {
-                return retain("durable-evidence-missing", true);
+                return retain(DURABLE_EVIDENCE_MISSING, true);
             }
         });
     }

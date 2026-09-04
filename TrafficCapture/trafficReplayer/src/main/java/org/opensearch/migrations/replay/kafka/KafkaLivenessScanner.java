@@ -27,103 +27,228 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 final class KafkaLivenessScanner {
     private static final int MAXIMUM_CHUNKS_PER_SNAPSHOT = 100_000;
 
-    record Candidate(
-        @NonNull SourcePartitionKey partition,
-        @NonNull SourceConnectionKey connection,
-        @NonNull String routingPlanId,
-        long lastReplayedOffset,
-        @NonNull FollowUpRequirement requirement
-    ) {}
+    static final class Candidate {
+        private final SourcePartitionKey partition;
+        private final SourceConnectionKey connection;
+        private final String routingPlanId;
+        private final long lastReplayedOffset;
+        private final FollowUpRequirement requirement;
 
-    private record SnapshotKey(String nodeId, int partition, String routingPlanId, long sequence) {}
+        Candidate(
+            @NonNull SourcePartitionKey partition,
+            @NonNull SourceConnectionKey connection,
+            @NonNull String routingPlanId,
+            long lastReplayedOffset,
+            @NonNull FollowUpRequirement requirement
+        ) {
+            this.partition = partition;
+            this.connection = connection;
+            this.routingPlanId = routingPlanId;
+            this.lastReplayedOffset = lastReplayedOffset;
+            this.requirement = requirement;
+        }
 
-    private record CompleteSnapshot(
-        SnapshotKey key,
-        CompleteSnapshotSpan span,
-        Set<String> openConnections
-    ) {}
+        SourcePartitionKey partition() {
+            return partition;
+        }
+
+        SourceConnectionKey connection() {
+            return connection;
+        }
+
+        String routingPlanId() {
+            return routingPlanId;
+        }
+
+        long lastReplayedOffset() {
+            return lastReplayedOffset;
+        }
+
+        FollowUpRequirement requirement() {
+            return requirement;
+        }
+    }
+
+    private static final class SnapshotKey {
+        private final String nodeId;
+        private final int partition;
+        private final String routingPlanId;
+        private final long sequence;
+
+        private SnapshotKey(String nodeId, int partition, String routingPlanId, long sequence) {
+            this.nodeId = nodeId;
+            this.partition = partition;
+            this.routingPlanId = routingPlanId;
+            this.sequence = sequence;
+        }
+
+        private String nodeId() {
+            return nodeId;
+        }
+
+        private int partition() {
+            return partition;
+        }
+
+        private String routingPlanId() {
+            return routingPlanId;
+        }
+
+        private long sequence() {
+            return sequence;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof SnapshotKey)) {
+                return false;
+            }
+            var that = (SnapshotKey) other;
+            return partition == that.partition
+                && sequence == that.sequence
+                && nodeId.equals(that.nodeId)
+                && routingPlanId.equals(that.routingPlanId);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(nodeId, partition, routingPlanId, sequence);
+        }
+    }
+
+    private static final class CompleteSnapshot {
+        private final SnapshotKey key;
+        private final CompleteSnapshotSpan span;
+        private final Set<String> openConnections;
+
+        private CompleteSnapshot(
+            SnapshotKey key,
+            CompleteSnapshotSpan span,
+            Set<String> openConnections
+        ) {
+            this.key = key;
+            this.span = span;
+            this.openConnections = openConnections;
+        }
+
+        private SnapshotKey key() {
+            return key;
+        }
+
+        private CompleteSnapshotSpan span() {
+            return span;
+        }
+
+        private Set<String> openConnections() {
+            return openConnections;
+        }
+    }
 
     List<ScanEvidence> evaluate(
         Collection<Candidate> candidates,
         TrackingKafkaConsumer.ScanCycle cycle
     ) {
         if (!cycle.stableGeneration()) {
-            return candidates.stream()
-                .map(candidate -> new ScanEvidence.Inconclusive(
-                    candidate.partition(),
-                    candidate.connection(),
-                    "Kafka assignment or generation changed during scan"
-                ))
-                .map(ScanEvidence.class::cast)
-                .toList();
+            return generationChangedVerdicts(candidates);
         }
         var candidateByConnection = new HashMap<SourceConnectionKey, Candidate>();
         candidates.forEach(candidate -> candidateByConnection.put(candidate.connection(), candidate));
         var followUps = new HashMap<SourceConnectionKey, Long>();
         var partialSnapshots = new HashMap<SnapshotKey, PartialSnapshot>();
 
-        for (var record : cycle.records()) {
-            if (isLivenessRecord(record)) {
-                addSnapshotRecord(record, partialSnapshots);
+        for (var kafkaRecord : cycle.records()) {
+            if (isLivenessRecord(kafkaRecord)) {
+                addSnapshotRecord(kafkaRecord, partialSnapshots);
             } else {
-                addTrafficFollowUp(record, candidateByConnection, followUps);
+                addTrafficFollowUp(kafkaRecord, candidateByConnection, followUps);
             }
         }
 
-        var completeSnapshots = partialSnapshots.values()
+        var completeSnapshots = completeSnapshots(partialSnapshots);
+
+        var verdicts = new ArrayList<ScanEvidence>(candidates.size());
+        for (var candidate : candidates) {
+            verdicts.add(evaluateCandidate(candidate, followUps, completeSnapshots, cycle.exhaustedBudget()));
+        }
+        return List.copyOf(verdicts);
+    }
+
+    private List<ScanEvidence> generationChangedVerdicts(Collection<Candidate> candidates) {
+        return candidates.stream()
+            .map(candidate -> new ScanEvidence.Inconclusive(
+                candidate.partition(),
+                candidate.connection(),
+                "Kafka assignment or generation changed during scan"
+            ))
+            .map(ScanEvidence.class::cast)
+            .toList();
+    }
+
+    private List<CompleteSnapshot> completeSnapshots(Map<SnapshotKey, PartialSnapshot> partialSnapshots) {
+        return partialSnapshots.values()
             .stream()
             .filter(PartialSnapshot::isComplete)
             .map(PartialSnapshot::complete)
             .sorted(Comparator.comparingLong(snapshot -> snapshot.span().firstOffset()))
             .toList();
+    }
 
-        var verdicts = new ArrayList<ScanEvidence>(candidates.size());
-        for (var candidate : candidates) {
-            var followUpOffset = followUps.get(candidate.connection());
-            if (followUpOffset != null) {
-                verdicts.add(new ScanEvidence.FollowUpPresent(
-                    candidate.partition(),
-                    candidate.connection(),
-                    followUpOffset
-                ));
-                continue;
-            }
-            var relevantSnapshots = completeSnapshots.stream()
-                .filter(snapshot -> snapshot.key().nodeId().equals(candidate.connection().nodeId()))
-                .filter(snapshot -> snapshot.key().partition() == candidate.partition().partition())
-                .filter(snapshot -> snapshot.key().routingPlanId().equals(candidate.routingPlanId()))
-                .filter(snapshot -> snapshot.span().firstOffset() > candidate.lastReplayedOffset())
-                .toList();
-            var containing = relevantSnapshots.stream()
-                .filter(snapshot -> snapshot.openConnections().contains(candidate.connection().connectionId()))
-                .findFirst();
-            if (containing.isPresent()) {
-                verdicts.add(new ScanEvidence.FollowUpPresent(
-                    candidate.partition(),
-                    candidate.connection(),
-                    containing.get().span().lastOffset()
-                ));
-                continue;
-            }
-            var proof = findOmissionProof(candidate, relevantSnapshots);
-            if (proof != null) {
-                verdicts.add(new ScanEvidence.ConfirmedAbsent(
-                    candidate.partition(),
-                    candidate.connection(),
-                    candidate.requirement(),
-                    proof
-                ));
-            } else {
-                verdicts.add(new ScanEvidence.Inconclusive(
-                    candidate.partition(),
-                    candidate.connection(),
-                    cycle.exhaustedBudget()
-                        ? "Scan budget ended before two complete omission snapshots"
-                        : "Two complete consecutive omission snapshots were not available"
-                ));
-            }
+    private ScanEvidence evaluateCandidate(
+        Candidate candidate,
+        Map<SourceConnectionKey, Long> followUps,
+        List<CompleteSnapshot> completeSnapshots,
+        boolean exhaustedBudget
+    ) {
+        var followUpOffset = followUps.get(candidate.connection());
+        if (followUpOffset != null) {
+            return followUpPresent(candidate, followUpOffset);
         }
-        return List.copyOf(verdicts);
+        var relevantSnapshots = relevantSnapshots(candidate, completeSnapshots);
+        var containing = relevantSnapshots.stream()
+            .filter(snapshot -> snapshot.openConnections().contains(candidate.connection().connectionId()))
+            .findFirst();
+        if (containing.isPresent()) {
+            return followUpPresent(candidate, containing.get().span().lastOffset());
+        }
+        var proof = findOmissionProof(candidate, relevantSnapshots);
+        if (proof != null) {
+            return new ScanEvidence.ConfirmedAbsent(
+                candidate.partition(),
+                candidate.connection(),
+                candidate.requirement(),
+                proof
+            );
+        }
+        return new ScanEvidence.Inconclusive(
+            candidate.partition(),
+            candidate.connection(),
+            exhaustedBudget
+                ? "Scan budget ended before two complete omission snapshots"
+                : "Two complete consecutive omission snapshots were not available"
+        );
+    }
+
+    private ScanEvidence.FollowUpPresent followUpPresent(Candidate candidate, long offset) {
+        return new ScanEvidence.FollowUpPresent(
+            candidate.partition(),
+            candidate.connection(),
+            offset
+        );
+    }
+
+    private List<CompleteSnapshot> relevantSnapshots(
+        Candidate candidate,
+        List<CompleteSnapshot> completeSnapshots
+    ) {
+        return completeSnapshots.stream()
+            .filter(snapshot -> snapshot.key().nodeId().equals(candidate.connection().nodeId()))
+            .filter(snapshot -> snapshot.key().partition() == candidate.partition().partition())
+            .filter(snapshot -> snapshot.key().routingPlanId().equals(candidate.routingPlanId()))
+            .filter(snapshot -> snapshot.span().firstOffset() > candidate.lastReplayedOffset())
+            .toList();
     }
 
     private AbsenceProof.LivenessOmission findOmissionProof(
@@ -133,68 +258,72 @@ final class KafkaLivenessScanner {
         for (int i = 1; i < snapshots.size(); ++i) {
             var first = snapshots.get(i - 1);
             var second = snapshots.get(i);
-            if (second.key().sequence() != first.key().sequence() + 1) {
-                continue;
+            if (isOmissionProof(candidate, first, second)) {
+                return new AbsenceProof.LivenessOmission(
+                    candidate.connection().nodeId(),
+                    candidate.partition().partition(),
+                    first.span(),
+                    second.span(),
+                    candidate.lastReplayedOffset()
+                );
             }
-            if (first.openConnections().contains(candidate.connection().connectionId())
-                || second.openConnections().contains(candidate.connection().connectionId())) {
-                continue;
-            }
-            if (first.span().lastOffset() >= second.span().firstOffset()) {
-                continue;
-            }
-            return new AbsenceProof.LivenessOmission(
-                candidate.connection().nodeId(),
-                candidate.partition().partition(),
-                first.span(),
-                second.span(),
-                candidate.lastReplayedOffset()
-            );
         }
         return null;
     }
 
+    private boolean isOmissionProof(
+        Candidate candidate,
+        CompleteSnapshot first,
+        CompleteSnapshot second
+    ) {
+        var connectionId = candidate.connection().connectionId();
+        return second.key().sequence() == first.key().sequence() + 1
+            && !first.openConnections().contains(connectionId)
+            && !second.openConnections().contains(connectionId)
+            && first.span().lastOffset() < second.span().firstOffset();
+    }
+
     private void addTrafficFollowUp(
-        ConsumerRecord<String, byte[]> record,
+        ConsumerRecord<String, byte[]> kafkaRecord,
         Map<SourceConnectionKey, Candidate> candidateByConnection,
         Map<SourceConnectionKey, Long> followUps
     ) {
         final TrafficStream stream;
         try {
-            stream = TrafficStream.parseFrom(record.value());
+            stream = TrafficStream.parseFrom(kafkaRecord.value());
         } catch (InvalidProtocolBufferException e) {
             return;
         }
         if (!stream.hasPartition() || !stream.hasRoutingPlanId()) {
             return;
         }
-        validateTrafficStamp(record, stream);
+        validateTrafficStamp(kafkaRecord, stream);
         var connection = new SourceConnectionKey(stream.getNodeId(), stream.getConnectionId());
         var candidate = candidateByConnection.get(connection);
         if (candidate != null
-            && candidate.partition().partition() == record.partition()
+            && candidate.partition().partition() == kafkaRecord.partition()
             && candidate.routingPlanId().equals(stream.getRoutingPlanId())
-            && record.offset() > candidate.lastReplayedOffset()) {
-            followUps.merge(connection, record.offset(), Math::min);
+            && kafkaRecord.offset() > candidate.lastReplayedOffset()) {
+            followUps.merge(connection, kafkaRecord.offset(), Math::min);
         }
     }
 
     private void addSnapshotRecord(
-        ConsumerRecord<String, byte[]> record,
+        ConsumerRecord<String, byte[]> kafkaRecord,
         Map<SnapshotKey, PartialSnapshot> partialSnapshots
     ) {
         final ProxyLivenessSnapshotChunk chunk;
         try {
-            chunk = ProxyLivenessSnapshotChunk.parseFrom(record.value());
+            chunk = ProxyLivenessSnapshotChunk.parseFrom(kafkaRecord.value());
         } catch (InvalidProtocolBufferException e) {
             return;
         }
-        if (chunk.getPartition() != record.partition()) {
+        if (chunk.getPartition() != kafkaRecord.partition()) {
             throw new IllegalStateException(
                 "Liveness snapshot partition stamp "
                     + chunk.getPartition()
                     + " does not match consumed partition "
-                    + record.partition()
+                    + kafkaRecord.partition()
             );
         }
         if (chunk.getRoutingPlanId().isBlank()) {
@@ -207,16 +336,16 @@ final class KafkaLivenessScanner {
             chunk.getSnapshotSequence()
         );
         partialSnapshots.computeIfAbsent(key, ignored -> new PartialSnapshot(key, chunk))
-            .add(record.offset(), chunk);
+            .add(kafkaRecord.offset(), chunk);
     }
 
-    static void validateTrafficStamp(ConsumerRecord<String, byte[]> record, TrafficStream stream) {
-        if (stream.getPartition() != record.partition()) {
+    static void validateTrafficStamp(ConsumerRecord<String, byte[]> kafkaRecord, TrafficStream stream) {
+        if (stream.getPartition() != kafkaRecord.partition()) {
             throw new IllegalStateException(
                 "Traffic partition stamp "
                     + stream.getPartition()
                     + " does not match consumed partition "
-                    + record.partition()
+                    + kafkaRecord.partition()
             );
         }
         if (stream.getRoutingPlanId().isBlank()) {
@@ -224,8 +353,8 @@ final class KafkaLivenessScanner {
         }
     }
 
-    static boolean isLivenessRecord(ConsumerRecord<String, byte[]> record) {
-        for (var header : record.headers()) {
+    static boolean isLivenessRecord(ConsumerRecord<String, byte[]> kafkaRecord) {
+        for (var header : kafkaRecord.headers()) {
             if (CaptureRecordTypes.RECORD_TYPE_HEADER.equals(header.key())
                 && CaptureRecordTypes.LIVENESS_RECORD_TYPE.equals(
                     new String(header.value(), StandardCharsets.UTF_8)

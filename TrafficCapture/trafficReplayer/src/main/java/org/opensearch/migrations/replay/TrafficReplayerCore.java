@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -67,6 +68,36 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         boolean isEmpty();
 
         int size();
+    }
+
+    private static final class TargetExchangeResult {
+        private final TransformedTargetRequestAndResponseList summary;
+        private final Throwable failure;
+
+        private TargetExchangeResult(TransformedTargetRequestAndResponseList summary, Throwable failure) {
+            this.summary = summary;
+            this.failure = failure;
+        }
+    }
+
+    static CompletableFuture<Void> combineConnectionCloseOperations(
+        CompletionStage<Void> sourceDisposition,
+        CompletionStage<Void> actorTermination
+    ) {
+        var normalizedActorTermination = actorTermination.handle((ignored, failure) -> {
+            if (failure == null) {
+                return null;
+            }
+            var cause = TrackedFuture.unwindPossibleCompletionException(failure);
+            if (cause instanceof SourceReassignmentCancellationException) {
+                return null;
+            }
+            throw new CompletionException(cause);
+        });
+        return CompletableFuture.allOf(
+            sourceDisposition.toCompletableFuture(),
+            normalizedActorTermination.toCompletableFuture()
+        );
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -279,11 +310,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture,
                 quiescentDurationForRequest
             );
-            targetFuture.future.whenComplete((summary, failure) -> {
-                evidenceState.target = summary;
-                evidenceState.targetFailure = failure == null ? null : unwrap(failure);
-                transaction.settleTarget(toTargetOutcome(summary, failure));
-            });
+            settleTransactionTarget(
+                transaction,
+                targetFuture,
+                finishedAccumulatingResponseFuture,
+                evidenceState
+            );
 
             var allWorkFinishedForTransactionFuture = new TextTrackedFuture<>(
                 transaction.completion()
@@ -318,6 +350,52 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                         }
                     });
             };
+        }
+
+        private void settleTransactionTarget(
+            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
+            TrackedFuture<String, TransformedTargetRequestAndResponseList> targetFuture,
+            TextTrackedFuture<RequestResponsePacketPair> sourceFuture,
+            TransactionEvidenceState evidenceState
+        ) {
+            targetFuture.future
+                .handle((summary, failure) -> captureTargetResult(evidenceState, summary, failure))
+                .thenCombine(
+                    sourceFuture.future,
+                    (targetResult, source) -> toTargetOutcome(
+                        targetResult.summary,
+                        targetResult.failure,
+                        source
+                    )
+                )
+                .whenComplete((outcome, failure) -> settleTargetOrFail(transaction, outcome, failure));
+        }
+
+        private TargetExchangeResult captureTargetResult(
+            TransactionEvidenceState evidenceState,
+            TransformedTargetRequestAndResponseList summary,
+            Throwable failure
+        ) {
+            var cause = failure == null ? null : unwrap(failure);
+            evidenceState.target = summary;
+            evidenceState.targetFailure = cause;
+            return new TargetExchangeResult(summary, cause);
+        }
+
+        private void settleTargetOrFail(
+            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
+            TargetOutcome<TransformedTargetRequestAndResponseList> outcome,
+            Throwable failure
+        ) {
+            if (failure != null) {
+                transaction.fail(unwrap(failure));
+                return;
+            }
+            transaction.settleTarget(outcome).whenComplete((ignored, settlementFailure) -> {
+                if (settlementFailure != null) {
+                    transaction.fail(unwrap(settlementFailure));
+                }
+            });
         }
 
         private CompletionStage<List<RecordId>> registerTransactionRecords(
@@ -395,7 +473,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 public Error onDurable(EvidenceOutcome.Durable durable) {
                     return new Error(
                         "Replay transaction " + outcome.requestId() + " retained its source records after "
-                            + outcome.disposition().reasonCode()
+                            + outcome.disposition().reasonCode(),
+                        targetFailureCause(outcome.targetOutcome())
                     );
                 }
 
@@ -412,22 +491,52 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 public Error onNotRequired(EvidenceOutcome.NotRequired notRequired) {
                     return new Error(
                         "Replay transaction " + outcome.requestId() + " retained its source records after "
-                            + outcome.disposition().reasonCode()
+                            + outcome.disposition().reasonCode(),
+                        targetFailureCause(outcome.targetOutcome())
                     );
+                }
+            });
+        }
+
+        private <T> Throwable targetFailureCause(TargetOutcome<T> outcome) {
+            return outcome.visit(new TargetOutcome.Visitor<T, Throwable>() {
+                @Override
+                public Throwable onSucceeded(TargetOutcome.Succeeded<T> succeeded) {
+                    return null;
+                }
+
+                @Override
+                public Throwable onFailed(TargetOutcome.Failed<T> failed) {
+                    return failed.cause();
+                }
+
+                @Override
+                public Throwable onCancelled(TargetOutcome.Cancelled<T> cancelled) {
+                    return cancelled.cause();
+                }
+
+                @Override
+                public Throwable onFiltered(TargetOutcome.Filtered<T> filtered) {
+                    return null;
+                }
+
+                @Override
+                public Throwable onClassifiedSkip(TargetOutcome.ClassifiedSkip<T> classifiedSkip) {
+                    return null;
                 }
             });
         }
 
         private TargetOutcome<TransformedTargetRequestAndResponseList> toTargetOutcome(
             TransformedTargetRequestAndResponseList summary,
-            Throwable failure
+            Throwable failure,
+            RequestResponsePacketPair source
         ) {
             if (failure != null) {
-                var cause = unwrap(failure);
-                if (cause instanceof CancellationException cancellation) {
+                if (failure instanceof CancellationException cancellation) {
                     return new TargetOutcome.Cancelled<>(cancellation);
                 }
-                return new TargetOutcome.Failed<>(cause);
+                return new TargetOutcome.Failed<>(failure);
             }
             if (summary != null && summary.getTransformationStatus().isSkipped()) {
                 return new TargetOutcome.Filtered<>("request transformation filter");
@@ -440,7 +549,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     new IllegalStateException("Target exchange completed without a result")
                 );
             }
-            return targetResponseClassifier.classify(summary);
+            return targetResponseClassifier.classify(summary, source);
         }
 
         private SourceOutcome toSourceOutcome(RequestResponsePacketPair rrPair) {
@@ -590,18 +699,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 );
             }
             var ownedProgressToken = progressToken;
-            CompletableFuture.allOf(
-                sourceDisposition.toCompletableFuture(),
-                actorTermination.future
-            ).whenComplete((ignored, failure) -> {
-                sessionPartitions.remove(sessionKey);
-                if (ownedProgressToken != null) {
-                    ownedProgressToken.close();
-                }
-                if (failure != null) {
-                    failReplayForSessionLifecycle(sessionKey, unwrap(failure));
-                }
-            });
+            combineConnectionCloseOperations(sourceDisposition, actorTermination.future)
+                .whenComplete((ignored, failure) -> {
+                    sessionPartitions.remove(sessionKey);
+                    if (ownedProgressToken != null) {
+                        ownedProgressToken.close();
+                    }
+                    if (failure != null) {
+                        failReplayForSessionLifecycle(sessionKey, unwrap(failure));
+                    }
+                });
         }
 
         @Override

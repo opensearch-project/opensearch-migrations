@@ -23,11 +23,29 @@ public final class AsyncPermitPool {
         void close();
     }
 
-    private record Waiter(
-        ReplayRequestId requestId,
-        int cost,
-        CompletableFuture<Permit> completion
-    ) {}
+    private static final class Waiter {
+        private final ReplayRequestId requestId;
+        private final int cost;
+        private final CompletableFuture<Permit> completion;
+
+        private Waiter(ReplayRequestId requestId, int cost, CompletableFuture<Permit> completion) {
+            this.requestId = requestId;
+            this.cost = cost;
+            this.completion = completion;
+        }
+
+        private ReplayRequestId requestId() {
+            return requestId;
+        }
+
+        private int cost() {
+            return cost;
+        }
+
+        private CompletableFuture<Permit> completion() {
+            return completion;
+        }
+    }
 
     private final int capacity;
     private final Executor ownerExecutor;

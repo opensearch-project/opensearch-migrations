@@ -51,11 +51,49 @@ import org.slf4j.event.Level;
  */
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
-    record ScanCycle(
-        List<ConsumerRecord<String, byte[]>> records,
-        boolean stableGeneration,
-        boolean exhaustedBudget
-    ) {}
+    static final class ScanCycle {
+        private final List<ConsumerRecord<String, byte[]>> records;
+        private final boolean stableGeneration;
+        private final boolean exhaustedBudget;
+
+        ScanCycle(
+            List<ConsumerRecord<String, byte[]>> records,
+            boolean stableGeneration,
+            boolean exhaustedBudget
+        ) {
+            this.records = records;
+            this.stableGeneration = stableGeneration;
+            this.exhaustedBudget = exhaustedBudget;
+        }
+
+        List<ConsumerRecord<String, byte[]>> records() {
+            return records;
+        }
+
+        boolean stableGeneration() {
+            return stableGeneration;
+        }
+
+        boolean exhaustedBudget() {
+            return exhaustedBudget;
+        }
+    }
+
+    private static final class ScanBaseline {
+        private final Set<TopicPartition> assignment;
+        private final Map<TopicPartition, Long> replayPositions;
+        private final Map<Integer, Integer> generations;
+
+        private ScanBaseline(
+            Set<TopicPartition> assignment,
+            Map<TopicPartition, Long> replayPositions,
+            Map<Integer, Integer> generations
+        ) {
+            this.assignment = assignment;
+            this.replayPositions = replayPositions;
+            this.generations = generations;
+        }
+    }
 
     @AllArgsConstructor
     private static class OrderedKeyHolder implements Comparable<OrderedKeyHolder> {
@@ -382,16 +420,44 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     }
 
     ScanCycle scanAhead(int maximumRecords, Duration maximumDuration) {
+        validateScanBudget(maximumRecords, maximumDuration);
+        var assignment = Set.copyOf(kafkaConsumer.assignment());
+        if (assignment.isEmpty()) {
+            return new ScanCycle(List.of(), true, false);
+        }
+        var baseline = captureScanBaseline(assignment);
+        if (baseline == null) {
+            return new ScanCycle(List.of(), false, false);
+        }
+        var endOffsets = kafkaConsumer.endOffsets(assignment);
+        long deadline = System.nanoTime() + maximumDuration.toNanos();
+        rebalanceDuringPoll.set(false);
+        try {
+            var scanned = collectScanRecords(baseline.assignment, endOffsets, maximumRecords, deadline);
+            var stableGeneration = scanGenerationIsStable(baseline.assignment, baseline.generations);
+            var exhaustedBudget = stableGeneration
+                && !atScanEnd(baseline.assignment, endOffsets)
+                && (scanned.size() >= maximumRecords || System.nanoTime() >= deadline);
+            return stableGeneration
+                ? new ScanCycle(List.copyOf(scanned), true, exhaustedBudget)
+                : new ScanCycle(List.of(), false, exhaustedBudget);
+        } finally {
+            restoreReplayPositions(baseline);
+            rebalanceDuringPoll.set(false);
+            lastTouchTimeRef.set(clock.instant());
+        }
+    }
+
+    private void validateScanBudget(int maximumRecords, Duration maximumDuration) {
         if (maximumRecords <= 0) {
             throw new IllegalArgumentException("maximumRecords must be positive");
         }
         if (maximumDuration.isZero() || maximumDuration.isNegative()) {
             throw new IllegalArgumentException("maximumDuration must be positive");
         }
-        var assignment = Set.copyOf(kafkaConsumer.assignment());
-        if (assignment.isEmpty()) {
-            return new ScanCycle(List.of(), true, false);
-        }
+    }
+
+    private ScanBaseline captureScanBaseline(Set<TopicPartition> assignment) {
         var replayPositions = new HashMap<TopicPartition, Long>();
         var generations = new HashMap<Integer, Integer>();
         synchronized (commitDataLock) {
@@ -399,66 +465,74 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 replayPositions.put(topicPartition, kafkaConsumer.position(topicPartition));
                 var tracker = partitionToOffsetLifecycleTrackerMap.get(topicPartition.partition());
                 if (tracker == null) {
-                    return new ScanCycle(List.of(), false, false);
+                    return null;
                 }
                 generations.put(topicPartition.partition(), tracker.consumerConnectionGeneration);
             }
         }
-        var endOffsets = kafkaConsumer.endOffsets(assignment);
+        return new ScanBaseline(assignment, replayPositions, generations);
+    }
+
+    private List<ConsumerRecord<String, byte[]>> collectScanRecords(
+        Set<TopicPartition> assignment,
+        Map<TopicPartition, Long> endOffsets,
+        int maximumRecords,
+        long deadline
+    ) {
         var scanned = new ArrayList<ConsumerRecord<String, byte[]>>();
-        long deadline = System.nanoTime() + maximumDuration.toNanos();
-        boolean exhaustedBudget = false;
-        boolean stableGeneration;
-        rebalanceDuringPoll.set(false);
+        while (shouldContinueScan(assignment, endOffsets, scanned.size(), maximumRecords, deadline)) {
+            var records = pollForScan(assignment, deadline);
+            if (records == null) {
+                return scanned;
+            }
+            for (var kafkaRecord : records) {
+                var topicPartition = new TopicPartition(kafkaRecord.topic(), kafkaRecord.partition());
+                if (scanned.size() < maximumRecords && assignment.contains(topicPartition)) {
+                    scanned.add(kafkaRecord);
+                }
+            }
+        }
+        return scanned;
+    }
+
+    private boolean shouldContinueScan(
+        Set<TopicPartition> assignment,
+        Map<TopicPartition, Long> endOffsets,
+        int scannedRecords,
+        int maximumRecords,
+        long deadline
+    ) {
+        return scannedRecords < maximumRecords
+            && System.nanoTime() < deadline
+            && !rebalanceDuringPoll.get()
+            && !atScanEnd(assignment, endOffsets);
+    }
+
+    private ConsumerRecords<String, byte[]> pollForScan(
+        Set<TopicPartition> assignment,
+        long deadline
+    ) {
+        var remaining = Duration.ofNanos(Math.max(1, deadline - System.nanoTime()));
         try {
-            while (scanned.size() < maximumRecords && System.nanoTime() < deadline) {
-                if (atScanEnd(assignment, endOffsets)) {
-                    break;
-                }
-                var remaining = Duration.ofNanos(Math.max(1, deadline - System.nanoTime()));
-                ConsumerRecords<String, byte[]> records;
-                try {
-                    records = kafkaConsumer.poll(
-                        remaining.compareTo(Duration.ofMillis(10)) > 0 ? Duration.ofMillis(10) : remaining
-                    );
-                } catch (RuntimeException e) {
-                    if (rebalanceDuringPoll.get() || !kafkaConsumer.assignment().equals(assignment)) {
-                        break;
-                    }
-                    throw e;
-                }
-                for (var record : records) {
-                    if (assignment.contains(new TopicPartition(record.topic(), record.partition()))) {
-                        scanned.add(record);
-                        if (scanned.size() == maximumRecords) {
-                            break;
-                        }
-                    }
-                }
-                if (rebalanceDuringPoll.get()) {
-                    break;
-                }
+            return kafkaConsumer.poll(
+                remaining.compareTo(Duration.ofMillis(10)) > 0 ? Duration.ofMillis(10) : remaining
+            );
+        } catch (RuntimeException e) {
+            if (rebalanceDuringPoll.get() || !kafkaConsumer.assignment().equals(assignment)) {
+                return null;
             }
-            stableGeneration = scanGenerationIsStable(assignment, generations);
-            exhaustedBudget = stableGeneration
-                && !atScanEnd(assignment, endOffsets)
-                && (scanned.size() >= maximumRecords || System.nanoTime() >= deadline);
-        } finally {
-            stableGeneration = scanGenerationIsStable(assignment, generations);
-            for (var entry : replayPositions.entrySet()) {
-                var topicPartition = entry.getKey();
-                if (kafkaConsumer.assignment().contains(topicPartition)
-                    && generationMatches(topicPartition, generations.get(topicPartition.partition()))) {
-                    kafkaConsumer.seek(topicPartition, entry.getValue());
-                }
+            throw e;
+        }
+    }
+
+    private void restoreReplayPositions(ScanBaseline baseline) {
+        for (var entry : baseline.replayPositions.entrySet()) {
+            var topicPartition = entry.getKey();
+            if (kafkaConsumer.assignment().contains(topicPartition)
+                && generationMatches(topicPartition, baseline.generations.get(topicPartition.partition()))) {
+                kafkaConsumer.seek(topicPartition, entry.getValue());
             }
-            rebalanceDuringPoll.set(false);
-            lastTouchTimeRef.set(clock.instant());
         }
-        if (!stableGeneration) {
-            return new ScanCycle(List.of(), false, exhaustedBudget);
-        }
-        return new ScanCycle(List.copyOf(scanned), true, exhaustedBudget);
     }
 
     private boolean atScanEnd(

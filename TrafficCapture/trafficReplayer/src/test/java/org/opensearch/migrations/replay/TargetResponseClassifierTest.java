@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 class TargetResponseClassifierTest {
     private static final String BULK_REQUEST =
         "POST /_bulk HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
+    private static final String REGULAR_REQUEST =
+        "GET /missing HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
 
     @Test
     void successfulBulkResponseIsARealSuccess() {
@@ -71,11 +73,44 @@ class TargetResponseClassifierTest {
         }
     }
 
+    @Test
+    void sourceAndTargetNonSuccessResponsesAreASuccessfulReplay() {
+        try (var fixture = fixture(
+            ExceptionTypeAllowlist.empty(),
+            REGULAR_REQUEST,
+            httpResponse(405, "source rejected"),
+            httpResponse(400, "target rejected")
+        )) {
+            assertInstanceOf(TargetOutcome.Succeeded.class, fixture.classify());
+        }
+    }
+
+    @Test
+    void targetNonSuccessAfterSourceSuccessRemainsAFailure() {
+        try (var fixture = fixture(
+            ExceptionTypeAllowlist.empty(),
+            REGULAR_REQUEST,
+            httpResponse(200, "source success"),
+            httpResponse(404, "target missing")
+        )) {
+            assertInstanceOf(TargetOutcome.Failed.class, fixture.classify());
+        }
+    }
+
     private static Fixture fixture(ExceptionTypeAllowlist allowlist, String response) {
-        var requestPacket = Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8));
+        return fixture(allowlist, BULK_REQUEST, httpResponse(200, "source success"), response);
+    }
+
+    private static Fixture fixture(
+        ExceptionTypeAllowlist allowlist,
+        String request,
+        String sourceResponse,
+        String targetResponse
+    ) {
+        var requestPacket = Unpooled.wrappedBuffer(request.getBytes(StandardCharsets.UTF_8));
         var requestPackets = new ByteBufList(requestPacket);
         requestPacket.release();
-        var responseBytes = response.getBytes(StandardCharsets.UTF_8);
+        var responseBytes = targetResponse.getBytes(StandardCharsets.UTF_8);
         var aggregatedResponse = AggregatedRawResponse.builder(Instant.now())
             .addHttpParsedResponseObject(
                 HttpByteBufFormatter.parseHttpResponseFromBufs(
@@ -92,8 +127,25 @@ class TargetResponseClassifierTest {
         );
         return new Fixture(
             new TargetResponseClassifier(new BulkItemErrorClassifier(), allowlist),
-            summary
+            summary,
+            sourcePair(sourceResponse)
         );
+    }
+
+    private static IRequestResponsePacketPair sourcePair(String responseBytes) {
+        var response = new HttpMessageAndTimestamp.Response(Instant.EPOCH);
+        response.add(responseBytes.getBytes(StandardCharsets.UTF_8));
+        return new IRequestResponsePacketPair() {
+            @Override
+            public HttpMessageAndTimestamp getRequestData() {
+                return null;
+            }
+
+            @Override
+            public HttpMessageAndTimestamp getResponseData() {
+                return response;
+            }
+        };
     }
 
     private static String bulkResponse(boolean errors, String... errorTypes) {
@@ -121,10 +173,11 @@ class TargetResponseClassifierTest {
 
     private record Fixture(
         TargetResponseClassifier classifier,
-        TransformedTargetRequestAndResponseList summary
+        TransformedTargetRequestAndResponseList summary,
+        IRequestResponsePacketPair source
     ) implements AutoCloseable {
         TargetOutcome<TransformedTargetRequestAndResponseList> classify() {
-            return classifier.classify(summary);
+            return classifier.classify(summary, source);
         }
 
         @Override

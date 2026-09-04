@@ -16,8 +16,12 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 
 import lombok.NonNull;
+import lombok.Value;
+import lombok.experimental.Accessors;
 
 public final class ReplayTransaction<R> {
+    private static final String ALREADY_TERMINATED = "transaction already terminated for ";
+
     public interface EvidenceWriter<R> {
         CompletionStage<EvidenceOutcome> write(
             ReplayRequestId requestId,
@@ -26,14 +30,16 @@ public final class ReplayTransaction<R> {
         );
     }
 
-    public record TransactionOutcome(
-        @NonNull ReplayRequestId requestId,
-        @NonNull SourceOutcome sourceOutcome,
-        @NonNull TargetOutcome<?> targetOutcome,
-        @NonNull EvidenceOutcome evidenceOutcome,
-        @NonNull RecordDisposition disposition,
-        boolean haltReplay
-    ) {}
+    @Value
+    @Accessors(fluent = true)
+    public static class TransactionOutcome {
+        @NonNull ReplayRequestId requestId;
+        @NonNull SourceOutcome sourceOutcome;
+        @NonNull TargetOutcome<?> targetOutcome;
+        @NonNull EvidenceOutcome evidenceOutcome;
+        @NonNull RecordDisposition disposition;
+        boolean haltReplay;
+    }
 
     private enum State {
         WAITING_FOR_JOIN,
@@ -92,7 +98,7 @@ public final class ReplayTransaction<R> {
         mailbox.execute(() -> {
             if (state == State.TERMINATED) {
                 acknowledgement.completeExceptionally(
-                    new IllegalStateException("transaction already terminated for " + requestId)
+                    new IllegalStateException(ALREADY_TERMINATED + requestId)
                 );
                 return;
             }
@@ -123,7 +129,7 @@ public final class ReplayTransaction<R> {
         mailbox.execute(() -> {
             if (state == State.TERMINATED) {
                 acknowledgement.completeExceptionally(
-                    new IllegalStateException("transaction already terminated for " + requestId)
+                    new IllegalStateException(ALREADY_TERMINATED + requestId)
                 );
                 return;
             }
@@ -149,7 +155,7 @@ public final class ReplayTransaction<R> {
         mailbox.execute(() -> {
             if (state == State.TERMINATED) {
                 acknowledgement.completeExceptionally(
-                    new IllegalStateException("transaction already terminated for " + requestId)
+                    new IllegalStateException(ALREADY_TERMINATED + requestId)
                 );
                 return;
             }
@@ -179,7 +185,7 @@ public final class ReplayTransaction<R> {
         CompletionStage<EvidenceOutcome> evidenceStage;
         try {
             evidenceStage = evidenceWriter.write(requestId, sourceOutcome, targetOutcome);
-        } catch (Throwable t) {
+        } catch (Exception t) {
             evidenceStage = CompletableFuture.completedFuture(new EvidenceOutcome.Failed(t));
         }
         evidenceStage.whenComplete((outcome, failure) ->
@@ -255,7 +261,7 @@ public final class ReplayTransaction<R> {
         while (!ownedResources.isEmpty()) {
             try {
                 ownedResources.removeLast().close();
-            } catch (Throwable t) {
+            } catch (Exception t) {
                 if (firstFailure == null) {
                     firstFailure = t;
                 } else {
