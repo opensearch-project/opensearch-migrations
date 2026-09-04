@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessi
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 
 import lombok.NonNull;
@@ -143,8 +144,11 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         return command.completion.stage();
     }
 
-    public CompletionStage<SessionOutcome> abort(@NonNull CancellationException cause) {
-        mailbox.execute(() -> beginAbort(cause));
+    public CompletionStage<SessionOutcome> abort(
+        @NonNull AbortReason reason,
+        @NonNull CancellationException cause
+    ) {
+        mailbox.execute(() -> beginAbort(reason, cause));
         return termination.stage();
     }
 
@@ -174,7 +178,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             request.preparationCompletion.cancel(false);
             request.completion.complete(new TargetOutcome.Cancelled<>(cause));
         } else if (command instanceof CloseCommand<P, R> close) {
-            close.completion.complete(new SessionOutcome.Aborted(cause));
+            close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
         }
     }
 
@@ -267,7 +271,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
             @Override
             public Void onCancelled(PreparationOutcome.Cancelled<P> outcome) {
-                beginAbort(outcome.cause());
+                beginAbort(AbortReason.DEPENDENCY_CANCELLED, outcome.cause());
                 return null;
             }
         });
@@ -299,7 +303,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                 }
                 if (normalized instanceof TargetOutcome.Cancelled<R> cancelled) {
                     releasePreparedQuietly(request);
-                    beginAbort(cancelled.cause());
+                    beginAbort(AbortReason.DEPENDENCY_CANCELLED, cancelled.cause());
                 } else {
                     closePreparedAndSettle(request, normalized);
                 }
@@ -357,7 +361,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         );
     }
 
-    private void beginAbort(CancellationException cause) {
+    private void beginAbort(AbortReason reason, CancellationException cause) {
         assertInMailbox();
         if (state == State.TERMINATED || state == State.ABORTING) {
             return;
@@ -368,7 +372,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             if (command instanceof RequestCommand<P, R> request && request != activeRequest) {
                 cancelQueuedRequest(request, cause);
             } else if (command instanceof CloseCommand<P, R> close) {
-                close.completion.complete(new SessionOutcome.Aborted(cause));
+                close.completion.complete(new SessionOutcome.Aborted(reason, cause));
             }
         }
 
@@ -389,7 +393,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                 commands.clear();
                 finishTermination(
                     failure == null
-                        ? new SessionOutcome.Aborted(cause)
+                        ? new SessionOutcome.Aborted(reason, cause)
                         : new SessionOutcome.Failed(unwrap(failure))
                 );
             })

@@ -11,7 +11,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,6 +36,8 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
@@ -84,20 +85,31 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         CompletionStage<Void> sourceDisposition,
         CompletionStage<Void> actorTermination
     ) {
-        var normalizedActorTermination = actorTermination.handle((ignored, failure) -> {
-            if (failure == null) {
-                return null;
-            }
-            var cause = TrackedFuture.unwindPossibleCompletionException(failure);
-            if (cause instanceof SourceReassignmentCancellationException) {
-                return null;
-            }
-            throw new CompletionException(cause);
-        });
         return CompletableFuture.allOf(
             sourceDisposition.toCompletableFuture(),
-            normalizedActorTermination.toCompletableFuture()
+            actorTermination.toCompletableFuture()
         );
+    }
+
+    static CompletionStage<Void> acceptOrderedCloseOutcome(SessionOutcome outcome) {
+        return outcome.visit(new SessionOutcome.Visitor<>() {
+            @Override
+            public CompletionStage<Void> onClosed(SessionOutcome.Closed closed) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletionStage<Void> onAborted(SessionOutcome.Aborted aborted) {
+                return aborted.reason() == AbortReason.SOURCE_REASSIGNMENT
+                    ? CompletableFuture.completedFuture(null)
+                    : CompletableFuture.failedFuture(aborted.cause());
+            }
+
+            @Override
+            public CompletionStage<Void> onFailed(SessionOutcome.Failed failed) {
+                return CompletableFuture.failedFuture(failed.cause());
+            }
+        });
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -668,7 +680,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var sessionKey = sessionKey(ctx, channelSessionNumber);
             WorkToken progressToken = null;
             CompletionStage<Void> sourceDisposition;
-            TrackedFuture<String, Void> actorTermination;
+            CompletionStage<Void> actorTermination;
             if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
                 sourceDisposition = disposeSourceRecords(
                     trafficStreamKeysBeingHeld,
@@ -676,7 +688,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     "interrupted connection close"
                 );
                 notifyConnectionDone(trafficStreamKeysBeingHeld);
-                actorTermination = replayEngine.cancelConnection(ctx, channelSessionNumber);
+                actorTermination = replayEngine.cancelConnection(ctx, channelSessionNumber).future;
             } else {
                 progressToken = admitSessionWork(
                     sessionKey,
@@ -692,14 +704,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     "captured connection close"
                 );
                 replayEngine.setFirstTimestamp(timestamp);
-                actorTermination = replayEngine.closeConnection(
-                    ctx,
-                    channelSessionNumber,
-                    timestamp
-                );
+                actorTermination = replayEngine.closeConnection(ctx, channelSessionNumber, timestamp)
+                    .future
+                    .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome);
             }
             var ownedProgressToken = progressToken;
-            combineConnectionCloseOperations(sourceDisposition, actorTermination.future)
+            combineConnectionCloseOperations(sourceDisposition, actorTermination)
                 .whenComplete((ignored, failure) -> {
                     sessionPartitions.remove(sessionKey);
                     if (ownedProgressToken != null) {

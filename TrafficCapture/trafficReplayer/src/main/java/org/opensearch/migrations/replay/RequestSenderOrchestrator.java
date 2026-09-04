@@ -35,6 +35,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransactionRegistry;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -957,7 +958,7 @@ public class RequestSenderOrchestrator {
         }
     }
 
-    public TrackedFuture<String, Void> scheduleActorClose(
+    public TrackedFuture<String, SessionOutcome> scheduleActorClose(
         @NonNull IReplayContexts.IChannelKeyContext context,
         int sessionNumber,
         @NonNull Instant timestamp
@@ -965,9 +966,8 @@ public class RequestSenderOrchestrator {
         var sessionKey = toConnectionSessionKey(context, sessionNumber);
         var runtime = actorRuntime(sessionKey, context);
         runtime.actor.admitClose(timestamp);
-        var result = runtime.termination().thenCompose(RequestSenderOrchestrator::mapSessionOutcome);
         return new TextTrackedFuture<>(
-            result.toCompletableFuture(),
+            runtime.termination().toCompletableFuture(),
             () -> "waiting for ordered actor close for " + sessionKey
         );
     }
@@ -975,6 +975,7 @@ public class RequestSenderOrchestrator {
     public TrackedFuture<String, Void> abortActor(
         @NonNull IReplayContexts.IChannelKeyContext context,
         int sessionNumber,
+        @NonNull AbortReason reason,
         @NonNull CancellationException cause
     ) {
         var sessionKey = toConnectionSessionKey(context, sessionNumber);
@@ -994,7 +995,7 @@ public class RequestSenderOrchestrator {
                 () -> "acknowledging that no actor existed for " + sessionKey
             );
         }
-        runtime.actor.abort(cause);
+        runtime.actor.abort(reason, cause);
         var result = runtime.termination().thenCompose(RequestSenderOrchestrator::mapAbortOutcome);
         return new TextTrackedFuture<>(
             result.toCompletableFuture(),
@@ -1032,25 +1033,6 @@ public class RequestSenderOrchestrator {
             sessionNumber,
             context.getChannelKey().getSourceGeneration()
         );
-    }
-
-    private static CompletionStage<Void> mapSessionOutcome(SessionOutcome outcome) {
-        return outcome.visit(new SessionOutcome.Visitor<>() {
-            @Override
-            public CompletionStage<Void> onClosed(SessionOutcome.Closed closed) {
-                return CompletableFuture.completedFuture(null);
-            }
-
-            @Override
-            public CompletionStage<Void> onAborted(SessionOutcome.Aborted aborted) {
-                return CompletableFuture.failedFuture(aborted.cause());
-            }
-
-            @Override
-            public CompletionStage<Void> onFailed(SessionOutcome.Failed failed) {
-                return CompletableFuture.failedFuture(failed.cause());
-            }
-        });
     }
 
     private static CompletionStage<Void> mapAbortOutcome(SessionOutcome outcome) {

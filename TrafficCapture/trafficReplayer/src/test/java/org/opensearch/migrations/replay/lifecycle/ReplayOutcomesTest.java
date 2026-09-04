@@ -134,7 +134,10 @@ class ReplayOutcomesTest {
         Assertions.assertEquals("closed", new ReplayOutcomes.SessionOutcome.Closed().visit(visitor));
         Assertions.assertEquals(
             "aborted:stop",
-            new ReplayOutcomes.SessionOutcome.Aborted(new CancellationException("stop")).visit(visitor)
+            new ReplayOutcomes.SessionOutcome.Aborted(
+                ReplayOutcomes.SessionOutcome.AbortReason.SOURCE_REASSIGNMENT,
+                new CancellationException("stop")
+            ).visit(visitor)
         );
         Assertions.assertEquals(
             "failed:bad",

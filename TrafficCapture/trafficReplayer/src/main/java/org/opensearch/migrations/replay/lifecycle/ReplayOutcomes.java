@@ -215,6 +215,11 @@ public final class ReplayOutcomes {
 
     public sealed interface SessionOutcome
         permits SessionOutcome.Closed, SessionOutcome.Aborted, SessionOutcome.Failed {
+        enum AbortReason {
+            SOURCE_REASSIGNMENT,
+            DEPENDENCY_CANCELLED,
+            SESSION_TERMINATED
+        }
 
         <R> R visit(Visitor<R> visitor);
 
@@ -233,7 +238,10 @@ public final class ReplayOutcomes {
             }
         }
 
-        record Aborted(@NonNull CancellationException cause) implements SessionOutcome {
+        record Aborted(
+            @NonNull AbortReason reason,
+            @NonNull CancellationException cause
+        ) implements SessionOutcome {
             @Override
             public <R> R visit(Visitor<R> visitor) {
                 return visitor.onAborted(this);

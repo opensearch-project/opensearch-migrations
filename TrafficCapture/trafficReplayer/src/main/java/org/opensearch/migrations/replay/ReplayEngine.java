@@ -13,6 +13,8 @@ import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
@@ -182,13 +184,14 @@ public class ReplayEngine {
         return networkSendOrchestrator.abortActor(
             ctx,
             channelSessionNumber,
-            new SourceReassignmentCancellationException(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new java.util.concurrent.CancellationException(
                 "Session cancelled due to source reassignment for " + ctx.getConnectionId()
             )
         );
     }
 
-    public TrackedFuture<String, Void> closeConnection(
+    public TrackedFuture<String, SessionOutcome> closeConnection(
         IReplayContexts.IChannelKeyContext ctx,
         int channelSessionNumber,
         Instant timestamp
