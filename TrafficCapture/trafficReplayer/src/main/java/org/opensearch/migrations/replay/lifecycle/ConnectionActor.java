@@ -53,19 +53,29 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     public interface Metrics {
         Metrics NOOP = new Metrics() {
             @Override
-            public void queuedCommandsChanged(int delta) {}
+            public void queuedCommandsChanged(int delta) {
+                // Metrics are optional for non-production actor instances.
+            }
 
             @Override
-            public void headWaitChanged(HeadWaitReason reason, int delta) {}
+            public void headWaitChanged(HeadWaitReason reason, int delta) {
+                // Metrics are optional for non-production actor instances.
+            }
 
             @Override
-            public void activeDuration(Duration duration) {}
+            public void activeDuration(Duration duration) {
+                // Metrics are optional for non-production actor instances.
+            }
 
             @Override
-            public void abortDuration(Duration duration) {}
+            public void abortDuration(Duration duration) {
+                // Metrics are optional for non-production actor instances.
+            }
 
             @Override
-            public void pendingAbortChildChanged(AbortChild child, int delta) {}
+            public void pendingAbortChildChanged(AbortChild child, int delta) {
+                // Metrics are optional for non-production actor instances.
+            }
         };
 
         void queuedCommandsChanged(int delta);

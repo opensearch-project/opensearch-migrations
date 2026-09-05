@@ -19,16 +19,24 @@ public final class AsyncPermitPool {
     public interface Metrics {
         Metrics NOOP = new Metrics() {
             @Override
-            public void availableChanged(int delta) {}
+            public void availableChanged(int delta) {
+                // Metrics are optional for non-production pool instances.
+            }
 
             @Override
-            public void queuedChanged(int delta) {}
+            public void queuedChanged(int delta) {
+                // Metrics are optional for non-production pool instances.
+            }
 
             @Override
-            public void permitHeld(Duration duration) {}
+            public void permitHeld(Duration duration) {
+                // Metrics are optional for non-production pool instances.
+            }
 
             @Override
-            public void cancelled(int count) {}
+            public void cancelled(int count) {
+                // Metrics are optional for non-production pool instances.
+            }
         };
 
         void availableChanged(int delta);
