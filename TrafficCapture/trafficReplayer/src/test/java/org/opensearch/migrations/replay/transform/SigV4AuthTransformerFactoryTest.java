@@ -214,6 +214,43 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
         }
     }
 
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void attemptOwnsFreshlySignedPackets() throws Exception {
+        var producer = runSigningPipelineGetProducer(
+            "Content-Type",
+            "application/json",
+            List.of("{\"message\":\"hello\"}")
+        );
+        var attempt = producer.newAttempt();
+        var packets = attempt.packets();
+
+        Assertions.assertFalse(packets.isClosed());
+        attempt.close();
+        attempt.close();
+        Assertions.assertTrue(packets.isClosed());
+
+        producer.release();
+    }
+
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void diagnosticSnapshotSurvivesSigningProducerRelease() throws Exception {
+        var producer = runSigningPipelineGetProducer(
+            "Content-Type",
+            "application/json",
+            List.of("{\"message\":\"hello\"}")
+        );
+        var snapshot = producer.retainDiagnosticCopy();
+
+        producer.close();
+
+        var composite = snapshot.packets().asCompositeByteBufRetained();
+        Assertions.assertTrue(composite.toString(StandardCharsets.UTF_8).contains("Authorization:"));
+        composite.release();
+        snapshot.close();
+    }
+
     private io.netty.buffer.CompositeByteBuf runSigningPipeline(
         String contentTypeHeaderKey, String contentTypeHeaderValue,
         List<String> stringParts

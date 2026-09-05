@@ -2,12 +2,26 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
-import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayWorkId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -29,15 +43,8 @@ public class ReplayEngine {
     public static final Duration EXPECTED_TRANSFORMATION_DURATION = Duration.ofSeconds(1);
     private final RequestSenderOrchestrator networkSendOrchestrator;
     private final BufferedFlowController contentTimeController;
-    private final AtomicLong lastCompletedSourceTimeEpochMs;
-    private final AtomicLong lastIdleUpdatedTimestampEpochMs;
+    private final ReplayProgressController progressController;
     private final TimeShifter timeShifter;
-
-    /**
-     * If this proves to be a contention bottleneck, we can move to a scheme with ThreadLocals
-     * and on a scheduled basis, submit work to each thread to find out if they're idle or not.
-     */
-    private final AtomicLong totalCountOfScheduledTasksOutstanding;
     ScheduledFuture<?> updateContentTimeControllerScheduledFuture;
     // Heartbeat: response status code counters (reset each heartbeat)
     private final java.util.concurrent.ConcurrentHashMap<Integer, AtomicLong> responseCodeCounters =
@@ -56,12 +63,27 @@ public class ReplayEngine {
         BufferedFlowController contentTimeController,
         TimeShifter timeShifter
     ) {
+        this(
+            networkSendOrchestrator,
+            contentTimeController,
+            timeShifter,
+            new ReplayProgressController(
+                Runnable::run,
+                new ReplayReadGate(contentTimeController.getBufferTimeWindow(), contentTimeController)
+            )
+        );
+    }
+
+    public ReplayEngine(
+        RequestSenderOrchestrator networkSendOrchestrator,
+        BufferedFlowController contentTimeController,
+        TimeShifter timeShifter,
+        ReplayProgressController progressController
+    ) {
         this.networkSendOrchestrator = networkSendOrchestrator;
         this.contentTimeController = contentTimeController;
         this.timeShifter = timeShifter;
-        this.totalCountOfScheduledTasksOutstanding = new AtomicLong();
-        this.lastCompletedSourceTimeEpochMs = new AtomicLong(0);
-        this.lastIdleUpdatedTimestampEpochMs = new AtomicLong(0);
+        this.progressController = progressController;
         // this is gross, but really useful. Grab a thread out of the clientConnectionPool's event loop
         // and run a daemon to update the contentTimeController if there isn't any work that will be doing that
         var bufferPeriodMs = getUpdatePeriodMs();
@@ -89,9 +111,6 @@ public class ReplayEngine {
     }
 
     private void updateContentTimeControllerWhenIdling() {
-        if (isWorkOutstanding()) {
-            return;
-        }
         var currentSourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
         if (currentSourceTimeOp.isEmpty()) {
             // do nothing - the traffic source shouldn't be blocking initially.
@@ -99,151 +118,110 @@ public class ReplayEngine {
             // start time might be yet.
             return;
         }
-        var currentSourceTimeEpochMs = currentSourceTimeOp.get().toEpochMilli();
-        var lastUpdatedTimeEpochMs = Math.max(
-            lastCompletedSourceTimeEpochMs.get(),
-            lastIdleUpdatedTimestampEpochMs.get()
-        );
-        var maxSkipTimeEpochMs = lastUpdatedTimeEpochMs + (long) (getUpdatePeriodMs() * this.timeShifter
-            .maxRateMultiplier());
-        lastIdleUpdatedTimestampEpochMs.set(Math.min(currentSourceTimeEpochMs, maxSkipTimeEpochMs));
-        contentTimeController.stopReadsPast(Instant.ofEpochMilli(lastIdleUpdatedTimestampEpochMs.get()));
+        progressController.advanceIdlePartitions(currentSourceTimeOp.get());
     }
 
-    // See the comment on totalCountOfScheduledTasksOutstanding. We could do this on a per-thread basis and
-    // join the results all via `networkSendOrchestrator.clientConnectionPool.eventLoopGroup`
     public boolean isWorkOutstanding() {
-        return totalCountOfScheduledTasksOutstanding.get() > 0;
+        return progressController.isWorkOutstanding();
     }
 
-    private <T> TrackedFuture<String, T> hookWorkFinishingUpdates(
-        TrackedFuture<String, T> future,
-        Instant timestamp,
-        Object stringableKey,
-        String taskDescription
+    public CompletionStage<Void> whenQuiescent() {
+        return progressController.whenQuiescent();
+    }
+
+    public WorkToken admitWork(
+        SourcePartitionKey partition,
+        ReplayWorkId workId,
+        Instant sourceTime
     ) {
-        return future.map(
-            f -> f.whenComplete((v, t) -> Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
-                .whenComplete((v, t) -> {
-                    var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
-                    log.atDebug().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
-                        .addArgument(taskDescription)
-                        .addArgument(stringableKey)
-                        .addArgument(newCount)
-                        .log();
-                })
-                .whenComplete((v, t) -> contentTimeController.stopReadsPast(timestamp))
-                .whenComplete((v, t) -> log.atDebug()
-                    .setMessage("work finished and used timestamp={} " +
-                        "to update contentTimeController (tasksOutstanding={})")
-                    .addArgument(timestamp)
-                    .addArgument(totalCountOfScheduledTasksOutstanding::get)
-                    .log()
-                ),
-            () -> "Updating fields for callers to poll progress and updating backpressure"
-        );
+        return progressController.admit(partition, workId, sourceTime).toCompletableFuture().join();
     }
 
-    private static void logStartOfWork(Object stringableKey, long newCount, Instant start, String label) {
-        log.atDebug().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
-            .addArgument(label)
-            .addArgument(stringableKey)
-            .addArgument(start)
-            .addArgument(newCount)
-            .log();
-    }
-
-    public <T> TrackedFuture<String, T> scheduleTransformationWork(
-        IReplayContexts.IReplayerHttpTransactionContext requestCtx,
-        Instant originalStart,
-        Supplier<TrackedFuture<String, T>> task
-    ) {
-        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        final String label = "processing";
-        var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        logStartOfWork(requestCtx, newCount, start, label);
-        var result = networkSendOrchestrator.scheduleWork(
-            requestCtx,
-            start.minus(EXPECTED_TRANSFORMATION_DURATION),
-            task
-        );
-        return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
-    }
-
-    public <T> TrackedFuture<String, T> scheduleRequest(
+    public <T> TrackedFuture<String, T> scheduleRequestLifecycle(
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant originalStart,
         Instant originalEnd,
-        int numPackets,
-        ByteBufListProducer packetProducer,
-        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
-    ) {
-        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packetProducer, retryVisitor, null);
-    }
-
-    public <T> TrackedFuture<String, T> scheduleRequest(
-        IReplayContexts.IReplayerHttpTransactionContext ctx,
-        Instant originalStart,
-        Instant originalEnd,
-        int numPackets,
-        ByteBufListProducer packetProducer,
-        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
+        AsyncPermitPool permitPool,
+        Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
+        Function<
+            TransformedOutputAndResult<ByteBufListProducer>,
+            RequestSenderOrchestrator.RetryVisitor<T>
+        > retryVisitorFactory,
+        Function<HttpRequestTransformationStatus, T> filteredResultFactory,
         Duration quiescentDurationForRequest
     ) {
-        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        // Apply quiescent delay relative to the time-shifted start (not wall-clock now),
-        // so the delay is consistent regardless of when the request is processed
         if (quiescentDurationForRequest != null) {
-            var quiescentUntil = start.plus(quiescentDurationForRequest);
-            log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
-                .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();
-            start = quiescentUntil;
+            start = start.plus(quiescentDurationForRequest);
+            log.atInfo().setMessage("Applying quiescent delay through {} for {}")
+                .addArgument(start)
+                .addArgument(ctx)
+                .log();
         }
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
-        var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets - 1L) : Duration.ZERO;
         var requestKey = ctx.getReplayerRequestKey();
-        logStartOfWork(requestKey, newCount, start, label);
+        return networkSendOrchestrator.scheduleRequestLifecycle(
+            requestKey,
+            ctx,
+            start.minus(EXPECTED_TRANSFORMATION_DURATION),
+            start,
+            end,
+            permitPool,
+            preparation,
+            retryVisitorFactory,
+            filteredResultFactory
+        );
+    }
 
-        log.atDebug().setMessage("Scheduling request for {} to run from [{}, {}] with an interval of {} for {} packets")
-            .addArgument(ctx)
-            .addArgument(start)
-            .addArgument(end)
-            .addArgument(interval)
-            .addArgument(numPackets)
-            .log();
-        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packetProducer, retryVisitor);
-        return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
+    public RequestSenderOrchestrator.TransactionRuntime transactionRuntime(
+        IReplayContexts.IReplayerHttpTransactionContext context
+    ) {
+        return networkSendOrchestrator.transactionRuntime(
+            context.getReplayerRequestKey(),
+            context.getChannelKeyContext()
+        );
+    }
+
+    public CompletionStage<Void> observeRunwayLost(
+        ConnectionSessionKey sessionKey,
+        ReplayTransaction.RunwayLossReason reason
+    ) {
+        return networkSendOrchestrator.observeRunwayLost(sessionKey, reason);
+    }
+
+    public CompletionStage<Void> observeAllRunwaysLost(ReplayTransaction.RunwayLossReason reason) {
+        return networkSendOrchestrator.observeAllRunwaysLost(reason);
+    }
+
+    public CompletionStage<Void> shutdownConnections(CancellationException cause) {
+        updateContentTimeControllerScheduledFuture.cancel(false);
+        return networkSendOrchestrator.shutdownActors(cause);
     }
 
     /**
-     * Immediately cancels a connection due to a traffic source reader interruption.
-     * Unlike {@link #closeConnection}, this bypasses the OnlineRadixSorter and time-shifting —
-     * the channel is closed directly and the session is marked cancelled to prevent reconnection.
+     * Immediately aborts a connection actor due to a traffic source reader interruption.
      */
     public TrackedFuture<String, Void> cancelConnection(
         IReplayContexts.IChannelKeyContext ctx,
         int channelSessionNumber
     ) {
-        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        var future = networkSendOrchestrator.cancelConnection(ctx, channelSessionNumber);
-        return hookWorkFinishingUpdates(future, Instant.now(), ctx.getChannelKey(), "cancel");
+        return networkSendOrchestrator.abortActor(
+            ctx,
+            channelSessionNumber,
+            AbortReason.SOURCE_REASSIGNMENT,
+            new java.util.concurrent.CancellationException(
+                "Session cancelled due to source reassignment for " + ctx.getConnectionId()
+            )
+        );
     }
 
-    public TrackedFuture<String, Void> closeConnection(
-        int channelInteractionNum,
+    public TrackedFuture<String, SessionOutcome> closeConnection(
         IReplayContexts.IChannelKeyContext ctx,
         int channelSessionNumber,
         Instant timestamp
     ) {
-        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
-        var channelKey = ctx.getChannelKey();
-        logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
-        var future = networkSendOrchestrator.scheduleClose(ctx, channelSessionNumber, channelInteractionNum, atTime);
-        return hookWorkFinishingUpdates(future, timestamp, channelKey, label);
+        return networkSendOrchestrator.scheduleActorClose(ctx, channelSessionNumber, atTime);
     }
 
     public void setFirstTimestamp(Instant firstPacketTimestamp) {
@@ -258,17 +236,19 @@ public class ReplayEngine {
     /** Emit a periodic heartbeat log summarizing the replay engine state. */
     public void logHeartbeat() {
         var sb = new StringBuilder();
-        sb.append("tasksOutstanding=").append(totalCountOfScheduledTasksOutstanding.get());
+        var progress = progressController.currentSnapshot();
+        sb.append("tasksOutstanding=").append(progress.outstandingWork());
+        sb.append(" assignedPartitions=").append(progress.assignedPartitions());
+        if (!progress.settledWatermark().equals(Instant.MIN)) {
+            sb.append(" settledSourceTime=").append(progress.settledWatermark());
+        }
 
         // Scheduling lag: how far wall clock is ahead of source time
         var sourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
-        var lastCompletedMs = lastCompletedSourceTimeEpochMs.get();
-        if (sourceTimeOp.isPresent() && lastCompletedMs > 0) {
+        if (sourceTimeOp.isPresent() && !progress.settledWatermark().equals(Instant.MIN)) {
             var currentSourceTime = sourceTimeOp.get();
-            var lastCompleted = Instant.ofEpochMilli(lastCompletedMs);
-            var lag = Duration.between(lastCompleted, currentSourceTime);
+            var lag = Duration.between(progress.settledWatermark(), currentSourceTime);
             sb.append(" schedulingLag=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(lag));
-            sb.append(" lastCompletedSourceTime=").append(lastCompleted);
         }
 
         sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(contentTimeController.getBufferTimeWindow()));

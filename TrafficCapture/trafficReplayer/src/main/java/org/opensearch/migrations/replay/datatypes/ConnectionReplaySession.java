@@ -1,23 +1,17 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import java.util.Collections;
-import java.util.Set;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.utils.OnlineRadixSorter;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.Setter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -37,17 +31,17 @@ public class ConnectionReplaySession {
      * EventLoop so that we can route all calls for this object into that loop/thread.
      */
     public final EventLoop eventLoop;
-    public final OnlineRadixSorter scheduleSequencer;
     @Getter
     private final BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
-    public final TimeToResponseFulfillmentFutureMap schedule;
+    private ChannelFuture observedChannel;
     @Getter
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
+    private final TargetExchangeState.Metrics metrics;
+    private TargetExchangeState.ChannelState channelState;
+    private boolean metricsRetired;
     /** Generation of the Kafka consumer assignment when this session was created. */
     public final int generation;
-    /** Called when the session's channel is closed (regardless of cause). */
-    public final Consumer<ConnectionReplaySession> onClose;
     /**
      * When true, this session has been cancelled due to a traffic source reader interruption.
      * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
@@ -55,73 +49,51 @@ public class ConnectionReplaySession {
      */
     @Getter
     @Setter
-    private volatile boolean cancelled = false;
+    private boolean cancelled;
 
-    /**
-     * Tracks standalone transformation-phase timer futures created by
-     * {@code RequestSenderOrchestrator.scheduleWork}. These timers are NOT part of
-     * {@link #schedule} (intentionally, for out-of-order transformation), so
-     * {@link TimeToResponseFulfillmentFutureMap#drainWithCancellation} does not reach them.
-     * Entries are self-cleaning: each future removes itself on completion.
-     */
-    private final Set<CompletableFuture<Void>> pendingTransformationTimers =
-        Collections.newSetFromMap(new ConcurrentHashMap<>());
-
-    public void addPendingTransformationTimer(CompletableFuture<Void> future) {
-        pendingTransformationTimers.add(future);
-    }
-
-    public void removePendingTransformationTimer(CompletableFuture<Void> future) {
-        pendingTransformationTimers.remove(future);
-    }
-
-    public boolean hasPendingTransformationTimers() {
-        return !pendingTransformationTimers.isEmpty();
-    }
-
-    public void drainTransformationTimers(CancellationException cause) {
-        var iterator = pendingTransformationTimers.iterator();
-        while (iterator.hasNext()) {
-            var f = iterator.next();
-            iterator.remove();
-            f.completeExceptionally(cause);
-        }
-    }
-
-    @SneakyThrows
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
     ) {
-        this(eventLoop, channelKeyContext, channelFutureFutureFactory, 0);
+        this(
+            eventLoop,
+            channelKeyContext,
+            channelFutureFutureFactory,
+            0,
+            TargetExchangeState.Metrics.NOOP
+        );
     }
 
-    @SneakyThrows
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
         int generation
     ) {
-        this(eventLoop, channelKeyContext, channelFutureFutureFactory, generation, ignored -> {});
+        this(
+            eventLoop,
+            channelKeyContext,
+            channelFutureFutureFactory,
+            generation,
+            TargetExchangeState.Metrics.NOOP
+        );
     }
 
-    @SneakyThrows
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory,
         int generation,
-        Consumer<ConnectionReplaySession> onClose
+        @NonNull TargetExchangeState.Metrics metrics
     ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
-        this.scheduleSequencer = new OnlineRadixSorter(0);
-        this.schedule = new TimeToResponseFulfillmentFutureMap();
         this.channelFutureFutureFactory = channelFutureFutureFactory;
         this.generation = generation;
-        this.onClose = onClose;
+        this.metrics = metrics;
+        this.channelState = TargetExchangeState.ChannelState.ABSENT;
+        runOnEventLoop(() -> metrics.channelStateChanged(channelState, 1));
     }
 
     public TrackedFuture<String, ChannelFuture> getChannelFutureInAnyState() {
@@ -134,34 +106,126 @@ public class ConnectionReplaySession {
     getChannelFutureInActiveState(IReplayContexts.ITargetRequestContext ctx)
     {
         TextTrackedFuture<ChannelFuture> trigger = new TextTrackedFuture<>("procuring a connection");
-        eventLoop.submit(() -> {
-            if (cancelled) {
-                trigger.future.completeExceptionally(
-                    new IllegalStateException("Session cancelled due to traffic source reader interruption — not reconnecting"));
-                return;
-            }
-            if (cachedChannel != null && cachedChannel.channel().isActive()) {
-                trigger.future.complete(cachedChannel);
-            } else {
-                channelFutureFutureFactory.apply(eventLoop, ctx)
-                    .whenComplete((v, t) -> {
-                        if (t == null) {
-                            trigger.future.complete(v);
-                        } else {
-                            trigger.future.completeExceptionally(TrackedFuture.unwindPossibleCompletionException(t));
-                        }
-                    }, () -> "working to signal back to an event loop trigger")
-                    .whenComplete((v,t) -> cachedChannel = v, () -> "Setting cached channel");
-            }
-        });
+        eventLoop.submit(() -> acquireActiveChannel(ctx, trigger));
         return trigger;
     }
 
-    public boolean hasWorkRemaining() {
-        return !scheduleSequencer.isEmpty() || schedule.hasPendingTransmissions();
+    public void markChannelClosing(ChannelFuture channelFuture) {
+        runOnEventLoop(() -> {
+            if (channelFuture == cachedChannel) {
+                transitionChannelState(TargetExchangeState.ChannelState.CLOSING);
+            }
+        });
     }
 
-    public long calculateSizeSlowly() {
-        return (long) schedule.timeToRunnableMap.size() + scheduleSequencer.size();
+    public void retireMetrics() {
+        runOnEventLoop(() -> {
+            if (!metricsRetired) {
+                metricsRetired = true;
+                metrics.channelStateChanged(channelState, -1);
+            }
+        });
+    }
+
+    private void acquireActiveChannel(
+        IReplayContexts.ITargetRequestContext context,
+        TextTrackedFuture<ChannelFuture> trigger
+    ) {
+        if (cancelled) {
+            trigger.future.completeExceptionally(
+                new IllegalStateException(
+                    "Session cancelled due to traffic source reader interruption — not reconnecting"
+                )
+            );
+            return;
+        }
+        if (cachedChannel != null && cachedChannel.channel().isActive()) {
+            transitionChannelState(TargetExchangeState.ChannelState.ACTIVE);
+            trigger.future.complete(cachedChannel);
+            return;
+        }
+
+        cachedChannel = null;
+        observedChannel = null;
+        transitionChannelState(TargetExchangeState.ChannelState.CONNECTING);
+        TrackedFuture<String, ChannelFuture> acquisition;
+        try {
+            acquisition = channelFutureFutureFactory.apply(eventLoop, context);
+        } catch (Throwable t) {
+            transitionChannelState(TargetExchangeState.ChannelState.ABSENT);
+            trigger.future.completeExceptionally(t);
+            return;
+        }
+        acquisition.future.whenComplete((channelFuture, failure) ->
+            runOnEventLoop(() -> onChannelAcquired(trigger, channelFuture, failure))
+        );
+    }
+
+    private void onChannelAcquired(
+        TextTrackedFuture<ChannelFuture> trigger,
+        ChannelFuture channelFuture,
+        Throwable failure
+    ) {
+        if (failure != null) {
+            transitionChannelState(TargetExchangeState.ChannelState.ABSENT);
+            trigger.future.completeExceptionally(TrackedFuture.unwindPossibleCompletionException(failure));
+            return;
+        }
+        if (channelFuture == null) {
+            transitionChannelState(TargetExchangeState.ChannelState.ABSENT);
+            trigger.future.completeExceptionally(
+                new NullPointerException("channel factory completed without a ChannelFuture")
+            );
+            return;
+        }
+
+        cachedChannel = channelFuture;
+        observedChannel = channelFuture;
+        channelFuture.addListener(ignored ->
+            runOnEventLoop(() -> onConnectSettled(channelFuture))
+        );
+        channelFuture.channel().closeFuture().addListener(ignored ->
+            runOnEventLoop(() -> onChannelClosed(channelFuture))
+        );
+        trigger.future.complete(channelFuture);
+    }
+
+    private void onConnectSettled(ChannelFuture channelFuture) {
+        if (channelFuture != observedChannel) {
+            return;
+        }
+        transitionChannelState(
+            channelFuture.isSuccess() && channelFuture.channel().isActive()
+                ? TargetExchangeState.ChannelState.ACTIVE
+                : TargetExchangeState.ChannelState.INACTIVE
+        );
+    }
+
+    private void onChannelClosed(ChannelFuture channelFuture) {
+        if (channelFuture != observedChannel) {
+            return;
+        }
+        observedChannel = null;
+        if (cachedChannel == channelFuture) {
+            cachedChannel = null;
+        }
+        transitionChannelState(TargetExchangeState.ChannelState.CLOSED);
+    }
+
+    private void transitionChannelState(TargetExchangeState.ChannelState nextState) {
+        if (metricsRetired || channelState == nextState) {
+            return;
+        }
+        metrics.channelStateChanged(channelState, -1);
+        channelState = nextState;
+        metrics.channelStateChanged(channelState, 1);
+    }
+
+    private void runOnEventLoop(Runnable command) {
+        if (eventLoop.inEventLoop()) {
+            command.run();
+        } else {
+            eventLoop.execute(command);
+        }
     }
 }

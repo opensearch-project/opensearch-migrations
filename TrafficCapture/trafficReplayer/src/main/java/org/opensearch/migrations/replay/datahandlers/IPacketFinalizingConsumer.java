@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import java.util.concurrent.CancellationException;
+
 import org.opensearch.migrations.utils.TrackedFuture;
 
 /**
@@ -12,4 +14,6 @@ import org.opensearch.migrations.utils.TrackedFuture;
 public interface IPacketFinalizingConsumer<R> extends IPacketConsumer {
 
     TrackedFuture<String, R> finalizeRequest();
+
+    default void abort(CancellationException cause) {}
 }

@@ -1,7 +1,9 @@
 package org.opensearch.migrations.replay.http.retries;
 
 import java.io.IOException;
+import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -24,6 +26,8 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.Value;
+import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -40,13 +44,20 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         this.errorClassifier = errorClassifier;
     }
 
-    enum BulkResponseAnalysis {
+    public enum BulkResponseAnalysis {
         /** No errors at all */
         NO_ERRORS,
         /** Has errors, but at least one is retryable */
         HAS_RETRYABLE_ERRORS,
         /** Has errors, but ALL are non-retryable */
         ONLY_NON_RETRYABLE_ERRORS
+    }
+
+    @Value
+    @Accessors(fluent = true)
+    public static class BulkResponseInspection {
+        BulkResponseAnalysis analysis;
+        Set<String> errorTypes;
     }
 
     /**
@@ -72,6 +83,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         private boolean parseFailed = false;
 
         private boolean foundTypeInCurrentError = false;
+        private final Set<String> errorTypes = new LinkedHashSet<>();
 
         @SneakyThrows
         public BulkResponseAnalyzer(BulkItemErrorClassifier errorClassifier) {
@@ -83,6 +95,10 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         BulkResponseAnalysis getAnalysis() {
             return result;
+        }
+
+        Set<String> getErrorTypes() {
+            return Set.copyOf(errorTypes);
         }
 
         @Override
@@ -186,6 +202,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 hasAnyError = true;
                 foundTypeInCurrentError = true;
                 var errorType = parser.getValueAsString();
+                errorTypes.add(errorType);
                 if (!errorClassifier.isNonRetryable(errorType)) {
                     log.atDebug().setMessage("Found retryable bulk item error type: {}")
                         .addArgument(errorType).log();
@@ -221,10 +238,24 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     }
 
     BulkResponseAnalysis analyzeBulkResponse(ByteBuf responseByteBuf) {
+        return inspectBulkResponse(responseByteBuf).analysis();
+    }
+
+    public BulkResponseInspection inspectBulkResponse(ByteBuf responseByteBuf) {
+        return inspectBulkResponse(responseByteBuf, errorClassifier);
+    }
+
+    public static BulkResponseInspection inspectBulkResponse(
+        ByteBuf responseByteBuf,
+        BulkItemErrorClassifier errorClassifier
+    ) {
         var analyzer = new BulkResponseAnalyzer(errorClassifier);
-        HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-            Stream.of(responseByteBuf), analyzer);
-        return analyzer.getAnalysis();
+        HttpByteBufFormatter.processHttpMessageFromBufs(
+            HttpByteBufFormatter.HttpMessageType.RESPONSE,
+            Stream.of(responseByteBuf),
+            analyzer
+        );
+        return new BulkResponseInspection(analyzer.getAnalysis(), analyzer.getErrorTypes());
     }
 
 

@@ -4,11 +4,13 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -27,7 +29,8 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+    readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         if (stopReadingRef.get()) {
@@ -35,7 +38,10 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
         }
         return underlyingSource.readNextTrafficStreamChunk(contextSupplier).thenApply(v -> {
             if (v != null) {
-                return v.stream().takeWhile(ts -> {
+                return v.stream().takeWhile(input -> {
+                    if (!(input instanceof ITrafficStreamWithKey ts)) {
+                        return true;
+                    }
                     var isSentinel = ts.getStream().getConnectionId().equals(SENTINEL_CONNECTION_ID);
                     if (isSentinel) {
                         stopReadingRef.set(true);
@@ -51,6 +57,16 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     @Override
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
         return underlyingSource.commitTrafficStream(trafficStreamKey);
+    }
+
+    @Override
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return underlyingSource.acknowledgeSessionTermination(sessionKey);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        underlyingSource.onConnectionAccumulationComplete(trafficStreamKey);
     }
 
     @Override

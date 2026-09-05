@@ -13,11 +13,18 @@ import lombok.Getter;
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
     public static final String SCOPE_NAME = "replayer";
 
+    public final KafkaConsumerContexts.LivenessScanContext.MetricInstruments livenessScanInstruments;
     public final KafkaConsumerContexts.AsyncListeningContext.MetricInstruments asyncListeningInstruments;
     public final KafkaConsumerContexts.TouchScopeContext.MetricInstruments touchInstruments;
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
     public final KafkaConsumerContexts.CommitScopeContext.MetricInstruments commitInstruments;
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
+    public final AsyncPermitPoolMetrics permitPoolMetrics;
+    public final ConnectionActorMetrics connectionActorMetrics;
+    public final TargetExchangeStateMetrics targetExchangeStateMetrics;
+    public final ReplayTransactionMetrics replayTransactionMetrics;
+    public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
+    public final ResourceOwnershipMetrics resourceOwnershipMetrics;
 
     public final TrafficSourceContexts.ReadChunkContext.MetricInstruments readChunkInstruments;
     public final TrafficSourceContexts.BackPressureBlockContext.MetricInstruments backPressureInstruments;
@@ -43,11 +50,18 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         super(SCOPE_NAME, contextTracker, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
+        livenessScanInstruments = KafkaConsumerContexts.LivenessScanContext.makeMetrics(meter);
         asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);
         touchInstruments = KafkaConsumerContexts.TouchScopeContext.makeMetrics(meter);
         pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
         commitInstruments = KafkaConsumerContexts.CommitScopeContext.makeMetrics(meter);
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
+        permitPoolMetrics = new AsyncPermitPoolMetrics(meter);
+        connectionActorMetrics = new ConnectionActorMetrics(meter);
+        targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
+        replayTransactionMetrics = new ReplayTransactionMetrics(meter);
+        kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
+        resourceOwnershipMetrics = new ResourceOwnershipMetrics(meter);
 
         readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
         backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);

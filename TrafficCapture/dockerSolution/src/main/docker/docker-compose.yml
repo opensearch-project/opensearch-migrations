@@ -49,6 +49,8 @@ services:
       - "/usr/share/captureProxy/config/pub.pem"
       - "--sslKeyFile"
       - "/usr/share/captureProxy/config/key.pem"
+      - "--max-connection-duration-seconds"
+      - "130"
     depends_on:
       - kafka
       - elasticsearch
@@ -92,6 +94,9 @@ services:
       - "logging-traffic-topic"
       - "--kafka-traffic-group-id"
       - "logging-group-default"
+      - "--request-filter-config"
+      - >-
+        {"JsonJMESPathPredicateProvider":{"script":"URI != '/_search/scroll'"}}
       - "--transformer-config"
       - '[{"TypeMappingSanitizationTransformerProvider":{"sourceProperties":{"version":{"major":7,"minor":10}}}}]'
 

@@ -25,6 +25,7 @@ import org.opensearch.migrations.replay.RequestTransformerAndSender;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -77,6 +78,10 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         + "I should be decrypted tester!\n"
         + "\r\n"
         + "0\r\n"
+        + "\r\n";
+    private static final String HEAD_REQUEST_STRING = "HEAD /geonames HTTP/1.1\r\n"
+        + "Host: localhost\r\n"
+        + "Connection: Keep-Alive\r\n"
         + "\r\n";
 
     @Override
@@ -186,6 +191,90 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     );
 
                 }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void headResponseWithContentLengthAndNoBodyCompletes(boolean fragmentMethod) throws Exception {
+        var responseTimeout = Duration.ofMillis(250);
+        try (
+            var testServer = SimpleNettyHttpServer.makeServer(false, request -> {
+                Assertions.assertEquals("HEAD", request.getVerb());
+                return new SimpleHttpResponse(
+                    Map.of(HttpHeaderNames.CONTENT_LENGTH.toString(), "377"),
+                    new byte[0],
+                    "Not Found",
+                    404
+                );
+            })
+        ) {
+            var clientConnectionPool = new ClientConnectionPool(
+                NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint()),
+                "targetPool for headResponseWithContentLengthAndNoBodyCompletes",
+                1
+            );
+            try {
+                var requestContext = rootContext.getTestConnectionRequestContext(0);
+                var consumer = new NettyPacketToHttpConsumer(
+                    clientConnectionPool.buildConnectionReplaySession(requestContext.getChannelKeyContext()),
+                    requestContext,
+                    responseTimeout
+                );
+                if (fragmentMethod) {
+                    consumer.consumeBytes("HE".getBytes(StandardCharsets.US_ASCII)).get();
+                    consumer.consumeBytes(
+                        HEAD_REQUEST_STRING.substring(2).getBytes(StandardCharsets.US_ASCII)
+                    ).get();
+                } else {
+                    consumer.consumeBytes(HEAD_REQUEST_STRING.getBytes(StandardCharsets.US_ASCII)).get();
+                }
+
+                var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);
+
+                Assertions.assertNull(response.getError());
+                Assertions.assertNotNull(response.getRawResponse());
+                Assertions.assertEquals(404, response.getRawResponse().status().code());
+                Assertions.assertEquals("377", response.getRawResponse().headers().get(HttpHeaderNames.CONTENT_LENGTH));
+            } finally {
+                clientConnectionPool.shutdownNow().get();
+            }
+        }
+    }
+
+    @Test
+    void targetResponseTimeoutStartsAfterRequestWriteCompletes() throws Exception {
+        var responseTimeout = Duration.ofMillis(50);
+        try (
+            var testServer = SimpleNettyHttpServer.makeServer(
+                false,
+                NettyPacketToHttpConsumerTest::makeResponseContext
+            )
+        ) {
+            var clientConnectionPool = new ClientConnectionPool(
+                NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint()),
+                "targetPool for targetResponseTimeoutStartsAfterRequestWriteCompletes",
+                1
+            );
+            try {
+                var requestContext = rootContext.getTestConnectionRequestContext(0);
+                var consumer = new NettyPacketToHttpConsumer(
+                    clientConnectionPool.buildConnectionReplaySession(requestContext.getChannelKeyContext()),
+                    requestContext,
+                    responseTimeout
+                );
+                consumer.activeChannelFuture.get(REGULAR_RESPONSE_TIMEOUT);
+
+                parkForAtLeast(responseTimeout.multipliedBy(10));
+
+                consumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)).get();
+                var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);
+
+                Assertions.assertNull(response.getError());
+                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, getResponsePacketsAsString(response));
+            } finally {
+                clientConnectionPool.shutdownNow().get();
             }
         }
     }
@@ -323,7 +412,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                         ctx,
                         Instant.now(),
                         Instant.now(),
-                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                        null,
+                        new AsyncPermitPool(1, Runnable::run));
                     log.info("requestFinishFuture=" + requestFinishFuture);
                     var aggregatedResponse = requestFinishFuture.get();
                     log.debug("Got aggregated response=" + aggregatedResponse);
@@ -437,7 +528,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ctx,
                 Instant.now(),
                 Instant.now(),
-                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                null,
+                new AsyncPermitPool(1, Runnable::run));
             var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
@@ -498,7 +591,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     ctx,
                     Instant.now(),
                     Instant.now(),
-                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                    null,
+                    new AsyncPermitPool(1, Runnable::run));
                 var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
                 var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
                 log.atInfo().setMessage("RequestFinishFuture finished for request {}").addArgument(i).log();

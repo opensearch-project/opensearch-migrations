@@ -5,11 +5,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.tracing.TestContext;
 
@@ -36,7 +38,7 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         var idx = readCursor.getAndIncrement();
@@ -50,7 +52,9 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
             pQueue.add(key);
             cursorHighWatermark = idx;
         }
-        return CompletableFuture.supplyAsync(() -> List.of(new PojoTrafficStreamAndKey(stream, key)));
+        return CompletableFuture.supplyAsync(() -> List.of(
+            (SourceInput) new PojoTrafficStreamAndKey(stream, key)
+        ));
     }
 
     @Override
@@ -78,5 +82,15 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
             ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext()
         );
         return CommitResult.IMMEDIATE;
+    }
+
+    @Override
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        // This deterministic source has no separate connection registry.
     }
 }

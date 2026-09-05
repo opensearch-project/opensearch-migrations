@@ -156,6 +156,17 @@ public class TrackedFuture<D, T> {
         return map(cf -> cf.whenComplete(fn::accept), diagnosticSupplier);
     }
 
+    /**
+     * Observes terminal completion without collapsing failure or cancellation into success.
+     * The returned future retains the original future's completion semantics.
+     */
+    public TrackedFuture<D, T> whenSettled(
+        @NonNull Consumer<WorkOutcome<T>> fn,
+        @NonNull Supplier<D> diagnosticSupplier
+    ) {
+        return whenComplete((value, throwable) -> fn.accept(WorkOutcome.from(value, throwable)), diagnosticSupplier);
+    }
+
     public <U> TrackedFuture<D, U> thenCompose(
         @NonNull Function<? super T, ? extends TrackedFuture<D, U>> fn,
         @NonNull Supplier<D> diagnosticSupplier

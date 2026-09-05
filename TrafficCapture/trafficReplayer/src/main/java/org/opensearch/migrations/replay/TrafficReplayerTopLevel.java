@@ -5,10 +5,12 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,16 +19,21 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
-import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -94,6 +101,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
     protected final ClientConnectionPool clientConnectionPool;
+    private final Object intakeLifecycleLock = new Object();
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
 
@@ -103,11 +111,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         IAuthTransformerFactory authTransformerFactory,
         Supplier<IJsonTransformer> jsonTransformerSupplier,
         ClientConnectionPool clientConnectionPool,
-        TrafficStreamLimiter trafficStreamLimiter,
+        int maxConcurrentRequests,
         IStreamableWorkTracker<Void> workTracker
     ) {
         this(context, serverUri, authTransformerFactory, jsonTransformerSupplier,
-            clientConnectionPool, trafficStreamLimiter, workTracker, new BulkItemErrorClassifier());
+            clientConnectionPool, maxConcurrentRequests, workTracker, new BulkItemErrorClassifier());
     }
 
     public TrafficReplayerTopLevel(
@@ -116,18 +124,43 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         IAuthTransformerFactory authTransformerFactory,
         Supplier<IJsonTransformer> jsonTransformerSupplier,
         ClientConnectionPool clientConnectionPool,
-        TrafficStreamLimiter trafficStreamLimiter,
+        int maxConcurrentRequests,
         IStreamableWorkTracker<Void> workTracker,
         BulkItemErrorClassifier errorClassifier
+    ) {
+        this(
+            context,
+            serverUri,
+            authTransformerFactory,
+            jsonTransformerSupplier,
+            clientConnectionPool,
+            maxConcurrentRequests,
+            workTracker,
+            errorClassifier,
+            ExceptionTypeAllowlist.empty()
+        );
+    }
+
+    public TrafficReplayerTopLevel(
+        IRootReplayerContext context,
+        URI serverUri,
+        IAuthTransformerFactory authTransformerFactory,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
+        ClientConnectionPool clientConnectionPool,
+        int maxConcurrentRequests,
+        IStreamableWorkTracker<Void> workTracker,
+        BulkItemErrorClassifier errorClassifier,
+        ExceptionTypeAllowlist poisonAllowlist
     ) {
         super(
             context,
             serverUri,
             authTransformerFactory,
             jsonTransformerSupplier,
-            trafficStreamLimiter,
+            maxConcurrentRequests,
             workTracker,
-            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier))
+            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier)),
+            new TargetResponseClassifier(errorClassifier, poisonAllowlist)
         );
         this.clientConnectionPool = clientConnectionPool;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
@@ -138,7 +171,13 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     public static ClientConnectionPool
     makeNettyPacketConsumerConnectionPool(URI serverUri, boolean allowInsecureConnections, int numSendingThreads) {
-        return makeNettyPacketConsumerConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
+        return makeNettyPacketConsumerConnectionPool(
+            serverUri,
+            allowInsecureConnections,
+            numSendingThreads,
+            null,
+            TargetExchangeState.Metrics.NOOP
+        );
     }
 
     public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
@@ -147,13 +186,30 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         int numSendingThreads,
         String connectionPoolName
     ) {
+        return makeNettyPacketConsumerConnectionPool(
+            serverUri,
+            allowInsecureConnections,
+            numSendingThreads,
+            connectionPoolName,
+            TargetExchangeState.Metrics.NOOP
+        );
+    }
+
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
+        URI serverUri,
+        boolean allowInsecureConnections,
+        int numSendingThreads,
+        String connectionPoolName,
+        TargetExchangeState.Metrics metrics
+    ) {
         return new ClientConnectionPool(
             NettyPacketToHttpConsumer.createClientConnectionFactory(
                 loadSslContext(serverUri, allowInsecureConnections), serverUri),
             connectionPoolName != null
                 ? connectionPoolName
                 : getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
-            numSendingThreads
+            numSendingThreads,
+            metrics
         );
     }
 
@@ -222,43 +278,72 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
+        var intakeMailbox = new ReplayIntakeMailbox();
+        var permitPool = new AsyncPermitPool(
+            maxConcurrentRequests,
+            intakeMailbox,
+            topLevelContext.getPermitPoolMetrics()
+        );
+        intakeMailboxRef.set(intakeMailbox);
+        permitPoolRef.set(permitPool);
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
+            trafficSource::acknowledgeSessionTermination,
+            topLevelContext.getConnectionActorMetrics(),
+            topLevelContext.getTargetExchangeStateMetrics(),
+            topLevelContext.getResourceOwnershipMetrics()
         );
-        var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
+        var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
+        var progressController = new ReplayProgressController(intakeMailbox, readGate);
+        var replayEngine = new ReplayEngine(
+            senderOrchestrator,
+            trafficSource,
+            timeShifter,
+            progressController
+        );
         this.currentReplayEngine.set(replayEngine);
-        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain.
-        // The sessionNumber MUST match what KafkaTrafficCaptureSource registers in
-        // pendingTrafficSourceReaderInterruptedCloses; full GenerationalSessionKey wiring is Phase A4
-        // and will replace the constant at both call sites simultaneously.
-        clientConnectionPool.setGlobalOnSessionClose(session ->
-            trafficSource.onNetworkConnectionClosed(
-                session.getChannelKeyContext().getConnectionId(),
-                KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
-                session.generation
+        var accumulationCallbacks = new TrafficReplayerAccumulationCallbacks(
+            replayEngine,
+            tupleWriter,
+            resultTupleConsumer,
+            tupleObserver,
+            trafficSource,
+            quiescentDuration,
+            permitPool
+        );
+        trafficSource.setSourcePartitionLifecycleListener(
+            SourcePartitionLifecycleListener.combine(
+                progressController,
+                accumulationCallbacks.sourcePartitionLifecycleListener()
             )
         );
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, tupleWriter, resultTupleConsumer,
-                    tupleObserver, trafficSource, quiescentDuration)
+                accumulationCallbacks,
+                trafficSource.usesStructuralExpiration(),
+                trafficSource::updateScanBlocker
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
         try {
-            pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);
+            pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator, intakeMailbox);
         } catch (InterruptedException ex) {
             throw ex;
         } catch (Exception e) {
             log.atWarn().setCause(e).setMessage("Terminating runReplay due to exception").log();
             throw e;
         } finally {
-            trafficToHttpTransactionAccumulator.close();
-            wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
-            assert shutdownFutureRef.get() != null || requestWorkTracker.isEmpty()
-                : "expected to wait for all the in flight requests to fully flush and self destruct themselves";
+            try {
+                intakeMailbox.runUntilIdle();
+                trafficToHttpTransactionAccumulator.close();
+                wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
+                assert shutdownFutureRef.get() != null || requestWorkTracker.isEmpty()
+                    : "expected to wait for all the in flight requests to fully flush and self destruct themselves";
+            } finally {
+                finishIntakeLifecycle(intakeMailbox);
+            }
         }
     }
 
@@ -391,13 +476,9 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     protected void waitForRemainingWork(Level logLevel, @NonNull Duration timeout) throws ExecutionException,
         InterruptedException, TimeoutException {
 
-        if (!liveTrafficStreamLimiter.isStopped()) {
-            var streamLimiterHasRunEverything = new CompletableFuture<Void>();
-            liveTrafficStreamLimiter.queueWork(1, null, wi -> {
-                streamLimiterHasRunEverything.complete(null);
-                liveTrafficStreamLimiter.doneProcessing(wi);
-            });
-            streamLimiterHasRunEverything.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        var intakeMailbox = intakeMailboxRef.get();
+        if (intakeMailbox != null && intakeMailbox.isOwnerThread()) {
+            intakeMailbox.runUntilIdle();
         }
 
         var workTracker = (IStreamableWorkTracker<Void>) requestWorkTracker;
@@ -413,13 +494,33 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         TrackedFuture<String, TransformedTargetRequestAndResponseList>[] allCompletableFuturesArray = Arrays.stream(
             allRemainingWorkArray
         ).map(Map.Entry::getValue).toArray(TrackedFuture[]::new);
-        var allWorkFuture = TextTrackedFuture.allOf(
+        var requestWorkFuture = TextTrackedFuture.allOf(
             allCompletableFuturesArray,
+            () -> "TrafficReplayer.AllRequestsFinished"
+        );
+        var replayEngine = currentReplayEngine.get();
+        var replayQuiescenceFuture = replayEngine == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : replayEngine.whenQuiescent().toCompletableFuture();
+        var ledger = dispositionLedgerRef.get();
+        var recordDispositionFuture = ledger == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : ledger.whenQuiescent().toCompletableFuture();
+        var allWorkFuture = new TextTrackedFuture<>(
+            combineReplayDrainGates(
+                requestWorkFuture.future,
+                replayQuiescenceFuture,
+                recordDispositionFuture
+            ),
             () -> "TrafficReplayer.AllWorkFinished"
         );
         try {
             if (allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, allWorkFuture)) {
-                allWorkFuture.get(timeout);
+                if (intakeMailbox != null && intakeMailbox.isOwnerThread()) {
+                    intakeMailbox.await(allWorkFuture.future, timeout);
+                } else {
+                    allWorkFuture.get(timeout);
+                }
             } else {
                 handleAlreadySetFinishedSignal();
             }
@@ -434,6 +535,18 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         } finally {
             allRemainingWorkFutureOrShutdownSignalRef.set(null);
         }
+    }
+
+    static CompletableFuture<Void> combineReplayDrainGates(
+        CompletionStage<Void> requestWork,
+        CompletionStage<Void> replayQuiescence,
+        CompletionStage<Void> recordDisposition
+    ) {
+        return CompletableFuture.allOf(
+            requestWork.toCompletableFuture(),
+            replayQuiescence.toCompletableFuture(),
+            recordDisposition.toCompletableFuture()
+        );
     }
 
     private void handleAlreadySetFinishedSignal() throws InterruptedException, ExecutionException {
@@ -515,10 +628,32 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             return shutdownFutureRef.get();
         }
         stopReadingRef.set(true);
-        liveTrafficStreamLimiter.close();
+        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f -> f.cancel(true));
+        var cancellationCause = new CancellationException("replay is shutting down");
+        var replayEngine = currentReplayEngine.get();
+        var permitPool = permitPoolRef.get();
+        if (permitPool != null) {
+            permitPool.close(cancellationCause);
+        }
 
-
-        var nettyShutdownFuture = clientConnectionPool.shutdownNow();
+        var actorShutdownFuture = beginActorShutdownAfterIntakeFence(replayEngine, cancellationCause);
+        var nettyShutdownFuture = actorShutdownFuture
+            .handle((ignored, actorFailure) -> actorFailure)
+            .thenCompose(actorFailure ->
+                clientConnectionPool.shutdownNow()
+                    .handle((ignored, nettyFailure) -> {
+                        if (actorFailure != null) {
+                            if (nettyFailure != null) {
+                                actorFailure.addSuppressed(nettyFailure);
+                            }
+                            throw new CompletionException(actorFailure);
+                        }
+                        if (nettyFailure != null) {
+                            throw new CompletionException(nettyFailure);
+                        }
+                        return null;
+                    })
+            );
         nettyShutdownFuture.whenComplete((v, t) -> {
             if (t != null) {
                 shutdownFutureRef.get().completeExceptionally(t);
@@ -526,7 +661,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 shutdownFutureRef.get().complete(null);
             }
         });
-        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f -> f.cancel(true));
         var shutdownWasSignalledFuture = error == null
             ? TextTrackedFuture.<Void>completedFuture(null, () -> "TrafficReplayer shutdown")
             : TextTrackedFuture.<Void>failedFuture(error, () -> "TrafficReplayer shutdown");
@@ -540,6 +674,55 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var shutdownFuture = shutdownFutureRef.get();
         log.atWarn().setMessage("Shutdown setup has been initiated").log();
         return shutdownFuture;
+    }
+
+    private CompletableFuture<Void> beginActorShutdownAfterIntakeFence(
+        ReplayEngine replayEngine,
+        CancellationException cause
+    ) {
+        if (replayEngine == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        var completion = new CompletableFuture<Void>();
+        Runnable beginShutdown = () -> {
+            try {
+                replayEngine.shutdownConnections(cause).whenComplete((ignored, failure) -> {
+                    if (failure == null) {
+                        completion.complete(null);
+                    } else {
+                        completion.completeExceptionally(failure);
+                    }
+                });
+            } catch (Throwable t) {
+                completion.completeExceptionally(t);
+            }
+        };
+        synchronized (intakeLifecycleLock) {
+            var intakeMailbox = intakeMailboxRef.get();
+            if (intakeMailbox != null) {
+                intakeMailbox.execute(beginShutdown);
+                return completion;
+            }
+        }
+        beginShutdown.run();
+        return completion;
+    }
+
+    void finishIntakeLifecycle(
+        ReplayIntakeMailbox intakeMailbox
+    ) throws ExecutionException, InterruptedException {
+        while (true) {
+            CompletableFuture<Void> shutdown;
+            synchronized (intakeLifecycleLock) {
+                intakeMailbox.runUntilIdle();
+                shutdown = shutdownFutureRef.get();
+                if (shutdown == null || shutdown.isDone()) {
+                    intakeMailboxRef.compareAndSet(intakeMailbox, null);
+                    return;
+                }
+            }
+            intakeMailbox.await(shutdown);
+        }
     }
 
     @Override

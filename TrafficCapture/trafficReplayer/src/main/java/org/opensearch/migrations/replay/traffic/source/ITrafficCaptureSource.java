@@ -5,9 +5,17 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TrafficStreamRecordId;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 public interface ITrafficCaptureSource extends AutoCloseable {
@@ -19,11 +27,57 @@ public interface ITrafficCaptureSource extends AutoCloseable {
         IGNORED
     }
 
-    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     );
 
     CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
+
+    default CompletionStage<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
+        try {
+            commitTrafficStream(trafficStreamKey);
+            return CompletableFuture.completedFuture(null);
+        } catch (IOException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    default void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {}
+
+    default RecordId recordIdFor(ITrafficStreamKey trafficStreamKey) {
+        return new TrafficStreamRecordId(
+            new SourceConnectionKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId()),
+            trafficStreamKey.getTrafficStreamIndex(),
+            trafficStreamKey.getSourceGeneration()
+        );
+    }
+
+    default SourcePartitionKey sourcePartitionFor(ITrafficStreamKey trafficStreamKey) {
+        var recordId = recordIdFor(trafficStreamKey);
+        if (recordId instanceof KafkaRecordId kafkaRecordId) {
+            return new SourcePartitionKey(
+                kafkaRecordId.topic(),
+                kafkaRecordId.partition(),
+                kafkaRecordId.sourceGeneration()
+            );
+        }
+        return new SourcePartitionKey("non-kafka-source", 0, trafficStreamKey.getSourceGeneration());
+    }
+
+    default void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {}
+
+    default void updateScanBlocker(
+        ITrafficStreamKey trafficStreamKey,
+        FollowUpRequirement followUpRequirement
+    ) {}
+
+    default boolean usesStructuralExpiration() {
+        return false;
+    }
+
+    default boolean hasPendingSourceControl() {
+        return false;
+    }
 
     /**
      * Called by the accumulator when a connection's lifecycle is complete — either because a
@@ -34,21 +88,13 @@ public interface ITrafficCaptureSource extends AutoCloseable {
      * for this connection. It does NOT mean the target-side Netty channel is closed yet.
      * Use this to clean up per-connection tracking state (e.g., {@code partitionToActiveConnections}).
      */
-    default void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {}
+    void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey);
 
     /**
-     * Called when a {@code ConnectionReplaySession}'s Netty channel has been closed and its
-     * cache entry invalidated, regardless of cause (source close, expiry, or synthetic
-     * reassignment close). Fires on the Netty event loop thread.
-     * <p>
-     * This is a target-side event: it means the TCP connection to the target cluster is gone.
-     * Use this to decrement {@code outstandingTrafficSourceReaderInterruptedCloseSessions} so the source knows it
-     * is safe to resume returning real Kafka records.
-     * <p>
-     * Note: {@code onConnectionAccumulationComplete} fires first (accumulator-level), then this fires later
-     * (after the Netty close completes). Both may fire for the same logical connection.
+     * Acknowledges that the complete target-side session lifecycle has settled: queued and
+     * active work, transaction disposition, channel close, and cache removal.
      */
-    default void onNetworkConnectionClosed(String connectionId, int sessionNumber, int generation) {}
+    CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey);
 
     default void close() throws Exception {}
 

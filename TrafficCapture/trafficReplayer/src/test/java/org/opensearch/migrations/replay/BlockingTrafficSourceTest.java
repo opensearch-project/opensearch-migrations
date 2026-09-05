@@ -6,7 +6,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,6 +17,9 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -45,11 +50,13 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         var testSource = new TestTrafficCaptureSource(rootContext, nStreamsToCreate);
 
         var blockingSource = new BlockingTrafficSource(testSource, Duration.ofMillis(BUFFER_MILLIS));
-        blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(0)));
+        var readGate = new ReplayReadGate(Duration.ofMillis(BUFFER_MILLIS), blockingSource);
+        readGate.advanceTo(sourceStartTime.plus(Duration.ofMillis(0)));
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i <= BUFFER_MILLIS + SHIFT; ++i) {
             var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
-            nextPieceFuture.get(10, TimeUnit.SECONDS).forEach(ts -> firstChunk.add(ts));
+            nextPieceFuture.get(10, TimeUnit.SECONDS)
+                .forEach(input -> firstChunk.add((ITrafficStreamWithKey) input));
         }
         log.atInfo().setMessage("blockingSource={}").addArgument(blockingSource).log();
         Assertions.assertTrue(BUFFER_MILLIS + SHIFT <= firstChunk.size());
@@ -58,19 +65,89 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
             var blockedFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
             Assertions.assertFalse(blockedFuture.isDone(), "for i=" + i + " and coounter=" + testSource.counter.get());
             Assertions.assertEquals(i + BUFFER_MILLIS + SHIFT, testSource.counter.get());
-            blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i)));
+            readGate.advanceTo(sourceStartTime.plus(Duration.ofMillis(i)));
             log.atInfo().setMessage("after stopReadsPast blockingSource={}").addArgument(blockingSource).log();
             var completedFutureValue = blockedFuture.get(10000, TimeUnit.MILLISECONDS);
-            lastTime = TrafficStreamUtils.getFirstTimestamp(completedFutureValue.get(0).getStream()).get();
+            lastTime = TrafficStreamUtils.getFirstTimestamp(
+                ((ITrafficStreamWithKey) completedFutureValue.get(0)).getStream()
+            ).get();
         }
         Assertions.assertEquals(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate - SHIFT)), lastTime);
-        blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
+        readGate.advanceTo(sourceStartTime.plus(Duration.ofMillis(nStreamsToCreate)));
         var exception = Assertions.assertThrows(
             ExecutionException.class,
             () -> blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                 .get(10000, TimeUnit.MILLISECONDS)
         );
         Assertions.assertInstanceOf(EOFException.class, exception.getCause());
+    }
+
+    /**
+     * Verify that BlockingTrafficSource delegates session acknowledgement and
+     * onConnectionAccumulationComplete to the underlying source.
+     */
+    @Test
+    void blockingTrafficSource_delegatesLifecycleCallbacks() throws Exception {
+        var delegatingSource = new DelegationTrackingSource(rootContext, 10);
+        var blockingSource = new BlockingTrafficSource(delegatingSource, Duration.ofMillis(10));
+
+        var sessionKey = new ConnectionSessionKey(
+            new SourceConnectionKey("test-node", "test-conn"),
+            5,
+            3
+        );
+        blockingSource.acknowledgeSessionTermination(sessionKey).toCompletableFuture().join();
+        Assertions.assertEquals(1, delegatingSource.networkClosedCalls.get(),
+            "session acknowledgement must be delegated to underlying source");
+        Assertions.assertEquals(sessionKey, delegatingSource.lastAcknowledgedSession,
+            "Delegation must preserve typed session identity");
+
+        var mockKey = PojoTrafficStreamKeyAndContext.build(
+            TrafficStream.newBuilder().setConnectionId("c").setNumberOfThisLastChunk(0).build(),
+            rootContext::createTrafficStreamContextForTest);
+        blockingSource.onConnectionAccumulationComplete(mockKey);
+        Assertions.assertEquals(1, delegatingSource.accumulationCompleteCalls.get(),
+            "onConnectionAccumulationComplete must be delegated to underlying source");
+
+        blockingSource.close();
+    }
+
+    @Test
+    void pendingSourceControlBreaksBackpressureWithoutAdvancingTheReadFrontier() throws Exception {
+        var source = new PendingControlSource(rootContext);
+        var blockingSource = new BlockingTrafficSource(source, Duration.ofSeconds(1));
+        blockingSource.stopReadsPast(Instant.ofEpochSecond(1));
+
+        blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+            .get(5, TimeUnit.SECONDS);
+        var controlRead = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
+
+        Assertions.assertTrue(controlRead.get(5, TimeUnit.SECONDS).isEmpty());
+        Assertions.assertEquals(1, source.touchCalls.get());
+        Assertions.assertEquals(2, source.readCalls.get());
+        blockingSource.close();
+    }
+
+    private static class DelegationTrackingSource extends TestTrafficCaptureSource {
+        final AtomicInteger networkClosedCalls = new AtomicInteger();
+        final AtomicInteger accumulationCompleteCalls = new AtomicInteger();
+        volatile ConnectionSessionKey lastAcknowledgedSession;
+
+        DelegationTrackingSource(TestContext rootContext, int nStreams) {
+            super(rootContext, nStreams);
+        }
+
+        @Override
+        public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+            networkClosedCalls.incrementAndGet();
+            lastAcknowledgedSession = sessionKey;
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+            accumulationCompleteCalls.incrementAndGet();
+        }
     }
 
     private static class TestTrafficCaptureSource implements ISimpleTrafficCaptureSource {
@@ -84,7 +161,8 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         }
 
         @Override
-        public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+        public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+        readNextTrafficStreamChunk(
             Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
         ) {
             log.atTrace().setMessage("Test.readNextTrafficStreamChunk.counter={}").addArgument(counter).log();
@@ -116,6 +194,64 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
             // do nothing
             return CommitResult.IMMEDIATE;
+        }
+
+        @Override
+        public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+            // No per-connection registry in this fixture.
+        }
+    }
+
+    private static final class PendingControlSource extends TestTrafficCaptureSource {
+        private final AtomicInteger readCalls = new AtomicInteger();
+        private final AtomicInteger touchCalls = new AtomicInteger();
+        private volatile boolean controlPending;
+
+        private PendingControlSource(TestContext rootContext) {
+            super(rootContext, 1);
+        }
+
+        @Override
+        public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+        readNextTrafficStreamChunk(
+            Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
+        ) {
+            if (readCalls.getAndIncrement() > 0) {
+                return CompletableFuture.completedFuture(List.of());
+            }
+            var timestamp = Instant.ofEpochSecond(10);
+            var stream = TrafficStream.newBuilder()
+                .setConnectionId("blocked")
+                .addSubStream(TrafficObservation.newBuilder()
+                    .setTs(Timestamp.newBuilder().setSeconds(timestamp.getEpochSecond()))
+                    .setClose(CloseObservation.getDefaultInstance()))
+                .build();
+            var key = PojoTrafficStreamKeyAndContext.build(
+                stream,
+                rootContext::createTrafficStreamContextForTest
+            );
+            return CompletableFuture.completedFuture(List.of(new PojoTrafficStreamAndKey(stream, key)));
+        }
+
+        @Override
+        public Optional<Instant> getNextRequiredTouch() {
+            return Optional.of(Instant.EPOCH);
+        }
+
+        @Override
+        public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
+            touchCalls.incrementAndGet();
+            controlPending = true;
+        }
+
+        @Override
+        public boolean hasPendingSourceControl() {
+            return controlPending;
         }
     }
 }

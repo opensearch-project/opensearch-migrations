@@ -15,6 +15,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -126,5 +127,80 @@ public class ClosedPrematurelyContextLeakTest extends InstrumentationTest {
         // The traffic stream context is closed even for CLOSED_PREMATURELY
         Assertions.assertTrue(lifecycleCount > 0,
             "trafficStreamLifetimeCount should be > 0 because contexts are always closed");
+    }
+
+    @Test
+    void closeRetainsTheStartingStreamWhenRequestAdmissionThrows() {
+        var baseTime = Instant.now();
+        var timestamp = Timestamp.newBuilder()
+            .setSeconds(baseTime.getEpochSecond())
+            .setNanos(baseTime.getNano())
+            .build();
+        var trafficStream = TrafficStream.newBuilder()
+            .setConnectionId("admission-failure")
+            .setNodeId("test-node")
+            .setNumberOfThisLastChunk(0)
+            .addSubStream(TrafficObservation.newBuilder().setTs(timestamp)
+                .setRead(ReadObservation.newBuilder()
+                    .setData(ByteString.copyFrom(
+                        "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+                        StandardCharsets.UTF_8
+                    ))))
+            .addSubStream(TrafficObservation.newBuilder().setTs(timestamp)
+                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
+                    .setFirstLineByteLength(14)
+                    .setHeadersByteLength(17)))
+            .build();
+        var expiredKeys = new ArrayList<ITrafficStreamKey>();
+        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
+            Duration.ofSeconds(30),
+            null,
+            new AccumulationCallbacks() {
+                @Override
+                public Consumer<RequestResponsePacketPair> onRequestReceived(
+                    @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+                    @NonNull HttpMessageAndTimestamp request,
+                    boolean isResumedConnection
+                ) {
+                    throw new IllegalStateException("admission failed");
+                }
+
+                @Override
+                public void onTrafficStreamsExpired(
+                    RequestResponsePacketPair.ReconstructionStatus status,
+                    @NonNull IReplayContexts.IChannelKeyContext ctx,
+                    @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+                ) {
+                    expiredKeys.addAll(trafficStreamKeysBeingHeld);
+                }
+
+                @Override
+                public void onConnectionClose(
+                    int n,
+                    @NonNull IReplayContexts.IChannelKeyContext ctx,
+                    int s,
+                    RequestResponsePacketPair.ReconstructionStatus status,
+                    @NonNull Instant when,
+                    @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+                ) {}
+
+                @Override
+                public void onTrafficStreamIgnored(
+                    @NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx
+                ) {}
+            }
+        );
+        var streamAndKey = new PojoTrafficStreamAndKey(
+            trafficStream,
+            PojoTrafficStreamKeyAndContext.build(
+                trafficStream,
+                rootContext::createTrafficStreamContextForTest
+            )
+        );
+
+        Assertions.assertThrows(IllegalStateException.class, () -> accumulator.accept(streamAndKey));
+        Assertions.assertDoesNotThrow(accumulator::close);
+
+        Assertions.assertEquals(List.of(streamAndKey.getKey()), expiredKeys);
     }
 }

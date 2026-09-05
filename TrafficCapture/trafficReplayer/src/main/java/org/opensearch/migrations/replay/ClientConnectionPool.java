@@ -3,10 +3,10 @@ package org.opensearch.migrations.replay;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -23,7 +23,6 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
-import lombok.Setter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -34,19 +33,22 @@ public class ClientConnectionPool {
         channelCreator;
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
-    /** Called when any session's channel is closed. Default no-op; set by coordinator. */
-    @Setter
-    private Consumer<ConnectionReplaySession> globalOnSessionClose = session -> {};
+    private final TargetExchangeState.Metrics metrics;
 
     @EqualsAndHashCode
     @AllArgsConstructor
     private static class Key {
         private final String connectionId;
         private final int sessionNumber;
+        private final int sourceGeneration;
     }
 
     private Key getKey(String connectionId, int sessionNumber) {
-        return new Key(connectionId, sessionNumber);
+        return getKey(connectionId, sessionNumber, 0);
+    }
+
+    private Key getKey(String connectionId, int sessionNumber, int sourceGeneration) {
+        return new Key(connectionId, sessionNumber, sourceGeneration);
     }
 
     public ClientConnectionPool(
@@ -54,7 +56,17 @@ public class ClientConnectionPool {
         @NonNull String targetConnectionPoolName,
         int numThreads
     ) {
+        this(channelCreator, targetConnectionPoolName, numThreads, TargetExchangeState.Metrics.NOOP);
+    }
+
+    public ClientConnectionPool(
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelCreator,
+        @NonNull String targetConnectionPoolName,
+        int numThreads,
+        @NonNull TargetExchangeState.Metrics metrics
+    ) {
         this.channelCreator = channelCreator;
+        this.metrics = metrics;
         this.eventLoopGroup = new NioEventLoopGroup(numThreads, new DefaultThreadFactory(targetConnectionPoolName));
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(CacheLoader.from(key -> {
@@ -82,8 +94,7 @@ public class ClientConnectionPool {
         // event loop that was tied to the original channel to bind all future channels to
         // the same event loop. That means that we don't have to worry about concurrent
         // accesses/changes to the OTHER value that we're storing within the cache.
-        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation,
-            globalOnSessionClose);
+        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation, metrics);
     }
 
     @SneakyThrows
@@ -100,7 +111,7 @@ public class ClientConnectionPool {
         int sessionNumber,
         int generation
     ) {
-        var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber);
+        var key = getKey(channelKeyCtx.getConnectionId(), sessionNumber, generation);
         var crs = connectionId2ChannelCache.get(
             key,
             () -> buildConnectionReplaySession(channelKeyCtx, generation)
@@ -115,63 +126,25 @@ public class ClientConnectionPool {
         return crs;
     }
 
-    public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
-        var connId = ctx.getConnectionId();
-        log.atTrace().setMessage("closing connection for {}").addArgument(connId).log();
-        var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
-        if (connectionReplaySession != null) {
-            closeClientConnectionChannel(connectionReplaySession);
-            connectionId2ChannelCache.invalidate(getKey(connId, sessionNumber));
-        } else {
-            log.atTrace()
-                .setMessage("No ChannelFuture for {} in closeConnection.  " +
-                        "The connection may have already been closed")
-                .addArgument(ctx)
-                .log();
-        }
-    }
-
     /** Closes the Netty channel for a session without touching the cache. */
     public TrackedFuture<String, Channel> closeChannelForSession(ConnectionReplaySession session) {
         return closeClientConnectionChannel(session);
     }
 
-    /**
-     * Immediately cancels a connection: marks the session cancelled (prevents reconnection),
-     * completes all pending scheduleFuture entries exceptionally so the OnlineRadixSorter
-     * drains fast (releasing requestWorkTracker entries and TrafficStreamLimiter slots),
-     * then closes the channel and invalidates the cache.
-     */
-    public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
-        var connId = ctx.getConnectionId();
-        var session = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
-        if (session != null) {
-            session.setCancelled(true);
-            var cancellationCause = new java.util.concurrent.CancellationException(
-                "Session cancelled due to partition reassignment for " + connId);
-            // Drain transformation-phase timers immediately (thread-safe, no event-loop needed).
-            session.drainTransformationTimers(cancellationCause);
-            // Drain send-schedule and sorter slots on the event loop thread.
-            if (session.eventLoop.isShuttingDown()) {
-                session.schedule.drainWithCancellation(cancellationCause);
-                session.scheduleSequencer.cancelAllWork();
-            } else {
-                session.eventLoop.submit(() -> {
-                    session.schedule.drainWithCancellation(cancellationCause);
-                    session.scheduleSequencer.cancelAllWork();
-                });
-            }
-            closeConnection(ctx, sessionNumber);
-        }
-        return TextTrackedFuture.completedFuture(null, () -> "cancelled");
+    public void invalidateSession(String connectionId, int sessionNumber) {
+        connectionId2ChannelCache.asMap().keySet().stream()
+            .filter(key -> key.connectionId.equals(connectionId) && key.sessionNumber == sessionNumber)
+            .toList()
+            .forEach(this::retireAndInvalidate);
     }
 
-    public void invalidateSession(String connectionId, int sessionNumber) {
-        connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber));
+    public void invalidateSession(String connectionId, int sessionNumber, int sourceGeneration) {
+        retireAndInvalidate(getKey(connectionId, sessionNumber, sourceGeneration));
     }
 
     public CompletableFuture<Void> shutdownNow() {
         log.atInfo().setMessage("Shutting down ClientConnectionPool").log();
+        connectionId2ChannelCache.asMap().values().forEach(ConnectionReplaySession::retireMetrics);
         var rval = NettyFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
         connectionId2ChannelCache.invalidateAll();
         return rval;
@@ -186,13 +159,13 @@ public class ClientConnectionPool {
                             "It may have already been reset.")
                         .addArgument(session::getChannelKeyContext)
                         .log();
-                    session.onClose.accept(session);
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
                 log.atTrace().setMessage("closing channel {} ({})...")
                     .addArgument(channelFuture::channel)
                     .addArgument(session::getChannelKeyContext)
                     .log();
+                session.markChannelClosing(channelFuture);
 
                 return NettyFutureBinders.bindNettyFutureToTrackableFuture(
                         channelFuture.channel().close(), "calling channel.close()")
@@ -201,17 +174,16 @@ public class ClientConnectionPool {
                             .addArgument(session::getChannelKeyContext)
                             .addArgument(v)
                             .log();
-                        if (session.hasWorkRemaining()) {
-                            log.atWarn().setMessage("Work items are still remaining for this connection session " +
-                                    "(last associated with connection={}). {} requests that were enqueued won't be run")
-                                .addArgument(session::getChannelKeyContext)
-                                .addArgument(session::calculateSizeSlowly)
-                                .log();
-                        }
-                        session.schedule.clear();
-                        session.onClose.accept(session);
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");
+    }
+
+    private void retireAndInvalidate(Key key) {
+        var session = connectionId2ChannelCache.getIfPresent(key);
+        if (session != null) {
+            session.retireMetrics();
+        }
+        connectionId2ChannelCache.invalidate(key);
     }
 }

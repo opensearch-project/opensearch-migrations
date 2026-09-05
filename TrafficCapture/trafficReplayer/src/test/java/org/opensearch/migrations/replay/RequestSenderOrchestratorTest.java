@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
+import static org.opensearch.migrations.replay.ActorRequestTestUtils.schedulePreparedRequest;
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
@@ -118,7 +119,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         var connectionToConsumerMap = new HashMap<Long, BlockingPacketConsumer>();
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (s, c) -> connectionToConsumerMap.get(c.getSourceRequestIndex())
+            (s, c) -> connectionToConsumerMap.get(c.getSourceRequestIndex()),
+            RequestSenderOrchestrator.noSourceTerminationObligations()
         );
         var baseTime = Instant.EPOCH;
         Instant lastEndTime = baseTime;
@@ -133,8 +135,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             var requestPackets = new ByteBufList(IntStream.range(0, NUM_PACKETS)
                 .mapToObj(b -> Unpooled.wrappedBuffer(new byte[] { (byte) b }))  // TODO refCnt issue
                 .toArray(ByteBuf[]::new));
-            var arrCf = senderOrchestrator.scheduleRequest(
-                requestContext.getReplayerRequestKey(),
+            var arrCf = schedulePreparedRequest(
+                senderOrchestrator,
                 requestContext,
                 startTimeForThisRequest,
                 Duration.ofMillis(1),
@@ -147,9 +149,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
         }
         var connectionCtx = rootContext.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
-        var closeFuture = senderOrchestrator.scheduleClose(
-            connectionCtx.getLogicalEnclosingScope(),
-            NUM_REQUESTS_TO_SCHEDULE,
+        var closeFuture = senderOrchestrator.scheduleActorClose(
+            connectionCtx.getChannelKeyContext(),
             0,
             lastEndTime.plus(Duration.ofMillis(100))
         );
@@ -222,7 +223,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             );
             var senderOrchestrator = new RequestSenderOrchestrator(
                 clientConnectionPool,
-                (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT)
+                (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
+                RequestSenderOrchestrator.noSourceTerminationObligations()
             );
             var baseTime = Instant.now();
             Instant lastEndTime = baseTime;
@@ -233,8 +235,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 var perPacketShift = Duration.ofMillis(10 * i / NUM_REPEATS);
                 var startTimeForThisRequest = baseTime.plus(perPacketShift);
                 var requestPackets = makeRequest(i / NUM_REPEATS);
-                var arr = senderOrchestrator.scheduleRequest(
-                    requestContext.getReplayerRequestKey(),
+                var arr = schedulePreparedRequest(
+                    senderOrchestrator,
                     requestContext,
                     startTimeForThisRequest,
                     Duration.ofMillis(1),
@@ -246,9 +248,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 lastEndTime = startTimeForThisRequest.plus(perPacketShift.multipliedBy(requestPackets.size()));
             }
             var connectionCtx = rootContext.getTestConnectionRequestContext(NUM_REQUESTS_TO_SCHEDULE);
-            var closeFuture = senderOrchestrator.scheduleClose(
-                connectionCtx.getLogicalEnclosingScope(),
-                NUM_REQUESTS_TO_SCHEDULE,
+            var closeFuture = senderOrchestrator.scheduleActorClose(
+                connectionCtx.getChannelKeyContext(),
                 0,
                 lastEndTime.plus(Duration.ofMillis(100))
             );

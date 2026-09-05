@@ -70,6 +70,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
     private static final int MAX_ID_SIZE = 100;
+    private static final int MAX_ROUTING_STAMP_SIZE = 128;
 
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
@@ -81,6 +82,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private final StreamLifecycleManager<T> streamManager;
     private final String nodeIdString;
     private final String connectionIdString;
+    private final Integer partition;
+    private final String routingPlanId;
     private CodedOutputStreamHolder currentCodedOutputStreamHolderOrNull;
 
     public StreamChannelConnectionCaptureSerializer(
@@ -88,11 +91,29 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         String connectionId,
         @NonNull StreamLifecycleManager<T> streamLifecycleManager
     ) {
+        this(nodeId, connectionId, null, null, streamLifecycleManager);
+    }
+
+    public StreamChannelConnectionCaptureSerializer(
+        String nodeId,
+        String connectionId,
+        Integer partition,
+        String routingPlanId,
+        @NonNull StreamLifecycleManager<T> streamLifecycleManager
+    ) {
         this.streamManager = streamLifecycleManager;
         assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId))
             + CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId) <= MAX_ID_SIZE;
+        assert (partition == null) == (routingPlanId == null);
+        assert (partition == null
+            ? 0
+            : CodedOutputStream.computeInt32Size(TrafficStream.PARTITION_FIELD_NUMBER, partition)
+                + CodedOutputStream.computeStringSize(TrafficStream.ROUTINGPLANID_FIELD_NUMBER, routingPlanId))
+            <= MAX_ROUTING_STAMP_SIZE;
         this.connectionIdString = connectionId;
         this.nodeIdString = nodeId;
+        this.partition = partition;
+        this.routingPlanId = routingPlanId;
     }
 
     private static int getWireTypeForFieldIndex(Descriptors.Descriptor d, int fieldNumber) {
@@ -128,6 +149,15 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             if (nodeIdString != null) {
                 // e.g. <pre> 5: "5ae27fca-0ac4-11ee-be56-0242ac120002" </pre>
                 currentCodedOutputStream.writeString(TrafficStream.NODEID_FIELD_NUMBER, nodeIdString);
+            }
+            if (partition != null) {
+                currentCodedOutputStream.writeInt32(TrafficStream.PARTITION_FIELD_NUMBER, partition);
+            }
+            if (routingPlanId != null) {
+                currentCodedOutputStream.writeString(
+                    TrafficStream.ROUTINGPLANID_FIELD_NUMBER,
+                    routingPlanId
+                );
             }
             if (eomsSoFar > 0) {
                 currentCodedOutputStream.writeInt32(TrafficStream.PRIORREQUESTSRECEIVED_FIELD_NUMBER, eomsSoFar);

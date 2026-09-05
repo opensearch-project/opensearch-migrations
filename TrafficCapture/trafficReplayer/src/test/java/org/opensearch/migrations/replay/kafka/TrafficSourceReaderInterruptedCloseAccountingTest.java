@@ -6,6 +6,9 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -21,127 +24,173 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests for synthetic close drain accounting correctness (Plan tests #1, #2, #3, #5).
+ * Tests for attributable synthetic-close termination obligations.
  */
 class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
 
     /**
-     * Test #1: Force a connection with non-zero sessionNumber. Assert onNetworkConnectionClosed
-     * decrements outstandingTrafficSourceReaderInterruptedCloseSessions.
+     * The source obligation is keyed by source connection and generation, so the actual session
+     * number discovered by the accumulator cannot cause a missed acknowledgement.
      */
     @Test
-    void trafficSourceReaderInterruptedClose_counterDecrements_withNonZeroSessionNumber() throws Exception {
+    void terminationAcknowledgementMatchesANonZeroSessionNumber() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            // Manually register a synthetic close with sessionNumber=2
-            var sessionKey = "conn1:2:5";
-            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
-            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+            var obligationKey = obligationKey("node1", "conn1", 5);
+            source.pendingSessionTerminationObligations.put(
+                obligationKey,
+                new KafkaTrafficCaptureSource.SessionTerminationObligation(0)
+            );
 
-            source.onNetworkConnectionClosed("conn1", 2, 5);
+            source.acknowledgeSessionTermination(session("node1", "conn1", 2, 5))
+                .toCompletableFuture()
+                .get();
 
-            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "onNetworkConnectionClosed must decrement counter for non-zero sessionNumber");
+            Assertions.assertFalse(source.pendingSessionTerminationObligations.containsKey(obligationKey));
         }
     }
 
-    /**
-     * Test #2: Register synthetic close (counter=1). Fire regular close first → counter=0.
-     * Fire synthetic close → counter stays at 0 (no double-decrement).
-     */
     @Test
-    void trafficSourceReaderInterruptedClose_exactlyOneDecrement_regularBeforeSynthetic() throws Exception {
+    void terminationAcknowledgementIsIdempotentWhenRegularCloseArrivesFirst() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            var sessionKey = "conn1:0:3";
-            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
-            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+            var obligationKey = obligationKey("node1", "conn1", 3);
+            var obligation = new KafkaTrafficCaptureSource.SessionTerminationObligation(0);
+            source.pendingSessionTerminationObligations.put(obligationKey, obligation);
 
-            // Regular close fires first (same key)
-            source.onNetworkConnectionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "First onNetworkConnectionClosed must decrement counter to 0");
+            source.acknowledgeSessionTermination(session("node1", "conn1", 0, 3))
+                .toCompletableFuture()
+                .get();
+            source.acknowledgeSessionTermination(session("node1", "conn1", 0, 3))
+                .toCompletableFuture()
+                .get();
 
-            // Synthetic close fires second — must NOT double-decrement
-            source.onNetworkConnectionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "Second onNetworkConnectionClosed must not double-decrement (counter stays at 0)");
+            Assertions.assertTrue(source.pendingSessionTerminationObligations.isEmpty());
+            Assertions.assertTrue(obligation.completion().toCompletableFuture().isDone());
         }
     }
 
-    /**
-     * Test #3: Same as #2 but reversed order — synthetic close fires first.
-     */
     @Test
-    void trafficSourceReaderInterruptedClose_exactlyOneDecrement_syntheticBeforeRegular() throws Exception {
+    void acknowledgementForAnotherGenerationCannotSettleTheObligation() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
-            var sessionKey = "conn1:0:3";
-            source.pendingTrafficSourceReaderInterruptedCloses.put(sessionKey, Boolean.TRUE);
-            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+            var obligationKey = obligationKey("node1", "conn1", 3);
+            source.pendingSessionTerminationObligations.put(
+                obligationKey,
+                new KafkaTrafficCaptureSource.SessionTerminationObligation(0)
+            );
 
-            // Synthetic close fires first
-            source.onNetworkConnectionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "First onNetworkConnectionClosed (synthetic path) must decrement counter to 0");
+            source.acknowledgeSessionTermination(session("node1", "conn1", 0, 4))
+                .toCompletableFuture()
+                .get();
 
-            // Regular close fires second — must NOT double-decrement
-            source.onNetworkConnectionClosed("conn1", 0, 3);
-            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "Second onNetworkConnectionClosed (regular path) must not double-decrement");
+            Assertions.assertTrue(source.pendingSessionTerminationObligations.containsKey(obligationKey));
         }
     }
 
-    /**
-     * Test #5: Enqueue N synthetic closes (counter=N). Fire onNetworkConnectionClosed for each.
-     * Assert counter reaches 0 and readNextTrafficStreamSynchronously returns real records.
-     */
     @Test
-    void outstandingTrafficSourceReaderInterruptedCloseSessions_reachesZeroAfterAllSessionsClose() throws Exception {
+    void oneSessionAcknowledgementSettlesEveryPartitionScopedObligation() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.pendingSessionTerminationObligations.put(
+                obligationKey("node1", "conn1", 0, 3),
+                new KafkaTrafficCaptureSource.SessionTerminationObligation(0)
+            );
+            source.pendingSessionTerminationObligations.put(
+                obligationKey("node1", "conn1", 2, 3),
+                new KafkaTrafficCaptureSource.SessionTerminationObligation(2)
+            );
+
+            source.acknowledgeSessionTermination(session("node1", "conn1", 4, 3))
+                .toCompletableFuture()
+                .get();
+
+            Assertions.assertTrue(source.pendingSessionTerminationObligations.isEmpty());
+        }
+    }
+
+    @Test
+    void realReadsResumeOnlyAfterEveryTerminationObligationSettles() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var tp = new TopicPartition(TOPIC, 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
             int N = 3;
-            // Register N synthetic closes
             for (int i = 0; i < N; i++) {
-                source.pendingTrafficSourceReaderInterruptedCloses.put("conn" + i + ":0:1", Boolean.TRUE);
+                source.pendingSessionTerminationObligations.put(
+                    obligationKey("node", "conn" + i, 1),
+                    new KafkaTrafficCaptureSource.SessionTerminationObligation(0)
+                );
             }
-            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(N);
 
-            // Verify empty batch while counter > 0
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
                 addRecord(mc, tp, 0);
             });
             var emptyResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertTrue(emptyResult.isEmpty(),
-                "Must return empty batch while outstandingTrafficSourceReaderInterruptedCloseSessions > 0");
+                "real records must stay gated while termination obligations remain");
 
-            // Close all sessions
             for (int i = 0; i < N; i++) {
-                source.onNetworkConnectionClosed("conn" + i, 0, 1);
+                source.acknowledgeSessionTermination(session("node", "conn" + i, i + 2, 1))
+                    .toCompletableFuture()
+                    .get();
             }
-            Assertions.assertEquals(0, source.outstandingTrafficSourceReaderInterruptedCloseSessions.get(),
-                "Counter must reach 0 after all sessions close");
+            Assertions.assertTrue(source.pendingSessionTerminationObligations.isEmpty());
 
-            // Now real records should be returned
             var realResult = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             Assertions.assertFalse(realResult.isEmpty(),
-                "Real records must be returned after counter reaches 0");
+                "real records must resume after all obligations settle");
         }
+    }
+
+    private static SourceConnectionPartitionGenerationKey obligationKey(
+        String nodeId,
+        String connectionId,
+        int generation
+    ) {
+        return obligationKey(nodeId, connectionId, 0, generation);
+    }
+
+    private static SourceConnectionPartitionGenerationKey obligationKey(
+        String nodeId,
+        String connectionId,
+        int partition,
+        int generation
+    ) {
+        return new SourceConnectionPartitionGenerationKey(
+            new SourceConnectionKey(nodeId, connectionId),
+            partition,
+            generation
+        );
+    }
+
+    private static ConnectionSessionKey session(
+        String nodeId,
+        String connectionId,
+        int sessionNumber,
+        int generation
+    ) {
+        return new ConnectionSessionKey(
+            new SourceConnectionKey(nodeId, connectionId),
+            sessionNumber,
+            generation
+        );
     }
 
     private static void addRecord(MockConsumer<String, byte[]> mc, TopicPartition tp, long offset) {
