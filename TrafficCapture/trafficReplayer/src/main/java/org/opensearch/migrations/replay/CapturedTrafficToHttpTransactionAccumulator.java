@@ -557,6 +557,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             var rrPair = accum.getRrPair();
             assert rrPair.responseData.hasInProgressSegment();
             rrPair.responseData.finalizeRequestSegments(timestamp);
+        } else if (observation.hasEndOfMessageIndicator()) {
+            // Capture-side now emits this the moment a response is fully parsed (see
+            // LoggingHttpHandler.write()'s embedded HttpResponseDecoder), mirroring the read-side
+            // handling above — without this branch, that signal fell through to the "unaccounted
+            // for observation type" warning and never finalized the response, leaving it to be
+            // discovered only by connection close/reuse/timeout (the original bug: a response
+            // sent over an idle keep-alive connection sat unfinalized until one of those fired).
+            handleEndOfResponse(accum, RequestResponsePacketPair.ReconstructionStatus.COMPLETE);
         } else if (observation.hasRead() || observation.hasReadSegment()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
             return handleObservationForReadState(accum, observation, trafficStreamKey, timestamp);

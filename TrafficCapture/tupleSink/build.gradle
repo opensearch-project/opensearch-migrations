@@ -9,6 +9,7 @@ dependencies {
     implementation libs.slf4j.api
     implementation libs.aws.s3
     implementation libs.aws.crt
+    implementation libs.kafka.clients
 
     testImplementation libs.junit.jupiter.api
     testImplementation libs.mockito.core
