@@ -1,9 +1,27 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.time.Duration;
+
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface IKafkaConsumerContexts {
+
+    enum LivenessScanVerdict {
+        FOLLOW_UP_FOUND("follow_up_found"),
+        CONFIRMED_ABSENT("confirmed_absent"),
+        INCONCLUSIVE("inconclusive");
+
+        private final String metricLabel;
+
+        LivenessScanVerdict(String metricLabel) {
+            this.metricLabel = metricLabel;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+    }
 
     class ScopeNames {
         private ScopeNames() {}
@@ -26,9 +44,20 @@ public interface IKafkaConsumerContexts {
         public static final String PARTITIONS_ASSIGNED_EVENT_COUNT = "partitionsAssigned";
         public static final String PARTITIONS_REVOKED_EVENT_COUNT = "partitionsRevoked";
         public static final String ACTIVE_PARTITIONS_ASSIGNED_COUNT = "numPartitionsAssigned";
+        public static final String LIVENESS_SCAN_COUNT = "livenessScanCount";
+        public static final String LIVENESS_SCAN_DISTANCE = "livenessScanDistance";
+        public static final String LIVENESS_SCAN_LATENCY = "livenessScanLatency";
+        public static final String LIVENESS_SCAN_BYTES_DISCARDED = "livenessScanBytesDiscarded";
+        public static final String LIVENESS_SCAN_VERDICT_COUNT = "livenessScanVerdictCount";
     }
 
     interface IAsyncListeningContext extends IInstrumentationAttributes {}
+
+    interface ILivenessScanContext extends IInstrumentationAttributes {
+        void recordCycle(int recordsScanned, long bytesDiscarded, Duration latency);
+
+        void recordVerdict(LivenessScanVerdict verdict);
+    }
 
     interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {}
 

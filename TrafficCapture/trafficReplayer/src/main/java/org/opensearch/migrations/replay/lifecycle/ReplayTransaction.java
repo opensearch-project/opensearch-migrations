@@ -22,6 +22,107 @@ import lombok.experimental.Accessors;
 public final class ReplayTransaction<R> {
     private static final String ALREADY_TERMINATED = "transaction already terminated for ";
 
+    public enum Phase {
+        WAITING_FOR_JOIN("waiting_for_join"),
+        WRITING_EVIDENCE("writing_evidence"),
+        DISPOSING("disposing");
+
+        private final String metricLabel;
+
+        Phase(String metricLabel) {
+            this.metricLabel = metricLabel;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+    }
+
+    public enum RunwayState {
+        AVAILABLE("available"),
+        LOST("lost");
+
+        private final String metricLabel;
+
+        RunwayState(String metricLabel) {
+            this.metricLabel = metricLabel;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+    }
+
+    public enum RunwayLossReason {
+        SOURCE_REASSIGNMENT("source_reassignment"),
+        SHUTDOWN("shutdown");
+
+        private final String metricLabel;
+
+        RunwayLossReason(String metricLabel) {
+            this.metricLabel = metricLabel;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+    }
+
+    public enum TerminalOutcome {
+        COMMITTED("committed"),
+        RETAINED("retained"),
+        FAILED("failed");
+
+        private final String metricLabel;
+
+        TerminalOutcome(String metricLabel) {
+            this.metricLabel = metricLabel;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+    }
+
+    public interface Metrics {
+        Metrics NOOP = new Metrics() {
+            @Override
+            public void phaseChanged(Phase phase, int delta) {
+                // Metrics are optional for non-production transactions.
+            }
+
+            @Override
+            public void runwayStateChanged(RunwayState state, int delta) {
+                // Metrics are optional for non-production transactions.
+            }
+
+            @Override
+            public void runwayLost(RunwayLossReason reason) {
+                // Metrics are optional for non-production transactions.
+            }
+
+            @Override
+            public void terminalOutcome(TerminalOutcome outcome) {
+                // Metrics are optional for non-production transactions.
+            }
+
+            @Override
+            public void disposition(RecordDisposition disposition) {
+                // Metrics are optional for non-production transactions.
+            }
+        };
+
+        void phaseChanged(Phase phase, int delta);
+
+        void runwayStateChanged(RunwayState state, int delta);
+
+        void runwayLost(RunwayLossReason reason);
+
+        void terminalOutcome(TerminalOutcome outcome);
+
+        void disposition(RecordDisposition disposition);
+    }
+
     public interface EvidenceWriter<R> {
         CompletionStage<EvidenceOutcome> write(
             ReplayRequestId requestId,
@@ -41,13 +142,6 @@ public final class ReplayTransaction<R> {
         boolean haltReplay;
     }
 
-    private enum State {
-        WAITING_FOR_JOIN,
-        WRITING_EVIDENCE,
-        DISPOSING,
-        TERMINATED
-    }
-
     private final ReplayRequestId requestId;
     private final String ledgerOwner;
     private final ActorMailbox mailbox;
@@ -57,11 +151,15 @@ public final class ReplayTransaction<R> {
     private final List<RecordId> recordIds;
     private final Deque<AutoCloseable> ownedResources = new ArrayDeque<>();
     private final CompletionGate<TransactionOutcome> completion = new CompletionGate<>();
+    private final Metrics metrics;
     private SourceOutcome sourceOutcome;
     private TargetOutcome<R> targetOutcome;
     private EvidenceOutcome evidenceOutcome;
-    private State state = State.WAITING_FOR_JOIN;
+    private Phase phase = Phase.WAITING_FOR_JOIN;
+    private RunwayState runwayState = RunwayState.AVAILABLE;
+    private boolean metricsActive;
     private boolean resourcesReleased;
+    private boolean terminated;
 
     public ReplayTransaction(
         @NonNull ReplayRequestId requestId,
@@ -72,6 +170,28 @@ public final class ReplayTransaction<R> {
         @NonNull Collection<? extends RecordId> recordIds,
         @NonNull Collection<? extends AutoCloseable> resources
     ) {
+        this(
+            requestId,
+            mailbox,
+            evidenceWriter,
+            dispositionPolicy,
+            dispositionLedger,
+            recordIds,
+            resources,
+            Metrics.NOOP
+        );
+    }
+
+    public ReplayTransaction(
+        @NonNull ReplayRequestId requestId,
+        @NonNull ActorMailbox mailbox,
+        @NonNull EvidenceWriter<R> evidenceWriter,
+        @NonNull ReplayDispositionPolicy dispositionPolicy,
+        @NonNull RecordDispositionLedger dispositionLedger,
+        @NonNull Collection<? extends RecordId> recordIds,
+        @NonNull Collection<? extends AutoCloseable> resources,
+        @NonNull Metrics metrics
+    ) {
         this.requestId = requestId;
         this.ledgerOwner = requestId.toString();
         this.mailbox = mailbox;
@@ -79,7 +199,9 @@ public final class ReplayTransaction<R> {
         this.dispositionPolicy = dispositionPolicy;
         this.dispositionLedger = dispositionLedger;
         this.recordIds = new ArrayList<>(recordIds);
+        this.metrics = metrics;
         resources.forEach(ownedResources::addLast);
+        mailbox.execute(this::activateMetrics);
     }
 
     public String ledgerOwner() {
@@ -96,7 +218,7 @@ public final class ReplayTransaction<R> {
     ) {
         var acknowledgement = new CompletableFuture<Void>();
         mailbox.execute(() -> {
-            if (state == State.TERMINATED) {
+            if (terminated) {
                 acknowledgement.completeExceptionally(
                     new IllegalStateException(ALREADY_TERMINATED + requestId)
                 );
@@ -127,7 +249,7 @@ public final class ReplayTransaction<R> {
     public CompletionStage<Void> settleTarget(@NonNull TargetOutcome<R> outcome) {
         var acknowledgement = new CompletableFuture<Void>();
         mailbox.execute(() -> {
-            if (state == State.TERMINATED) {
+            if (terminated) {
                 acknowledgement.completeExceptionally(
                     new IllegalStateException(ALREADY_TERMINATED + requestId)
                 );
@@ -150,20 +272,38 @@ public final class ReplayTransaction<R> {
         return completion.stage();
     }
 
+    public CompletionStage<Void> observeRunwayLost(@NonNull RunwayLossReason reason) {
+        var acknowledgement = new CompletableFuture<Void>();
+        mailbox.execute(() -> {
+            if (!terminated && runwayState == RunwayState.AVAILABLE) {
+                if (metricsActive) {
+                    metrics.runwayStateChanged(runwayState, -1);
+                }
+                runwayState = RunwayState.LOST;
+                if (metricsActive) {
+                    metrics.runwayStateChanged(runwayState, 1);
+                    metrics.runwayLost(reason);
+                }
+            }
+            acknowledgement.complete(null);
+        });
+        return acknowledgement.minimalCompletionStage();
+    }
+
     public CompletionStage<Void> fail(@NonNull Throwable cause) {
         var acknowledgement = new CompletableFuture<Void>();
         mailbox.execute(() -> {
-            if (state == State.TERMINATED) {
+            if (terminated) {
                 acknowledgement.completeExceptionally(
                     new IllegalStateException(ALREADY_TERMINATED + requestId)
                 );
                 return;
             }
-            state = State.TERMINATED;
             var releaseFailure = releaseResources();
             if (releaseFailure != null) {
                 cause.addSuppressed(releaseFailure);
             }
+            recordTermination(TerminalOutcome.FAILED);
             completion.completeExceptionally(cause);
             acknowledgement.complete(null);
         });
@@ -172,7 +312,7 @@ public final class ReplayTransaction<R> {
 
     private void tryAdvance() {
         assertInMailbox();
-        if (state != State.WAITING_FOR_JOIN || sourceOutcome == null || targetOutcome == null) {
+        if (phase != Phase.WAITING_FOR_JOIN || sourceOutcome == null || targetOutcome == null) {
             return;
         }
         if (!dispositionPolicy.requiresEvidence(sourceOutcome, targetOutcome)) {
@@ -181,7 +321,7 @@ public final class ReplayTransaction<R> {
             return;
         }
 
-        state = State.WRITING_EVIDENCE;
+        transitionPhase(Phase.WRITING_EVIDENCE);
         CompletionStage<EvidenceOutcome> evidenceStage;
         try {
             evidenceStage = evidenceWriter.write(requestId, sourceOutcome, targetOutcome);
@@ -190,7 +330,7 @@ public final class ReplayTransaction<R> {
         }
         evidenceStage.whenComplete((outcome, failure) ->
             mailbox.execute(() -> {
-                if (state != State.WRITING_EVIDENCE) {
+                if (terminated || phase != Phase.WRITING_EVIDENCE) {
                     return;
                 }
                 evidenceOutcome = failure == null
@@ -208,7 +348,7 @@ public final class ReplayTransaction<R> {
 
     private void beginDisposition() {
         assertInMailbox();
-        state = State.DISPOSING;
+        transitionPhase(Phase.DISPOSING);
         var decision = dispositionPolicy.decide(sourceOutcome, targetOutcome, evidenceOutcome);
         var dispositionStages = new ArrayList<CompletableFuture<RecordDispositionLedger.DispositionResult>>();
         for (var recordId : recordIds) {
@@ -244,22 +384,29 @@ public final class ReplayTransaction<R> {
         Throwable dispositionFailure
     ) {
         assertInMailbox();
-        if (state == State.TERMINATED) {
+        if (terminated) {
             return;
         }
         Throwable releaseFailure = releaseResources();
-        state = State.TERMINATED;
         if (dispositionFailure != null) {
             if (releaseFailure != null) {
                 dispositionFailure.addSuppressed(releaseFailure);
             }
+            recordTermination(TerminalOutcome.FAILED);
             completion.completeExceptionally(dispositionFailure);
             return;
         }
+        metrics.disposition(acceptedDisposition);
         if (releaseFailure != null) {
+            recordTermination(TerminalOutcome.FAILED);
             completion.completeExceptionally(releaseFailure);
             return;
         }
+        recordTermination(
+            acceptedDisposition.action() == RecordDisposition.Action.COMMIT
+                ? TerminalOutcome.COMMITTED
+                : TerminalOutcome.RETAINED
+        );
         completion.complete(
             new TransactionOutcome(
                 requestId,
@@ -270,6 +417,44 @@ public final class ReplayTransaction<R> {
                 decision.haltReplay()
             )
         );
+    }
+
+    private void activateMetrics() {
+        assertInMailbox();
+        if (terminated || metricsActive) {
+            return;
+        }
+        metricsActive = true;
+        metrics.phaseChanged(phase, 1);
+        metrics.runwayStateChanged(runwayState, 1);
+    }
+
+    private void transitionPhase(Phase nextPhase) {
+        assertInMailbox();
+        if (phase == nextPhase) {
+            return;
+        }
+        if (metricsActive) {
+            metrics.phaseChanged(phase, -1);
+        }
+        phase = nextPhase;
+        if (metricsActive) {
+            metrics.phaseChanged(phase, 1);
+        }
+    }
+
+    private void recordTermination(TerminalOutcome outcome) {
+        assertInMailbox();
+        if (terminated) {
+            return;
+        }
+        terminated = true;
+        metrics.terminalOutcome(outcome);
+        if (metricsActive) {
+            metrics.phaseChanged(phase, -1);
+            metrics.runwayStateChanged(runwayState, -1);
+            metricsActive = false;
+        }
     }
 
     private Throwable releaseResources() {

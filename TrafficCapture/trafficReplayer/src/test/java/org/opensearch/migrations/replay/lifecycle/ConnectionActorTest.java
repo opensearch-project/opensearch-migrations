@@ -10,6 +10,7 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
@@ -18,11 +19,19 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutc
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.tracing.ConnectionActorMetrics;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-class ConnectionActorTest {
+class ConnectionActorTest extends InstrumentationTest {
+    @Override
+    protected TestContext makeInstrumentationContext() {
+        return TestContext.withAllTracking();
+    }
+
     @Test
     void preparationMayFinishOutOfOrderButExecutionCannot() {
         var mailbox = new DeterministicMailbox();
@@ -151,6 +160,175 @@ class ConnectionActorTest {
         Assertions.assertTrue(exchange.executed.isEmpty());
     }
 
+    @Test
+    void abortRemainsAuthoritativeWhenOrderedCloseCompletesDuringDrain() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        exchange.closeCompletion = new CompletableFuture<>();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var close = actor.admitClose(Instant.EPOCH).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        var termination = actor.abort(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("rebalance")
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, close.join());
+
+        exchange.closeCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertFalse(termination.isDone());
+
+        exchange.abortCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
+    }
+
+    @Test
+    void lateOrderedCloseCompletionCannotMutateTerminatedActor() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        exchange.closeCompletion = new CompletableFuture<>();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        actor.admitClose(Instant.EPOCH);
+        mailbox.runUntilIdle();
+
+        var termination = actor.abort(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("rebalance")
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+        exchange.abortCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
+
+        exchange.closeCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, actor.termination().toCompletableFuture().join());
+    }
+
+    @Test
+    void recordsAuthoritativeQueueWaitActiveAndAbortState() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var nanoTime = new AtomicLong();
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            exchange,
+            rootContext.getConnectionActorMetrics(),
+            nanoTime::get
+        );
+        var firstPreparation = new CompletableFuture<PreparationOutcome<TestPrepared>>();
+        actor.admitRequest(request(0), Instant.ofEpochSecond(10), firstPreparation);
+        actor.admitRequest(
+            request(1),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(new TestPrepared("second")))
+        );
+        mailbox.runUntilIdle();
+
+        assertLongSum(ConnectionActorMetrics.MetricNames.QUEUED_COMMANDS, 2);
+        assertHeadWait(ConnectionActor.HeadWaitReason.SCHEDULED_START, 1);
+
+        mailbox.advance(Duration.ofSeconds(10));
+        assertHeadWait(ConnectionActor.HeadWaitReason.SCHEDULED_START, 0);
+        assertHeadWait(ConnectionActor.HeadWaitReason.PREPARATION, 1);
+
+        firstPreparation.complete(new PreparationOutcome.Prepared<>(new TestPrepared("first")));
+        mailbox.runUntilIdle();
+        assertHeadWait(ConnectionActor.HeadWaitReason.PREPARATION, 0);
+        assertHeadWait(ConnectionActor.HeadWaitReason.ACTIVE_EXCHANGE, 1);
+
+        nanoTime.set(5_000_000);
+        exchange.completeNext(new TargetOutcome.Succeeded<>("first-response"));
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(List.of("first", "second"), exchange.executed);
+        assertLongSum(ConnectionActorMetrics.MetricNames.QUEUED_COMMANDS, 1);
+
+        actor.abort(AbortReason.SOURCE_REASSIGNMENT, new CancellationException("rebalance"));
+        mailbox.runUntilIdle();
+        assertHeadWait(ConnectionActor.HeadWaitReason.ACTIVE_EXCHANGE, 0);
+        assertPendingAbortChild(1);
+
+        nanoTime.set(8_000_000);
+        exchange.abortCompletion.complete(null);
+        mailbox.runUntilIdle();
+
+        assertLongSum(ConnectionActorMetrics.MetricNames.QUEUED_COMMANDS, 0);
+        assertPendingAbortChild(0);
+        assertHistogram(ConnectionActorMetrics.MetricNames.ACTIVE_DURATION, 2, 8.0);
+        assertHistogram(ConnectionActorMetrics.MetricNames.ABORT_DURATION, 1, 3.0);
+    }
+
+    private void assertHeadWait(ConnectionActor.HeadWaitReason reason, long expected) {
+        assertAttributedLongSum(
+            ConnectionActorMetrics.MetricNames.HEAD_WAIT,
+            ConnectionActorMetrics.REASON_ATTRIBUTE,
+            reason.metricLabel(),
+            expected
+        );
+    }
+
+    private void assertPendingAbortChild(long expected) {
+        assertAttributedLongSum(
+            ConnectionActorMetrics.MetricNames.PENDING_ABORT_CHILD,
+            ConnectionActorMetrics.CHILD_ATTRIBUTE,
+            ConnectionActor.AbortChild.TARGET_EXCHANGE.metricLabel(),
+            expected
+        );
+    }
+
+    private void assertLongSum(String metricName, long expected) {
+        var point = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
+            .stream()
+            .filter(metric -> metric.getName().equals(metricName))
+            .findFirst()
+            .orElseThrow()
+            .getLongSumData()
+            .getPoints()
+            .stream()
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(expected, point.getValue());
+    }
+
+    private void assertAttributedLongSum(
+        String metricName,
+        io.opentelemetry.api.common.AttributeKey<String> attribute,
+        String value,
+        long expected
+    ) {
+        var point = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
+            .stream()
+            .filter(metric -> metric.getName().equals(metricName))
+            .findFirst()
+            .orElseThrow()
+            .getLongSumData()
+            .getPoints()
+            .stream()
+            .filter(candidate -> value.equals(candidate.getAttributes().get(attribute)))
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(expected, point.getValue());
+    }
+
+    private void assertHistogram(String metricName, long expectedCount, double expectedSum) {
+        var point = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
+            .stream()
+            .filter(metric -> metric.getName().equals(metricName))
+            .findFirst()
+            .orElseThrow()
+            .getHistogramData()
+            .getPoints()
+            .stream()
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(expectedCount, point.getCount());
+        Assertions.assertEquals(expectedSum, point.getSum());
+    }
+
     private static ConnectionSessionKey session() {
         return new ConnectionSessionKey(new SourceConnectionKey("node", "connection"), 0, 1);
     }
@@ -178,6 +356,7 @@ class ConnectionActorTest {
         private final List<TestPrepared> prepared = new ArrayList<>();
         private final Queue<CompletableFuture<TargetOutcome<String>>> active = new ArrayDeque<>();
         private final CompletableFuture<Void> abortCompletion = new CompletableFuture<>();
+        private CompletableFuture<Void> closeCompletion = CompletableFuture.completedFuture(null);
         private int closeCalls;
 
         @Override
@@ -192,7 +371,7 @@ class ConnectionActorTest {
         @Override
         public CompletableFuture<Void> close() {
             closeCalls++;
-            return CompletableFuture.completedFuture(null);
+            return closeCompletion;
         }
 
         @Override

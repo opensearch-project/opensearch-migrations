@@ -11,6 +11,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
@@ -61,7 +62,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private final ScheduledThreadPoolExecutor routingInitializer;
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile CaptureKafkaPublisher publisher;
-    private volatile Throwable routingInitializationFailure;
+    private final AtomicReference<Throwable> routingInitializationFailure = new AtomicReference<>();
     private int routingDiscoveryFailures;
 
     public KafkaCaptureFactory(
@@ -202,7 +203,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             }
             var readyPublisher = publisher;
             if (readyPublisher == null) {
-                if (routingInitializationFailure == null && !connectionsAwaitingRouting.add(connectionId)) {
+                if (routingInitializationFailure.get() == null && !connectionsAwaitingRouting.add(connectionId)) {
                     throw new IllegalStateException(
                         "Connection " + connectionId + " is already waiting for Kafka routing"
                     );
@@ -265,7 +266,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private void finishRoutingInitialization(PartitionRoutingPlan routingPlan) {
         CaptureKafkaPublisher initializedPublisher;
         synchronized (routingInitializationLock) {
-            if (closed.get() || routingInitializationFailure != null) {
+            if (closed.get() || routingInitializationFailure.get() != null) {
                 return;
             }
             for (var connectionId : connectionsAwaitingRouting) {
@@ -317,7 +318,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                     TimeUnit.MILLISECONDS
                 );
             } catch (RejectedExecutionException e) {
-                if (!closed.get() && routingInitializationFailure == null) {
+                if (!closed.get() && routingInitializationFailure.get() == null) {
                     throw e;
                 }
             }
@@ -326,10 +327,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     private void failRoutingInitialization(Throwable failure) {
         synchronized (routingInitializationLock) {
-            if (routingInitializationFailure != null || publisher != null) {
+            if (routingInitializationFailure.get() != null || publisher != null) {
                 return;
             }
-            routingInitializationFailure = failure;
+            routingInitializationFailure.set(failure);
             connectionsAwaitingRouting.clear();
         }
         publisherFuture.completeExceptionally(failure);
@@ -340,15 +341,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             .setCause(failure)
             .setMessage("Kafka capture routing failed closed; no authoritative liveness snapshots will be emitted")
             .log();
-    }
-
-    private void failCapture(Throwable failure) {
-        var readyPublisher = publisher;
-        if (readyPublisher == null) {
-            failRoutingInitialization(failure);
-        } else {
-            readyPublisher.failClosed(failure);
-        }
     }
 
     private static int checkedPayloadSize(int messageSize) {
@@ -567,6 +559,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 );
             } catch (InvalidProtocolBufferException e) {
                 return CompletableFuture.failedFuture(e);
+            }
+        }
+
+        private void failCapture(Throwable failure) {
+            var readyPublisher = publisher;
+            if (readyPublisher == null) {
+                failRoutingInitialization(failure);
+            } else {
+                readyPublisher.failClosed(failure);
             }
         }
     }

@@ -3,6 +3,8 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
@@ -22,6 +24,84 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ReplayTransactionTest {
+    @Test
+    void lifecycleMetricsFollowMailboxOwnedPhasesAndRetireAtCompletion() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(9));
+        var evidence = new CompletableFuture<EvidenceOutcome>();
+        var metrics = new RecordingMetrics(mailbox);
+        register(ledger, record, request().toString());
+        var transaction = new ReplayTransaction<String>(
+            request(),
+            mailbox,
+            (id, source, target) -> evidence,
+            new ReplayDispositionPolicy(),
+            ledger,
+            List.of(record.id()),
+            List.of(),
+            metrics
+        );
+
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(1, metrics.phaseCount(ReplayTransaction.Phase.WAITING_FOR_JOIN));
+        Assertions.assertEquals(1, metrics.runwayCount(ReplayTransaction.RunwayState.AVAILABLE));
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(0, metrics.phaseCount(ReplayTransaction.Phase.WAITING_FOR_JOIN));
+        Assertions.assertEquals(1, metrics.phaseCount(ReplayTransaction.Phase.WRITING_EVIDENCE));
+
+        evidence.complete(new EvidenceOutcome.Durable("receipt"));
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(metrics.onlyMailboxCallbacks);
+        Assertions.assertEquals(0, metrics.totalActivePhases());
+        Assertions.assertEquals(0, metrics.totalRunwayStates());
+        Assertions.assertEquals(List.of(ReplayTransaction.TerminalOutcome.COMMITTED), metrics.terminalOutcomes);
+        Assertions.assertEquals(1, metrics.dispositions.size());
+        Assertions.assertInstanceOf(RecordDisposition.Commit.class, metrics.dispositions.get(0));
+    }
+
+    @Test
+    void runwayLossIsMonotonicAndRetiredAtFailure() {
+        var mailbox = new QueuedMailbox();
+        var metrics = new RecordingMetrics(mailbox);
+        var transaction = new ReplayTransaction<String>(
+            request(),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            new RecordDispositionLedger(Runnable::run),
+            List.of(),
+            List.of(),
+            metrics
+        );
+        mailbox.runUntilIdle();
+
+        transaction.observeRunwayLost(ReplayTransaction.RunwayLossReason.SOURCE_REASSIGNMENT);
+        transaction.observeRunwayLost(ReplayTransaction.RunwayLossReason.SHUTDOWN);
+        mailbox.runUntilIdle();
+
+        Assertions.assertEquals(0, metrics.runwayCount(ReplayTransaction.RunwayState.AVAILABLE));
+        Assertions.assertEquals(1, metrics.runwayCount(ReplayTransaction.RunwayState.LOST));
+        Assertions.assertEquals(
+            List.of(ReplayTransaction.RunwayLossReason.SOURCE_REASSIGNMENT),
+            metrics.runwayLosses
+        );
+
+        transaction.fail(new IllegalStateException("failed"));
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(metrics.onlyMailboxCallbacks);
+        Assertions.assertEquals(0, metrics.totalActivePhases());
+        Assertions.assertEquals(0, metrics.totalRunwayStates());
+        Assertions.assertEquals(List.of(ReplayTransaction.TerminalOutcome.FAILED), metrics.terminalOutcomes);
+    }
+
     @Test
     void ownedResourcesSettleOnlyAfterTheWholeTransaction() {
         var mailbox = new QueuedMailbox();
@@ -322,6 +402,72 @@ class ReplayTransactionTest {
         @Override
         public void close() {
             closes++;
+        }
+    }
+
+    private static final class RecordingMetrics implements ReplayTransaction.Metrics {
+        private final ActorMailbox mailbox;
+        private final EnumMap<ReplayTransaction.Phase, Integer> phases =
+            new EnumMap<>(ReplayTransaction.Phase.class);
+        private final EnumMap<ReplayTransaction.RunwayState, Integer> runwayStates =
+            new EnumMap<>(ReplayTransaction.RunwayState.class);
+        private final List<ReplayTransaction.RunwayLossReason> runwayLosses = new ArrayList<>();
+        private final List<ReplayTransaction.TerminalOutcome> terminalOutcomes = new ArrayList<>();
+        private final List<RecordDisposition> dispositions = new ArrayList<>();
+        private boolean onlyMailboxCallbacks = true;
+
+        private RecordingMetrics(ActorMailbox mailbox) {
+            this.mailbox = mailbox;
+        }
+
+        @Override
+        public void phaseChanged(ReplayTransaction.Phase phase, int delta) {
+            recordThread();
+            phases.merge(phase, delta, Integer::sum);
+        }
+
+        @Override
+        public void runwayStateChanged(ReplayTransaction.RunwayState state, int delta) {
+            recordThread();
+            runwayStates.merge(state, delta, Integer::sum);
+        }
+
+        @Override
+        public void runwayLost(ReplayTransaction.RunwayLossReason reason) {
+            recordThread();
+            runwayLosses.add(reason);
+        }
+
+        @Override
+        public void terminalOutcome(ReplayTransaction.TerminalOutcome outcome) {
+            recordThread();
+            terminalOutcomes.add(outcome);
+        }
+
+        @Override
+        public void disposition(RecordDisposition disposition) {
+            recordThread();
+            dispositions.add(disposition);
+        }
+
+        private int phaseCount(ReplayTransaction.Phase phase) {
+            return phases.getOrDefault(phase, 0);
+        }
+
+        private int runwayCount(ReplayTransaction.RunwayState state) {
+            return runwayStates.getOrDefault(state, 0);
+        }
+
+        private int totalActivePhases() {
+            return phases.values().stream().mapToInt(Integer::intValue).sum();
+        }
+
+        private int totalRunwayStates() {
+            return runwayStates.values().stream().mapToInt(Integer::intValue).sum();
+        }
+
+        private void recordThread() {
+            onlyMailboxCallbacks &= mailbox.inMailbox();
         }
     }
 

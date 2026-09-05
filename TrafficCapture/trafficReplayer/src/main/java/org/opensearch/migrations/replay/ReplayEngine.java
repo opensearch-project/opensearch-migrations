@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
@@ -19,6 +20,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -177,6 +179,17 @@ public class ReplayEngine {
             context.getReplayerRequestKey(),
             context.getChannelKeyContext()
         );
+    }
+
+    public CompletionStage<Void> observeRunwayLost(
+        ConnectionSessionKey sessionKey,
+        ReplayTransaction.RunwayLossReason reason
+    ) {
+        return networkSendOrchestrator.observeRunwayLost(sessionKey, reason);
+    }
+
+    public CompletionStage<Void> observeAllRunwaysLost(ReplayTransaction.RunwayLossReason reason) {
+        return networkSendOrchestrator.observeAllRunwaysLost(reason);
     }
 
     /**

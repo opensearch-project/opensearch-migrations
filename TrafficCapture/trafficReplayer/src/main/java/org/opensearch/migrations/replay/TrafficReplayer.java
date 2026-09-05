@@ -739,7 +739,9 @@ public class TrafficReplayer {
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
-                    params.numClientThreads
+                    params.numClientThreads,
+                    null,
+                    topContext.getTargetExchangeStateMetrics()
                 ),
                 params.maxConcurrentRequests,
                 orderedRequestTracker,

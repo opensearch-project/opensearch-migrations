@@ -13,11 +13,20 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public final class ReplayTransactionRegistry {
+    private static final class Entry {
+        private final ReplayTransaction<?> transaction;
+
+        private Entry(ReplayTransaction<?> transaction) {
+            this.transaction = transaction;
+        }
+    }
+
     private final ConnectionSessionKey sessionKey;
     private final ActorMailbox mailbox;
-    private final Map<ReplayRequestId, CompletionStage<?>> active = new LinkedHashMap<>();
+    private final Map<ReplayRequestId, Entry> active = new LinkedHashMap<>();
     private final CompletionGate<Void> termination = new CompletionGate<>();
     private boolean terminating;
+    private ReplayTransaction.RunwayLossReason runwayLossReason;
     private Throwable firstFailure;
 
     public ReplayTransactionRegistry(
@@ -32,6 +41,21 @@ public final class ReplayTransactionRegistry {
         @NonNull ReplayRequestId requestId,
         @NonNull CompletionStage<?> transactionCompletion
     ) {
+        return register(requestId, transactionCompletion, null);
+    }
+
+    public CompletionStage<Void> register(
+        @NonNull ReplayRequestId requestId,
+        @NonNull ReplayTransaction<?> transaction
+    ) {
+        return register(requestId, transaction.completion(), transaction);
+    }
+
+    private CompletionStage<Void> register(
+        ReplayRequestId requestId,
+        CompletionStage<?> transactionCompletion,
+        ReplayTransaction<?> transaction
+    ) {
         if (!requestId.session().equals(sessionKey)) {
             throw new IllegalArgumentException("transaction belongs to a different session");
         }
@@ -43,7 +67,7 @@ public final class ReplayTransactionRegistry {
                 );
                 return;
             }
-            if (active.putIfAbsent(requestId, transactionCompletion) != null) {
+            if (active.putIfAbsent(requestId, new Entry(transaction)) != null) {
                 acknowledgement.completeExceptionally(
                     new IllegalStateException("transaction is already registered: " + requestId)
                 );
@@ -52,9 +76,39 @@ public final class ReplayTransactionRegistry {
             transactionCompletion.whenComplete((ignored, failure) ->
                 mailbox.execute(() -> settle(requestId, failure))
             );
+            if (transaction != null && runwayLossReason != null) {
+                transaction.observeRunwayLost(runwayLossReason);
+            }
             acknowledgement.complete(null);
         });
         return acknowledgement.minimalCompletionStage();
+    }
+
+    public CompletionStage<Void> observeRunwayLost(@NonNull ReplayTransaction.RunwayLossReason reason) {
+        var completion = new CompletableFuture<Void>();
+        mailbox.execute(() -> {
+            if (runwayLossReason != null) {
+                completion.complete(null);
+                return;
+            }
+            runwayLossReason = reason;
+            var acknowledgements = active.values()
+                .stream()
+                .filter(entry -> entry.transaction != null)
+                .map(entry -> entry.transaction.observeRunwayLost(reason).toCompletableFuture())
+                .toArray(CompletableFuture[]::new);
+            CompletableFuture.allOf(acknowledgements)
+                .whenComplete((ignored, failure) ->
+                    mailbox.execute(() -> {
+                        if (failure == null) {
+                            completion.complete(null);
+                        } else {
+                            completion.completeExceptionally(unwrap(failure));
+                        }
+                    })
+                );
+        });
+        return completion.minimalCompletionStage();
     }
 
     public CompletionStage<Void> beginTermination() {
