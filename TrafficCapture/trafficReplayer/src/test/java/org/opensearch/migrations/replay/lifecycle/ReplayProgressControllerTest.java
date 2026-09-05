@@ -91,6 +91,77 @@ class ReplayProgressControllerTest {
     }
 
     @Test
+    void quiescenceCompletesOnlyAfterAllAdmittedWorkSettles() {
+        var fixture = new Fixture(Duration.ZERO);
+        var partition = partition(0, 1);
+        var initiallyQuiescent = fixture.controller.whenQuiescent().toCompletableFuture();
+        var first = fixture.controller.admit(
+            partition,
+            request(0),
+            Instant.ofEpochSecond(10)
+        ).toCompletableFuture().join();
+        var second = fixture.controller.admit(
+            partition,
+            request(1),
+            Instant.ofEpochSecond(20)
+        ).toCompletableFuture().join();
+        var activeInterval = fixture.controller.whenQuiescent().toCompletableFuture();
+
+        Assertions.assertTrue(initiallyQuiescent.isDone());
+        Assertions.assertFalse(activeInterval.isDone());
+
+        second.close();
+        Assertions.assertFalse(activeInterval.isDone());
+
+        first.close();
+        activeInterval.join();
+        Assertions.assertFalse(fixture.controller.isWorkOutstanding());
+    }
+
+    @Test
+    void newAdmissionStartsANewQuiescenceInterval() {
+        var fixture = new Fixture(Duration.ZERO);
+        var partition = partition(0, 1);
+        var first = fixture.controller.admit(
+            partition,
+            request(0),
+            Instant.EPOCH
+        ).toCompletableFuture().join();
+        var firstInterval = fixture.controller.whenQuiescent().toCompletableFuture();
+        first.close();
+        firstInterval.join();
+
+        var second = fixture.controller.admit(
+            partition,
+            request(1),
+            Instant.ofEpochSecond(1)
+        ).toCompletableFuture().join();
+        var secondInterval = fixture.controller.whenQuiescent().toCompletableFuture();
+
+        Assertions.assertNotSame(firstInterval, secondInterval);
+        Assertions.assertFalse(secondInterval.isDone());
+        second.close();
+        secondInterval.join();
+    }
+
+    @Test
+    void callerCannotCancelAuthoritativeQuiescenceGate() {
+        var fixture = new Fixture(Duration.ZERO);
+        var token = fixture.controller.admit(
+            partition(0, 1),
+            request(0),
+            Instant.EPOCH
+        ).toCompletableFuture().join();
+        var callerFuture = fixture.controller.whenQuiescent().toCompletableFuture();
+
+        callerFuture.cancel(false);
+        Assertions.assertFalse(fixture.controller.whenQuiescent().toCompletableFuture().isDone());
+
+        token.close();
+        fixture.controller.whenQuiescent().toCompletableFuture().join();
+    }
+
+    @Test
     void minimumAssignedPartitionControlsTheGlobalFrontier() {
         var fixture = new Fixture(Duration.ofSeconds(5));
         var firstPartition = partition(0, 1);

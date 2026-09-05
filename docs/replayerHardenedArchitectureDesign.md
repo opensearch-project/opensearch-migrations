@@ -456,6 +456,11 @@ while work is still in flight.
 7. A timeout or watchdog may report or fail the operation. It may never reset state or complete the
    gate successfully while postconditions remain false.
 8. Reusable shutdown does not rely on process exit for cleanup.
+9. End-of-input drain uses a replay-quiescence gate owned by `ReplayProgressController`. Admission
+   opens a new interval when outstanding work changes from zero to one; settlement completes that
+   interval only when the count returns to zero. The top-level drain joins this gate with request
+   tracking while servicing the replay-intake mailbox. It does not poll `isWorkOutstanding()`, and
+   cancellation of a caller's aggregate waiter cannot cancel the controller's authoritative gate.
 
 Callers chain subsequent lifecycle work from the gate. They do not infer completion from a callback
 firing, a counter reaching zero, a cache entry disappearing, or the cancellation of a separate
@@ -522,6 +527,7 @@ flowchart TD
     subgraph COMPLETION_GATES["Completion gates: threadless, non-mutable stage views"]
         TXN_GATE(["Transaction completion gate"])
         SESSION_GATE(["Session termination completion gate"])
+        DRAIN_GATE(["Replay quiescence completion gate"])
         LIFECYCLE_GATE(["Rebalance or shutdown completion gate"])
     end
 
@@ -551,8 +557,10 @@ flowchart TD
     ACTOR -.->|"completes"| SESSION_GATE
     TXN_GATE -.->|"settle request work token"| PROGRESS
     SESSION_GATE -.->|"settle session work token"| PROGRESS
+    PROGRESS -.->|"zero admitted work"| DRAIN_GATE
     TXN_GATE -.->|"join when in scope"| LIFECYCLE_GATE
     SESSION_GATE -.->|"join when in scope"| LIFECYCLE_GATE
+    DRAIN_GATE -.->|"join when in scope"| LIFECYCLE_GATE
     LIFECYCLE_GATE -.->|"resume generation or continue shutdown"| KAFKA
 
     style KAFKA_EXECUTOR fill:#fff5d6,stroke:#8a6d1d
@@ -608,7 +616,7 @@ not a dedicated thread.**
 | `ConnectionRuntime` | One assigned existing Netty event loop | `ConnectionActor`, session transactions, command mailbox, timers, target channel, terminal state |
 | `RequestPreparationService` | Transformation/event-loop workers as appropriate | No shared connection lifecycle state |
 | `EvidenceWriter` | Sink-specific executor | Sink-local buffering and durability |
-| `ReplayProgressController` | Main replay intake thread | Admitted-work tokens and contiguous settled watermark |
+| `ReplayProgressController` | Main replay intake thread | Admitted-work tokens, replay-quiescence gate, and contiguous settled watermark |
 | `ReplayReadGate` | Main replay intake thread | Source admission using settled watermark, epsilon, and lifecycle state |
 | `RecordDispositionLedger` | Kafka executor, behind `KafkaSourceActor` | Generation runway, record obligations, context closure, commit staging, retained-record release |
 

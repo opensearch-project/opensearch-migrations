@@ -1,7 +1,9 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -59,6 +61,32 @@ class ReplayIntakeMailboxTest {
         thread.start();
         Assertions.assertEquals("done", mailbox.await(completion));
         thread.join();
+    }
+
+    @Test
+    void timedAwaitServicesCommandsUntilCompletion() throws Exception {
+        var mailbox = new ReplayIntakeMailbox();
+        var completion = new CompletableFuture<String>();
+        var commandRan = new AtomicBoolean();
+        var thread = new Thread(() -> mailbox.execute(() -> {
+            commandRan.set(true);
+            completion.complete("complete");
+        }));
+
+        thread.start();
+        Assertions.assertEquals("complete", mailbox.await(completion, Duration.ofSeconds(1)));
+        Assertions.assertTrue(commandRan.get());
+        thread.join();
+    }
+
+    @Test
+    void timedAwaitExpiresWithoutCompletion() {
+        var mailbox = new ReplayIntakeMailbox();
+
+        Assertions.assertThrows(
+            TimeoutException.class,
+            () -> mailbox.await(new CompletableFuture<>(), Duration.ofMillis(10))
+        );
     }
 
     @Test
