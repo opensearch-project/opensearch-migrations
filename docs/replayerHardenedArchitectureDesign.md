@@ -851,6 +851,13 @@ The last row is a hard rule with a specific reason: if a wall-clock expiry mecha
 the scanner, the two resolve in favor of whichever fires first — and the impatient one always does.
 That would defeat the scanner entirely while leaving it in the codebase looking authoritative.
 
+That rule governs Kafka and any other source with durable redelivery or offset obligations. Finite
+legacy sources such as an in-memory array or an input stream have no Kafka commit authority to
+advance. They may continue to use the configured inactivity timeout to end local reconstruction and
+release their records, preserving their existing session-splitting behavior. The lifecycle records
+that result as `LegacyExpired`, not `Complete` or `ConfirmedDead`: it is an explicit compatibility
+outcome, not structural proof, and it must never be constructed for a structurally expiring source.
+
 ### 10.6 Epsilon lookahead
 
 Lookahead becomes a smoothing margin rather than the expiry mechanism. The intended default is
@@ -1246,6 +1253,7 @@ sealed interface SourceOutcome {
     record Complete(...) implements SourceOutcome {}
     record ConfirmedDead(ScanEvidence evidence) implements SourceOutcome {}
     record CapturedClose(...) implements SourceOutcome {}
+    record LegacyExpired(...) implements SourceOutcome {}
     record Interrupted(...) implements SourceOutcome {}
     record Shutdown(...) implements SourceOutcome {}
 }
@@ -1279,6 +1287,10 @@ commit.
   commit-eligible, so a timestamp sweep and an offset-ordered proxy declaration are indistinguishable
   at the commit site. `ConfirmedDead(proof)` is a different value that cannot be constructed without
   evidence, which is what any scanner-delivered expiry requires before it can exist.
+* **Legacy finite sources still need an honest timeout value.** They have no durable offset to retain,
+  but calling a timed-out reconstruction `Complete` would make the model lie. `LegacyExpired` preserves
+  their existing local release behavior while making the compatibility boundary exhaustive and
+  preventing that outcome from authorizing a Kafka commit.
 * **Shutdown has no value of its own.** It currently arrives as reader-interruption, which happens to
   suppress commits and therefore happens to be safe — a correct outcome reached by coincidence of
   another cause's policy rather than by stating it.
@@ -1739,4 +1751,5 @@ Deliberately out of scope:
 * Introducing a new durable tuple store in the first implementation.
 * Providing exactly-once target-side effects across process crashes.
 * Reproducing HTTP/2 multiplexing semantics.
-* Any path by which wall-clock timeout code can commit captured records.
+* Any path by which wall-clock timeout code can commit Kafka or other structurally expiring source
+  records.

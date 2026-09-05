@@ -59,6 +59,11 @@ public final class ReplayDispositionPolicy {
             }
 
             @Override
+            public Boolean onLegacyExpired(SourceOutcome.LegacyExpired outcome) {
+                return targetRequiresEvidence(target);
+            }
+
+            @Override
             public Boolean onInconclusive(SourceOutcome.Inconclusive outcome) {
                 return targetRequiresEvidence(target);
             }
@@ -93,6 +98,11 @@ public final class ReplayDispositionPolicy {
             }
 
             @Override
+            public Decision onLegacyExpired(SourceOutcome.LegacyExpired outcome) {
+                return decideDurableTarget(target);
+            }
+
+            @Override
             public Decision onInconclusive(SourceOutcome.Inconclusive outcome) {
                 return retain("source-inconclusive", true);
             }
@@ -123,6 +133,11 @@ public final class ReplayDispositionPolicy {
 
             @Override
             public Decision onCapturedClose(SourceOutcome.CapturedClose outcome) {
+                return retainForTargetWithoutEvidence(target);
+            }
+
+            @Override
+            public Decision onLegacyExpired(SourceOutcome.LegacyExpired outcome) {
                 return retainForTargetWithoutEvidence(target);
             }
 

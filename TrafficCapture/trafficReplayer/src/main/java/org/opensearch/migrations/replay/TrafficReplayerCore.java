@@ -38,7 +38,6 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
@@ -211,6 +210,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final AsyncPermitPool permitPool;
         private final ReplayDispositionPolicy dispositionPolicy;
         private final RecordDispositionLedger dispositionLedger;
+        private final SourceReconstructionPolicy sourceReconstructionPolicy;
         private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new LinkedHashMap<>();
 
         TrafficReplayerAccumulationCallbacks(
@@ -230,6 +230,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.quiescentDuration = quiescentDuration;
             this.permitPool = permitPool;
             this.dispositionPolicy = new ReplayDispositionPolicy();
+            this.sourceReconstructionPolicy = new SourceReconstructionPolicy(
+                trafficCaptureSource.usesStructuralExpiration()
+            );
             this.dispositionLedger = new RecordDispositionLedger(
                 java.util.Objects.requireNonNull(intakeMailboxRef.get(), "replay intake mailbox")
             );
@@ -376,7 +379,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture.future.complete(rrPair);
                 registerTransactionRecords(transaction, rrPair.getTrafficStreamsHeld())
                     .thenCompose(recordIds -> transaction.settleSource(
-                        toSourceOutcome(rrPair),
+                        sourceReconstructionPolicy.classify(rrPair),
                         recordIds
                     ))
                     .whenComplete((ignored, failure) -> {
@@ -587,24 +590,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             return targetResponseClassifier.classify(summary, source);
         }
 
-        private SourceOutcome toSourceOutcome(RequestResponsePacketPair rrPair) {
-            return switch (rrPair.completionStatus) {
-                case COMPLETE -> new SourceOutcome.Complete();
-                case CONFIRMED_DEAD -> new SourceOutcome.ConfirmedDead(
-                    Objects.requireNonNull(
-                        rrPair.structuralProofId,
-                        "Confirmed-dead source outcomes require a structural proof identity"
-                    )
-                );
-                case EXPIRED_PREMATURELY ->
-                    new SourceOutcome.Inconclusive("timestamp-only source expiry has no structural proof");
-                case CLOSED_PREMATURELY ->
-                    new SourceOutcome.Shutdown("source closed before request reconstruction completed");
-                case TRAFFIC_SOURCE_READER_INTERRUPTED ->
-                    new SourceOutcome.Interrupted("Kafka source generation was reassigned");
-            };
-        }
-
         private void failReplayForTransaction(
             IReplayContexts.IReplayerHttpTransactionContext context,
             Throwable failure
@@ -728,7 +713,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 notifyConnectionDone(trafficStreamKeysBeingHeld);
                 sourceDisposition = disposeSourceRecords(
                     trafficStreamKeysBeingHeld,
-                    sourceOnlyDisposition(status, "captured connection close"),
+                    sourceReconstructionPolicy.sourceOnlyDisposition(status, "captured connection close"),
                     "captured connection close"
                 );
                 replayEngine.setFirstTimestamp(timestamp);
@@ -772,7 +757,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             notifyConnectionDone(trafficStreamKeysBeingHeld);
             disposeSourceRecords(
                 trafficStreamKeysBeingHeld,
-                sourceOnlyDisposition(status, "source accumulation expired"),
+                sourceReconstructionPolicy.sourceOnlyDisposition(status, "source accumulation expired"),
                 "source accumulation expired"
             );
         }
@@ -838,22 +823,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(sessionKey)
                 .log();
             shutdown(fatalError);
-        }
-
-        private RecordDisposition sourceOnlyDisposition(
-            RequestResponsePacketPair.ReconstructionStatus status,
-            String operation
-        ) {
-            return switch (status) {
-                case COMPLETE -> new RecordDisposition.Commit(operation);
-                case CONFIRMED_DEAD -> new RecordDisposition.Commit("source-confirmed-dead");
-                case EXPIRED_PREMATURELY ->
-                    new RecordDisposition.Retain("source-expired-without-structural-proof");
-                case CLOSED_PREMATURELY ->
-                    new RecordDisposition.Retain("source-closed-prematurely");
-                case TRAFFIC_SOURCE_READER_INTERRUPTED ->
-                    new RecordDisposition.Retain("source-reassigned");
-            };
         }
 
         private CompletionStage<Void> disposeSourceRecords(

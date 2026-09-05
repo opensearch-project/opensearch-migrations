@@ -35,6 +35,7 @@ class ReplayDispositionPolicyTest {
         var sources = java.util.List.<SourceOutcome>of(
             new SourceOutcome.Complete(),
             new SourceOutcome.ConfirmedDead("proof"),
+            new SourceOutcome.LegacyExpired(),
             new SourceOutcome.Inconclusive("scan window exhausted"),
             new SourceOutcome.CapturedClose(),
             new SourceOutcome.Interrupted("rebalance"),
@@ -62,7 +63,7 @@ class ReplayDispositionPolicyTest {
                 }
             }
         }
-        Assertions.assertEquals(90, decisions);
+        Assertions.assertEquals(105, decisions);
     }
 
     private static Stream<Arguments> decisions() {
@@ -129,6 +130,13 @@ class ReplayDispositionPolicyTest {
                 new EvidenceOutcome.NotRequired("missing"),
                 RecordDisposition.Retain.class,
                 true
+            ),
+            Arguments.of(
+                new SourceOutcome.LegacyExpired(),
+                new TargetOutcome.Succeeded<>("response"),
+                new EvidenceOutcome.Durable("receipt"),
+                RecordDisposition.Commit.class,
+                false
             ),
             Arguments.of(
                 new SourceOutcome.Inconclusive("scan window exhausted"),

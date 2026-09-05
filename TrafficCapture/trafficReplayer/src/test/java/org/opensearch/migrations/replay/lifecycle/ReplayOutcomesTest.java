@@ -73,6 +73,11 @@ class ReplayOutcomesTest {
             }
 
             @Override
+            public String onLegacyExpired(ReplayOutcomes.SourceOutcome.LegacyExpired outcome) {
+                return "legacy-expired";
+            }
+
+            @Override
             public String onInconclusive(ReplayOutcomes.SourceOutcome.Inconclusive outcome) {
                 return outcome.reason();
             }
@@ -105,6 +110,7 @@ class ReplayOutcomesTest {
         };
 
         Assertions.assertEquals("proof", new ReplayOutcomes.SourceOutcome.ConfirmedDead("proof").visit(sourceVisitor));
+        Assertions.assertEquals("legacy-expired", new ReplayOutcomes.SourceOutcome.LegacyExpired().visit(sourceVisitor));
         Assertions.assertEquals("receipt", new ReplayOutcomes.EvidenceOutcome.Durable("receipt").visit(evidenceVisitor));
         Assertions.assertEquals(
             "discard",
