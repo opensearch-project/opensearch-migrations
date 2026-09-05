@@ -715,6 +715,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .log();
         var rrPairWithCallback = accumulation.getRrPairWithCallback();
         var rrPair = rrPairWithCallback.pair;
+        rrPair.responseData = SourceResponseNormalizer.retainTerminalResponse(rrPair.responseData);
         rrPair.completionStatus = status;
         rrPairWithCallback.getFullDataContinuation().accept(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
