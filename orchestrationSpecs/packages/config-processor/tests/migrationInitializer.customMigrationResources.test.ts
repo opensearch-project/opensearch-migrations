@@ -91,6 +91,7 @@ describe('migration initializer CRD resource generation', () => {
         const initializer = new MigrationInitializer();
         const bundle = await initializer.generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
         const resources = bundle.customMigrationResources.items;
+        const preflightResources = (initializer as any).buildSubmissionPreflightResources(bundle);
         const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
 
         const byKind = (kind: string) =>
@@ -103,7 +104,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind('CaptureProxy')).toContain('source-proxy');
         expect(byKind('DataSnapshot')).toContain('source-snap1');
         expect(byKind('SnapshotMigration')).toContain('source-target-snap1-migration-0');
-        expect(byKind('TrafficReplay')).toContain('source-proxy-target-target-replay');
+        expect(byKind('TrafficReplay')).toContain('target-replay');
         expect(byKind('MigrationRun')).toHaveLength(1);
         expect(byKind('ApprovalGate')).toEqual(expect.arrayContaining([
             'evaluatemetadata.source-target-snap1-migration-0',
@@ -119,7 +120,7 @@ describe('migration initializer CRD resource generation', () => {
             // SnapshotMigration CR reconcile VAP retry gate
             'snapshotmigration.source-target-snap1-migration-0.vapretry',
             // Replay VAP retry gate
-            'trafficreplay.source-proxy-target-target-replay.vapretry',
+            'trafficreplay.target-replay.vapretry',
         ]));
 
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toBeUndefined();
@@ -130,7 +131,7 @@ describe('migration initializer CRD resource generation', () => {
         // workflow's tryApply is its sole writer (see makeSnapshotMigrationManifest / upsertDataSnapshotResource).
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toBeUndefined();
         expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toBeUndefined();
-        expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual([
+        expect(getResource('TrafficReplay', 'target-replay')?.spec.dependsOn).toEqual([
             'source-proxy',
             'source-target-snap1-migration-0',
         ]);
@@ -141,7 +142,28 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('CaptureProxy', 'source-proxy')?.spec.listenPort).toBe(9200);
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.snapshotPrefix).toBe('snap1');
         expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.metadataMigrationEnableSourcelessMigrations).toBe(false);
-        expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.speedupFactor).toBe(1.1);
+        expect(getResource('TrafficReplay', 'target-replay')?.spec.speedupFactor).toBe(1.1);
+        const preflightByKindAndName = (kind: string, name: string) =>
+            preflightResources.find((item: any) =>
+                item.manifest.kind === kind && item.manifest.metadata.name === name);
+        expect(
+            preflightByKindAndName('CaptureProxy', 'source-proxy')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.proxies[0].configChecksum);
+        expect(
+            preflightByKindAndName('CapturedTraffic', 'source-proxy-topic')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.proxies[0].topicConfigChecksum);
+        expect(
+            preflightByKindAndName('DataSnapshot', 'source-snap1')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.snapshots[0].createSnapshotConfig[0].configChecksum);
+        expect(
+            preflightByKindAndName(
+                'SnapshotMigration',
+                'source-target-snap1-migration-0'
+            )?.desiredConfigChecksum
+        ).toBe(bundle.workflows.snapshotMigrations[0].configChecksum);
+        expect(
+            preflightByKindAndName('TrafficReplay', 'target-replay')?.desiredConfigChecksum
+        ).toBe(bundle.workflows.trafficReplays[0].configChecksum);
         expect(getResource('MigrationRun', byKind('MigrationRun')[0])?.spec.resolvedConfig.resources).toEqual(
             bundle.resolvedMigrationResources.resources
         );
@@ -150,7 +172,7 @@ describe('migration initializer CRD resource generation', () => {
         }
 
         expect(enrichScript).toContain(
-            "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
+            "data_snapshot_source_snap1=\"$(run_kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('dataSnapshots: {');
         expect(enrichScript).toContain('"source-snap1": $data_snapshot_source_snap1');
@@ -158,7 +180,7 @@ describe('migration initializer CRD resource generation', () => {
             '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[crdname($snapshot.sourceConfig.label + "-" + .label)]}))))'
         );
         expect(enrichScript).toContain(
-            "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
+            "snapshot_migration_source_target_snap1_migration_0=\"$(run_kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
@@ -202,6 +224,7 @@ describe('migration initializer CRD resource generation', () => {
         const initializer = new MigrationInitializer();
         const bundle = await initializer.generateMigrationBundle(config, "byoc-workflow", {runNumber: 1700000000000});
         const resources = bundle.customMigrationResources.items;
+        const preflightResources = (initializer as any).buildSubmissionPreflightResources(bundle);
         const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
 
         const byKind = (kind: string) =>
@@ -212,10 +235,10 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind("KafkaCluster")).toContain("default");
         expect(byKind("CapturedTraffic")).toContain("loaded-dump-topic");
         expect(byKind("CaptureProxy")).toEqual([]);
-        expect(byKind("TrafficReplay")).toContain("loaded-dump-target-replay");
+        expect(byKind("TrafficReplay")).toContain("replay");
         expect(byKind("ApprovalGate")).toEqual(expect.arrayContaining([
             "capturedtraffic.loaded-dump-topic.vapretry",
-            "trafficreplay.loaded-dump-target-replay.vapretry"
+            "trafficreplay.replay.vapretry"
         ]));
 
         const capturedTraffic = getResource("CapturedTraffic", "loaded-dump-topic");
@@ -232,7 +255,7 @@ describe('migration initializer CRD resource generation', () => {
             s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz",
             loadStarted: true
         }));
-        expect(getResource("TrafficReplay", "loaded-dump-target-replay").spec.dependsOn).toEqual(["loaded-dump"]);
+        expect(getResource("TrafficReplay", "replay").spec.dependsOn).toEqual(["loaded-dump"]);
         expect(bundle.resolvedMigrationResources.resources).toContainEqual(expect.objectContaining({
             kind: "CapturedTraffic",
             name: "loaded-dump-topic",
@@ -241,9 +264,16 @@ describe('migration initializer CRD resource generation', () => {
                 s3SourceUri: "s3://traffic-bucket/captures/one.proto.gz"
             })
         }));
+        expect(preflightResources).toContainEqual(expect.objectContaining({
+            desiredConfigChecksum: bundle.workflows.s3TrafficLoaders[0].checksumForReplayer,
+            manifest: expect.objectContaining({
+                kind: "CapturedTraffic",
+                metadata: expect.objectContaining({name: "loaded-dump-topic"}),
+            }),
+        }));
 
         expect(enrichScript).toContain(
-            "s3loader_loaded_dump=\"$(kubectl get capturedtraffics.migrations.opensearch.org/loaded-dump-topic -o jsonpath='{.metadata.uid}')\""
+            "s3loader_loaded_dump=\"$(run_kubectl get capturedtraffics.migrations.opensearch.org/loaded-dump-topic -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain("s3TrafficLoaders: {");
         expect(enrichScript).toContain('"loaded-dump": $s3loader_loaded_dump');
@@ -304,12 +334,28 @@ describe('migration initializer CRD resource generation', () => {
             [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: 'my-workflow',
             [MigrationInitializer.WORKFLOW_NAME_LABEL]: 'my-workflow',
             [MigrationInitializer.RUN_NUMBER_LABEL]: '52',
+            [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: 'recovery',
+            [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: 'false',
             [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'SnapshotMigration',
             [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: 'source-target-snap1-migration-0',
             [MigrationInitializer.GATE_LABEL_SOURCE]: 'source',
             [MigrationInitializer.GATE_LABEL_TARGET]: 'target',
             [MigrationInitializer.GATE_LABEL_SNAPSHOT]: 'snap1',
             [MigrationInitializer.GATE_LABEL_MIGRATION]: 'migration-0',
+        });
+        const evaluateGate = gates.find(
+            (g: any) => g.metadata.name === 'evaluatemetadata.source-target-snap1-migration-0'
+        );
+        expect(evaluateGate.metadata.labels).toMatchObject({
+            [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: 'checkpoint',
+            [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: 'false',
+        });
+        const backfillGate = gates.find(
+            (g: any) => g.metadata.name === 'documentbackfill.source-target-snap1-migration-0'
+        );
+        expect(backfillGate.metadata.labels).toMatchObject({
+            [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: 'checkpoint',
+            [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: 'false',
         });
 
         const migrationRun = bundle.customMigrationResources.items.find((item: any) => item.kind === 'MigrationRun');
@@ -503,10 +549,10 @@ describe('migration initializer CRD resource generation', () => {
 
         expect(enrichScript).not.toBeNull();
         expect(enrichScript).toContain(
-            "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
+            "data_snapshot_source_snap1=\"$(run_kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain(
-            "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
+            "snapshot_migration_source_target_snap1_migration_0=\"$(run_kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');

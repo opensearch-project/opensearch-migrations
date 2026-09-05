@@ -14,6 +14,195 @@ Users can reach the validation pipeline from two directions:
 The important point is that there is one TypeScript validation pipeline. Python
 is a caller, not a second validator.
 
+That rule also applies to manage/edit partial rendering. A partially authored
+workflow config should not be parsed once by `editConfig`, again by
+`resolveMigrationResources`, and a third time by Python. The intended shape is a
+single TypeScript-owned parser/projection pipeline with two validation modes:
+
+- `strict`: require the complete config to pass all validation layers before
+  producing workflow/runtime resources. This is the submit path.
+- `loose`: parse syntactically valid YAML, walk known schema scopes,
+  best-effort project interior structures that have enough identity, and return
+  diagnostics for missing/invalid pieces. This is the manage rendering path.
+
+Loose mode is allowed to return partial resources and `valid: false`; it is not
+allowed to submit workflows or generate final CR manifests.
+
+## Submission Admission Preflight
+
+Strict validation is followed by a package-owned submission preflight. The
+initializer generates one submission bundle, including final desired root CR
+specs. The submission path then:
+
+1. runs Kubernetes server dry-run against that exact bundle;
+2. classifies projected-field restrictions with the metadata that generates
+   the VAP rules;
+3. writes the versioned `submissionPreflight.json` report;
+4. stops before every mutating command when the report is blocked; and
+5. commits the prepared bundle without rerunning initialization.
+
+| Classification | Blocks submit | Meaning |
+| --- | --- | --- |
+| `recreate-required` | yes | A proven impossible or sealed update requires reset and a replacement workflow. |
+| `invalid` | yes | The candidate is definitely invalid against the live CRD/schema. |
+| `approval-required` | no | The workflow may converge after its normal approval gate. |
+| `warning` | no | Admission is unavailable, state-dependent, or not proven permanent. |
+
+Only proven permanent failures block. Deleting resources, transient API
+failures, generic state-dependent VAP failures, and approval-gated changes do
+not block because a later workflow step may still converge.
+
+### Why Admission Is Checked Again
+
+Strict config validation and Kubernetes admission answer different questions.
+Strict validation proves that the user config and generated workflow artifacts
+match the schemas known to this repository. Admission preflight asks the live
+cluster whether it would accept each final generated resource now.
+
+The live check is required for safety because local validation cannot fully
+account for:
+
+- the CRDs, ValidatingAdmissionPolicies, bindings, and admission webhooks
+  currently installed in the target cluster;
+- immutable, sealed, or approval-gated changes that depend on the existing
+  resource's spec and status;
+- cluster or resource changes made after an earlier edit-time preflight; or
+- run-specific values added while generating the exact submission bundle.
+
+The UI or CLI may run an earlier preflight to give the user prompt feedback,
+but submit must check again. Reusing an earlier result would create a
+time-of-check/time-of-use gap in which the cluster or generated candidate could
+change. The repeated check is non-mutating and runs before the existing Argo
+Workflow is replaced or any generated resource is applied.
+
+After the submit-time preflight succeeds, the submission path commits the same
+prepared bundle. It does not regenerate resources between the check and the
+write. This limits the remaining gap and ensures that admission evaluated the
+objects the submit path intends to apply.
+
+### How The Live Check Works
+
+For each generated resource, preflight:
+
+1. reads the live object to determine whether the candidate is a create or an
+   update and to obtain required server metadata such as `resourceVersion`;
+2. combines that live metadata with the final desired manifest while removing
+   stale generated server fields;
+3. sends a Kubernetes `create` or `replace` request with `dryRun=All`, causing
+   the API server to execute normal schema and admission checks without
+   persisting the object; and
+4. compares each workflow resource's live and desired configuration checksums
+   and projected fields to forecast deployment work; and
+5. classifies any response and adds it to the report.
+
+The read and dry-run must remain ordered for an individual resource because the
+second operation depends on the first. Independent resources are checked
+concurrently through one reusable Kubernetes client. The default concurrency
+is eight and does not affect deterministic report ordering. The low-level
+`preflightSubmission` command accepts `--concurrency` when a different bound is
+needed.
+
+### Report Contract
+
+The versioned report is deliberately small and shared unchanged by direct CLI,
+Python, FastAPI, and web callers. A report containing one permanent blocker and
+one normal approval requirement looks like:
+
+```json
+{
+  "formatVersion": 1,
+  "allowed": false,
+  "checkedResources": 3,
+  "deploymentActions": [
+    {
+      "kind": "CaptureProxy",
+      "name": "p2",
+      "plural": "captureproxies",
+      "action": "reconcile",
+      "reason": "checksum-only",
+      "message": "The workflow will reconcile this resource because its generated checksum changed, although no projected fields changed.",
+      "resourceId": "resource:captureproxies:p2",
+      "currentConfigChecksum": "1b6a5004f61b1c9c",
+      "desiredConfigChecksum": "14e8f7cc763affe8"
+    }
+  ],
+  "issues": [
+    {
+      "kind": "CapturedTraffic",
+      "name": "p2-topic",
+      "plural": "capturedtraffics",
+      "classification": "recreate-required",
+      "blocking": true,
+      "message": "Impossible: sourceLabel cannot be changed. Delete and recreate.",
+      "source": "kubernetes",
+      "resourceId": "resource:capturedtraffics:p2-topic",
+      "resetTargetId": "reset:capturedtraffics:p2-topic"
+    },
+    {
+      "kind": "TrafficReplay",
+      "name": "replay",
+      "plural": "trafficreplays",
+      "classification": "approval-required",
+      "blocking": false,
+      "message": "Gated changes detected. Create an ApprovalGate to approve this update.",
+      "source": "kubernetes",
+      "resourceId": "resource:trafficreplays:replay"
+    }
+  ]
+}
+```
+
+`allowed` is false when any issue has `blocking: true`.
+`checkedResources` counts every generated resource, including resources with no
+issue. `deploymentActions` lists workflow resources that submission is expected
+to create or reconcile. Its reasons distinguish a missing resource, an
+incomplete resource, a projected configuration change, and a checksum-only
+reconcile. The checksum-only case is important during checksum algorithm
+migrations: Kubernetes may accept an unchanged CR spec while the workflow still
+reruns deployment work because its status checksum no longer matches.
+`resourceId` lets a caller associate an issue or action with its workflow
+resource, while `resetTargetId` identifies the reset action for
+recreate-required resources. `source` distinguishes a direct Kubernetes result
+from a projected-policy fallback or a failure to initialize preflight itself.
+
+For users, a blocked report prevents submission before mutation and provides a
+specific reset target or validation message. Approval requirements and
+uncertain warnings remain visible but do not create an impossible submission
+loop. Planned deployment actions are advisory and do not change admission's
+blocking decision, but they prevent accepted checksum or retry work from being
+silent. If the Kubernetes client or API server is unavailable, preflight
+returns non-blocking warnings rather than claiming that the candidate is
+invalid.
+
+### Performance Impact
+
+Preflight performs up to two API operations per generated resource: one read
+and one server-side dry-run. Reusing a Kubernetes client avoids starting two
+`kubectl` processes for every resource, and bounded concurrency keeps latency
+from growing linearly while avoiding an unbounded burst against the API server.
+Measured against a local kind cluster:
+
+| Generated resources | Sequential `kubectl` | Reused client, concurrency 8 |
+| ---: | ---: | ---: |
+| 16 | 1.77 s | 0.28 s |
+| 36 | 3.78 s | 0.33 s |
+| 61 | 6.29 s | 0.41 s |
+| 111 | 11.37 s | 0.66 s |
+
+These measurements cover admission preflight, not initialization or mutation.
+The safety check remains part of every submit even though its cost is now a
+small fraction of the complete submission preparation path.
+
+`packages/config-processor/src/submissionPreflight.ts` owns the report contract,
+Kubernetes classification, and projected-policy fallback. The submission shell
+script owns prepare/commit. Python Click, FastAPI, and Textual code adapts the
+report and coordinates replacement of the existing Argo Workflow; it does not
+reimplement policy semantics.
+
+`workflow submit --dry-run --output json` exposes the same report and exits
+nonzero when `allowed` is false. Normal direct script submission and every
+Python submission path always run the preflight.
+
 ## Direct `config-processor` Entry Points
 
 - `packages/config-processor/src/validateConfig.ts`
@@ -55,6 +244,14 @@ raw user input
 The central implementation is:
 
 - `packages/config-processor/src/migrationConfigTransformer.ts`
+
+Current strict callers use `MigrationConfigTransformer.processFromObject(...)`.
+`processFromObject` always validates before transforming, so a missing interior
+object such as `traffic.proxies.<name>.proxyConfig` prevents the resource
+projection from returning any pending resources. That behavior is correct for
+submit and strict validation, but manage needs a loose sibling path in TS that
+shares the same schema/projection metadata and returns partial projections plus
+diagnostics.
 
 After transformation, resource parameter projection, CRD/VAP generation, and
 resolved migration resources generation are described in

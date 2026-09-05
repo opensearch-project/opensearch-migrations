@@ -65,7 +65,7 @@ The migration config is validated against a single unified JSON Schema.  That
 schema starts with the orchestration config shape from
 `packages/schemas/src/userSchemas.ts`, then splices in selected Strimzi schema
 fragments for the Kafka pass-through sections under
-`kafkaClusterConfiguration.<name>.autoCreate`.
+`traffic.kafkaClusters.<name>.autoCreate`.
 
 The merge intentionally pulls in only Strimzi `spec` fragments that users are
 allowed to control:
@@ -229,7 +229,7 @@ targetClusters:
 
 ### Kafka Settings
 
-`kafkaClusterConfiguration.<cluster>.autoCreate` is intended to behave like the
+`traffic.kafkaClusters.<cluster>.autoCreate` is intended to behave like the
 other compound resource settings in migration config: the workflow provides
 baseline defaults, the user specifies only the Kafka settings they care about,
 and the final Kafka configuration is a deep merge of defaults plus overrides.
@@ -249,7 +249,7 @@ resource names and Kafka access contract.  In particular, workflow-managed
 listeners, auth wiring, and other invariants may be overwritten so that proxy,
 replayer, and console connectivity remains stable.
 
-For `kafkaClusterConfiguration.<cluster>.existing`, the user should provide the
+For `traffic.kafkaClusters.<cluster>.existing`, the user should provide the
 explicit connection and auth material that migration applications must use.  In
 particular, existing Kafka clusters should use an explicit auth block rather
 than relying on the workflow to infer secret names.

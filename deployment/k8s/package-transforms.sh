@@ -171,9 +171,32 @@ Transforms image pushed successfully.
 Pinned image:
   ${PINNED_REF}
 
-Set this in your transformsSources:
-  transformsSources:
-    my-transforms:
-      image: "${PINNED_REF}"
+Reference this image directly from the transform that uses it. For example:
+
+  metadataTransforms:
+    entryPoint:
+      javascriptFile:
+        image: "${PINNED_REF}"
+        path: metadata.js
+
+  documentTransforms:
+    - entryPoint:
+        javascriptFile:
+          image: "${PINNED_REF}"
+          path: document.js
+
+  requestTransforms:
+    entryPoint:
+      javascriptFile:
+        image: "${PINNED_REF}"
+        path: request.js
+
+  tupleTransforms:
+    - entryPoint:
+        pythonFile:
+          image: "${PINNED_REF}"
+          path: tuple.py
+
+Use javascript/python for inline source code. Use javascriptFile/pythonFile when the script is loaded from this image or from a ConfigMap key.
 OUTPUT
 fi

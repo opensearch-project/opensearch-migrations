@@ -81,7 +81,7 @@ Still incomplete:
 For an auto-created Kafka cluster, the user-facing Kafka configuration lives
 under:
 
-`kafkaClusterConfiguration.<name>.autoCreate`
+`traffic.kafkaClusters.<name>.autoCreate`
 
 The intended primary settings are:
 
@@ -142,9 +142,10 @@ how to supply.
 The intended minimal experience is:
 
 ```yaml
-kafkaClusterConfiguration:
-  default:
-    autoCreate: {}
+traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
 ```
 
 That should be enough for the workflow to create a usable Kafka cluster using
@@ -155,28 +156,29 @@ the baseline defaults.
 The intended override experience is:
 
 ```yaml
-kafkaClusterConfiguration:
-  default:
-    autoCreate:
-      auth:
-        type: scram-sha-512
-      nodePoolSpecOverrides:
-        replicas: 3
-        storage:
-          type: jbod
-          volumes:
-            - id: 0
-              type: persistent-claim
-              size: 100Gi
-      clusterSpecOverrides:
-        kafka:
+traffic:
+  kafkaClusters:
+    default:
+      autoCreate:
+        auth:
+          type: scram-sha-512
+        nodePoolSpecOverrides:
+          replicas: 3
+          storage:
+            type: jbod
+            volumes:
+              - id: 0
+                type: persistent-claim
+                size: 100Gi
+        clusterSpecOverrides:
+          kafka:
+            config:
+              min.insync.replicas: 2
+              message.max.bytes: 2097152
+        topicSpecOverrides:
+          partitions: 12
           config:
-            min.insync.replicas: 2
-            message.max.bytes: 2097152
-      topicSpecOverrides:
-        partitions: 12
-        config:
-          cleanup.policy: compact
+            cleanup.policy: compact
 ```
 
 In that example, the user changes only the settings they care about. The
@@ -319,14 +321,15 @@ managed resources explicit.
 Conceptually:
 
 ```yaml
-kafkaClusterConfiguration:
-  default:
-    existing:
-      kafkaConnection: broker.example.org:9093
-      kafkaTopic: logging-traffic-topic
-      auth:
-        type: scram-sha-512
-        secretName: existing-kafka-user-secret
+traffic:
+  kafkaClusters:
+    default:
+      existing:
+        kafkaConnection: broker.example.org:9093
+        kafkaTopic: logging-traffic-topic
+        auth:
+          type: scram-sha-512
+          secretName: existing-kafka-user-secret
 ```
 
 The contract should remain:

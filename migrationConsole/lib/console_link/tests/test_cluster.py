@@ -371,6 +371,75 @@ def test_source_proxy_sigv4_call_signs_with_source_endpoint(requests_mock, aws_c
     assert "us-east-1/es/aws4_request" in auth_header
 
 
+def test_cluster_api_call_uses_client_cert_paths():
+    class FakeSession:
+        def __init__(self):
+            self.request_kwargs = None
+
+        def request(self, *args, **kwargs):
+            self.request_kwargs = kwargs
+            response = requests.Response()
+            response.status_code = 200
+            response._content = b"{}"
+            return response
+
+    cluster = Cluster({
+        "endpoint": "https://capture-proxy:9201",
+        "allow_insecure": True,
+        "no_auth": None,
+        "client_cert": {
+            "cert_path": "/tmp/client.crt",
+            "key_path": "/tmp/client.key",
+        },
+    })
+    session = FakeSession()
+
+    cluster.call_api("/", session=session)
+
+    assert session.request_kwargs["cert"] == ("/tmp/client.crt", "/tmp/client.key")
+
+
+def test_cluster_client_cert_can_be_loaded_from_k8s_secret(mocker):
+    kubectl_runner = mocker.patch("console_link.models.cluster.KubectlRunner")
+    kubectl_runner.return_value.read_secret.return_value = {
+        "tls.crt": "client-cert",
+        "tls.key": "client-key",
+    }
+    cluster = Cluster({
+        "endpoint": "https://capture-proxy:9201",
+        "allow_insecure": True,
+        "no_auth": None,
+        "client_cert": {
+            "k8s_secret_name": "proxy-client-cert",
+        },
+    })
+
+    cert_path, key_path = cluster._get_client_cert_files()
+
+    assert kubectl_runner.return_value.read_secret.call_args.args == ("proxy-client-cert",)
+    with open(cert_path) as f:
+        assert f.read() == "client-cert"
+    with open(key_path) as f:
+        assert f.read() == "client-key"
+
+
+def test_source_proxy_preserves_proxy_client_cert_config():
+    source_cluster = SourceCluster({
+        "endpoint": "https://source.example.com",
+        "allow_insecure": True,
+        "no_auth": None,
+        "proxy": {
+            "endpoint": "https://capture-proxy:9201",
+            "allow_insecure": True,
+            "client_cert": {
+                "k8s_secret_name": "proxy-client-cert",
+            },
+        },
+    })
+
+    assert source_cluster.proxy.client_cert_details == {"k8s_secret_name": "proxy-client-cert"}
+
+
 def test_run_benchmark_executes_correctly_no_auth(mocker):
     cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     mock = mocker.patch("subprocess.run", autospec=True)
@@ -383,6 +452,32 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
                                  " --test-mode --kill-running-processes --workload-params="
                                  "bulk_size:10,bulk_indexing_clients:1 "
                                  "--client-options=verify_certs:false,use_ssl:true", shell=True)
+
+
+def test_run_benchmark_includes_client_cert_options(mocker):
+    cluster = Cluster({
+        "endpoint": "https://capture-proxy:9201",
+        "allow_insecure": True,
+        "no_auth": None,
+        "client_cert": {
+            "cert_path": "/tmp/client.crt",
+            "key_path": "/tmp/client.key",
+        },
+    })
+    mock = mocker.patch("subprocess.run", autospec=True)
+    workload = "nyctaxis"
+
+    cluster.execute_benchmark_workload(workload=workload)
+
+    mock.assert_called_once_with("opensearch-benchmark run"
+                                 " --exclude-tasks=check-cluster-health"
+                                 f" --target-host={cluster.endpoint} --workload={workload}"
+                                 " --pipeline=benchmark-only"
+                                 " --test-mode --kill-running-processes --workload-params="
+                                 "bulk_size:10,bulk_indexing_clients:1 "
+                                 "--client-options=verify_certs:false,use_ssl:true,"
+                                 "client_cert:/tmp/client.crt,"
+                                 "client_key:/tmp/client.key", shell=True)
 
 
 def test_run_benchmark_executes_correctly_sigv4_auth(mocker):

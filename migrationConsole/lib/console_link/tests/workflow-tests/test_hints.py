@@ -33,9 +33,14 @@ MONITOR_ERROR_HINT = "could not be monitored"    # submit --wait, monitoring fai
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _make_gate(name, category="step", status="waiting"):
+def _make_gate(name, category="step", status="waiting", labels=None):
     from console_link.workflow.commands.approve import GateInfo
-    return GateInfo(name=name, category=category, status=status)
+    return GateInfo(
+        name=name,
+        category=category,
+        status=status,
+        labels=labels,
+    )
 
 
 def _workflow_response(phase):
@@ -160,13 +165,6 @@ class TestPublicHintFunctions:
         assert HINT_PREFIX in out
         assert MANAGE_HINT in out
         assert "--list" not in out
-
-    def test_hint_after_approve_retry(self, capsys):
-        from console_link.workflow.commands.hints import hint_after_approve_retry
-        hint_after_approve_retry()
-        out = capsys.readouterr().out
-        assert HINT_PREFIX in out
-        assert MANAGE_HINT in out
 
     @pytest.mark.parametrize("phase,expected", [
         ("Running", IS_RUNNING_HINT),
@@ -348,6 +346,14 @@ class TestConfigureEditHints:
 class TestSubmitHints:
     """workflow submit — success, --wait, and error paths."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_admission_preflight(self):
+        with patch(
+            "console_link.workflow.commands.submit."
+            "ConfigEditService.validate_raw_config_for_submit"
+        ):
+            yield
+
     def _base_patches(self):
         """Return list of patch targets always needed for submit."""
         return [
@@ -367,6 +373,23 @@ class TestSubmitHints:
         )
         return mock_store
 
+    def _setup_runner(self, mock_runner_class):
+        prepared = Mock(
+            report={
+                "formatVersion": 1,
+                "allowed": True,
+                "checkedResources": 0,
+                "issues": [],
+            },
+        )
+        runner = mock_runner_class.return_value
+        runner.prepare_workflow.return_value = prepared
+        runner.commit_prepared_workflow.return_value = {
+            "workflow_name": "migration-workflow",
+            "warnings": [],
+        }
+        return runner, prepared
+
     @patch("console_link.workflow.commands.submit.WorkflowConfigStore")
     @patch("console_link.workflow.commands.submit.ScriptRunner")
     @patch("console_link.workflow.commands.submit.load_k8s_config")
@@ -376,9 +399,7 @@ class TestSubmitHints:
     def test_success_no_wait_shows_manage_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.return_value = {
-            "workflow_name": "migration-workflow", "warnings": []
-        }
+        self._setup_runner(mock_runner_class)
         self._setup_store(mock_store_class)
 
         result = CliRunner().invoke(workflow_cli, ["submit"])
@@ -397,9 +418,7 @@ class TestSubmitHints:
     def test_wait_succeeded_shows_complete_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_svc_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.return_value = {
-            "workflow_name": "migration-workflow", "warnings": []
-        }
+        self._setup_runner(mock_runner_class)
         mock_svc_class.return_value.wait_for_workflow_completion.return_value = ("Succeeded", None)
         self._setup_store(mock_store_class)
 
@@ -419,9 +438,7 @@ class TestSubmitHints:
     def test_wait_failed_shows_fix_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_svc_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.return_value = {
-            "workflow_name": "migration-workflow", "warnings": []
-        }
+        self._setup_runner(mock_runner_class)
         mock_svc_class.return_value.wait_for_workflow_completion.return_value = ("Failed", None)
         self._setup_store(mock_store_class)
 
@@ -441,9 +458,7 @@ class TestSubmitHints:
     def test_wait_timeout_shows_manage_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_svc_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.return_value = {
-            "workflow_name": "migration-workflow", "warnings": []
-        }
+        self._setup_runner(mock_runner_class)
         mock_svc_class.return_value.wait_for_workflow_completion.side_effect = TimeoutError("timed out")
         self._setup_store(mock_store_class)
 
@@ -466,9 +481,7 @@ class TestSubmitHints:
         # Submission succeeds, but monitoring the workflow raises a non-timeout error.
         # The user should be told the workflow is submitted and to check it manually —
         # not nudged to fix the config (the submit itself worked).
-        mock_runner_class.return_value.submit_workflow.return_value = {
-            "workflow_name": "migration-workflow", "warnings": []
-        }
+        self._setup_runner(mock_runner_class)
         mock_svc_class.return_value.wait_for_workflow_completion.side_effect = Exception("argo unreachable")
         self._setup_store(mock_store_class)
 
@@ -488,7 +501,8 @@ class TestSubmitHints:
     def test_script_error_shows_fix_above_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.side_effect = (
+        runner, _prepared = self._setup_runner(mock_runner_class)
+        runner.commit_prepared_workflow.side_effect = (
             subprocess.CalledProcessError(1, ["cmd"], stderr="config validation failed")
         )
         self._setup_store(mock_store_class)
@@ -508,7 +522,10 @@ class TestSubmitHints:
     def test_general_exception_shows_fix_above_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.side_effect = Exception("unexpected failure")
+        runner, _prepared = self._setup_runner(mock_runner_class)
+        runner.commit_prepared_workflow.side_effect = Exception(
+            "unexpected failure"
+        )
         self._setup_store(mock_store_class)
 
         result = CliRunner().invoke(workflow_cli, ["submit"])
@@ -526,7 +543,9 @@ class TestSubmitHints:
     def test_file_not_found_does_not_show_fix_hint(
         self, _vfy, _ss, _exists, _k8s, mock_runner_class, mock_store_class
     ):
-        mock_runner_class.return_value.submit_workflow.side_effect = FileNotFoundError("no such script")
+        mock_runner_class.return_value.prepare_workflow.side_effect = (
+            FileNotFoundError("no such script")
+        )
         self._setup_store(mock_store_class)
 
         result = CliRunner().invoke(workflow_cli, ["submit"])
@@ -594,14 +613,25 @@ class TestApproveHints:
     @patch("console_link.workflow.commands.approve.approve_gate", return_value=True)
     @patch("console_link.workflow.commands.approve._gather_gates")
     @patch("console_link.workflow.commands.approve.load_k8s_config")
-    def test_approve_retry_shows_manage_hint(self, _k8s, mock_gather, _approve):
-        mock_gather.return_value = [_make_gate("cp.proxy-1.vapretry", category="retry")]
+    def test_approve_retry_requires_reset_and_resubmit(
+        self, _k8s, mock_gather, approve
+    ):
+        mock_gather.return_value = [_make_gate(
+            "cp.proxy-1.vapretry",
+            category="retry",
+            labels={
+                "migrations.opensearch.org/resource-kind": "CaptureProxy",
+                "migrations.opensearch.org/resource-name": "proxy-1",
+            },
+        )]
 
         result = CliRunner().invoke(workflow_cli, ["approve", "retry", "--all"])
 
-        assert result.exit_code == 0
-        assert HINT_PREFIX in result.output
-        assert MANAGE_HINT in result.output
+        assert result.exit_code == 1
+        approve.assert_not_called()
+        assert "cannot be approved safely" in result.output
+        assert "workflow reset captureproxy.proxy-1 --resubmit" in result.output
+        assert HINT_PREFIX not in result.output
 
     @patch("console_link.workflow.commands.approve._gather_gates")
     @patch("console_link.workflow.commands.approve.load_k8s_config")

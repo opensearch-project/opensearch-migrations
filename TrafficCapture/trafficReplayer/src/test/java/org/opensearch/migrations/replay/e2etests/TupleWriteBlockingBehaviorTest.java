@@ -176,8 +176,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
                 // Run the replayer in a background thread. The future completes when the
-                // thread exits — that's the signal we use to assert "replay is done"
-                // instead of a Thread.join with a hard-coded deadline.
+                // replay method returns and surfaces any exception from that method. An
+                // unbounded join below is safe because the method-level timeout is the bound.
                 var replayDone = new CompletableFuture<Void>();
                 var replayThread = new Thread(() -> {
                     try {
@@ -211,9 +211,10 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 latchedSink.releaseAll();
                 awaitCursorAdvance(sourceContext, 1, Duration.ofMinutes(1));
 
-                // Wait for the replay loop to exit cleanly. Surface any exception
-                // that occurred inside the thread.
+                // Surface any replay exception, then wait for the worker to execute its
+                // final instructions. The method-level timeout bounds the unbounded join.
                 replayDone.get(1, TimeUnit.MINUTES);
+                replayThread.join();
                 Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
 
                 tr.shutdown(null).get();
@@ -281,6 +282,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 // Clean up — release futures, then wait for the replay to finish.
                 latchedSink.releaseAll();
                 replayDone.get(1, TimeUnit.MINUTES);
+                replayThread.join();
                 tr.shutdown(null).get();
             }
         }

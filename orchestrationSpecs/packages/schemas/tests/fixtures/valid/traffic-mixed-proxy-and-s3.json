@@ -31,11 +31,11 @@
       }
     },
     "replayers": {
-      "replayLive": {
+      "replay-live": {
         "fromCapturedTraffic": "live-capture",
         "toTarget": "target"
       },
-      "replayDump": {
+      "replay-dump": {
         "fromCapturedTraffic": "loaded-dump",
         "toTarget": "target2"
       }

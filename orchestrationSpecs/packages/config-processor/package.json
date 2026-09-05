@@ -1,6 +1,9 @@
 {
   "name": "@opensearch-migrations/config-processor",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22.14"
+  },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -19,6 +22,7 @@
     "test:integ:crds": "jest --config ./jest.integ.config.js --runTestsByPath tests/integ/generatedMigrationCrds.integ.test.ts"
   },
   "dependencies": {
+    "@kubernetes/client-node": "^1.4.0",
     "@opensearch-migrations/schemas": "*",
     "ajv": "^8.20.0",
     "ci": "^2.3.0",

@@ -67,6 +67,9 @@ describe('MigrationConfigTransformer validation', () => {
             }
         ],
         traffic: {
+            kafkaClusters: {
+                "default": { "autoCreate": {} }
+            },
             proxies: {
                 "proxy1": {
                     "source": "source1",
@@ -79,9 +82,6 @@ describe('MigrationConfigTransformer validation', () => {
                     "toTarget": "target1"
                 }
             }
-        },
-        kafkaClusterConfiguration: {
-            "default": { "autoCreate": {} }
         }
     };
 
@@ -95,7 +95,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithRogueKey);
-        }).toThrow(/Unrecognized keys at root: rogueTopLevel/);
+        }).toThrow(/Unrecognized key 'rogueTopLevel' at: rogueTopLevel/);
     });
 
     it('should reject rogue key in union (authConfig.basic)', () => {
@@ -117,7 +117,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithRogueInUnion);
-        }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.authConfig\.basic: rogueInUnion/);
+        }).toThrow(/Unrecognized key 'rogueInUnion' at: sourceClusters\.source1\.authConfig\.basic\.rogueInUnion/);
     });
 
     it.each([
@@ -225,7 +225,37 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithRogueInNested);
-        }).toThrow(/Unrecognized keys at sourceClusters\.\[0\]\.snapshotInfo: rogueInNested/);
+        }).toThrow(/Unrecognized key 'rogueInNested' at: sourceClusters\.source1\.snapshotInfo\.rogueInNested/);
+    });
+
+    it('should reject rogue keys inside piped document backfill options', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            documentBackfillConfig: {
+                podReplicas: 1,
+                documentBackfillPodReplicas: 2,
+            },
+        };
+
+        expect(() => {
+            transformer.validateInput(config);
+        }).toThrow(/Unrecognized key 'documentBackfillPodReplicas' at: snapshotMigrationConfigs\.0\.perSnapshotConfig\.snap1\.0\.documentBackfillConfig\.documentBackfillPodReplicas/);
+    });
+
+    it('should reject stale pod replica keys outside proxy and replayer config blocks', () => {
+        const config = cloneBaseConfig() as any;
+        config.traffic.proxies.proxy1.podReplicas = 2;
+
+        expect(() => {
+            transformer.validateInput(config);
+        }).toThrow(/Unrecognized key 'podReplicas' at: traffic\.proxies\.proxy1\.podReplicas/);
+
+        delete config.traffic.proxies.proxy1.podReplicas;
+        config.traffic.replayers.replay1.podReplicas = 2;
+
+        expect(() => {
+            transformer.validateInput(config);
+        }).toThrow(/Unrecognized key 'podReplicas' at: traffic\.replayers\.replay1\.podReplicas/);
     });
 
     it('should validate refinements (bad repoName reference)', () => {
@@ -249,7 +279,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithSolrCollections);
-        }).toThrow(/Unrecognized keys.*solrCollections/);
+        }).toThrow(/Unrecognized key.*solrCollections/);
     });
 
     it('should reject solrContextPath on a user-facing ES/OS createSnapshotConfig', () => {
@@ -261,7 +291,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(() => {
             transformer.validateInput(configWithContextPath);
-        }).toThrow(/Unrecognized keys.*solrContextPath/);
+        }).toThrow(/Unrecognized key.*solrContextPath/);
     });
 
     it('stamps a sanitized resourceName on each snapshot migration', async () => {
@@ -299,9 +329,54 @@ describe('MigrationConfigTransformer validation', () => {
             .toThrow(/s3Source 'loaded-dump' references unknown kafka cluster 'missing'/);
     });
 
+    it('should backfill default kafka refs alongside explicit kafka configs', async () => {
+        const config = cloneBaseConfig();
+        config.traffic.kafkaClusters = {
+            kafka: {autoCreate: {}}
+        };
+        delete config.traffic.proxies.proxy1.kafka;
+
+        expect(() => transformer.validateInput(config)).not.toThrow();
+        const resolved = await transformer.processFromObject(config);
+        expect((resolved.kafkaClusters ?? []).map(cluster => cluster.name).sort())
+            .toEqual(["default", "kafka"]);
+    });
+
+    it('should require source endpoint when snapshots or capture proxies reference the source', () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.endpoint = "";
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Source endpoint is required because snapshotMigrationConfigs\[0\], traffic\.proxies\.proxy1 references this source\. at: sourceClusters\.source1\.endpoint/);
+    });
+
+    it('should allow snapshot migrations over externally managed snapshots without a source endpoint', () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.endpoint = "";
+        config.sourceClusters.source1.snapshotInfo.snapshots.snap1.config = {
+            externallyManagedSnapshotName: "preexisting-snapshot",
+        };
+        delete config.traffic;
+
+        expect(() => transformer.validateInput(config)).not.toThrow();
+    });
+
+    it('should reject kafka cluster configs that define both modes', () => {
+        const config = cloneBaseConfig();
+        config.traffic.kafkaClusters.default = {
+            autoCreate: {},
+            existing: {
+                kafkaConnection: "broker:9092",
+            },
+        };
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate' at: traffic\.kafkaClusters\.default/);
+    });
+
     it('should transform s3 captured traffic sources without a live proxy', async () => {
         const config = cloneBaseConfig();
-        delete config.kafkaClusterConfiguration;
+        delete config.traffic.kafkaClusters;
         config.snapshotMigrationConfigs = [];
         config.traffic = {
             s3Sources: {
@@ -354,7 +429,7 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(result.trafficReplays).toHaveLength(1);
         expect(result.trafficReplays![0]).toEqual(expect.objectContaining({
-            name: "loaded-dump-target1-replay1",
+            name: "replay1",
             sourceLabel: "detached-source",
             fromCapturedTraffic: "loaded-dump",
             kafkaClusterName: "default",
@@ -370,6 +445,33 @@ describe('MigrationConfigTransformer validation', () => {
         }));
     });
 
+    it('should preserve a cluster-only LocalStack hostname when host DNS cannot resolve it', async () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.snapshotInfo.repos.default.endpoint =
+            "localstack://not-resolvable.invalid:4566";
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.snapshots[0].createSnapshotConfig[0].repo.endpoint)
+            .toBe("http://not-resolvable.invalid:4566");
+        expect(result.snapshotMigrations[0].snapshotConfig.repoConfig.endpoint)
+            .toBe("http://not-resolvable.invalid:4566");
+    });
+
+    it('should still resolve a host-visible LocalStack hostname to an IP', async () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source1.snapshotInfo.repos.default.endpoint =
+            "localstacks://localhost:4566";
+
+        const result = await transformer.processFromObject(config);
+        const endpoint =
+            result.snapshots[0].createSnapshotConfig[0].repo.endpoint;
+
+        expect(endpoint).toMatch(
+            /^https:\/\/(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:]+\]):4566$/i
+        );
+    });
+
     it('should lower transform pipelines into provider configs with file-source mounts', async () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
@@ -378,7 +480,7 @@ describe('MigrationConfigTransformer validation', () => {
                     metadataTransforms: {
                         entryPoint: {
                             javascriptFile: {
-                                image: "example.com/transforms@sha256:abc123",
+                                image: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                                 path: "metadata.js"
                             }
                         },
@@ -425,7 +527,7 @@ describe('MigrationConfigTransformer validation', () => {
                 {
                     entryPoint: {
                         pythonFile: {
-                            image: "example.com/transforms@sha256:abc123",
+                            image: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                             path: "tuple.py"
                         }
                     },
@@ -445,7 +547,7 @@ describe('MigrationConfigTransformer validation', () => {
             {
                 name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
                 image: {
-                    reference: "example.com/transforms@sha256:abc123",
+                    reference: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     pullPolicy: "IfNotPresent"
                 }
             }
@@ -487,7 +589,7 @@ describe('MigrationConfigTransformer validation', () => {
             {
                 name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
                 image: {
-                    reference: "example.com/transforms@sha256:abc123",
+                    reference: "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     pullPolicy: "IfNotPresent"
                 }
             }
@@ -557,7 +659,7 @@ describe('MigrationConfigTransformer validation', () => {
 
     it('should lower every supported transform context form and dedupe shared image sources', async () => {
         const config = cloneBaseConfig();
-        const transformImage = "example.com/transforms@sha256:abc123";
+        const transformImage = "example.com/transforms@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         config.traffic.replayers.replay1.replayerConfig = {
             requestTransforms: [
                 {
@@ -725,7 +827,7 @@ describe('MigrationConfigTransformer validation', () => {
         config.transformsSources = {};
 
         expect(() => transformer.validateInput(config))
-            .toThrow(/Unrecognized keys at root: transformsSources/);
+            .toThrow(/Unrecognized key 'transformsSources' at: transformsSources/);
     });
 
     it('should lower capture proxy client-auth trust material into file-source mounts', async () => {
@@ -737,7 +839,8 @@ describe('MigrationConfigTransformer validation', () => {
                 trustedClientCaFile: {
                     configMap: "trusted-client-roots",
                     path: "ca.crt"
-                }
+                },
+                consoleClientSecretName: "console-client-cert"
             }
         };
 
@@ -745,17 +848,17 @@ describe('MigrationConfigTransformer validation', () => {
         const proxyConfig = result.proxies[0].proxyConfig;
         const mountPath = proxyConfig.fileSourceVolumeMounts![0].mountPath;
 
-        // clientAuth is retained in tls (rides into the gated CR spec.tls); the
-        // flat fields below are the Deployment/Java-process projection of it.
+        // clientAuth stays in the resolved workflow config so console-resource
+        // projection can configure migration-console proxy clients.
         expect(proxyConfig.tls).toEqual({
             mode: "existingSecret",
             secretName: "proxy-tls",
             clientAuth: {
-                required: true,
                 trustedClientCaFile: {
                     configMap: "trusted-client-roots",
                     path: "ca.crt"
-                }
+                },
+                consoleClientSecretName: "console-client-cert",
             }
         });
         expect(proxyConfig.sslTrustCertFile).toBe(`${mountPath}/ca.crt`);
@@ -780,7 +883,6 @@ describe('MigrationConfigTransformer validation', () => {
             secretName: "proxy-tls",
             clientAuth: {
                 trustedClientCaPem: pem,
-                required: false
             }
         };
 
@@ -792,13 +894,12 @@ describe('MigrationConfigTransformer validation', () => {
             secretName: "proxy-tls",
             clientAuth: {
                 trustedClientCaPem: pem,
-                required: false
             }
         });
         expect(proxyConfig.sslTrustCertPem).toBe(pem);
         expect(proxyConfig.sslTrustCertPemEnvVar).toBe("CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
         expect(proxyConfig.sslTrustCertFile).toBeUndefined();
-        expect(proxyConfig.requireClientAuth).toBe(false);
+        expect(proxyConfig.requireClientAuth).toBe(true);
         expect(proxyConfig.fileSourceVolumes).toEqual([]);
         expect(proxyConfig.fileSourceVolumeMounts).toEqual([]);
     });
@@ -880,7 +981,7 @@ describe('MigrationConfigTransformer validation', () => {
         const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
         const normalized = normalizeUserConfig(parsed);
 
-        expect(normalized.kafkaClusterConfiguration.default).toMatchObject({
+        expect(normalized.traffic?.kafkaClusters.default).toMatchObject({
             autoCreate: {
                 auth: {
                     type: "scram-sha-512"
@@ -902,14 +1003,34 @@ describe('MigrationConfigTransformer validation', () => {
         });
     });
 
+    it('should lower capture header suppression maps to proxy process argument pairs', async () => {
+        const configWithHeaderMatches = cloneBaseConfig();
+        configWithHeaderMatches.traffic.proxies.proxy1.proxyConfig.suppressCaptureForHeaderMatch = {
+            "Authorization": "Bearer .*",
+            "User-Agent": ".*healthcheck.*",
+        };
+
+        const result = await transformer.processFromObject(configWithHeaderMatches);
+
+        expect(result.proxies?.[0]?.proxyConfig.suppressCaptureForHeaderMatch).toEqual([
+            "Authorization",
+            "Bearer .*",
+            "User-Agent",
+            ".*healthcheck.*",
+        ]);
+    });
+
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
         const configWithScramKafka = {
             ...baseConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        auth: {
-                            type: "scram-sha-512"
+            traffic: {
+                ...baseConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            auth: {
+                                type: "scram-sha-512"
+                            }
                         }
                     }
                 }
@@ -989,14 +1110,17 @@ describe('MigrationConfigTransformer validation', () => {
     it('should require a CA secret for existing SCRAM-managed Kafka clusters', () => {
         const configWithInvalidExistingScramKafka = {
             ...baseConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    existing: {
-                        kafkaConnection: "broker.example.org:9093",
-                        kafkaTopic: "capture-proxy",
-                        auth: {
-                            type: "scram-sha-512",
-                            secretName: "existing-kafka-user-secret"
+            traffic: {
+                ...baseConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        existing: {
+                            kafkaConnection: "broker.example.org:9093",
+                            kafkaTopic: "capture-proxy",
+                            auth: {
+                                type: "scram-sha-512",
+                                secretName: "existing-kafka-user-secret"
+                            }
                         }
                     }
                 }
@@ -1011,14 +1135,17 @@ describe('MigrationConfigTransformer validation', () => {
     it('should report an unknown Kafka broker key without union noise', () => {
         const configWithBogusKafkaKey = {
             ...baseConfig,
-            kafkaClusterConfiguration: {
-                default: {
-                    autoCreate: {
-                        clusterSpecOverrides: {
-                            kafka: {
-                                config: {
-                                    "auto.create.topics.enable": false,
-                                    "bogus.inner.key": true,
+            traffic: {
+                ...baseConfig.traffic,
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {
+                            clusterSpecOverrides: {
+                                kafka: {
+                                    config: {
+                                        "auto.create.topics.enable": false,
+                                        "bogus.inner.key": true,
+                                    }
                                 }
                             }
                         }

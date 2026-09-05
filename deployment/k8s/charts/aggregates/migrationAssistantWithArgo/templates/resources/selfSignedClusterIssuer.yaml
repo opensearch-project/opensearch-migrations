@@ -39,7 +39,7 @@ spec:
           apiVersion: cert-manager.io/v1
           kind: ClusterIssuer
           metadata:
-            name: migrations-selfsigned-bootstrap
+            name: selfsigned-bootstrap-not-for-services
           spec:
             selfSigned: {}
           ---
@@ -58,7 +58,7 @@ spec:
               algorithm: RSA
               size: 2048
             issuerRef:
-              name: migrations-selfsigned-bootstrap
+              name: selfsigned-bootstrap-not-for-services
               kind: ClusterIssuer
           ---
           apiVersion: cert-manager.io/v1
@@ -74,7 +74,7 @@ spec:
                 STATUS=$(kubectl get certificate migrations-root-ca -n {{ .Release.Namespace }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
                 if [ "$STATUS" = "True" ]; then
                   echo "Migrations CA chain created successfully."
-                  echo "  - ClusterIssuer 'migrations-selfsigned-bootstrap' (bootstrap only)"
+                  echo "  - ClusterIssuer 'selfsigned-bootstrap-not-for-services' (bootstrap only)"
                   echo "  - Certificate 'migrations-root-ca' (root CA)"
                   echo "  - ClusterIssuer 'migrations-ca' (use this for proxy certs)"
                   exit 0

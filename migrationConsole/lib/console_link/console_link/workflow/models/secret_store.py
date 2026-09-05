@@ -294,14 +294,15 @@ class SecretStore:
         return result
 
     def secret_exists(self, resource_name: str) -> bool:
-        """Check if a single managed secret exists
+        """Check if a single managed secret exists.
 
 
         Args:
             resource_name: Name of the secret to check
 
         Returns:
-            True if secret exists, False otherwise
+            True if the Secret exists and has this store's management labels,
+            False otherwise.
         """
         try:
             secret = self.v1.read_namespaced_secret(
@@ -309,6 +310,21 @@ class SecretStore:
                 namespace=self.namespace
             )
             return self._has_default_labels(secret)
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            else:
+                logger.error(f"Kubernetes API error checking secret {resource_name}: {e}")
+                raise
+
+    def secret_resource_exists(self, resource_name: str) -> bool:
+        """Check if a Kubernetes Secret resource exists, regardless of labels."""
+        try:
+            self.v1.read_namespaced_secret(
+                name=resource_name,
+                namespace=self.namespace
+            )
+            return True
         except ApiException as e:
             if e.status == 404:
                 return False

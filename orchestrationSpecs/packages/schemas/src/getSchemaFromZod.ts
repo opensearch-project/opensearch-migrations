@@ -1,6 +1,7 @@
 import {extendZodWithOpenApi, OpenApiGeneratorV3, OpenAPIRegistry} from "@asteasolutions/zod-to-openapi";
 import {z} from "zod";
 import {FieldMeta} from "./userSchemas";
+import {getDescription} from "./schemaUtilities";
 
 extendZodWithOpenApi(z);
 
@@ -31,23 +32,85 @@ function safeObjectValues(obj: Record<string, unknown>) {
 
 /** Unwrap Zod wrappers (optional, default, etc.) to reach the type that holds .meta(). */
 function unwrapZod(schema: z.ZodType): z.ZodType {
+    if (schema instanceof z.ZodArray) return schema;
     if ('unwrap' in schema && typeof (schema as any).unwrap === 'function') return unwrapZod((schema as any).unwrap());
     if ('removeDefault' in schema && typeof (schema as any).removeDefault === 'function') return unwrapZod((schema as any).removeDefault());
+    if (schema instanceof z.ZodPipe) {
+        const def = schema._def;
+        return unwrapZod((def.in instanceof z.ZodTransform ? def.out : def.in) as z.ZodType);
+    }
     return schema;
+}
+
+function fieldMeta(schema: z.ZodType): FieldMeta | undefined {
+    const direct = schema.meta() as FieldMeta | undefined;
+    const unwrapped = unwrapZod(schema);
+    const inner = unwrapped === schema ? undefined : unwrapped.meta() as FieldMeta | undefined;
+    return {
+        ...(inner ?? {}),
+        ...(direct ?? {}),
+    };
+}
+
+function isExpertDescription(description: string | undefined): boolean {
+    return Boolean(description) && (/^\s*\[Expert\]/i.test(description ?? "") || /^\s*Expert\b/i.test(description ?? ""));
+}
+
+function applyMetaExtensions(jsonSchema: Record<string, unknown>, zodSchema: z.ZodType): void {
+    const meta = fieldMeta(zodSchema);
+    if (meta?.checksumFor?.length) jsonSchema['x-checksum-for'] = meta.checksumFor;
+    if (meta?.changeRestriction) jsonSchema['x-change-restriction'] = meta.changeRestriction;
+    if (meta?.essential) jsonSchema['x-essential'] = true;
+    if (meta?.uiHint) jsonSchema['x-ui-hint'] = meta.uiHint;
+    if (meta?.externalRef) jsonSchema['x-external-ref'] = meta.externalRef;
+    if (meta?.effectiveDefault) jsonSchema['x-effective-default'] = meta.effectiveDefault;
+    if (meta?.expert || isExpertDescription(getDescription(zodSchema as z.ZodTypeAny) ?? String(jsonSchema.description ?? ""))) {
+        jsonSchema['x-expert'] = true;
+    }
 }
 
 /** Walk a generated JSON Schema and inject x- extensions from Zod .meta(). */
 function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
-    if (!(zodSchema instanceof z.ZodObject) || !isSafePlainObject(jsonSchema?.properties)) return;
-    for (const [key, propSchema] of safeObjectEntries(jsonSchema.properties)) {
-        if (!Object.hasOwn((zodSchema as z.ZodObject<any>).shape, key)) continue;
-        if (!isSafePlainObject(propSchema)) continue;
-        const fieldZod = (zodSchema as z.ZodObject<any>).shape[key];
-        const meta = fieldZod.meta() as FieldMeta | undefined;
-        if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
-        if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
-        // Recurse into nested objects
-        injectMetaExtensions(propSchema, unwrapZod(fieldZod));
+    const unwrapped = unwrapZod(zodSchema);
+    if (unwrapped instanceof z.ZodObject) {
+        if (!isSafePlainObject(jsonSchema?.properties)) return;
+        for (const [key, propSchema] of safeObjectEntries(jsonSchema.properties)) {
+            if (!Object.hasOwn((unwrapped as z.ZodObject<any>).shape, key)) continue;
+            if (!isSafePlainObject(propSchema)) continue;
+            const fieldZod = (unwrapped as z.ZodObject<any>).shape[key];
+            applyMetaExtensions(propSchema, fieldZod);
+            injectMetaExtensions(propSchema, fieldZod);
+        }
+        return;
+    }
+
+    if (unwrapped instanceof z.ZodRecord && isSafePlainObject(jsonSchema?.additionalProperties)) {
+        const valueType = (unwrapped as z.ZodRecord<any, any>).valueType;
+        applyMetaExtensions(jsonSchema.additionalProperties, valueType);
+        injectMetaExtensions(jsonSchema.additionalProperties, valueType);
+        return;
+    }
+
+    if (unwrapped instanceof z.ZodArray && isSafePlainObject(jsonSchema?.items)) {
+        const itemZod = (unwrapped as z.ZodArray<any>).element;
+        applyMetaExtensions(jsonSchema.items, itemZod);
+        injectMetaExtensions(jsonSchema.items, itemZod);
+        return;
+    }
+
+    const unionOptions = (unwrapped instanceof z.ZodUnion || unwrapped instanceof z.ZodDiscriminatedUnion)
+        ? (unwrapped as z.ZodUnion<any> | z.ZodDiscriminatedUnion<any, any>).options as z.ZodType[]
+        : undefined;
+    const jsonUnionBranches = Array.isArray(jsonSchema?.anyOf)
+        ? jsonSchema.anyOf
+        : Array.isArray(jsonSchema?.oneOf) ? jsonSchema.oneOf : undefined;
+    if (unionOptions && jsonUnionBranches) {
+        const options = unionOptions;
+        jsonUnionBranches.forEach((branch: unknown, index: number) => {
+            if (isSafePlainObject(branch) && options[index]) {
+                injectMetaExtensions(branch, options[index]);
+            }
+        });
     }
 }
 
@@ -70,6 +133,22 @@ function makeBareNullableSchemasAjvCompatible(jsonSchema: any): void {
     }
 
     safeObjectValues(jsonSchema).forEach(makeBareNullableSchemasAjvCompatible);
+}
+
+function removeRawUiHintMetadata(jsonSchema: any): void {
+    if (Array.isArray(jsonSchema)) {
+        jsonSchema.forEach(removeRawUiHintMetadata);
+        return;
+    }
+    if (!isSafePlainObject(jsonSchema)) {
+        return;
+    }
+    delete jsonSchema.uiHint;
+    delete jsonSchema.externalRef;
+    delete jsonSchema.effectiveDefault;
+    delete jsonSchema.essential;
+    delete jsonSchema.expert;
+    safeObjectValues(jsonSchema).forEach(removeRawUiHintMetadata);
 }
 
 /**
@@ -95,7 +174,8 @@ export function zodSchemaToJsonSchema(
     const components = generator.generateComponents();
 
     const result = components.components?.schemas?.[schemaName];
-    injectMetaExtensions(result, schema);
+    injectMetaExtensions(result, schemaToRegister);
+    removeRawUiHintMetadata(result);
     makeBareNullableSchemasAjvCompatible(result);
     return result;
 }

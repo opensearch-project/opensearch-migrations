@@ -6,10 +6,10 @@
     "target": { "endpoint": "http://target:9200" }
   },
   "snapshotMigrationConfigs": [],
-  "kafkaClusterConfiguration": {
-    "my-kafka": { "autoCreate": { "replicas": 1, "storage": { "type": "ephemeral" } } }
-  },
   "traffic": {
+    "kafkaClusters": {
+      "my-kafka": { "autoCreate": { "replicas": 1, "storage": { "type": "ephemeral" } } }
+    },
     "proxies": {
       "proxy1": {
         "source": "source",

@@ -19,7 +19,7 @@ Images are the preferred path. ConfigMap support is a convenience for users who 
 
 ### 1.1 Transform source definition — `userSchemas.ts`
 
-New top-level aliased map, following the same pattern as `kafkaClusterConfiguration`, `sourceClusters`, and `targetClusters`:
+New top-level aliased map, following the same pattern as `traffic.kafkaClusters`, `sourceClusters`, and `targetClusters`:
 
 ```typescript
 const TRANSFORMS_IMAGE_SOURCE = z.object({
@@ -531,7 +531,7 @@ The project targets EKS with K8s 1.35, where the `ImageVolume` feature gate is e
 
 ### Why an aliased map instead of inline image references?
 
-OCI image references with digests are long (`123456789012.dkr.ecr.us-east-1.amazonaws.com/transforms@sha256:abc123...`). Defining them once in `transformsSources` and referencing by short key (`my-transforms`) keeps per-tool config readable. This follows the existing pattern used by `kafkaClusterConfiguration`, `sourceClusters`, and `targetClusters`.
+OCI image references with digests are long (`123456789012.dkr.ecr.us-east-1.amazonaws.com/transforms@sha256:abc123...`). Defining them once in `transformsSources` and referencing by short key (`my-transforms`) keeps per-tool config readable. This follows the existing pattern used by `traffic.kafkaClusters`, `sourceClusters`, and `targetClusters`.
 
 ### Why default script filenames?
 

@@ -28,6 +28,10 @@ def workflowTemplatesStagingP =
         layout.buildDirectory.dir("dockerContext/nodeStaging/workflowTemplates")
 def migrationResourcesStagingP =
         layout.buildDirectory.dir("dockerContext/nodeStaging/migrationResources")
+def manageWebP = layout.projectDirectory.dir("web")
+def manageWebBundleStagingP =
+        layout.buildDirectory.dir("manageWebStatic")
+def manageWebOpenApiP = manageWebP.file("openapi.json")
 
 // Root-level tsconfig files that affect compilation
 def rootTsConfigFiles = [
@@ -233,6 +237,77 @@ tasks.register('buildAndStageMigrationResources', NpmTask) {
     }
 }
 
+tasks.register('installManageWebDependencies', NpmTask) {
+    description = 'Install locked dependencies for the native workflow manage web app'
+    workingDir = manageWebP.asFile
+    args = ['ci']
+
+    inputs.file(manageWebP.file("package.json"))
+    inputs.file(manageWebP.file("package-lock.json"))
+    outputs.dir(manageWebP.dir("node_modules"))
+}
+
+tasks.register('generateManageWebOpenApi', NpmTask) {
+    description = 'Generate the workflow manage OpenAPI contract from FastAPI'
+    workingDir = manageWebP.asFile
+    args = ['run', 'generate:openapi']
+
+    inputs.files(
+            manageWebP.file("scripts/generated-api.sh"),
+            manageWebP.file("package.json"),
+            project.file("lib/console_link/Pipfile.lock"),
+            project.file("lib/console_link/console_link/workflow/web/app.py"),
+            project.file("lib/console_link/console_link/workflow/web/contracts.py"),
+            project.file("lib/console_link/console_link/workflow/web/openapi.py"))
+    outputs.file(manageWebOpenApiP)
+}
+
+tasks.register('generateManageWebClient', NpmTask) {
+    description = 'Generate the workflow manage TypeScript API contract from OpenAPI'
+    workingDir = manageWebP.asFile
+    args = ['run', 'generate:client']
+    dependsOn installManageWebDependencies
+    dependsOn generateManageWebOpenApi
+
+    inputs.file(manageWebOpenApiP)
+    inputs.file(manageWebP.file("package.json"))
+    outputs.file(manageWebP.file("src/api/schema.generated.ts"))
+}
+
+tasks.register('testManageWeb', NpmTask) {
+    description = 'Run native workflow manage React unit tests'
+    workingDir = manageWebP.asFile
+    args = ['test']
+    dependsOn generateManageWebClient
+
+    inputs.dir(manageWebP.dir("src"))
+    inputs.file(manageWebP.file("vite.config.ts"))
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('buildManageWeb', NpmTask) {
+    description = 'Type-check and compile the native workflow manage React app'
+    workingDir = manageWebP.asFile
+    args = ['run', 'build']
+    dependsOn generateManageWebClient
+
+    inputs.dir(manageWebP.dir("src"))
+    inputs.file(manageWebP.file("index.html"))
+    inputs.file(manageWebP.file("tsconfig.json"))
+    inputs.file(manageWebP.file("tsconfig.app.json"))
+    inputs.file(manageWebP.file("vite.config.ts"))
+    outputs.dir(manageWebP.dir("dist"))
+}
+
+tasks.register('buildAndStageManageWeb', Sync) {
+    description = 'Build, test, and stage the native workflow manage web bundle'
+    dependsOn buildAndStageConfigProcessor
+    dependsOn testManageWeb
+    dependsOn buildManageWeb
+    from(manageWebP.dir("dist"))
+    into(manageWebBundleStagingP)
+}
+
 def buildAndStageConfigProcessorProvider = tasks.named("buildAndStageConfigProcessor")
 def nodeSetupProvider = tasks.named("nodeSetup")
 def nodeExt = extensions.getByType(NodeExtension)
@@ -258,6 +333,7 @@ tasks.register('syncDockerBuildContext', Sync) {
     dependsOn makeAndStageWorkflowTemplates
     dependsOn buildAndStageConfigProcessor
     dependsOn buildAndStageMigrationResources
+    dependsOn buildAndStageManageWeb
     dependsOn byocPutTrafficFixtureTask
 
     // Explicitly declare inputs for all files being synced
@@ -275,6 +351,7 @@ tasks.register('syncDockerBuildContext', Sync) {
     inputs.file(project.file("lib/console_link/Pipfile"))
     inputs.file(project.file("lib/console_link/Pipfile.lock"))
     inputs.file(project.file("lib/console_link/setup.py"))
+    inputs.dir(manageWebBundleStagingP)
     inputs.dir(project.file("lib/integ_test"))
     inputs.files(byocPutTrafficFixtureTask)
 
@@ -315,6 +392,9 @@ tasks.register('syncDockerBuildContext', Sync) {
     from(project.file("lib/console_link/setup.py")) {
         into "lib/console_link"
         exclude commonExcludes
+    }
+    from(manageWebBundleStagingP) {
+        into "lib/console_link/console_link/workflow/web/static"
     }
     from(project.file("lib/integ_test")) {
         into "lib/integ_test"

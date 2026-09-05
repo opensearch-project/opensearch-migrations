@@ -5,6 +5,7 @@ preserving any migration CRD-owned resources.
 """
 
 import logging
+import json
 import subprocess
 import click
 import time
@@ -15,6 +16,11 @@ from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
+from ..services.config_edit_service import (
+    AdmissionPreflightBlocked,
+    ConfigEditService,
+)
+from ..services.admission_preflight import AdmissionPreflightReport
 from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
@@ -134,8 +140,30 @@ def _remove_existing_workflow(workflow_name, namespace):
     help='id that gets appended to downstream as uniqueRunNonce arg (and is appended to some naming such as '
          'snapshotName downstream)'
 )
+@click.option(
+    '--verbose-submit-output',
+    is_flag=True,
+    default=False,
+    help='Show detailed Kubernetes resource output from the submit script.'
+)
+@click.option(
+    '--dry-run',
+    is_flag=True,
+    default=False,
+    help='Validate and admission-check the exact submission without applying it.'
+)
+@click.option(
+    '--output',
+    'output_format',
+    type=click.Choice(['text', 'json']),
+    default='text',
+    show_default=True,
+    help='Preflight output format; JSON is available with --dry-run.'
+)
 @click.pass_context
-def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce):
+def submit_command(
+        ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce,
+        verbose_submit_output, dry_run, output_format):
     """Submit a migration workflow using the config processor.
 
     If a workflow already exists, it is automatically stopped, deleted, and
@@ -146,6 +174,11 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         workflow submit --wait
         workflow submit --wait --timeout 300
     """
+    if output_format != "text" and not dry_run:
+        raise click.UsageError("--output json requires --dry-run")
+    if wait and dry_run:
+        raise click.UsageError("--wait cannot be combined with --dry-run")
+
     # Check if configuration exists
     store = WorkflowConfigStore(namespace=namespace)
     config = store.load_config(session_name=session)
@@ -168,19 +201,69 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         runner = ScriptRunner()
 
         config_yaml = config.raw_yaml
-
-        click.echo(f"Initializing workflow from session: {session}")
-        _remove_existing_workflow(workflow_name, namespace)
-
-        click.echo(f"Submitting workflow to namespace: {namespace}")
+        edit_service = ConfigEditService(
+            namespace=namespace,
+            runner=runner,
+            secret_store=secret_store,
+        )
+        edit_service.validate_raw_config_for_submit(config_yaml)
+        prepared = runner.prepare_workflow(
+            config_yaml,
+            [
+                "--workflow-name", workflow_name,
+                "--namespace", namespace,
+                "--unique-run-nonce", unique_run_nonce,
+            ],
+            quiet=not verbose_submit_output,
+        )
         try:
-            submit_result = runner.submit_workflow(
-                config_yaml,
-                [
-                    "--workflow-name", workflow_name,
-                    "--unique-run-nonce", unique_run_nonce
-                ],
+            preflight = AdmissionPreflightReport.from_payload(
+                prepared.report
             )
+            if dry_run and output_format == "json":
+                click.echo(json.dumps(prepared.report, indent=2))
+                if not preflight.allowed:
+                    ctx.exit(ExitCode.FAILURE.value)
+                return
+
+            if not preflight.allowed:
+                raise AdmissionPreflightBlocked(preflight)
+
+            if dry_run:
+                click.echo(
+                    "Admission preflight passed for "
+                    f"{preflight.checked_resources} resources."
+                )
+                for action in preflight.deployment_actions:
+                    click.echo(
+                        f"Planned {action.action}: "
+                        f"{action.kind} {action.name} - {action.message}"
+                    )
+                for issue in preflight.warning_issues:
+                    click.echo(
+                        f"Warning: {issue.kind} {issue.name}: "
+                        f"{issue.message}"
+                    )
+                return
+
+            for issue in preflight.warning_issues:
+                click.echo(
+                    f"Admission preflight warning for "
+                    f"{issue.kind} {issue.name}: {issue.message}",
+                    err=True,
+                )
+
+            for action in preflight.deployment_actions:
+                click.echo(
+                    f"Planned {action.action}: "
+                    f"{action.kind} {action.name} - {action.message}"
+                )
+
+            click.echo(f"Initializing workflow from session: {session}")
+            _remove_existing_workflow(workflow_name, namespace)
+
+            click.echo(f"Submitting workflow to namespace: {namespace}")
+            submit_result = runner.commit_prepared_workflow(prepared)
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 
@@ -214,11 +297,17 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
                 click.echo(e.stderr, err=True)
             hint_on_submit_error()
             ctx.exit(ExitCode.FAILURE.value)
+        except click.exceptions.Exit:
+            raise
         except Exception as e:
             click.echo(f"Error submitting workflow: {str(e)}", err=True)
             hint_on_submit_error()
             ctx.exit(ExitCode.FAILURE.value)
+        finally:
+            prepared.cleanup()
 
+    except click.exceptions.Exit:
+        raise
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)

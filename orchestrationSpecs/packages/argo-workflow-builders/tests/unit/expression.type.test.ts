@@ -5,6 +5,7 @@ import {
     INTERNAL,
     makeDirectTypeProxy,
     makeParameterLoop,
+    toArgoExpressionString,
     typeToken,
     UnquotedTypeWrapper,
     WorkflowBuilder,
@@ -207,6 +208,36 @@ describe("expression type contracts", () => {
             );
 
         expectTypeOf(wf).not.toBeAny();
+    });
+
+    it("scopeRoot exposes Argo scope maps to typed expressions", () => {
+        type StepsScope = {
+            tryApply: {
+                status: string;
+                outputs: {
+                    parameters: Record<string, string>;
+                };
+            };
+        };
+
+        const steps = expr.scopeRoot<StepsScope>("steps");
+        const status = expr.dig(steps, ["tryApply", "status"], expr.literal(""));
+        const checksum = expr.dig(
+            steps,
+            ["tryApply", "outputs", "parameters", "currentConfigChecksum"],
+            expr.literal("")
+        );
+        const condition = expr.and(
+            expr.equals(status, expr.literal("Succeeded")),
+            expr.not(expr.equals(checksum, expr.literal("desired")))
+        );
+
+        expectTypeOf(status).toExtend<BaseExpression<string>>();
+        expectTypeOf(checksum).toExtend<BaseExpression<string>>();
+        expectTypeOf(condition).toExtend<BaseExpression<boolean, "complicatedExpression">>();
+        expect(toArgoExpressionString(condition)).toEqual(
+            "{{=sprig.dig('tryApply', 'status', '', steps) == 'Succeeded' && !(sprig.dig('tryApply', 'outputs', 'parameters', 'currentConfigChecksum', '', steps) == 'desired')}}"
+        );
     });
 
     it("jsonPath outputs cannot be passed to deserializeRecord", () => {

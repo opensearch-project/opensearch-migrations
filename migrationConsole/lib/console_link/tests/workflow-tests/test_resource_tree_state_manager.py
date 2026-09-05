@@ -4,6 +4,9 @@ import pytest
 from textual.widgets import Tree
 
 from console_link.workflow.resource_tree import (
+    CONFIG_MODE_CURRENT_WORKFLOW,
+    CONFIG_MODE_DEPLOYED,
+    CONFIG_MODE_PENDING_SUBMIT,
     ResourceNode, ResourceGroup, ResourceSection,
 )
 from console_link.workflow.tui.resource_tree_state_manager import (
@@ -100,6 +103,100 @@ class TestRebuild:
         resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}bf-1')
         labels = [str(c.label) for c in resource_node.children]
         assert any('Backfill status:' in ln for ln in labels)
+
+    def test_rebuild_shows_config_changes_and_mode(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('kafka-1', 'kafkaclusters', spec={'version': '3.6.0'})
+        resource.config_diff = {
+            'has_submitted_changes': True,
+            'has_pending_submit_changes': True,
+            'fields': [{
+                'path': 'version',
+                'label': 'version',
+                'values': {
+                    'deployed': {'present': True, 'value': '3.6.0'},
+                    'submitted': {'present': True, 'value': '3.7.0'},
+                    'pending': {'present': True, 'value': '3.8.0'},
+                },
+            }],
+        }
+
+        mgr.rebuild(make_sections({'Buffer': [resource]}))
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}kafka-1')
+        assert 'to submit' in str(resource_node.label)
+        labels = [str(c.label) for c in resource_node.children]
+        assert any('deployed=3.6.0 | pending=3.7.0 | to-submit=3.8.0' in ln for ln in labels)
+
+        mgr.set_config_value_mode('pendingSubmit')
+        mgr.update(make_sections({'Buffer': [resource]}))
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}kafka-1')
+        labels = [str(c.label) for c in resource_node.children]
+        assert any('version: to-submit=3.8.0' in ln for ln in labels)
+
+    def test_parent_resource_label_does_not_inherit_child_pending_diff(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        kafka = make_resource('default', 'kafkaclusters', phase='Ready')
+        topic = make_resource('cap-topic', 'capturedtraffics', phase='Ready')
+        topic.config_diff = {
+            'has_submitted_changes': True,
+            'has_pending_submit_changes': False,
+            'fields': [{
+                'path': 'kafkaBrokers',
+                'label': 'kafkaBrokers',
+                'values': {
+                    'deployed': {'present': False},
+                    'submitted': {'present': True, 'value': 'default-kafka-bootstrap:9093'},
+                    'pending': {'present': True, 'value': 'default-kafka-bootstrap:9093'},
+                },
+            }],
+        }
+        mgr.rebuild(make_sections({'Buffer': [kafka, topic]}))
+
+        kafka_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}default')
+        topic_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}cap-topic')
+        group_node = find_node_by_id(tree.root, 'group:Buffer')
+        assert 'pending' not in str(kafka_node.label)
+        assert 'pending' in str(topic_node.label)
+        assert 'pending' in str(group_node.label)
+
+    def test_value_modes_filter_resources_by_projected_presence(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        delete_after_submit = make_resource('delete-after-submit', 'trafficreplays')
+        delete_after_submit.config_presence = {'deployed': True, 'submitted': True, 'pending': False}
+        create_after_submit = make_resource('create-after-submit', 'trafficreplays', 'Pending Config')
+        create_after_submit.config_presence = {'deployed': False, 'submitted': False, 'pending': True}
+        create_after_workflow = make_resource('create-after-workflow', 'trafficreplays', 'Pending Config')
+        create_after_workflow.config_presence = {'deployed': False, 'submitted': True, 'pending': True}
+        sections = make_sections({
+            'Replay': [delete_after_submit, create_after_submit, create_after_workflow],
+        })
+
+        mgr.rebuild(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' in ids
+
+        mgr.set_config_value_mode(CONFIG_MODE_DEPLOYED)
+        mgr.update(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' not in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' not in ids
+
+        mgr.set_config_value_mode(CONFIG_MODE_CURRENT_WORKFLOW)
+        mgr.update(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' not in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' in ids
+
+        mgr.set_config_value_mode(CONFIG_MODE_PENDING_SUBMIT)
+        mgr.update(sections)
+        ids = get_all_node_ids(tree.root)
+        assert f'{RESOURCE_ID_PREFIX}delete-after-submit' not in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-submit' in ids
+        assert f'{RESOURCE_ID_PREFIX}create-after-workflow' in ids
 
 
 # --- Incremental Update ---
@@ -212,3 +309,38 @@ class TestIncrementalUpdate:
         ])
         mgr.rebuild(make_sections({'Backfill': [resource]}))
         assert 'pod-1' in observed_pods
+
+    def test_workflow_progress_for_attention_resource_stays_expanded(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('bf-1', 'snapshotmigrations', phase='Pending', workflow_progress=[
+            {'id': 'pod-1', 'display_name': 'evaluateMetadata', 'phase': 'Failed', 'type': 'Pod',
+             'started_at': '2026-01-01T10:00:00Z', 'children': []},
+        ])
+        sections = make_sections({'Backfill': [resource]})
+        mgr.rebuild(sections)
+        workflow_node = find_node_by_id(tree.root, 'workflow:bf-1')
+        workflow_node.collapse()
+        assert not workflow_node.is_expanded
+
+        mgr.update(sections)
+
+        workflow_node = find_node_by_id(tree.root, 'workflow:bf-1')
+        assert workflow_node.is_expanded
+
+    def test_workflow_progress_nodes_inherit_resource_log_context(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('bf-1', 'snapshotmigrations', phase='Pending', workflow_progress=[
+            {'id': 'pod-1', 'display_name': 'evaluateMetadata', 'phase': 'Failed', 'type': 'Pod',
+             'started_at': '2026-01-01T10:00:00Z', 'children': []},
+        ])
+
+        mgr.rebuild(make_sections({'Backfill': [resource]}))
+
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}bf-1')
+        workflow_node = find_node_by_id(tree.root, 'workflow:bf-1')
+        pod_node = find_node_by_id(tree.root, 'pod-1')
+        assert resource_node.data['resource_path'] == 'snapshotmigration.bf-1'
+        assert resource_node.data['resource_log_node_id'] == 'pod-1'
+        assert workflow_node.data['resource_path'] == 'snapshotmigration.bf-1'
+        assert workflow_node.data['resource_log_node_id'] == 'pod-1'
+        assert pod_node.data['resource_path'] == 'snapshotmigration.bf-1'

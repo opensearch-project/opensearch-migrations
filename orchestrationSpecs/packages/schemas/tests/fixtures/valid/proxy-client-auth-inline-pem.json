@@ -21,8 +21,7 @@
             "mode": "existingSecret",
             "secretName": "proxy-tls",
             "clientAuth": {
-              "trustedClientCaPem": "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----",
-              "required": false
+              "trustedClientCaPem": "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----"
             }
           }
         }

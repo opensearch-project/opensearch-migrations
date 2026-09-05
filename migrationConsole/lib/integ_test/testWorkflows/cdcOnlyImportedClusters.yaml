@@ -117,8 +117,8 @@ spec:
                 "sourceClusters": { "source1": $source },
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
-                "kafkaClusterConfiguration": { "default": { "autoCreate": {} } },
                 "traffic": {
+                  "kafkaClusters": { "default": { "autoCreate": {} } },
                   "proxies": {
                     "capture-proxy": {
                       "source": "source1",

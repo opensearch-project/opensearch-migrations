@@ -30,6 +30,7 @@ welcome feedback and contributions to optimize costs.
 | redeployMigrationConsole.sh       | Removes possible image cache in kind and calls `helm upgrade` to redeploy the migration console |
 | update_deps.sh                    | Updates dependencies of helm charts                                                             |
 | updateArgoWorkflowTemplate.sh     | Updates `clusterWorkflows.yaml` in case changes were made to it and need update in running argo |
+| workflowWeb.sh                    | Starts and port-forwards the packaged Workflow Web UI from the migration console                 |
 
 See the [kind instructions](#install-kind) below for more details about specific scripts.
 
@@ -120,11 +121,11 @@ mirror at `localhost:5001`.
 
 Both local flows use the same docker-hosted backend:
 
-* `kindTesting.sh` source `buildImages/backends/dockerHostedBuildkit.sh`. It shares a single `docker-registry`
-  container on the `local-migrations-network` Docker network. Host-side `docker buildx` pushes to `localhost:5001`; pods
-  inside the cluster pull by the in-cluster DNS name `docker-registry:5000`. The cluster's nodes are joined to
-  `local-migrations-network` so the name resolves via Docker's bridge DNS. Plain HTTP is allowed on the in-cluster
-  endpoint in kind via a containerd `hosts.toml`.
+* `kindTesting.sh` sources `buildImages/backends/dockerHostedBuildkit.sh`. It shares a single `docker-registry`
+  container on the `local-migrations-network` Docker network. Host-side `docker buildx` pushes to `localhost:5001`;
+  pods reference `docker-registry:5001`. Each kind node's containerd `hosts.toml` maps that name directly to the
+  Docker host-gateway IP and permits plain HTTP. This avoids an extra Docker-network attachment and survives Docker
+  restarts without relying on an appended `/etc/hosts` entry.
 * EKS / GKE / AKS use `buildImages/backends/eksKubernetesBuildkit.sh`, which spins up amd64 + arm64 buildkit Pods
   directly via `docker buildx --driver=kubernetes` on the cluster's `build-nodepool`.
 
@@ -199,6 +200,35 @@ helm install tc -n ma charts/aggregates/testClusters
 
 Notice that all resources are deployed within the same namespace as that makes the authorization models easier to
 manage.
+
+### Workflow Web UI
+
+The migration-console image packages the FastAPI server and compiled React application
+together. For a local kind deployment, start the server inside the console pod and
+forward its single browser-facing port:
+
+```shell
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh start
+```
+
+Open `http://127.0.0.1:8000`. The frontend, REST API, API documentation at
+`/api/docs`, and server-sent event stream all use that origin. FastAPI accesses Argo
+and Kubernetes from inside the pod, so developers do not need to forward either one
+to the host.
+
+The port-forward remains in the foreground. In another terminal, inspect or stop the
+in-pod process with:
+
+```shell
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh status
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh logs --follow
+KUBE_CONTEXT=kind-ma ./workflowWeb.sh stop
+```
+
+Set `WORKFLOW_MANAGE_LOCAL_PORT` to use a local port other than 8000. This helper is a
+developer convenience and currently starts the server with `kubectl exec`; the Helm
+chart does not run it automatically.
 
 ### Configuration
 

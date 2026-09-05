@@ -105,6 +105,14 @@ function snapshotMigrationConfig(opts: {
 }
 
 describe("Solr backup snapshotInfo paths", () => {
+    it("requires a source endpoint when importing an externally managed backup", () => {
+        const config = snapshotMigrationConfig({shape: "solrExternalBackups"}) as any;
+        config.sourceClusters.solrSource.endpoint = "";
+
+        expect(() => new MigrationConfigTransformer().validateInput(config))
+            .toThrow(/Source endpoint is required because snapshotMigrationConfigs\[0\] references this source/);
+    });
+
     it("folds user-facing topology into solrTopology on the import prepare config", async () => {
         const workflowConfig = await new MigrationConfigTransformer()
             .processFromObject(snapshotMigrationConfig({
@@ -399,7 +407,7 @@ describe("Solr backup snapshotInfo paths", () => {
         }
         expect(threw).toBeInstanceOf(Error);
         expect(String((threw as Error).message ?? threw))
-            .toMatch(/Unrecognized keys.*mode/);
+            .toMatch(/Unrecognized key 'mode'/);
     });
 });
 

@@ -11,8 +11,10 @@ import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaph
 import { crdName } from './crdNaming';
 import {
     buildResolvedMigrationResources,
+    ResolvedMigrationResource,
     ResolvedMigrationResources,
 } from "./resolvedMigrationResources";
+import type {SubmissionPreflightResource} from "./submissionPreflight";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
@@ -92,7 +94,10 @@ export class MigrationInitializer {
             throw new Error("Migration run number is required when generating migration resources.");
         }
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
-        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
+        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName, {
+            includeParameterProvenance: true,
+            sourceConfig: userConfig,
+        });
         const customMigrationResources = this.generateCustomMigrationResources(
             workflows,
             workflowName,
@@ -122,6 +127,10 @@ export class MigrationInitializer {
         await fs.writeFile(
             path.join(outputDir, 'resolvedMigrationResources.json'),
             JSON.stringify(bundle.resolvedMigrationResources, null, 2)
+        );
+        await fs.writeFile(
+            path.join(outputDir, 'submissionPreflightResources.json'),
+            JSON.stringify(this.buildSubmissionPreflightResources(bundle), null, 2)
         );
 
         // 2. Write individual resource files and the handler script
@@ -178,6 +187,77 @@ export class MigrationInitializer {
         }
     }
 
+    private buildSubmissionPreflightResources(bundle: any): SubmissionPreflightResource[] {
+        const resolvedByKey = new Map<string, ResolvedMigrationResource>(
+            (bundle.resolvedMigrationResources.resources as ResolvedMigrationResource[])
+                .map(resource => [`${resource.kind}:${resource.name}`, resource])
+        );
+        const desiredChecksums = this.buildDesiredConfigChecksums(bundle.workflows);
+        const manifests = [
+            ...(bundle.customMigrationResources.items ?? []),
+            ...(bundle.concurrencyConfigMaps.items ?? []),
+        ];
+        return manifests.map((item: any) => {
+            const {status: _status, ...manifestWithoutStatus} = item;
+            void _status;
+            const name = String(item.metadata?.name ?? "");
+            const policyResource = resolvedByKey.get(`${item.kind}:${name}`);
+            const desiredConfigChecksum = desiredChecksums.get(`${item.kind}:${name}`);
+            return {
+                manifest: policyResource
+                    ? {...manifestWithoutStatus, spec: policyResource.parameters}
+                    : manifestWithoutStatus,
+                ...(policyResource ? {policyResource} : {}),
+                ...(desiredConfigChecksum ? {desiredConfigChecksum} : {}),
+            };
+        });
+    }
+
+    private buildDesiredConfigChecksums(workflows: WorkflowConfig): Map<string, string> {
+        const checksums = new Map<string, string>();
+        const add = (kind: string, name: string, checksum: unknown) => {
+            if (typeof checksum === "string" && checksum) {
+                checksums.set(`${kind}:${name}`, checksum);
+            }
+        };
+
+        for (const kafkaCluster of workflows.kafkaClusters ?? []) {
+            add("KafkaCluster", kafkaCluster.name, kafkaCluster.configChecksum);
+        }
+        for (const proxy of workflows.proxies ?? []) {
+            add("CapturedTraffic", `${proxy.name}-topic`, proxy.topicConfigChecksum);
+            add("CaptureProxy", proxy.name, proxy.configChecksum);
+        }
+        for (const loader of workflows.s3TrafficLoaders ?? []) {
+            add("CapturedTraffic", `${loader.name}-topic`, loader.checksumForReplayer);
+        }
+        for (const snapshot of workflows.snapshots ?? []) {
+            for (const item of snapshot.createSnapshotConfig) {
+                add(
+                    "DataSnapshot",
+                    crdName(snapshot.sourceConfig.label, item.label),
+                    item.configChecksum,
+                );
+            }
+        }
+        for (const migration of workflows.snapshotMigrations ?? []) {
+            add(
+                "SnapshotMigration",
+                [
+                    migration.sourceLabel,
+                    migration.targetConfig.label,
+                    migration.label,
+                    migration.migrationLabel,
+                ].join("-"),
+                migration.configChecksum,
+            );
+        }
+        for (const replay of workflows.trafficReplays ?? []) {
+            add("TrafficReplay", replay.name, replay.configChecksum);
+        }
+        return checksums;
+    }
+
     private generateHandleK8sResourcesScript(
         entries: { file: string; kind: string; name: string; category: string; hasStatus: boolean }[],
         allItems: any[]
@@ -185,6 +265,14 @@ export class MigrationInitializer {
         const lines: string[] = [
             '#!/bin/sh',
             'set -e',
+            '',
+            'run_kubectl() {',
+            '  if [ -n "${WORKFLOW_NAMESPACE:-}" ]; then',
+            '    kubectl --namespace "$WORKFLOW_NAMESPACE" "$@"',
+            '  else',
+            '    kubectl "$@"',
+            '  fi',
+            '}',
             '',
             'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
             'RESOURCES_DIR="$SCRIPT_DIR/resources"',
@@ -199,13 +287,13 @@ export class MigrationInitializer {
             const labelValue = firstGate?.metadata?.labels?.[labelKey];
             if (labelValue) {
                 lines.push(`# Clean up stale approval gates by label`);
-                lines.push(`kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP} -l '${labelKey}=${labelValue}' --ignore-not-found`);
+                lines.push(`run_kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP} -l '${labelKey}=${labelValue}' --ignore-not-found`);
                 lines.push('');
             }
             // Fallback: delete each known gate by name
             lines.push('# Fallback: delete known gates by name');
             for (const entry of gateEntries) {
-                lines.push(`kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP}/${entry.name} --ignore-not-found`);
+                lines.push(`run_kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP}/${entry.name} --ignore-not-found`);
             }
             lines.push('');
         }
@@ -225,7 +313,7 @@ export class MigrationInitializer {
             if (entry.category === 'approvalgate') {
                 lines.push(`# ApprovalGate: ${entry.name}`);
                 lines.push('(');
-                lines.push(`  kubectl create -f "$RESOURCES_DIR/${entry.file}"`);
+                lines.push(`  run_kubectl create -f "$RESOURCES_DIR/${entry.file}"`);
                 if (statusPatchCmd) lines.push(`  ${statusPatchCmd}`);
                 lines.push(`  echo "RESULT ApprovalGate ${entry.name} CREATED"`);
                 lines.push(') &');
@@ -235,7 +323,7 @@ export class MigrationInitializer {
                 lines.push(`# Root CR: ${entry.kind} ${entry.name}`);
                 lines.push('(');
                 lines.push(`  err_file="${errFile}"`);
-                lines.push(`  if kubectl create -f "$RESOURCES_DIR/${entry.file}" 2>"$err_file"; then`);
+                lines.push(`  if run_kubectl create -f "$RESOURCES_DIR/${entry.file}" 2>"$err_file"; then`);
                 if (statusPatchCmd) lines.push(`    ${statusPatchCmd}`);
                 lines.push(`    echo "RESULT ${entry.kind} ${entry.name} CREATED"`);
                 lines.push(`  elif grep -q 'AlreadyExists' "$err_file"; then`);
@@ -253,7 +341,7 @@ export class MigrationInitializer {
             } else if (entry.category === 'configmap') {
                 lines.push(`# ConfigMap: ${entry.name}`);
                 lines.push('(');
-                lines.push(`  kubectl apply -f "$RESOURCES_DIR/${entry.file}"`);
+                lines.push(`  run_kubectl apply -f "$RESOURCES_DIR/${entry.file}"`);
                 lines.push(`  echo "RESULT ${entry.kind} ${entry.name} APPLIED"`);
                 lines.push(') &');
                 lines.push('pids="$pids $!"');
@@ -277,7 +365,7 @@ export class MigrationInitializer {
         }
         const plural = `${pluralName}.${group}`;
         const patch = JSON.stringify({ status: item.status });
-        return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
+        return `run_kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
     }
 
     private generateConcurrencyConfigMaps(userConfig: any) {
@@ -309,6 +397,8 @@ export class MigrationInitializer {
     static readonly APPROVAL_GATE_LABEL_KEY = 'migrations.opensearch.org/workflow';
     static readonly GATE_LABEL_RESOURCE_KIND = 'migrations.opensearch.org/resource-kind';
     static readonly GATE_LABEL_RESOURCE_NAME = 'migrations.opensearch.org/resource-name';
+    static readonly GATE_LABEL_APPROVAL_CLASS = 'migrations.opensearch.org/approval-class';
+    static readonly GATE_LABEL_PREAPPROVAL_ENABLED = 'migrations.opensearch.org/preapproval-enabled';
     static readonly GATE_LABEL_SOURCE = 'migrations.opensearch.org/source';
     static readonly GATE_LABEL_TARGET = 'migrations.opensearch.org/target';
     static readonly GATE_LABEL_SNAPSHOT = 'migrations.opensearch.org/snapshot';
@@ -403,13 +493,27 @@ export class MigrationInitializer {
         };
     }
 
-    private makeApprovalGateResource(nameParts: string[], labels?: Record<string, string>) {
+    private makeApprovalGateResource(
+        nameParts: string[],
+        labels?: Record<string, string>,
+        preapprovalEnabled = false,
+    ) {
+        const name = nameParts.join('.').toLowerCase();
+        const approvalClass = name.endsWith('.vapretry')
+            ? 'recovery'
+            : 'checkpoint';
         return {
             apiVersion: MigrationInitializer.CRD_API_VERSION,
             kind: 'ApprovalGate',
             metadata: {
-                name: nameParts.join('.').toLowerCase(),
-                ...(labels && Object.keys(labels).length > 0 && { labels }),
+                name,
+                labels: {
+                    ...(labels ?? {}),
+                    [MigrationInitializer.GATE_LABEL_APPROVAL_CLASS]: approvalClass,
+                    [MigrationInitializer.GATE_LABEL_PREAPPROVAL_ENABLED]: String(
+                        approvalClass === 'checkpoint' && preapprovalEnabled
+                    ),
+                },
             },
             spec: {},
             status: { phase: 'Created' }
@@ -449,7 +553,8 @@ export class MigrationInitializer {
                 gateLabels({
                     [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'MigrationRun',
                     [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: migrationRun.name,
-                })
+                }),
+                true,
             ));
         }
 
@@ -571,7 +676,8 @@ export class MigrationInitializer {
                     [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CaptureProxy',
                     [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: proxy.name,
                     [MigrationInitializer.GATE_LABEL_SOURCE]: proxySource,
-                })
+                }),
+                !proxy.skipApproval,
             ));
             // Step approval gate: fires after reconcile, before actual proxy deployment
             items.push(this.makeApprovalGateResource(
@@ -692,11 +798,23 @@ export class MigrationInitializer {
             const resourcePath = this.makeCrdName(...approvalNameParts);
             // Step approval gates: ordered by workflow execution sequence (all inside migrateFromSnapshot)
             items.push(this.makeApprovalGateResource(
-                ['evaluatemetadata', resourcePath], migLabels));
+                ['evaluatemetadata', resourcePath],
+                migLabels,
+                Boolean(migration.metadataMigrationConfig)
+                    && !migration.metadataMigrationConfig?.skipEvaluateApproval,
+            ));
             items.push(this.makeApprovalGateResource(
-                ['migratemetadata', resourcePath], migLabels));
+                ['migratemetadata', resourcePath],
+                migLabels,
+                Boolean(migration.metadataMigrationConfig)
+                    && !migration.metadataMigrationConfig?.skipMigrateApproval,
+            ));
             items.push(this.makeApprovalGateResource(
-                ['documentbackfill', resourcePath], migLabels));
+                ['documentbackfill', resourcePath],
+                migLabels,
+                Boolean(migration.documentBackfillConfig)
+                    && !migration.documentBackfillConfig?.skipApproval,
+            ));
         }
 
         // TrafficReplay resources from trafficReplays
@@ -755,20 +873,32 @@ export class MigrationInitializer {
         if (gates.length === 0) return null;
 
         const plural = `approvalgates.${MigrationInitializer.CRD_GROUP}`;
-        const lines = ['#!/bin/sh', 'set -x', ''];
+        const lines = [
+            '#!/bin/sh',
+            'set -x',
+            '',
+            'run_kubectl() {',
+            '  if [ -n "${WORKFLOW_NAMESPACE:-}" ]; then',
+            '    kubectl --namespace "$WORKFLOW_NAMESPACE" "$@"',
+            '  else',
+            '    kubectl "$@"',
+            '  fi',
+            '}',
+            '',
+        ];
 
         // Label-based cleanup — deletes all gates matching the workflow label
         const firstLabel = gates[0].metadata.labels;
         if (firstLabel?.[MigrationInitializer.APPROVAL_GATE_LABEL_KEY]) {
             const selector = `${MigrationInitializer.APPROVAL_GATE_LABEL_KEY}=${firstLabel[MigrationInitializer.APPROVAL_GATE_LABEL_KEY]}`;
-            lines.push(`kubectl delete ${plural} -l '${selector}' --ignore-not-found`);
+            lines.push(`run_kubectl delete ${plural} -l '${selector}' --ignore-not-found`);
             lines.push('');
         }
 
         // Delete-by-name fallback for each known gate
         lines.push('# Fallback: delete by name in case labels were missing or changed');
         for (const gate of gates) {
-            lines.push(`kubectl delete ${plural}/${gate.metadata.name} --ignore-not-found`);
+            lines.push(`run_kubectl delete ${plural}/${gate.metadata.name} --ignore-not-found`);
         }
         lines.push('');
 
@@ -791,7 +921,7 @@ export class MigrationInitializer {
         const shellVar = (prefix: string, name: string) =>
             `${prefix}_${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
         const kubectlGetUid = (resource: string, name: string, varName: string) =>
-            `${varName}="$(kubectl get ${resource}/${name} -o jsonpath='{.metadata.uid}')"`;
+            `${varName}="$(run_kubectl get ${resource}/${name} -o jsonpath='{.metadata.uid}')"`;
 
         const uidLookups = [
             ...kafkaClusters.map(cluster =>
@@ -880,6 +1010,14 @@ export class MigrationInitializer {
         return [
             "#!/bin/sh",
             "set -e",
+            "",
+            "run_kubectl() {",
+            "  if [ -n \"${WORKFLOW_NAMESPACE:-}\" ]; then",
+            "    kubectl --namespace \"$WORKFLOW_NAMESPACE\" \"$@\"",
+            "  else",
+            "    kubectl \"$@\"",
+            "  fi",
+            "}",
             "",
             "CONFIG_PATH=\"${1:?Usage: $0 <workflowMigration.config.yaml>}\"",
             "",
