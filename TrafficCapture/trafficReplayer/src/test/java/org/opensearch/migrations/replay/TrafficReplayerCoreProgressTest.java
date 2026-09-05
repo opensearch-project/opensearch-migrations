@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 
 class TrafficReplayerCoreProgressTest {
     @Test
-    void targetCompletionReleasesReadGateWithoutWaitingForSourceDisposition() {
+    void targetCompletionDoesNotReleaseReadGateBeforeTransactionDisposition() {
         var readGate = new ReplayReadGate(Duration.ofSeconds(30), new NoopFlowController());
         var progress = new ReplayProgressController(Runnable::run, readGate);
         var partition = new SourcePartitionKey("topic", 0, 1);
@@ -32,17 +32,43 @@ class TrafficReplayerCoreProgressTest {
             Instant.ofEpochSecond(10)
         ).toCompletableFuture().join();
         var targetCompletion = new CompletableFuture<Void>();
-        var sourceDisposition = new CompletableFuture<Void>();
+        var transactionCompletion = new CompletableFuture<Void>();
 
-        TrafficReplayerCore.settleProgressWhenTargetCompletes(targetCompletion, progressToken);
+        TrafficReplayerCore.settleProgressWhenTransactionCompletes(transactionCompletion, progressToken);
         targetCompletion.complete(null);
 
+        Assertions.assertTrue(progress.isWorkOutstanding());
+        Assertions.assertFalse(progressToken.settled().toCompletableFuture().isDone());
+
+        transactionCompletion.complete(null);
         progressToken.settled().toCompletableFuture().join();
         Assertions.assertFalse(progress.isWorkOutstanding());
-        Assertions.assertFalse(sourceDisposition.isDone());
 
         progress.advanceIdlePartitions(Instant.ofEpochSecond(100));
         Assertions.assertEquals(Instant.ofEpochSecond(130), readGate.frontier());
+    }
+
+    @Test
+    void failedTransactionStillReleasesReadGate() {
+        var readGate = new ReplayReadGate(Duration.ofSeconds(30), new NoopFlowController());
+        var progress = new ReplayProgressController(Runnable::run, readGate);
+        var partition = new SourcePartitionKey("topic", 0, 1);
+        progress.onAssigned(List.of(partition));
+        var progressToken = progress.admit(
+            partition,
+            new ReplayRequestId(
+                new ConnectionSessionKey(new SourceConnectionKey("node", "connection"), 0, 1),
+                0
+            ),
+            Instant.ofEpochSecond(10)
+        ).toCompletableFuture().join();
+        var transactionCompletion = new CompletableFuture<Void>();
+
+        TrafficReplayerCore.settleProgressWhenTransactionCompletes(transactionCompletion, progressToken);
+        transactionCompletion.completeExceptionally(new IllegalStateException("disposition failed"));
+
+        progressToken.settled().toCompletableFuture().join();
+        Assertions.assertFalse(progress.isWorkOutstanding());
     }
 
     private static final class NoopFlowController implements BufferedFlowController {

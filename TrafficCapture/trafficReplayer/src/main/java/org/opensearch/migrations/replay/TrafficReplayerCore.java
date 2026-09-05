@@ -113,11 +113,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         });
     }
 
-    static void settleProgressWhenTargetCompletes(
-        @NonNull CompletionStage<?> targetCompletion,
+    static void settleProgressWhenTransactionCompletes(
+        @NonNull CompletionStage<?> transactionCompletion,
         @NonNull WorkToken progressToken
     ) {
-        targetCompletion.whenComplete((ignored, failure) -> progressToken.close());
+        transactionCompletion.whenComplete((ignored, failure) -> progressToken.close());
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -363,6 +363,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 List.of(ctx),
                 topLevelContext.getReplayTransactionMetrics()
             );
+            settleProgressWhenTransactionCompletes(transaction.completion(), progressToken);
             runtime.register(transaction).whenComplete((ignored, failure) -> {
                 if (failure != null) {
                     transaction.fail(unwrap(failure));
@@ -375,7 +376,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture,
                 quiescentDurationForRequest
             );
-            settleProgressWhenTargetCompletes(targetFuture.future, progressToken);
             settleTransactionTarget(
                 transaction,
                 targetFuture,
