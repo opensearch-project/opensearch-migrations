@@ -227,6 +227,7 @@ public final class ReplayOutcomes {
         permits SessionOutcome.Closed, SessionOutcome.Aborted, SessionOutcome.Failed {
         enum AbortReason {
             SOURCE_REASSIGNMENT,
+            SHUTDOWN,
             DEPENDENCY_CANCELLED,
             SESSION_TERMINATED
         }

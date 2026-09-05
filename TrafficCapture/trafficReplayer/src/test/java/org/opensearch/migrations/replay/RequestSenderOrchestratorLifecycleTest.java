@@ -816,6 +816,53 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     }
 
     @Test
+    void shutdownCancelsQueuedWorkAndWaitsForSourceAcknowledgement() throws Exception {
+        var sourceAcknowledgement = new CompletableFuture<Void>();
+        var acknowledgementStarted = new CompletableFuture<ConnectionSessionKey>();
+        sessionAcknowledger.set(sessionKey -> {
+            acknowledgementStarted.complete(sessionKey);
+            return sourceAcknowledgement;
+        });
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("shutdown", 0);
+        var preparation = new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
+        var request = schedule(context, permits, preparation);
+        var cause = new CancellationException("shutdown");
+
+        var firstShutdown = orchestrator.shutdownActors(cause).toCompletableFuture();
+        var repeatedShutdown = orchestrator.shutdownActors(
+            new CancellationException("ignored repeated shutdown")
+        ).toCompletableFuture();
+
+        Assertions.assertEquals(
+            "shutdown",
+            acknowledgementStarted.get(5, TimeUnit.SECONDS).connection().connectionId()
+        );
+        await(preparation::isCancelled);
+        Assertions.assertTrue(request.future.isCompletedExceptionally());
+        Assertions.assertFalse(firstShutdown.isDone());
+        Assertions.assertFalse(repeatedShutdown.isDone());
+        Assertions.assertEquals(0, targetExchanges.get());
+
+        var lateContext = rootContext.getTestConnectionRequestContext("late-after-shutdown", 0);
+        var rejected = Assertions.assertThrows(
+            CancellationException.class,
+            () -> orchestrator.transactionRuntime(
+                lateContext.getReplayerRequestKey(),
+                lateContext.getChannelKeyContext()
+            )
+        );
+        Assertions.assertSame(cause, rejected);
+
+        sourceAcknowledgement.complete(null);
+        firstShutdown.get(5, TimeUnit.SECONDS);
+        repeatedShutdown.get(5, TimeUnit.SECONDS);
+
+        var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        probe.close();
+    }
+
+    @Test
     void failedSourceAcknowledgementFailsTheSessionGate() {
         sessionAcknowledger.set(sessionKey ->
             CompletableFuture.failedFuture(new IllegalStateException("source acknowledgement failed"))

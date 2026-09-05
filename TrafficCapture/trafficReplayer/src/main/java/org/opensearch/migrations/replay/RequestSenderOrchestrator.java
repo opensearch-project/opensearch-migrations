@@ -84,8 +84,15 @@ public class RequestSenderOrchestrator {
     private final TargetExchangeState.Metrics targetExchangeMetrics;
     private final ResourceOwnership.Metrics resourceOwnershipMetrics;
     private final ConcurrentHashMap<ConnectionSessionKey, ActorRuntime> actorRuntimes = new ConcurrentHashMap<>();
+    private final Object actorLifecycleLock = new Object();
     private final AtomicReference<ReplayTransaction.RunwayLossReason> globalRunwayLossReason =
         new AtomicReference<>();
+    private ActorShutdown actorShutdown;
+
+    private record ActorShutdown(
+        CancellationException cause,
+        CompletableFuture<Void> completion
+    ) {}
 
     /**
      * Notice that the two arguments need to be in agreement with each other.  The clientConnectionPool will need to
@@ -1377,6 +1384,39 @@ public class RequestSenderOrchestrator {
         return CompletableFuture.allOf(acknowledgements);
     }
 
+    public CompletionStage<Void> shutdownActors(@NonNull CancellationException cause) {
+        final List<ActorRuntime> runtimes;
+        final ActorShutdown shutdown;
+        synchronized (actorLifecycleLock) {
+            if (actorShutdown != null) {
+                return actorShutdown.completion.minimalCompletionStage();
+            }
+            globalRunwayLossReason.compareAndSet(null, ReplayTransaction.RunwayLossReason.SHUTDOWN);
+            shutdown = new ActorShutdown(cause, new CompletableFuture<>());
+            actorShutdown = shutdown;
+            runtimes = List.copyOf(actorRuntimes.values());
+        }
+
+        var runwayReason = globalRunwayLossReason.get();
+        var terminations = runtimes.stream()
+            .map(runtime -> {
+                runtime.transactions.observeRunwayLost(runwayReason);
+                runtime.actor.abort(AbortReason.SHUTDOWN, cause);
+                return runtime.termination()
+                    .thenCompose(RequestSenderOrchestrator::mapAbortOutcome)
+                    .toCompletableFuture();
+            })
+            .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(terminations).whenComplete((ignored, failure) -> {
+            if (failure == null) {
+                shutdown.completion.complete(null);
+            } else {
+                shutdown.completion.completeExceptionally(unwrap(failure));
+            }
+        });
+        return shutdown.completion.minimalCompletionStage();
+    }
+
     public TrackedFuture<String, SessionOutcome> scheduleActorClose(
         @NonNull IReplayContexts.IChannelKeyContext context,
         int sessionNumber,
@@ -1434,12 +1474,17 @@ public class RequestSenderOrchestrator {
         ConnectionSessionKey key,
         IReplayContexts.IChannelKeyContext channelContext
     ) {
-        var runtime = actorRuntimes.computeIfAbsent(key, ignored -> new ActorRuntime(key, channelContext));
-        var runwayLossReason = globalRunwayLossReason.get();
-        if (runwayLossReason != null) {
-            runtime.transactions.observeRunwayLost(runwayLossReason);
+        synchronized (actorLifecycleLock) {
+            if (actorShutdown != null) {
+                throw actorShutdown.cause;
+            }
+            var runtime = actorRuntimes.computeIfAbsent(key, ignored -> new ActorRuntime(key, channelContext));
+            var runwayLossReason = globalRunwayLossReason.get();
+            if (runwayLossReason != null) {
+                runtime.transactions.observeRunwayLost(runwayLossReason);
+            }
+            return runtime;
         }
-        return runtime;
     }
 
     private static ReplayRequestId toReplayRequestId(UniqueReplayerRequestKey requestKey) {

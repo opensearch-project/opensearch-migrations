@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -190,6 +191,11 @@ public class ReplayEngine {
 
     public CompletionStage<Void> observeAllRunwaysLost(ReplayTransaction.RunwayLossReason reason) {
         return networkSendOrchestrator.observeAllRunwaysLost(reason);
+    }
+
+    public CompletionStage<Void> shutdownConnections(CancellationException cause) {
+        updateContentTimeControllerScheduledFuture.cancel(false);
+        return networkSendOrchestrator.shutdownActors(cause);
     }
 
     /**
