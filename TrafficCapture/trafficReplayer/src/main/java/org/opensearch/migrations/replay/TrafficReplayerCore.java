@@ -329,7 +329,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 runtime.requestId(),
                 runtime.mailbox(),
                 (requestId, sourceOutcome, targetOutcome) ->
-                    writeTransactionEvidence(evidenceState, targetOutcome),
+                    writeTransactionEvidence(evidenceState),
                 dispositionPolicy,
                 dispositionLedger,
                 List.of(),
@@ -453,10 +453,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .thenApply(ignored -> List.copyOf(handlesById.keySet()));
         }
 
-        private CompletionStage<EvidenceOutcome> writeTransactionEvidence(
-            TransactionEvidenceState state,
-            TargetOutcome<TransformedTargetRequestAndResponseList> targetOutcome
-        ) {
+        private CompletionStage<EvidenceOutcome> writeTransactionEvidence(TransactionEvidenceState state) {
             if (state.source == null) {
                 return CompletableFuture.completedFuture(
                     new EvidenceOutcome.Failed(
