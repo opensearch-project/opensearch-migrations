@@ -66,10 +66,7 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
             if (admitted.isEmpty()) {
                 return later(settledWatermark, idleWatermark);
             }
-            if (settledWatermark.equals(Instant.MIN)) {
-                return admitted.peekFirst().sourceTime;
-            }
-            return settledWatermark;
+            return admitted.peekFirst().sourceTime;
         }
     }
 
