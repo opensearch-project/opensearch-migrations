@@ -18,6 +18,8 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class EsMetadataMigrationPipeline {
 
+    private static final int INDEX_MIGRATION_CONCURRENCY = 5;
+
     private final GlobalMetadataSource source;
     private final GlobalMetadataSink sink;
 
@@ -63,7 +65,7 @@ public class EsMetadataMigrationPipeline {
         return Mono.from(sink.writeGlobalMetadata(globalMetadata))
             .thenMany(
                 Flux.fromIterable(indices)
-                    .concatMap(indexName -> migrateIndexMetadata(indexName).thenReturn(indexName))
+                    .flatMap(indexName -> migrateIndexMetadata(indexName).thenReturn(indexName), INDEX_MIGRATION_CONCURRENCY)
             )
             .doOnComplete(() -> log.info("Full metadata migration complete"));
     }
