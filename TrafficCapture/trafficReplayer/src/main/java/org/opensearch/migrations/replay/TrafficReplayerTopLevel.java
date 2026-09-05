@@ -456,13 +456,25 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         TrackedFuture<String, TransformedTargetRequestAndResponseList>[] allCompletableFuturesArray = Arrays.stream(
             allRemainingWorkArray
         ).map(Map.Entry::getValue).toArray(TrackedFuture[]::new);
-        var allWorkFuture = TextTrackedFuture.allOf(
+        var requestWorkFuture = TextTrackedFuture.allOf(
             allCompletableFuturesArray,
+            () -> "TrafficReplayer.AllRequestsFinished"
+        );
+        var replayEngine = currentReplayEngine.get();
+        var replayQuiescenceFuture = replayEngine == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : replayEngine.whenQuiescent().toCompletableFuture();
+        var allWorkFuture = new TextTrackedFuture<>(
+            CompletableFuture.allOf(requestWorkFuture.future, replayQuiescenceFuture),
             () -> "TrafficReplayer.AllWorkFinished"
         );
         try {
             if (allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, allWorkFuture)) {
-                allWorkFuture.get(timeout);
+                if (intakeMailbox != null && intakeMailbox.isOwnerThread()) {
+                    intakeMailbox.await(allWorkFuture.future, timeout);
+                } else {
+                    allWorkFuture.get(timeout);
+                }
             } else {
                 handleAlreadySetFinishedSignal();
             }

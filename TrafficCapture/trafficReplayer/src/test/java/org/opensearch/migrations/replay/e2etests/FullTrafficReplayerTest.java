@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -57,6 +56,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.slf4j.event.Level;
 
 @Slf4j
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
@@ -110,20 +110,9 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             ReplayEngine replayEngine,
             CapturedTrafficToHttpTransactionAccumulator accumulator
         ) {
-            var startTime = System.nanoTime();
-            for (Duration waitTime = Duration.ofMillis(10); replayEngine.isWorkOutstanding(); waitTime = waitTime
-                .multipliedBy(2)) {
-                var totalDurationSpent = Duration.ofNanos(System.nanoTime() - startTime);
-                if (maxWaitTime.minus(totalDurationSpent).isNegative()) {
-                    throw new TimeoutException(
-                        "Spent too long "
-                            + totalDurationSpent
-                            + " waiting for the ReplayEngine ("
-                            + replayEngine
-                            + ") to complete its outstanding work."
-                    );
-                }
-                Thread.sleep(waitTime.toMillis());
+            waitForRemainingWork(Level.INFO, maxWaitTime);
+            if (replayEngine.isWorkOutstanding()) {
+                throw new IllegalStateException("ReplayEngine reported quiescence with work still outstanding");
             }
             super.wrapUpWorkAndEmitSummary(replayEngine, accumulator);
         }

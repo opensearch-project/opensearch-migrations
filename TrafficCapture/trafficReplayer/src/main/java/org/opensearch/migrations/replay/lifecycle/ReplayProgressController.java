@@ -77,6 +77,8 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
     private final ReplayReadGate readGate;
     private final Map<SourcePartitionKey, PartitionProgress> partitions = new LinkedHashMap<>();
     private final AtomicInteger outstandingSnapshot = new AtomicInteger();
+    private final AtomicReference<CompletionGate<Void>> quiescenceGate =
+        new AtomicReference<>(completedGate());
     private final AtomicReference<Snapshot> snapshot =
         new AtomicReference<>(new Snapshot(0, 0, Instant.MIN));
     private Instant publishedWatermark = Instant.MIN;
@@ -138,6 +140,9 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
             progress.admissionWatermark = later(progress.admissionWatermark, sourceTime);
             var entry = new WorkEntry(workId, progress.admissionWatermark);
             progress.admitted.addLast(entry);
+            if (outstandingSnapshot.get() == 0) {
+                quiescenceGate.set(new CompletionGate<>());
+            }
             outstandingSnapshot.incrementAndGet();
             completion.complete(new OwnedWorkToken(partition, entry));
             publish();
@@ -163,6 +168,14 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         return outstandingSnapshot.get() > 0;
     }
 
+    /**
+     * Completes the next time all admitted work has settled. Work admitted before that point joins
+     * the same interval; work admitted after quiescence starts a new interval.
+     */
+    public CompletionStage<Void> whenQuiescent() {
+        return quiescenceGate.get().stage();
+    }
+
     public Snapshot currentSnapshot() {
         return snapshot.get();
     }
@@ -182,6 +195,12 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
 
     private static Instant later(Instant left, Instant right) {
         return left.isAfter(right) ? left : right;
+    }
+
+    private static CompletionGate<Void> completedGate() {
+        var gate = new CompletionGate<Void>();
+        gate.complete(null);
+        return gate;
     }
 
     private final class OwnedWorkToken implements WorkToken {
@@ -226,7 +245,9 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
             }
             entry.settled = true;
             entry.completion.complete(null);
-            outstandingSnapshot.decrementAndGet();
+            if (outstandingSnapshot.decrementAndGet() == 0) {
+                quiescenceGate.get().complete(null);
+            }
             while (!progress.admitted.isEmpty() && progress.admitted.peekFirst().settled) {
                 progress.settledWatermark = progress.admitted.removeFirst().sourceTime;
             }

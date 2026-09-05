@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -119,6 +120,10 @@ public class ReplayEngine {
 
     public boolean isWorkOutstanding() {
         return progressController.isWorkOutstanding();
+    }
+
+    public CompletionStage<Void> whenQuiescent() {
+        return progressController.whenQuiescent();
     }
 
     public WorkToken admitWork(

@@ -1,11 +1,14 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Serializes replay-intake state changes onto the thread that constructs this mailbox.
@@ -52,6 +55,36 @@ public final class ReplayIntakeMailbox implements Executor {
         }
         while (!completion.isDone()) {
             dispatchQueued(commands.take());
+            throwQueuedFailure();
+        }
+        runUntilIdle();
+        return completion.get();
+    }
+
+    public <T> T await(
+        CompletionStage<T> stage,
+        Duration timeout
+    ) throws InterruptedException, ExecutionException, TimeoutException {
+        assertOwner();
+        Objects.requireNonNull(timeout);
+        var completion = Objects.requireNonNull(stage).toCompletableFuture();
+        if (!completion.isDone()) {
+            stage.whenComplete((value, failure) -> commands.add(WAKE_UP));
+        }
+        var deadline = System.nanoTime() + timeout.toNanos();
+        while (!completion.isDone()) {
+            var remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0) {
+                throw new TimeoutException("timed out while servicing the replay intake mailbox");
+            }
+            var command = commands.poll(remainingNanos, TimeUnit.NANOSECONDS);
+            if (command == null) {
+                if (!completion.isDone()) {
+                    throw new TimeoutException("timed out while servicing the replay intake mailbox");
+                }
+                break;
+            }
+            dispatchQueued(command);
             throwQueuedFailure();
         }
         runUntilIdle();
