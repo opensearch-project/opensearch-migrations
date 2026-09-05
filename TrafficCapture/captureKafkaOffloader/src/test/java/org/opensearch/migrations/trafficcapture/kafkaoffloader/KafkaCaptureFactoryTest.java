@@ -9,11 +9,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
@@ -29,6 +32,8 @@ import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.Node;
+import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.record.AbstractRecords;
 import org.apache.kafka.common.record.CompressionType;
@@ -42,6 +47,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Slf4j
@@ -454,6 +460,232 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertTrue(exception.getMessage().contains("partition locality"));
 
         producer.close();
+    }
+
+    @Test
+    public void routingDiscoveryDoesNotBlockProxyStartupAndPreservesPendingTraffic() throws Exception {
+        var metadataEntered = new CountDownLatch(1);
+        var releaseMetadata = new CountDownLatch(1);
+        var sentRecord = new CompletableFuture<ProducerRecord<String, byte[]>>();
+        when(mockProducer.partitionsFor(topic)).thenAnswer(invocation -> {
+            metadataEntered.countDown();
+            if (!releaseMetadata.await(5, TimeUnit.SECONDS)) {
+                throw new TimeoutException("test did not release Kafka metadata");
+            }
+            return List.of(new PartitionInfo(topic, 0, null, new Node[0], new Node[0]));
+        });
+        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
+            ProducerRecord<String, byte[]> record = invocation.getArgument(0);
+            Callback callback = invocation.getArgument(1);
+            var metadata = generateRecordMetadata(record.topic(), record.partition());
+            sentRecord.complete(record);
+            callback.onCompletion(metadata, null);
+            return CompletableFuture.completedFuture(metadata);
+        });
+
+        var constructor = new FutureTask<>(() -> new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            topic,
+            1024 * 1024,
+            null,
+            Duration.ofDays(1)
+        ));
+        new Thread(constructor).start();
+        var factory = constructor.get(1, TimeUnit.SECONDS);
+        Assertions.assertTrue(metadataEntered.await(1, TimeUnit.SECONDS));
+
+        var offloader = factory.createOffloader(createCtx());
+        var payload = Unpooled.wrappedBuffer("pending".getBytes(StandardCharsets.UTF_8));
+        offloader.addReadEvent(Instant.EPOCH, payload);
+        var published = offloader.flushCommitAndResetStream(false);
+        payload.release();
+        Assertions.assertFalse(published.isDone());
+
+        releaseMetadata.countDown();
+        published.get(5, TimeUnit.SECONDS);
+        var record = sentRecord.get(5, TimeUnit.SECONDS);
+        var stream = TrafficStream.parseFrom(record.value());
+        Assertions.assertEquals(record.partition(), stream.getPartition());
+        Assertions.assertEquals(
+            factory.getPublisher().getRoutingPlan().getRoutingPlanId(),
+            stream.getRoutingPlanId()
+        );
+        Assertions.assertEquals(1, factory.getPublisher().getLivenessRegistry().size());
+
+        offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
+        Assertions.assertEquals(0, factory.getPublisher().getLivenessRegistry().size());
+        factory.close();
+    }
+
+    @Test
+    public void pendingRoutingBufferExhaustionFailsCaptureClosed() throws Exception {
+        var releaseMetadata = new CountDownLatch(1);
+        when(mockProducer.partitionsFor(topic)).thenAnswer(invocation -> {
+            releaseMetadata.await(5, TimeUnit.SECONDS);
+            return List.of(new PartitionInfo(topic, 0, null, new Node[0], new Node[0]));
+        });
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            topic,
+            1024 * 1024,
+            null,
+            Duration.ofDays(1),
+            Duration.ofMillis(1),
+            1,
+            1
+        );
+
+        var offloader = factory.createOffloader(createCtx());
+        var payload = Unpooled.wrappedBuffer("too-large".getBytes(StandardCharsets.UTF_8));
+        offloader.addReadEvent(Instant.EPOCH, payload);
+        var failure = Assertions.assertThrows(
+            ExecutionException.class,
+            () -> offloader.flushCommitAndResetStream(false).get(1, TimeUnit.SECONDS)
+        );
+        payload.release();
+        Assertions.assertTrue(failure.getCause().getMessage().contains("buffer is full"));
+        Assertions.assertTrue(factory.publisherReady().isCompletedExceptionally());
+
+        releaseMetadata.countDown();
+        factory.close();
+    }
+
+    @Test
+    public void pendingRoutingBudgetStopsApplyingOnceRoutingIsReady() throws Exception {
+        var releaseMetadata = new CountDownLatch(1);
+        var acknowledgements = new LinkedBlockingQueue<Runnable>();
+        when(mockProducer.partitionsFor(topic)).thenAnswer(invocation -> {
+            releaseMetadata.await(5, TimeUnit.SECONDS);
+            return List.of(new PartitionInfo(topic, 0, null, new Node[0], new Node[0]));
+        });
+        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
+            ProducerRecord<String, byte[]> record = invocation.getArgument(0);
+            Callback callback = invocation.getArgument(1);
+            var metadata = generateRecordMetadata(record.topic(), record.partition());
+            acknowledgements.add(() -> callback.onCompletion(metadata, null));
+            return CompletableFuture.completedFuture(metadata);
+        });
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            topic,
+            1024 * 1024,
+            null,
+            Duration.ofDays(1),
+            Duration.ofMillis(1),
+            KafkaCaptureFactory.DEFAULT_PENDING_CAPTURE_BYTES,
+            1
+        );
+
+        var offloader = factory.createOffloader(createCtx());
+        var firstPayload = Unpooled.wrappedBuffer("first".getBytes(StandardCharsets.UTF_8));
+        offloader.addReadEvent(Instant.EPOCH, firstPayload);
+        var first = offloader.flushCommitAndResetStream(false);
+        firstPayload.release();
+        releaseMetadata.countDown();
+        factory.publisherReady().get(5, TimeUnit.SECONDS);
+        var acknowledgeFirst = acknowledgements.poll(5, TimeUnit.SECONDS);
+        Assertions.assertNotNull(
+            acknowledgeFirst,
+            () -> "First deferred record was not submitted; done="
+                + first.isDone()
+                + ", failed="
+                + first.isCompletedExceptionally()
+        );
+
+        var secondPayload = Unpooled.wrappedBuffer("second".getBytes(StandardCharsets.UTF_8));
+        offloader.addReadEvent(Instant.EPOCH.plusSeconds(1), secondPayload);
+        var second = offloader.flushCommitAndResetStream(false);
+        secondPayload.release();
+        Assertions.assertFalse(second.isCompletedExceptionally());
+        acknowledgeFirst.run();
+        var acknowledgeSecond = acknowledgements.poll(5, TimeUnit.SECONDS);
+        Assertions.assertNotNull(acknowledgeSecond);
+        acknowledgeSecond.run();
+        CompletableFuture.allOf(first, second).get(5, TimeUnit.SECONDS);
+
+        var finished = offloader.flushCommitAndResetStream(true);
+        var acknowledgeFinal = acknowledgements.poll(5, TimeUnit.SECONDS);
+        Assertions.assertNotNull(acknowledgeFinal);
+        acknowledgeFinal.run();
+        finished.get(5, TimeUnit.SECONDS);
+        factory.close();
+    }
+
+    @Test
+    public void closeBeforeRoutingAbortsTheProducerAndFailsPendingCapture() throws Exception {
+        var metadataEntered = new CountDownLatch(1);
+        var releaseMetadata = new CountDownLatch(1);
+        when(mockProducer.partitionsFor(topic)).thenAnswer(invocation -> {
+            metadataEntered.countDown();
+            releaseMetadata.await(5, TimeUnit.SECONDS);
+            return List.of(new PartitionInfo(topic, 0, null, new Node[0], new Node[0]));
+        });
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            topic,
+            1024 * 1024,
+            null,
+            Duration.ofDays(1)
+        );
+        Assertions.assertTrue(metadataEntered.await(1, TimeUnit.SECONDS));
+
+        var offloader = factory.createOffloader(createCtx());
+        var payload = Unpooled.wrappedBuffer("pending".getBytes(StandardCharsets.UTF_8));
+        offloader.addReadEvent(Instant.EPOCH, payload);
+        var pending = offloader.flushCommitAndResetStream(false);
+        payload.release();
+
+        factory.close();
+        Assertions.assertThrows(
+            ExecutionException.class,
+            () -> pending.get(1, TimeUnit.SECONDS)
+        );
+        verify(mockProducer).close(Duration.ZERO);
+        releaseMetadata.countDown();
+    }
+
+    @Test
+    public void routingDiscoveryRetriesTransientMetadataFailures() throws Exception {
+        var discoveryAttempts = new AtomicInteger();
+        when(mockProducer.partitionsFor(topic)).thenAnswer(invocation -> {
+            if (discoveryAttempts.getAndIncrement() == 0) {
+                throw new org.apache.kafka.common.errors.TimeoutException("metadata unavailable");
+            }
+            return List.of(new PartitionInfo(topic, 0, null, new Node[0], new Node[0]));
+        });
+        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
+            ProducerRecord<String, byte[]> record = invocation.getArgument(0);
+            Callback callback = invocation.getArgument(1);
+            var metadata = generateRecordMetadata(record.topic(), record.partition());
+            callback.onCompletion(metadata, null);
+            return CompletableFuture.completedFuture(metadata);
+        });
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            topic,
+            1024 * 1024,
+            null,
+            Duration.ofDays(1),
+            Duration.ofMillis(1),
+            KafkaCaptureFactory.DEFAULT_PENDING_CAPTURE_BYTES,
+            KafkaCaptureFactory.DEFAULT_PENDING_CAPTURE_RECORDS
+        );
+
+        var offloader = factory.createOffloader(createCtx());
+        offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
+
+        Assertions.assertEquals(2, discoveryAttempts.get());
+        factory.close();
     }
 
     private KafkaCaptureFactory createFactory(Producer<String, byte[]> producer, int messageSize) {

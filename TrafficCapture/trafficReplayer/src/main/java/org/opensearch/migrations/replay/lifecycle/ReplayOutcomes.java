@@ -115,6 +115,7 @@ public final class ReplayOutcomes {
         permits SourceOutcome.Complete,
             SourceOutcome.ConfirmedDead,
             SourceOutcome.CapturedClose,
+            SourceOutcome.LegacyExpired,
             SourceOutcome.Inconclusive,
             SourceOutcome.Interrupted,
             SourceOutcome.Shutdown {
@@ -127,6 +128,8 @@ public final class ReplayOutcomes {
             R onConfirmedDead(ConfirmedDead outcome);
 
             R onCapturedClose(CapturedClose outcome);
+
+            R onLegacyExpired(LegacyExpired outcome);
 
             R onInconclusive(Inconclusive outcome);
 
@@ -153,6 +156,13 @@ public final class ReplayOutcomes {
             @Override
             public <R> R visit(Visitor<R> visitor) {
                 return visitor.onCapturedClose(this);
+            }
+        }
+
+        record LegacyExpired() implements SourceOutcome {
+            @Override
+            public <R> R visit(Visitor<R> visitor) {
+                return visitor.onLegacyExpired(this);
             }
         }
 

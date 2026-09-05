@@ -346,6 +346,10 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         }
     }
 
+    void failClosed(Throwable throwable) {
+        failPublisher(Objects.requireNonNull(throwable));
+    }
+
     private static RecordHeaders recordHeaders(String recordType) {
         return new RecordHeaders(List.of(new RecordHeader(
             RECORD_TYPE_HEADER,

@@ -851,6 +851,13 @@ The last row is a hard rule with a specific reason: if a wall-clock expiry mecha
 the scanner, the two resolve in favor of whichever fires first — and the impatient one always does.
 That would defeat the scanner entirely while leaving it in the codebase looking authoritative.
 
+That rule governs Kafka and any other source with durable redelivery or offset obligations. Finite
+legacy sources such as an in-memory array or an input stream have no Kafka commit authority to
+advance. They may continue to use the configured inactivity timeout to end local reconstruction and
+release their records, preserving their existing session-splitting behavior. The lifecycle records
+that result as `LegacyExpired`, not `Complete` or `ConfirmedDead`: it is an explicit compatibility
+outcome, not structural proof, and it must never be constructed for a structurally expiring source.
+
 ### 10.6 Epsilon lookahead
 
 Lookahead becomes a smoothing margin rather than the expiry mechanism. The intended default is
@@ -968,13 +975,25 @@ timestamps because elapsed time is irrelevant to the proof.
 | Snapshot batches are complete and size-bounded before submission | A truncated declaration must never look like an empty one |
 | Liveness records do not create replay accumulations or long-lived record obligations | When encountered by the replay cursor they are immediately marked settled, subject to the partition's ordinary contiguous commit low-watermark; scan-cursor decoding remains read-only |
 
-At startup the publisher discovers the topic partition count `M`. The default shard width is the
-full set, `K = M`, preserving the broadest distribution and avoiding a hidden fleet-sizing guess. An
-optional command-line setting may reduce `K`; validation requires `1 <= K <= M`. The resulting
-partition set and hash algorithm are frozen in `PartitionRoutingPlan` for the lifetime of the
-process. A later topic expansion does not move an existing process's connections; new processes may
-use the new count under new `nodeId`s. Topic recreation or loss of a selected partition fails the
-publisher rather than silently recomputing the plan.
+Kafka metadata discovery runs on a dedicated initialization lane; it is not a prerequisite for
+binding the frontside listener. Connections accepted before discovery completes serialize provisional
+chunks into a bounded in-memory queue. They are entered in the exact liveness registry before the
+first snapshot can run, then each chunk is stamped with the resolved partition and `routingPlanId`
+before entering the ordinary ordered publisher lane. No provisional or unstamped record is submitted
+to Kafka. The initial queue is bounded by both bytes and record count; exhaustion fails capture
+closed, prevents authoritative omission snapshots, and remains visible through failed capture
+futures and diagnostics without blocking request forwarding. The first implementation caps this
+queue at 64 MiB and 4,096 closed chunks; each open connection may additionally own its ordinary
+in-progress serialization buffer.
+
+The initialization lane retries transient metadata failures. Once it discovers the topic partition
+count `M`, the default shard width is the full set, `K = M`, preserving the broadest distribution and
+avoiding a hidden fleet-sizing guess. An optional command-line setting may reduce `K`; validation
+requires `1 <= K <= M`. The resulting partition set and hash algorithm are frozen in
+`PartitionRoutingPlan` for the lifetime of the process. A later topic expansion does not move an
+existing process's connections; new processes may use the new count under new `nodeId`s. Topic
+recreation or loss of a selected partition fails the publisher rather than silently recomputing the
+plan.
 
 **Why `nodeId` must stay per-process.** A stable per-host id looks strictly better — a restarted proxy
 could then prove its predecessor's connections dead. It is unsafe. A proxy that is merely *stalled*
@@ -1246,6 +1265,7 @@ sealed interface SourceOutcome {
     record Complete(...) implements SourceOutcome {}
     record ConfirmedDead(ScanEvidence evidence) implements SourceOutcome {}
     record CapturedClose(...) implements SourceOutcome {}
+    record LegacyExpired(...) implements SourceOutcome {}
     record Interrupted(...) implements SourceOutcome {}
     record Shutdown(...) implements SourceOutcome {}
 }
@@ -1279,6 +1299,10 @@ commit.
   commit-eligible, so a timestamp sweep and an offset-ordered proxy declaration are indistinguishable
   at the commit site. `ConfirmedDead(proof)` is a different value that cannot be constructed without
   evidence, which is what any scanner-delivered expiry requires before it can exist.
+* **Legacy finite sources still need an honest timeout value.** They have no durable offset to retain,
+  but calling a timed-out reconstruction `Complete` would make the model lie. `LegacyExpired` preserves
+  their existing local release behavior while making the compatibility boundary exhaustive and
+  preventing that outcome from authorizing a Kafka commit.
 * **Shutdown has no value of its own.** It currently arrives as reader-interruption, which happens to
   suppress commits and therefore happens to be safe — a correct outcome reached by coincidence of
   another cause's policy rather than by stating it.
@@ -1716,9 +1740,11 @@ without another actor transition.
 
 ### 19.7 Liveness defaults to the full partition set
 
-At startup the capture publisher discovers `M`, the traffic topic's partition count. With no option,
-`K = M`: every node uses the full partition set. Operators may reduce the width with the startup-only
-`--traffic-partition-shard-width` option; validation requires `1 <= K <= M`.
+After the frontside listener starts, the capture initialization lane discovers `M`, the traffic
+topic's partition count. With no option, `K = M`: every node uses the full partition set. Operators
+may reduce the width with the startup-only `--traffic-partition-shard-width` option; validation
+requires `1 <= K <= M`. Traffic accepted while discovery retries remains in the bounded provisional
+queue described in §10.8 and is never submitted without the resolved routing stamp.
 
 The startup-only `--liveness-snapshot-interval-seconds` option defaults to 30 and must be positive.
 The replayer may use the configured value for expected-latency diagnostics, but never for a verdict.
@@ -1739,4 +1765,5 @@ Deliberately out of scope:
 * Introducing a new durable tuple store in the first implementation.
 * Providing exactly-once target-side effects across process crashes.
 * Reproducing HTTP/2 multiplexing semantics.
-* Any path by which wall-clock timeout code can commit captured records.
+* Any path by which wall-clock timeout code can commit Kafka or other structurally expiring source
+  records.
