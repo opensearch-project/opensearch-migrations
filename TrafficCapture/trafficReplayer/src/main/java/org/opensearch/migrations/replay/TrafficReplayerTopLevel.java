@@ -252,7 +252,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var intakeMailbox = new ReplayIntakeMailbox();
-        var permitPool = new AsyncPermitPool(maxConcurrentRequests, intakeMailbox);
+        var permitPool = new AsyncPermitPool(
+            maxConcurrentRequests,
+            intakeMailbox,
+            topLevelContext.getPermitPoolMetrics()
+        );
         intakeMailboxRef.set(intakeMailbox);
         permitPoolRef.set(permitPool);
         var senderOrchestrator = new RequestSenderOrchestrator(
