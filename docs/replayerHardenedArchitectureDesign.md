@@ -1138,6 +1138,12 @@ Successful `abort` completion proves all of the following:
    perform only self-cleanup when it eventually runs; the session gate does not wait for a semantic
    result that the adapter has already replaced with cancellation.
 
+The exchange also owns the target-response timeout. That timeout begins only after the complete
+request has been handed to the target channel and the exchange starts waiting for a response. Channel
+acquisition, replay pacing, transformation, and time between request fragments do not consume the
+target's response budget. Once response waiting begins, decoded response activity may refresh the
+inactivity timer, while cancellation settles the timer as part of the exchange's owned cleanup.
+
 `abort` and `close` are idempotent. Repeated calls join the same cleanup rather than starting another
 teardown. This contract is what makes a never-completing response finalizer a test case instead of a
 permanent session drain.
