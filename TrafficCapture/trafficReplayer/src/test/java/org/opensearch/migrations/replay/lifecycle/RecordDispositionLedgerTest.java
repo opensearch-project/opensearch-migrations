@@ -180,7 +180,7 @@ class RecordDispositionLedgerTest {
     }
 
     @Test
-    void acceptedCommitRetainsWhenTheSourceReportsGenerationLossBeforeAcknowledgement() {
+    void acceptedCommitFailureRemainsUnresolvedWhenSourceGenerationIsLost() {
         var ledger = new RecordDispositionLedger(Runnable::run);
         var commitAcknowledgement = new CompletableFuture<Void>();
         var handle = new TestRecordHandle(record(16), commitAcknowledgement);
@@ -195,12 +195,15 @@ class RecordDispositionLedgerTest {
         ledger.onRevoked(java.util.List.of(handle.sourcePartition()));
         commitAcknowledgement.completeExceptionally(new SourceRunwayLostException(handle.sourcePartition()));
 
-        var result = disposition.toCompletableFuture().join();
-        Assertions.assertInstanceOf(RecordDisposition.Retain.class, result.disposition());
-        Assertions.assertEquals("source-runway-lost-after-replay-succeeded", result.disposition().reasonCode());
-        Assertions.assertEquals(1, handle.releasesWithoutCommit.get());
-        Assertions.assertFalse(
-            ledger.unresolvedObligations().toCompletableFuture().join().containsKey(handle.id())
+        var failure = Assertions.assertThrows(
+            CompletionException.class,
+            () -> disposition.toCompletableFuture().join()
+        );
+        Assertions.assertInstanceOf(SourceRunwayLostException.class, failure.getCause());
+        Assertions.assertEquals(0, handle.releasesWithoutCommit.get());
+        Assertions.assertEquals(
+            "transaction",
+            ledger.unresolvedObligations().toCompletableFuture().join().get(handle.id())
         );
     }
 

@@ -197,13 +197,12 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             return;
         }
         commitStage.whenComplete((ignored, failure) ->
-            ownerExecutor.execute(() -> completeCommit(id, obligation, result, failure, completion))
+            ownerExecutor.execute(() -> completeCommit(id, result, failure, completion))
         );
     }
 
     private void completeCommit(
         RecordId id,
-        Obligation obligation,
         DispositionResult result,
         Throwable failure,
         CompletableFuture<DispositionResult> completion
@@ -211,19 +210,6 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         if (failure == null) {
             resolve(id, result);
             completion.complete(result);
-        } else if (SourceRunwayLostException.causedBy(failure)) {
-            releaseWithoutCommit(
-                id,
-                obligation,
-                new DispositionResult(
-                    result.recordId(),
-                    result.owner(),
-                    new RecordDisposition.Retain(
-                        "source-runway-lost-after-" + result.disposition().reasonCode()
-                    )
-                ),
-                completion
-            );
         } else {
             completion.completeExceptionally(failure);
         }
