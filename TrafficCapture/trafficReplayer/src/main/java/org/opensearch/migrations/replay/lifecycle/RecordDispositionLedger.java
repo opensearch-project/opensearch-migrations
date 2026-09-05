@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
@@ -69,7 +71,22 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
     private final Map<RecordId, Obligation> unresolved = new LinkedHashMap<>();
     private final Map<RecordId, PendingDisposition> pending = new LinkedHashMap<>();
     private final Map<RecordId, DispositionResult> resolved = new LinkedHashMap<>();
+    private final Map<RecordId, FailedDisposition> failed = new LinkedHashMap<>();
+
+    private static final class FailedDisposition {
+        private final Obligation obligation;
+        private final Throwable failure;
+
+        private FailedDisposition(Obligation obligation, Throwable failure) {
+            this.obligation = obligation;
+            this.failure = failure;
+        }
+    }
     private final Map<SourcePartitionKey, Boolean> generationRunway = new LinkedHashMap<>();
+    private final AtomicReference<CompletionGate<Void>> quiescenceGate =
+        new AtomicReference<>(completedGate());
+    private final AtomicBoolean registrationsSealed = new AtomicBoolean();
+    private Throwable quiescenceIntervalFailure;
 
     public RecordDispositionLedger(@NonNull Executor ownerExecutor) {
         this.ownerExecutor = ownerExecutor;
@@ -86,8 +103,15 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
     }
 
     public CompletionStage<Void> register(@NonNull RecordHandle handle, @NonNull String owner) {
+        if (registrationsSealed.get()) {
+            return rejectedRegistration(handle.id());
+        }
         var completion = new CompletableFuture<Void>();
         ownerExecutor.execute(() -> {
+            if (registrationsSealed.get()) {
+                completeRejectedRegistration(completion, handle.id());
+                return;
+            }
             if (unresolved.containsKey(handle.id())
                 || pending.containsKey(handle.id())
                 || resolved.containsKey(handle.id())) {
@@ -96,11 +120,39 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
                 );
                 return;
             }
+            if (unresolved.isEmpty() && pending.isEmpty()) {
+                quiescenceGate.set(new CompletionGate<>());
+                quiescenceIntervalFailure = null;
+            }
             generationRunway.putIfAbsent(handle.sourcePartition(), true);
             unresolved.put(handle.id(), new Obligation(handle, owner));
             completion.complete(null);
         });
         return completion.minimalCompletionStage();
+    }
+
+    public CompletionStage<Void> sealRegistrations() {
+        if (registrationsSealed.get()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        var completion = new CompletableFuture<Void>();
+        ownerExecutor.execute(() -> {
+            registrationsSealed.set(true);
+            completion.complete(null);
+        });
+        return completion.minimalCompletionStage();
+    }
+
+    private static CompletionStage<Void> rejectedRegistration(RecordId id) {
+        return CompletableFuture.failedFuture(registrationSealedException(id));
+    }
+
+    private static void completeRejectedRegistration(CompletableFuture<Void> completion, RecordId id) {
+        completion.completeExceptionally(registrationSealedException(id));
+    }
+
+    private static IllegalStateException registrationSealedException(RecordId id) {
+        return new IllegalStateException("record registration is sealed: " + id);
     }
 
     public CompletionStage<Void> transfer(
@@ -147,7 +199,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         try {
             obligation.handle().closeContext();
         } catch (Exception e) {
-            completion.completeExceptionally(e);
+            resolveExceptionally(id, obligation, e, completion);
             return;
         }
 
@@ -169,7 +221,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             resolve(id, result);
             completion.complete(result);
         } catch (Exception e) {
-            completion.completeExceptionally(e);
+            resolveExceptionally(id, obligation, e, completion);
         }
     }
 
@@ -193,7 +245,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         try {
             commitStage = obligation.handle().commit();
         } catch (Exception e) {
-            completion.completeExceptionally(e);
+            resolveExceptionally(id, obligation, e, completion);
             return;
         }
         commitStage.whenComplete((ignored, failure) ->
@@ -211,22 +263,32 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         if (failure == null) {
             resolve(id, result);
             completion.complete(result);
-        } else if (SourceRunwayLostException.causedBy(failure)) {
-            releaseWithoutCommit(
-                id,
-                obligation,
-                new DispositionResult(
-                    result.recordId(),
-                    result.owner(),
-                    new RecordDisposition.Retain(
-                        "source-runway-lost-after-" + result.disposition().reasonCode()
-                    )
-                ),
-                completion
-            );
-        } else {
-            completion.completeExceptionally(failure);
+            return;
         }
+        if (unwrap(failure) instanceof SourceRunwayLostException runwayLost
+            && runwayLost.getPartition().equals(obligation.handle().sourcePartition())) {
+            var retainedResult = new DispositionResult(
+                id,
+                result.owner(),
+                new RecordDisposition.Retain(
+                    "source-runway-lost-after-" + result.disposition().reasonCode()
+                )
+            );
+            resolve(id, retainedResult);
+            completion.complete(retainedResult);
+            return;
+        }
+        resolveExceptionally(id, obligation, failure, completion);
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        var current = failure;
+        while ((current instanceof java.util.concurrent.CompletionException
+            || current instanceof java.util.concurrent.ExecutionException)
+            && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     public CompletionStage<Map<RecordId, String>> unresolvedObligations() {
@@ -235,9 +297,14 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             var snapshot = new LinkedHashMap<RecordId, String>();
             unresolved.forEach((id, obligation) -> snapshot.put(id, obligation.owner()));
             pending.forEach((id, disposition) -> snapshot.put(id, disposition.obligation().owner()));
+            failed.forEach((id, disposition) -> snapshot.put(id, disposition.obligation.owner()));
             completion.complete(Map.copyOf(snapshot));
         });
         return completion.minimalCompletionStage();
+    }
+
+    public CompletionStage<Void> whenQuiescent() {
+        return quiescenceGate.get().stage();
     }
 
     private <T> Obligation requireOwnedObligation(
@@ -245,6 +312,16 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         String expectedOwner,
         CompletableFuture<T> completion
     ) {
+        var failedDisposition = failed.get(id);
+        if (failedDisposition != null) {
+            completion.completeExceptionally(
+                new IllegalStateException(
+                    "record disposition already failed terminally: " + id,
+                    failedDisposition.failure
+                )
+            );
+            return null;
+        }
         if (pending.containsKey(id)) {
             completion.completeExceptionally(
                 new IllegalStateException("record disposition is awaiting acknowledgement: " + id)
@@ -274,5 +351,46 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
     private void resolve(RecordId id, DispositionResult result) {
         pending.remove(id);
         resolved.put(id, result);
+        maybeCompleteQuiescence();
+    }
+
+    /**
+     * A failed acknowledgement still settles its obligation for quiescence purposes. Leaving it
+     * pending would hold the quiescence gate open forever, deadlocking shutdown behind an
+     * acknowledgement that can no longer arrive; instead the failure propagates through both the
+     * disposer's completion and, once no work remains, the quiescence gate itself. The record
+     * stays visible in {@link #unresolvedObligations()} so shutdown diagnostics can still name it.
+     */
+    private void resolveExceptionally(
+        RecordId id,
+        Obligation obligation,
+        Throwable failure,
+        CompletableFuture<?> completion
+    ) {
+        pending.remove(id);
+        failed.put(id, new FailedDisposition(obligation, failure));
+        if (quiescenceIntervalFailure == null) {
+            quiescenceIntervalFailure = failure;
+        } else if (quiescenceIntervalFailure != failure) {
+            quiescenceIntervalFailure.addSuppressed(failure);
+        }
+        completion.completeExceptionally(failure);
+        maybeCompleteQuiescence();
+    }
+
+    private void maybeCompleteQuiescence() {
+        if (unresolved.isEmpty() && pending.isEmpty()) {
+            if (quiescenceIntervalFailure == null) {
+                quiescenceGate.get().complete(null);
+            } else {
+                quiescenceGate.get().completeExceptionally(quiescenceIntervalFailure);
+            }
+        }
+    }
+
+    private static CompletionGate<Void> completedGate() {
+        var gate = new CompletionGate<Void>();
+        gate.complete(null);
+        return gate;
     }
 }

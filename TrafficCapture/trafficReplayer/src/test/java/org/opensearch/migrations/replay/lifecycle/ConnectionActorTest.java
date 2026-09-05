@@ -119,6 +119,47 @@ class ConnectionActorTest extends InstrumentationTest {
     }
 
     @Test
+    void abortReportsActiveAndQueuedPreparedCleanupFailures() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var activeCleanupFailure = new AssertionError("active cleanup failed");
+        var queuedCleanupFailure = new AssertionError("queued cleanup failed");
+        var activePrepared = new TestPrepared("active", activeCleanupFailure);
+        var queuedPrepared = new TestPrepared("queued", queuedCleanupFailure);
+        var active = actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(activePrepared))
+        ).toCompletableFuture();
+        var queued = actor.admitRequest(
+            request(1),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(queuedPrepared))
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        var termination = actor.abort(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("rebalance")
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+        exchange.abortCompletion.complete(null);
+        mailbox.runUntilIdle();
+
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, active.join());
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, queued.join());
+        var failed = Assertions.assertInstanceOf(SessionOutcome.Failed.class, termination.join());
+        Assertions.assertSame(activeCleanupFailure, failed.cause());
+        Assertions.assertArrayEquals(
+            new Throwable[] { queuedCleanupFailure },
+            failed.cause().getSuppressed()
+        );
+        Assertions.assertEquals(1, activePrepared.closeCount);
+        Assertions.assertEquals(1, queuedPrepared.closeCount);
+    }
+
+    @Test
     void orderedCloseRunsAfterRequestsAndCallerCannotCancelTermination() {
         var mailbox = new DeterministicMailbox();
         var exchange = new TestExchange();
@@ -339,15 +380,24 @@ class ConnectionActorTest extends InstrumentationTest {
 
     private static final class TestPrepared implements AutoCloseable {
         private final String name;
+        private final AssertionError closeFailure;
         private int closeCount;
 
         private TestPrepared(String name) {
+            this(name, null);
+        }
+
+        private TestPrepared(String name, AssertionError closeFailure) {
             this.name = name;
+            this.closeFailure = closeFailure;
         }
 
         @Override
         public void close() {
             closeCount++;
+            if (closeFailure != null) {
+                throw closeFailure;
+            }
         }
     }
 

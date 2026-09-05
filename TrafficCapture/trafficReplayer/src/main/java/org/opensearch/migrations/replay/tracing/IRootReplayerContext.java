@@ -5,6 +5,7 @@ import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
+import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IRootOtelContext;
@@ -24,4 +25,6 @@ public interface IRootReplayerContext extends IRootOtelContext, IInstrumentConst
     ReplayTransaction.Metrics getReplayTransactionMetrics();
 
     TrackingKafkaConsumer.Metrics getKafkaCommitStateMetrics();
+
+    ResourceOwnership.Metrics getResourceOwnershipMetrics();
 }

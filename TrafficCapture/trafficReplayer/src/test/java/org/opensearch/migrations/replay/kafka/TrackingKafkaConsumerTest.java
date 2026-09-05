@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -27,8 +28,10 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 /**
@@ -602,5 +605,52 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         Assertions.assertFalse(cycle.stableGeneration());
         Assertions.assertTrue(cycle.records().isEmpty());
+    }
+
+    @Test
+    void scanAheadBoundsEveryMetadataRequestByItsBudget() {
+        var mc = Mockito.spy(buildMockConsumer());
+        var consumer = buildConsumer(mc);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mc.seek(partition, 0);
+        mc.updateEndOffsets(Map.of(partition, 0L));
+        var budget = Duration.ofSeconds(1);
+
+        consumer.scanAhead(10, budget);
+
+        var positionTimeout = ArgumentCaptor.forClass(Duration.class);
+        Mockito.verify(mc, Mockito.atLeastOnce()).position(
+            Mockito.eq(partition),
+            positionTimeout.capture()
+        );
+        var endOffsetsTimeout = ArgumentCaptor.forClass(Duration.class);
+        Mockito.verify(mc).endOffsets(
+            Mockito.eq(Set.of(partition)),
+            endOffsetsTimeout.capture()
+        );
+        positionTimeout.getAllValues().forEach(timeout -> {
+            Assertions.assertTrue(timeout.isPositive());
+            Assertions.assertTrue(timeout.compareTo(budget) <= 0);
+        });
+        Assertions.assertTrue(endOffsetsTimeout.getValue().isPositive());
+        Assertions.assertTrue(endOffsetsTimeout.getValue().compareTo(budget) <= 0);
+    }
+
+    @Test
+    void scanAheadSurfacesTransientMetadataFailureForTheSourceToRetry() {
+        var mc = Mockito.spy(buildMockConsumer());
+        var consumer = buildConsumer(mc);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mc.seek(partition, 0);
+        Mockito.doThrow(new TimeoutException("metadata unavailable"))
+            .when(mc)
+            .endOffsets(Mockito.eq(Set.of(partition)), Mockito.any(Duration.class));
+
+        Assertions.assertThrows(
+            TimeoutException.class,
+            () -> consumer.scanAhead(10, Duration.ofMillis(50))
+        );
     }
 }

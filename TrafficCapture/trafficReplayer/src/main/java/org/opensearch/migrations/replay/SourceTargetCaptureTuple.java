@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -55,6 +56,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public final IReplayContexts.ITupleHandlingContext context;
     public final List<Response> responseList;
     public final Throwable topLevelErrorCause;
+    private final DiagnosticPayload targetRequestPayload;
 
     public SourceTargetCaptureTuple(
         @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
@@ -64,21 +66,34 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     ) {
         this.context = tupleHandlingContext;
         this.sourcePair = sourcePair;
-        this.targetRequestData = transformedTargetRequestAndResponseList == null ? null :
-            transformedTargetRequestAndResponseList.requestPackets;
-        this.transformationStatus = transformedTargetRequestAndResponseList == null ? null :
+        var transformationStatus = transformedTargetRequestAndResponseList == null ? null :
             transformedTargetRequestAndResponseList.getTransformationStatus();
-        this.responseList = transformedTargetRequestAndResponseList == null ? List.of() :
+        var responseList = transformedTargetRequestAndResponseList == null ? List.<Response>of() :
             transformedTargetRequestAndResponseList.responses().stream()
             .map(arr -> new Response(arr.packets.stream().map(AbstractMap.SimpleEntry::getValue)
                 .collect(Collectors.toList()), arr.error, arr.duration))
             .collect(Collectors.toList());
+        var targetRequestPayload = transformedTargetRequestAndResponseList == null ? null :
+            transformedTargetRequestAndResponseList.claimDiagnosticPayload();
+        ByteBufList targetRequestData;
+        try {
+            targetRequestData = targetRequestPayload == null ? null : targetRequestPayload.packets();
+        } catch (Throwable t) {
+            if (targetRequestPayload != null) {
+                targetRequestPayload.close();
+            }
+            throw t;
+        }
+        this.targetRequestPayload = targetRequestPayload;
+        this.targetRequestData = targetRequestData;
+        this.transformationStatus = transformationStatus;
+        this.responseList = responseList;
         this.topLevelErrorCause = topLevelErrorCause;
     }
 
     @Override
     public void close() {
-        Optional.ofNullable(targetRequestData).ifPresent(ByteBufList::release);
+        Optional.ofNullable(targetRequestPayload).ifPresent(DiagnosticPayload::close);
     }
 
     @Override

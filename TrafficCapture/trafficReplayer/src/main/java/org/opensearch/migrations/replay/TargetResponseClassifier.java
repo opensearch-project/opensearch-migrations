@@ -119,10 +119,11 @@ public final class TargetResponseClassifier {
     }
 
     private boolean isBulkRequest(TransformedTargetRequestAndResponseList summary) {
-        if (summary.requestPackets == null || summary.requestPackets.isEmpty()) {
+        var requestPackets = summary.requestPackets();
+        if (requestPackets == null || requestPackets.isEmpty()) {
             return false;
         }
-        try (var request = RefSafeHolder.create(summary.requestPackets.asCompositeByteBufRetained())) {
+        try (var request = RefSafeHolder.create(requestPackets.asCompositeByteBufRetained())) {
             var parsed = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(request.get()), 0);
             return parsed != null && BULK_PATH.matcher(parsed.uri()).matches();
         }

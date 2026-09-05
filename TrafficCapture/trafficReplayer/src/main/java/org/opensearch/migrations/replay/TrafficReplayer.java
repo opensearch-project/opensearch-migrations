@@ -906,7 +906,7 @@ public class TrafficReplayer {
                     log.atWarn().setMessage(beforeMsg).log();
                     System.err.println(beforeMsg);
                 });
-            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(o -> o.shutdown(null));
+            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(TrafficReplayer::awaitReplayerShutdown);
             Optional.of("Done shutting down TrafficReplayer (due to Runtime shutdown).  "
                     + "Logs may be missing for events that have happened after the Shutdown event was received.")
                 .ifPresent(afterMsg -> {
@@ -914,6 +914,10 @@ public class TrafficReplayer {
                     System.err.println(afterMsg);
                 });
         }));
+    }
+
+    static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
+        trafficReplayer.shutdown(null).join();
     }
 
     /**

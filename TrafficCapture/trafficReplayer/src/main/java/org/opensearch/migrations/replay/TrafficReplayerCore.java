@@ -113,11 +113,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         });
     }
 
-    static void settleProgressWhenTargetCompletes(
-        @NonNull CompletionStage<?> targetCompletion,
+    static void settleProgressWhenTransactionCompletes(
+        @NonNull CompletionStage<?> transactionCompletion,
         @NonNull WorkToken progressToken
     ) {
-        targetCompletion.whenComplete((ignored, failure) -> progressToken.close());
+        transactionCompletion.whenComplete((ignored, failure) -> progressToken.close());
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -134,6 +134,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     protected final AtomicReference<CompletableFuture<List<SourceInput>>> nextChunkFutureRef;
     protected final AtomicReference<AsyncPermitPool> permitPoolRef;
     protected final AtomicReference<ReplayIntakeMailbox> intakeMailboxRef;
+    protected final AtomicReference<RecordDispositionLedger> dispositionLedgerRef;
 
     protected TrafficReplayerCore(
         IRootReplayerContext context,
@@ -193,6 +194,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         stopReadingRef = new AtomicBoolean();
         permitPoolRef = new AtomicReference<>();
         intakeMailboxRef = new AtomicReference<>();
+        dispositionLedgerRef = new AtomicReference<>();
         this.targetResponseClassifier = Objects.requireNonNull(targetResponseClassifier);
     }
 
@@ -237,6 +239,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.dispositionLedger = new RecordDispositionLedger(
                 java.util.Objects.requireNonNull(intakeMailboxRef.get(), "replay intake mailbox")
             );
+            dispositionLedgerRef.set(this.dispositionLedger);
         }
 
         private final class TransactionEvidenceState {
@@ -363,6 +366,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 List.of(ctx),
                 topLevelContext.getReplayTransactionMetrics()
             );
+            settleProgressWhenTransactionCompletes(transaction.completion(), progressToken);
             runtime.register(transaction).whenComplete((ignored, failure) -> {
                 if (failure != null) {
                     transaction.fail(unwrap(failure));
@@ -375,7 +379,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture,
                 quiescentDurationForRequest
             );
-            settleProgressWhenTargetCompletes(targetFuture.future, progressToken);
             settleTransactionTarget(
                 transaction,
                 targetFuture,
@@ -424,8 +427,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             TextTrackedFuture<RequestResponsePacketPair> sourceFuture,
             TransactionEvidenceState evidenceState
         ) {
-            targetFuture.future
-                .handle((summary, failure) -> captureTargetResult(evidenceState, summary, failure))
+            CompletionStage<TargetExchangeResult> capturedTarget = targetFuture.future
+                .handle((summary, failure) ->
+                    captureTargetResult(transaction, evidenceState, summary, failure)
+                )
+                .thenCompose(stage -> stage);
+            capturedTarget
                 .thenCombine(
                     sourceFuture.future,
                     (targetResult, source) -> toTargetOutcome(
@@ -437,7 +444,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .whenComplete((outcome, failure) -> settleTargetOrFail(transaction, outcome, failure));
         }
 
-        private TargetExchangeResult captureTargetResult(
+        private CompletionStage<TargetExchangeResult> captureTargetResult(
+            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
             TransactionEvidenceState evidenceState,
             TransformedTargetRequestAndResponseList summary,
             Throwable failure
@@ -445,7 +453,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var cause = failure == null ? null : unwrap(failure);
             evidenceState.target = summary;
             evidenceState.targetFailure = cause;
-            return new TargetExchangeResult(summary, cause);
+            var result = new TargetExchangeResult(summary, cause);
+            return summary == null
+                ? CompletableFuture.completedFuture(result)
+                : transaction.ownResource(summary).thenApply(ignored -> result);
         }
 
         private void settleTargetOrFail(

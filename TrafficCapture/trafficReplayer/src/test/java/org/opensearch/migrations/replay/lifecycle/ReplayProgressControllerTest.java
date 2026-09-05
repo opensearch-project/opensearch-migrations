@@ -47,6 +47,32 @@ class ReplayProgressControllerTest {
     }
 
     @Test
+    void laterActiveWorkReplacesThePreviouslySettledConstraint() {
+        var fixture = new Fixture(Duration.ofSeconds(30));
+        var partition = partition(0, 1);
+        fixture.controller.onAssigned(List.of(partition));
+        var first = fixture.controller.admit(
+            partition,
+            request(0),
+            Instant.ofEpochSecond(10)
+        ).toCompletableFuture().join();
+        first.close();
+
+        var second = fixture.controller.admit(
+            partition,
+            request(1),
+            Instant.ofEpochSecond(70)
+        ).toCompletableFuture().join();
+
+        Assertions.assertEquals(
+            Instant.ofEpochSecond(70),
+            fixture.controller.currentSnapshot().settledWatermark()
+        );
+        Assertions.assertEquals(Instant.ofEpochSecond(100), fixture.readGate.frontier());
+        second.close();
+    }
+
+    @Test
     void outOfOrderSourceTimesUseTheMonotonicAdmissionFrontier() {
         var fixture = new Fixture(Duration.ZERO);
         var partition = partition(0, 1);

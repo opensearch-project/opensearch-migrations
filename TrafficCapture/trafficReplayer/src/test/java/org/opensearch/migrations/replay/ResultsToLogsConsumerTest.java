@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
@@ -400,24 +401,25 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         targetResponse.add(new AbstractMap.SimpleEntry<>(Instant.now(), rawResponseData));
         var aggregatedResponse = new AggregatedRawResponse(null, 13, Duration.ofMillis(267), targetResponse, null);
         var targetResponses = new TransformedTargetRequestAndResponseList(
-            targetRequest,
+            new DiagnosticPayload(targetRequest),
             HttpRequestTransformationStatus.skipped(),
             aggregatedResponse
         );
         try (var tupleContext = rootContext.getTestTupleContext(); var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
-            var tuple = new SourceTargetCaptureTuple(
-                tupleContext,
-                sourcePair,
-                targetResponses,
-                null
-            );
-            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, transformerSupplier);
-            var consumer = new TupleParserChainConsumer(streamConsumer);
-            consumer.accept(tuple);
-            Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
-            var contents = closeableLogSetup.getLogEvents().get(0);
-            log.info("Output=" + contents);
-            Assertions.assertEquals(normalizeJson(expected), normalizeJson(contents));
+            try (var tuple = new SourceTargetCaptureTuple(
+                    tupleContext,
+                    sourcePair,
+                    targetResponses,
+                    null
+                )) {
+                var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, transformerSupplier);
+                var consumer = new TupleParserChainConsumer(streamConsumer);
+                consumer.accept(tuple);
+                Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
+                var contents = closeableLogSetup.getLogEvents().get(0);
+                log.info("Output=" + contents);
+                Assertions.assertEquals(normalizeJson(expected), normalizeJson(contents));
+            }
         }
         var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var filteredMetrics = allMetricData.stream()
@@ -427,7 +429,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         log.error("TODO - find out how to verify these metrics");
         // Assertions.assertEquals("REQUEST_ID:testConnection.1|SOURCE_HTTP_STATUS:200|TARGET_HTTP_STATUS:200|HTTP_STATUS_MATCH:1",
         // filteredMetrics.stream().map(md->md.getName()+":"+md.getData()).collect(Collectors.joining("|")));
-        targetRequest.release();
+        Assertions.assertTrue(targetRequest.isClosed());
     }
 
     static String normalizeJson(String input) throws JsonProcessingException {

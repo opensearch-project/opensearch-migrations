@@ -3,70 +3,103 @@ package org.opensearch.migrations.replay.datatypes;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.util.AbstractReferenceCounted;
 import io.netty.util.ReferenceCounted;
+import lombok.NonNull;
 
 /**
- * A reference-counted supplier of {@link ByteBufList} that also advertises the number
+ * An owned supplier of {@link ByteBufList} that also advertises the number
  * of ByteBufs each produced list will contain. This count is used for pacing calculations
  * (inter-packet interval) without needing to materialize the list.
  * <p>
- * Callers must {@link #retain()} before use and {@link #release()} when done (including
- * after all retries are complete). When the reference count reaches zero, the underlying
- * resources (e.g., the wrapped ByteBufList) are released.
+ * Production callers transfer one instance and close it after all retries are complete.
+ * The reference-counted base remains temporarily for compatibility with transformation code.
  * <p>
  * Each call to {@link #get()} returns the same underlying ByteBufList for the
  * trivial (non-resigning) case. Implementations that regenerate content (e.g.,
  * re-signing auth headers) may return a fresh ByteBufList on each call.
  */
-public abstract class ByteBufListProducer extends AbstractReferenceCounted implements Supplier<ByteBufList> {
-    public static final class AttemptPayload implements AutoCloseable {
-        private final ByteBufList packets;
-        private final Runnable release;
-        private final AtomicBoolean closed = new AtomicBoolean();
+public abstract class ByteBufListProducer extends AbstractReferenceCounted
+    implements Supplier<ByteBufList>, OwnedPreparedRequest {
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private ResourceOwnership.Metrics ownershipMetrics = ResourceOwnership.Metrics.NOOP;
+    private ResourceOwnership.Tracker ownership;
 
-        private AttemptPayload(ByteBufList packets, Runnable release) {
-            this.packets = packets;
-            this.release = release;
-        }
-
-        public static AttemptPayload borrowed(ByteBufList packets) {
-            return new AttemptPayload(packets, () -> {});
-        }
-
-        public static AttemptPayload owned(ByteBufList packets) {
-            return new AttemptPayload(packets, packets::release);
-        }
-
-        public ByteBufList packets() {
-            return packets;
-        }
-
-        @Override
-        public void close() {
-            if (closed.compareAndSet(false, true)) {
-                release.run();
-            }
-        }
-    }
-
+    @Override
     public abstract int numByteBufs();
 
     /**
      * Returns an attempt-scoped view. Producers that allocate a new list per attempt must override this
      * and return an owned payload so the caller can release it after response evaluation.
      */
+    @Override
     public AttemptPayload newAttempt() {
-        return AttemptPayload.borrowed(get());
+        var copies = get().streamUnretained().toArray(ByteBuf[]::new);
+        return AttemptPayload.owned(new ByteBufList(copies), ownershipMetrics);
     }
 
-    /**
-     * Returns an independently owned request snapshot for evidence and diagnostics.
-     */
-    public ByteBufList diagnosticSnapshot() {
+    @Override
+    public DiagnosticPayload retainDiagnosticCopy() {
         var copies = get().streamUnretained().toArray(ByteBuf[]::new);
-        return new ByteBufList(copies);
+        return new DiagnosticPayload(new ByteBufList(copies), ownershipMetrics);
+    }
+
+    public final synchronized void trackOwnership(@NonNull ResourceOwnership.Metrics metrics) {
+        if (closed.get()) {
+            metrics.invariantFailure(ResourceOwnership.Type.PREPARED_REQUEST);
+            throw new IllegalStateException("cannot track a closed prepared request");
+        }
+        if (ownership != null) {
+            ownership.invariantFailure();
+            throw new IllegalStateException("prepared request ownership was already tracked");
+        }
+        ownershipMetrics = metrics;
+        ownership = new ResourceOwnership.Tracker(
+            metrics,
+            ResourceOwnership.Type.PREPARED_REQUEST,
+            ownedBufferCount(),
+            ownedBytes()
+        );
+    }
+
+    protected final ResourceOwnership.Metrics ownershipMetrics() {
+        return ownershipMetrics;
+    }
+
+    protected int ownedBufferCount() {
+        return 0;
+    }
+
+    protected long ownedBytes() {
+        return 0;
+    }
+
+    @Override
+    public final synchronized void close() {
+        if (ownership != null) {
+            ownership.close(this::releasePreparedRequest);
+            return;
+        }
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            releasePreparedRequest();
+        } catch (Throwable t) {
+            closed.set(false);
+            throw t;
+        }
+    }
+
+    private void releasePreparedRequest() {
+        if (refCnt() != 1) {
+            throw new IllegalStateException("prepared request has shared ownership; refCnt=" + refCnt());
+        }
+        release();
+        closed.set(true);
     }
 
     @Override
@@ -85,6 +118,16 @@ public abstract class ByteBufListProducer extends AbstractReferenceCounted imple
             @Override
             public ByteBufList get() {
                 return packets;
+            }
+
+            @Override
+            protected int ownedBufferCount() {
+                return packets.size();
+            }
+
+            @Override
+            protected long ownedBytes() {
+                return packets.readableBytes();
             }
 
             @Override

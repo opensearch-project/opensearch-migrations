@@ -63,6 +63,28 @@ class RecordDispositionLedgerTest {
     }
 
     @Test
+    void sealingRejectsNewRecordsButAllowsAcceptedRecordsToSettle() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var accepted = new TestRecordHandle(record(21));
+        var rejected = new TestRecordHandle(record(22));
+        ledger.register(accepted, "transaction").toCompletableFuture().join();
+
+        ledger.sealRegistrations().toCompletableFuture().join();
+
+        var registrationFailure = Assertions.assertThrows(
+            CompletionException.class,
+            () -> ledger.register(rejected, "transaction").toCompletableFuture().join()
+        );
+        Assertions.assertInstanceOf(IllegalStateException.class, registrationFailure.getCause());
+        ledger.dispose(
+            accepted.id(),
+            "transaction",
+            new RecordDisposition.Retain("shutdown")
+        ).toCompletableFuture().join();
+        ledger.whenQuiescent().toCompletableFuture().join();
+    }
+
+    @Test
     void commitRemainsUnresolvedUntilTheSourceAcknowledgesIt() {
         var ledger = new RecordDispositionLedger(Runnable::run);
         var commitAcknowledgement = new CompletableFuture<Void>();
@@ -100,6 +122,64 @@ class RecordDispositionLedgerTest {
         );
         Assertions.assertEquals(1, handle.contextCloses.get());
         Assertions.assertEquals(1, handle.commits.get());
+    }
+
+    @Test
+    void quiescenceWaitsForAcceptedCommitAcknowledgement() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var initiallyQuiescent = ledger.whenQuiescent().toCompletableFuture();
+        var commitAcknowledgement = new CompletableFuture<Void>();
+        var handle = new TestRecordHandle(record(17), commitAcknowledgement);
+
+        ledger.register(handle, "source-only").toCompletableFuture().join();
+        var activeInterval = ledger.whenQuiescent().toCompletableFuture();
+        var disposition = ledger.dispose(
+            handle.id(),
+            "source-only",
+            new RecordDisposition.Commit("source-record-ignored")
+        );
+
+        Assertions.assertTrue(initiallyQuiescent.isDone());
+        Assertions.assertFalse(activeInterval.isDone());
+        commitAcknowledgement.complete(null);
+        disposition.toCompletableFuture().join();
+        activeInterval.join();
+    }
+
+    @Test
+    void retainedRecordCompletesTheActiveQuiescenceInterval() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var handle = new TestRecordHandle(record(18));
+        ledger.register(handle, "source-only").toCompletableFuture().join();
+        var activeInterval = ledger.whenQuiescent().toCompletableFuture();
+
+        ledger.dispose(
+            handle.id(),
+            "source-only",
+            new RecordDisposition.Retain("source-inconclusive")
+        ).toCompletableFuture().join();
+
+        activeInterval.join();
+        Assertions.assertEquals(0, handle.commits.get());
+        Assertions.assertEquals(1, handle.releasesWithoutCommit.get());
+    }
+
+    @Test
+    void callerCannotCancelTheAuthoritativeQuiescenceGate() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var handle = new TestRecordHandle(record(19));
+        ledger.register(handle, "source-only").toCompletableFuture().join();
+        var callerFuture = ledger.whenQuiescent().toCompletableFuture();
+
+        callerFuture.cancel(false);
+
+        Assertions.assertFalse(ledger.whenQuiescent().toCompletableFuture().isDone());
+        ledger.dispose(
+            handle.id(),
+            "source-only",
+            new RecordDisposition.Retain("shutdown")
+        ).toCompletableFuture().join();
+        ledger.whenQuiescent().toCompletableFuture().join();
     }
 
     @Test
@@ -180,12 +260,13 @@ class RecordDispositionLedgerTest {
     }
 
     @Test
-    void acceptedCommitRetainsWhenTheSourceReportsGenerationLossBeforeAcknowledgement() {
+    void acceptedCommitAcknowledgementLostWithSourceGenerationResolvesAsRetain() {
         var ledger = new RecordDispositionLedger(Runnable::run);
         var commitAcknowledgement = new CompletableFuture<Void>();
         var handle = new TestRecordHandle(record(16), commitAcknowledgement);
         ledger.onAssigned(java.util.List.of(handle.sourcePartition()));
         ledger.register(handle, "transaction").toCompletableFuture().join();
+        var activeInterval = ledger.whenQuiescent().toCompletableFuture();
 
         var disposition = ledger.dispose(
             handle.id(),
@@ -197,15 +278,143 @@ class RecordDispositionLedgerTest {
 
         var result = disposition.toCompletableFuture().join();
         Assertions.assertInstanceOf(RecordDisposition.Retain.class, result.disposition());
-        Assertions.assertEquals("source-runway-lost-after-replay-succeeded", result.disposition().reasonCode());
-        Assertions.assertEquals(1, handle.releasesWithoutCommit.get());
+        Assertions.assertEquals(
+            "source-runway-lost-after-replay-succeeded",
+            result.disposition().reasonCode()
+        );
+        Assertions.assertEquals(0, handle.releasesWithoutCommit.get());
         Assertions.assertFalse(
             ledger.unresolvedObligations().toCompletableFuture().join().containsKey(handle.id())
+        );
+        activeInterval.join();
+    }
+
+    @Test
+    void runwayLossForAnotherPartitionDoesNotResolveAnAcceptedCommit() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var commitAcknowledgement = new CompletableFuture<Void>();
+        var handle = new TestRecordHandle(record(20), commitAcknowledgement);
+        ledger.register(handle, "transaction").toCompletableFuture().join();
+
+        var disposition = ledger.dispose(
+            handle.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        );
+        commitAcknowledgement.completeExceptionally(
+            new SourceRunwayLostException(new SourcePartitionKey("topic", 1, 1))
+        );
+
+        var failure = Assertions.assertThrows(
+            CompletionException.class,
+            () -> disposition.toCompletableFuture().join()
+        );
+        Assertions.assertInstanceOf(SourceRunwayLostException.class, failure.getCause());
+        Assertions.assertEquals(
+            "transaction",
+            ledger.unresolvedObligations().toCompletableFuture().join().get(handle.id())
         );
     }
 
     private static KafkaRecordId record(long offset) {
         return new KafkaRecordId("topic", 0, offset, 1);
+    }
+
+    @Test
+    void failedCommitAcknowledgementStillSettlesQuiescence() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var commitAcknowledgement = new CompletableFuture<Void>();
+        var handle = new TestRecordHandle(record(31), commitAcknowledgement);
+        ledger.register(handle, "transaction").toCompletableFuture().join();
+        var activeInterval = ledger.whenQuiescent().toCompletableFuture();
+
+        var disposition = ledger.dispose(
+            handle.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        ).toCompletableFuture();
+        Assertions.assertFalse(activeInterval.isDone());
+
+        var brokerFailure = new java.util.concurrent.CancellationException(
+            "Kafka traffic source closed before commit acknowledgement"
+        );
+        commitAcknowledgement.completeExceptionally(brokerFailure);
+
+        var dispositionFailure = Assertions.assertThrows(CompletionException.class, disposition::join);
+        Assertions.assertSame(brokerFailure, dispositionFailure.getCause());
+        Assertions.assertTrue(activeInterval.isDone(), "quiescence must not hang on a failed acknowledgement");
+        var quiescenceFailure = Assertions.assertThrows(CompletionException.class, activeInterval::join);
+        Assertions.assertSame(brokerFailure, quiescenceFailure.getCause());
+        Assertions.assertEquals(
+            "transaction",
+            ledger.unresolvedObligations().toCompletableFuture().join().get(handle.id()),
+            "failed dispositions stay visible for diagnostics without holding the gate"
+        );
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> ledger.dispose(
+                handle.id(),
+                "transaction",
+                new RecordDisposition.Retain("second-attempt")
+            ).toCompletableFuture().join()
+        );
+    }
+
+    @Test
+    void wrappedRunwayLossOnAcknowledgementStillRetains() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var commitAcknowledgement = new CompletableFuture<Void>();
+        var handle = new TestRecordHandle(record(32), commitAcknowledgement) {
+            @Override
+            public CompletableFuture<Void> commit() {
+                // Derived stages wrap failures in CompletionException; the ledger must unwrap.
+                return super.commit().thenApply(v -> v);
+            }
+        };
+        ledger.register(handle, "transaction").toCompletableFuture().join();
+        var activeInterval = ledger.whenQuiescent().toCompletableFuture();
+
+        var disposition = ledger.dispose(
+            handle.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        ).toCompletableFuture();
+        commitAcknowledgement.completeExceptionally(
+            new SourceRunwayLostException(handle.sourcePartition())
+        );
+
+        var result = disposition.join();
+        Assertions.assertInstanceOf(RecordDisposition.Retain.class, result.disposition());
+        activeInterval.join();
+    }
+
+    @Test
+    void quiescenceGateRecoversAfterAFailedInterval() {
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var failingAcknowledgement = new CompletableFuture<Void>();
+        var failing = new TestRecordHandle(record(33), failingAcknowledgement);
+        ledger.register(failing, "transaction").toCompletableFuture().join();
+        var failingDisposition = ledger.dispose(
+            failing.id(),
+            "transaction",
+            new RecordDisposition.Commit("replay-succeeded")
+        ).toCompletableFuture();
+        failingAcknowledgement.completeExceptionally(new RuntimeException("broker commit failed"));
+        Assertions.assertThrows(CompletionException.class, failingDisposition::join);
+        Assertions.assertThrows(
+            CompletionException.class,
+            () -> ledger.whenQuiescent().toCompletableFuture().join()
+        );
+
+        var healthy = new TestRecordHandle(record(34));
+        ledger.register(healthy, "transaction").toCompletableFuture().join();
+        var freshInterval = ledger.whenQuiescent().toCompletableFuture();
+        ledger.dispose(
+            healthy.id(),
+            "transaction",
+            new RecordDisposition.Retain("shutdown")
+        ).toCompletableFuture().join();
+        freshInterval.join();
     }
 
     private static class TestRecordHandle implements RecordDispositionLedger.RecordHandle {

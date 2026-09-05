@@ -42,6 +42,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.slf4j.event.Level;
 
 /**
@@ -400,6 +401,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return r;
     }
 
+    /**
+     * Flushes staged offset commits without a driving read or back-pressure block. Once intake
+     * stops (end of stream or shutdown), no poll cycle ever runs again, so commits staged by late
+     * dispositions would otherwise sit unflushed and their acknowledgements would never complete.
+     * Must run on the same executor that owns every other consumer interaction.
+     */
+    public void commitStagedOffsets() {
+        safeCommit(globalContext::createCommitContext);
+    }
+
     public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
         try (var touchCtx = context.createNewTouchContext()) {
             log.trace("touch() called.");
@@ -490,22 +501,21 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     ScanCycle scanAhead(int maximumRecords, Duration maximumDuration) {
         validateScanBudget(maximumRecords, maximumDuration);
+        long deadline = System.nanoTime() + maximumDuration.toNanos();
         var assignment = Set.copyOf(kafkaConsumer.assignment());
         if (assignment.isEmpty()) {
             return new ScanCycle(List.of(), true, false);
         }
-        var baseline = captureScanBaseline(assignment);
+        var baseline = captureScanBaseline(assignment, deadline);
         if (baseline == null) {
             return new ScanCycle(List.of(), false, false);
         }
-        var endOffsets = kafkaConsumer.endOffsets(assignment);
-        long deadline = System.nanoTime() + maximumDuration.toNanos();
+        var endOffsets = kafkaConsumer.endOffsets(assignment, remainingScanDuration(deadline));
         rebalanceDuringPoll.set(false);
         try {
             var scanned = collectScanRecords(baseline.assignment, endOffsets, maximumRecords, deadline);
             var stableGeneration = scanGenerationIsStable(baseline.assignment, baseline.generations);
             var exhaustedBudget = stableGeneration
-                && !atScanEnd(baseline.assignment, endOffsets)
                 && (scanned.size() >= maximumRecords || System.nanoTime() >= deadline);
             return stableGeneration
                 ? new ScanCycle(List.copyOf(scanned), true, exhaustedBudget)
@@ -526,12 +536,15 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    private ScanBaseline captureScanBaseline(Set<TopicPartition> assignment) {
+    private ScanBaseline captureScanBaseline(Set<TopicPartition> assignment, long deadline) {
         var replayPositions = new HashMap<TopicPartition, Long>();
         var generations = new HashMap<Integer, Integer>();
         synchronized (commitDataLock) {
             for (var topicPartition : assignment) {
-                replayPositions.put(topicPartition, kafkaConsumer.position(topicPartition));
+                replayPositions.put(
+                    topicPartition,
+                    kafkaConsumer.position(topicPartition, remainingScanDuration(deadline))
+                );
                 var tracker = partitionToOffsetLifecycleTrackerMap.get(topicPartition.partition());
                 if (tracker == null) {
                     return null;
@@ -574,7 +587,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return scannedRecords < maximumRecords
             && System.nanoTime() < deadline
             && !rebalanceDuringPoll.get()
-            && !atScanEnd(assignment, endOffsets);
+            && !atScanEnd(assignment, endOffsets, deadline);
     }
 
     private ConsumerRecords<String, byte[]> pollForScan(
@@ -606,11 +619,21 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     private boolean atScanEnd(
         Set<TopicPartition> assignment,
-        Map<TopicPartition, Long> endOffsets
+        Map<TopicPartition, Long> endOffsets,
+        long deadline
     ) {
         return assignment.stream().allMatch(topicPartition ->
-            kafkaConsumer.position(topicPartition) >= endOffsets.getOrDefault(topicPartition, Long.MAX_VALUE)
+            kafkaConsumer.position(topicPartition, remainingScanDuration(deadline))
+                >= endOffsets.getOrDefault(topicPartition, Long.MAX_VALUE)
         );
+    }
+
+    private Duration remainingScanDuration(long deadline) {
+        long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) {
+            throw new TimeoutException("Kafka liveness scan exceeded its time budget");
+        }
+        return Duration.ofNanos(remainingNanos);
     }
 
     private boolean scanGenerationIsStable(

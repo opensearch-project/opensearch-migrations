@@ -63,6 +63,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.errors.RetriableException;
 
 /**
  * Adapt a Kafka stream into a TrafficCaptureSource.
@@ -730,6 +731,21 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 cycle.records().stream().mapToLong(KafkaTrafficCaptureSource::serializedRecordSize).sum(),
                 Duration.ofNanos(System.nanoTime() - scanStartNanos)
             );
+        } catch (RetriableException e) {
+            livenessScanContext.addCaughtException(e);
+            evidenceResults = livenessScanner.evaluate(
+                candidates,
+                new TrackingKafkaConsumer.ScanCycle(List.of(), false, false)
+            );
+            livenessScanContext.recordCycle(
+                0,
+                0,
+                Duration.ofNanos(System.nanoTime() - scanStartNanos)
+            );
+            log.atWarn()
+                .setCause(e)
+                .setMessage("Kafka liveness scan was unavailable; leaving all candidates inconclusive")
+                .log();
         } catch (RuntimeException e) {
             livenessScanContext.addCaughtException(e);
             throw e;
@@ -843,6 +859,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 new IllegalStateException("commit acknowledgement already pending for " + trafficStreamKey)
             );
         }
+        if (isClosed.get()) {
+            // close() failed and cleared the pending map; an entry registered after that sweep
+            // would otherwise wait forever for an acknowledgement that can no longer arrive.
+            pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
+            acknowledgement.completeExceptionally(
+                new CancellationException("Kafka traffic source closed before commit acknowledgement")
+            );
+            return acknowledgement;
+        }
         try {
             var result = commitTrafficStream(trafficStreamKey);
             if (result == CommitResult.IGNORED) {
@@ -853,6 +878,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             } else if (result == CommitResult.IMMEDIATE) {
                 pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
                 acknowledgement.complete(null);
+            } else {
+                // AFTER_NEXT_READ / BLOCKED_BY_OTHER_COMMITS: a next read may never happen —
+                // intake can end while dispositions are still settling — so nudge a flush on the
+                // consumer thread instead of leaving the acknowledgement to wait for a poll cycle.
+                kafkaExecutor.execute(trackingKafkaConsumer::commitStagedOffsets);
             }
         } catch (Throwable t) {
             pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
@@ -911,7 +941,18 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public void close() throws IOException, InterruptedException, ExecutionException {
         if (isClosed.compareAndSet(false, true)) {
             try {
-                kafkaExecutor.submit(trackingKafkaConsumer::close).get();
+                kafkaExecutor.submit(() -> {
+                    try {
+                        // §16.2: flush eligible staged commits before closing the consumer, so a
+                        // clean shutdown doesn't discard commits the replay already earned.
+                        trackingKafkaConsumer.commitStagedOffsets();
+                    } catch (RuntimeException e) {
+                        log.atWarn().setCause(e)
+                            .setMessage("Final staged-commit flush failed; pending acknowledgements will fail")
+                            .log();
+                    }
+                    trackingKafkaConsumer.close();
+                }).get();
             } finally {
                 var cause = new CancellationException("Kafka traffic source closed before commit acknowledgement");
                 pendingCommitAcknowledgements.forEach((key, acknowledgement) ->

@@ -142,6 +142,69 @@ class ReplayTransactionTest {
     }
 
     @Test
+    void rejectedResourceAdmissionClosesTheOfferedResource() {
+        var mailbox = new QueuedMailbox();
+        var transaction = new ReplayTransaction<String>(
+            request(),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            new RecordDispositionLedger(Runnable::run),
+            List.of(),
+            List.of()
+        );
+        mailbox.runUntilIdle();
+        mailbox.rejectNewTasks();
+        var resource = new TestResource();
+
+        var failure = Assertions.assertThrows(
+            java.util.concurrent.CompletionException.class,
+            () -> transaction.ownResource(resource).toCompletableFuture().join()
+        );
+
+        Assertions.assertInstanceOf(java.util.concurrent.RejectedExecutionException.class, failure.getCause());
+        Assertions.assertEquals(1, resource.closes);
+    }
+
+    @Test
+    void rejectedResourceAdmissionPreservesCleanupErrors() {
+        var mailbox = new QueuedMailbox();
+        var transaction = new ReplayTransaction<String>(
+            request(),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            new RecordDispositionLedger(Runnable::run),
+            List.of(),
+            List.of()
+        );
+        mailbox.runUntilIdle();
+        mailbox.rejectNewTasks();
+        var cleanupFailure = new AssertionError("cleanup failed");
+        AutoCloseable resource = () -> {
+            throw cleanupFailure;
+        };
+
+        var failure = Assertions.assertThrows(
+            java.util.concurrent.CompletionException.class,
+            () -> transaction.ownResource(resource).toCompletableFuture().join()
+        );
+
+        Assertions.assertInstanceOf(
+            java.util.concurrent.RejectedExecutionException.class,
+            failure.getCause()
+        );
+        Assertions.assertArrayEquals(
+            new Throwable[] { cleanupFailure },
+            failure.getCause().getSuppressed()
+        );
+    }
+
+    @Test
     void successfulTransactionWaitsForEvidenceAndCommitBeforeCompleting() {
         var mailbox = new QueuedMailbox();
         var ledger = new RecordDispositionLedger(Runnable::run);
@@ -193,6 +256,88 @@ class ReplayTransactionTest {
             RecordDisposition.Commit.class,
             transaction.completion().toCompletableFuture().join().disposition()
         );
+    }
+
+    @Test
+    void sourceRunwayLossDuringCommitRetainsAndReleasesTheTransaction() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(11));
+        record.commitCompletion = new CompletableFuture<>();
+        var resource = new TestResource();
+        ledger.onAssigned(List.of(record.sourcePartition()));
+        register(ledger, record, request().toString());
+        var transaction = transaction(
+            mailbox,
+            ledger,
+            CompletableFuture.completedFuture(new EvidenceOutcome.Durable("receipt")),
+            record.id(),
+            resource
+        );
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(1, record.commits.get());
+        Assertions.assertFalse(transaction.completion().toCompletableFuture().isDone());
+
+        ledger.onRevoked(List.of(record.sourcePartition()));
+        record.commitCompletion.completeExceptionally(
+            new SourceRunwayLostException(record.sourcePartition())
+        );
+        mailbox.runUntilIdle();
+
+        var outcome = transaction.completion().toCompletableFuture().join();
+        Assertions.assertInstanceOf(RecordDisposition.Retain.class, outcome.disposition());
+        Assertions.assertEquals(
+            "source-runway-lost-after-replay-succeeded",
+            outcome.disposition().reasonCode()
+        );
+        Assertions.assertFalse(outcome.haltReplay());
+        Assertions.assertEquals(1, resource.closes);
+        Assertions.assertEquals(0, record.releasesWithoutCommit.get());
+        ledger.whenQuiescent().toCompletableFuture().join();
+    }
+
+    @Test
+    void failureDuringDispositionWaitsForKafkaAcknowledgementBeforeReleasingResources() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(10));
+        record.commitCompletion = new CompletableFuture<>();
+        var resource = new TestResource();
+        register(ledger, record, request().toString());
+        var transaction = transaction(
+            mailbox,
+            ledger,
+            CompletableFuture.completedFuture(new EvidenceOutcome.Durable("receipt")),
+            record.id(),
+            resource
+        );
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(1, record.commits.get());
+
+        var actorFailure = new IllegalStateException("actor failed during commit");
+        transaction.fail(actorFailure);
+        mailbox.runUntilIdle();
+
+        Assertions.assertFalse(transaction.completion().toCompletableFuture().isDone());
+        Assertions.assertEquals(0, resource.closes);
+
+        record.commitCompletion.complete(null);
+        mailbox.runUntilIdle();
+
+        var completionFailure = Assertions.assertThrows(
+            java.util.concurrent.CompletionException.class,
+            () -> transaction.completion().toCompletableFuture().join()
+        );
+        Assertions.assertSame(actorFailure, completionFailure.getCause());
+        Assertions.assertEquals(1, resource.closes);
+        Assertions.assertEquals(1, record.contextCloses.get());
+        Assertions.assertEquals(1, record.commits.get());
     }
 
     @Test
@@ -355,8 +500,70 @@ class ReplayTransactionTest {
         Assertions.assertTrue(targetAcknowledgement.isCompletedExceptionally());
         Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
         Assertions.assertEquals(1, resource.closes);
-        Assertions.assertEquals(0, record.contextCloses.get());
+        Assertions.assertEquals(1, record.contextCloses.get());
         Assertions.assertEquals(0, record.commits.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+    }
+
+    @Test
+    void explicitFailureRetainsOwnedRecordsSoTheLedgerStillQuiesces() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(15));
+        register(ledger, record, request().toString());
+        var transaction = transaction(
+            mailbox,
+            ledger,
+            new CompletableFuture<>(),
+            record.id(),
+            new TestResource()
+        );
+        var activeInterval = ledger.whenQuiescent().toCompletableFuture();
+        Assertions.assertFalse(activeInterval.isDone());
+
+        transaction.fail(new IllegalStateException("actor failed"));
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+        Assertions.assertEquals(0, record.commits.get());
+        activeInterval.join();
+        Assertions.assertTrue(
+            ledger.unresolvedObligations().toCompletableFuture().join().isEmpty(),
+            "a failed transaction must not leave orphaned record obligations"
+        );
+    }
+
+    @Test
+    void dynamicallyOwnedResourcesCloseAtTerminationAndLateResourcesCloseImmediately() {
+        var mailbox = new QueuedMailbox();
+        var transaction = new ReplayTransaction<String>(
+            request(),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            new RecordDispositionLedger(Runnable::run),
+            List.of(),
+            List.of()
+        );
+        var dynamicResource = new TestResource();
+
+        transaction.ownResource(dynamicResource);
+        transaction.settleSource(new SourceOutcome.Interrupted("rebalance"));
+        transaction.settleTarget(new TargetOutcome.Cancelled<>(new CancellationException("rebalance")));
+        mailbox.runUntilIdle();
+
+        transaction.completion().toCompletableFuture().join();
+        Assertions.assertEquals(1, dynamicResource.closes);
+
+        var lateResource = new TestResource();
+        var lateAcknowledgement = transaction.ownResource(lateResource).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(lateAcknowledgement.isCompletedExceptionally());
+        Assertions.assertEquals(1, lateResource.closes);
     }
 
     private static ReplayTransaction<String> transaction(
@@ -475,6 +682,7 @@ class ReplayTransactionTest {
         private final KafkaRecordId id;
         private final AtomicInteger contextCloses = new AtomicInteger();
         private final AtomicInteger commits = new AtomicInteger();
+        private final AtomicInteger releasesWithoutCommit = new AtomicInteger();
         private CompletableFuture<Void> commitCompletion = CompletableFuture.completedFuture(null);
 
         private TestRecordHandle(KafkaRecordId id) {
@@ -498,7 +706,7 @@ class ReplayTransactionTest {
 
         @Override
         public void releaseWithoutCommit() {
-            // Test handles have no source-owned parent context.
+            releasesWithoutCommit.incrementAndGet();
         }
 
         @Override
@@ -511,9 +719,13 @@ class ReplayTransactionTest {
     private static final class QueuedMailbox implements ActorMailbox {
         private final Queue<Runnable> tasks = new ArrayDeque<>();
         private boolean running;
+        private boolean rejectNewTasks;
 
         @Override
         public void execute(Runnable command) {
+            if (rejectNewTasks) {
+                throw new java.util.concurrent.RejectedExecutionException("mailbox rejected task");
+            }
             tasks.add(command);
         }
 
@@ -541,6 +753,10 @@ class ReplayTransactionTest {
                     running = false;
                 }
             }
+        }
+
+        void rejectNewTasks() {
+            rejectNewTasks = true;
         }
     }
 }

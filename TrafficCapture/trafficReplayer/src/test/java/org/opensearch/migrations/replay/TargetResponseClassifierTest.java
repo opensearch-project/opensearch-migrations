@@ -7,6 +7,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
@@ -121,7 +122,7 @@ class TargetResponseClassifierTest {
             .addResponsePacket(responseBytes)
             .build();
         var summary = new TransformedTargetRequestAndResponseList(
-            requestPackets,
+            new DiagnosticPayload(requestPackets),
             HttpRequestTransformationStatus.completed(),
             aggregatedResponse
         );
@@ -182,7 +183,7 @@ class TargetResponseClassifierTest {
 
         @Override
         public void close() {
-            summary.requestPackets.release();
+            summary.close();
         }
     }
 }
