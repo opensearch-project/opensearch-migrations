@@ -9,6 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -21,6 +22,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessi
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -226,6 +228,122 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     }
 
     @Test
+    void exchangePhasesAreSerializedOnTheSessionEventLoopAndClearedAfterAbort() throws Exception {
+        var metrics = new RecordingTargetExchangeMetrics();
+        var consume = new CompletableFuture<Void>();
+        var response = new CompletableFuture<AggregatedRawResponse>();
+        var retryDecision =
+            new CompletableFuture<RequestSenderOrchestrator.DeterminedTransformedResponse<String>>();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(30),
+            (session, context) -> new IPacketFinalizingConsumer<>() {
+                @Override
+                public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+                    nextRequestPacket.release();
+                    return new TextTrackedFuture<>(consume, "controlled packet write");
+                }
+
+                @Override
+                public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
+                    return new TextTrackedFuture<>(response, "controlled target response");
+                }
+            },
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            metrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("phase-state", 0);
+        var now = Instant.now();
+        var request = orchestrator.scheduleRequestLifecycle(
+            context.getReplayerRequestKey(),
+            context,
+            now.minusSeconds(1),
+            now.minusMillis(1),
+            now,
+            permits,
+            () -> TextTrackedFuture.completedFuture(transformedRequest(), () -> "prepared request"),
+            transformed -> (requestBytes, targetResponse, failure) ->
+                new TextTrackedFuture<>(retryDecision, "controlled retry decision"),
+            status -> status.getClass().getSimpleName()
+        );
+
+        metrics.awaitPhase(TargetExchangeState.Phase.SENDING_REQUEST);
+        consume.complete(null);
+        metrics.awaitPhase(TargetExchangeState.Phase.WAITING_FOR_RESPONSE);
+        response.complete(new AggregatedRawResponse(null, 0, Duration.ZERO, null, null));
+        metrics.awaitPhase(TargetExchangeState.Phase.EVALUATING_RETRY);
+        retryDecision.complete(
+            new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                RequestSenderOrchestrator.RetryDirective.RETRY,
+                "retry"
+            )
+        );
+        metrics.awaitPhase(TargetExchangeState.Phase.RETRY_DELAY);
+
+        orchestrator.abortActor(
+            context.getChannelKeyContext(),
+            0,
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("source reassigned")
+        ).get(Duration.ofSeconds(5));
+        metrics.awaitNoActivePhase();
+
+        Assertions.assertTrue(request.future.isCompletedExceptionally());
+        Assertions.assertTrue(metrics.onlyOwnerThreadCallbacks());
+        Assertions.assertEquals(
+            List.of(
+                TargetExchangeState.Phase.STARTING_ATTEMPT,
+                TargetExchangeState.Phase.SENDING_REQUEST,
+                TargetExchangeState.Phase.WAITING_FOR_RESPONSE,
+                TargetExchangeState.Phase.EVALUATING_RETRY,
+                TargetExchangeState.Phase.RETRY_DELAY,
+                TargetExchangeState.Phase.ABORTING
+            ),
+            metrics.enteredPhases()
+        );
+    }
+
+    @Test
+    void synchronouslyCompletedExchangeClearsItsPhase() throws Exception {
+        var metrics = new RecordingTargetExchangeMetrics();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> new ImmediatePacketConsumer(
+                context.getReplayerRequestKey().getReplayerRequestIndex()
+            ),
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            metrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("synchronous-phase-state", 0);
+
+        var result = schedule(
+            context,
+            permits,
+            CompletableFuture.completedFuture(transformedRequest())
+        ).get(Duration.ofSeconds(5));
+
+        metrics.awaitEnteredPhaseCount(4);
+        metrics.awaitNoActivePhase();
+        Assertions.assertEquals("sent", result);
+        Assertions.assertTrue(metrics.onlyOwnerThreadCallbacks());
+        Assertions.assertEquals(
+            List.of(
+                TargetExchangeState.Phase.STARTING_ATTEMPT,
+                TargetExchangeState.Phase.SENDING_REQUEST,
+                TargetExchangeState.Phase.WAITING_FOR_RESPONSE,
+                TargetExchangeState.Phase.EVALUATING_RETRY
+            ),
+            metrics.enteredPhases()
+        );
+        closeActor(context);
+    }
+
+    @Test
     void filteredPreparationReleasesPermitWithoutOpeningTargetExchange() throws Exception {
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("filtered", 0);
@@ -408,6 +526,54 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ),
             index
         );
+    }
+
+    private static void await(BooleanSupplier condition) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        Assertions.assertTrue(condition.getAsBoolean(), "condition did not become true before timeout");
+    }
+
+    private static final class RecordingTargetExchangeMetrics implements TargetExchangeState.Metrics {
+        private final List<TargetExchangeState.Phase> enteredPhases = new CopyOnWriteArrayList<>();
+        private final AtomicReference<TargetExchangeState.Phase> activePhase = new AtomicReference<>();
+        private final List<Boolean> ownerThreadCallbacks = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void phaseChanged(TargetExchangeState.Phase phase, int delta) {
+            ownerThreadCallbacks.add(Thread.currentThread().getName().startsWith("actor-lifecycle-test"));
+            if (delta > 0) {
+                Assertions.assertTrue(activePhase.compareAndSet(null, phase));
+                enteredPhases.add(phase);
+            } else {
+                Assertions.assertTrue(activePhase.compareAndSet(phase, null));
+            }
+        }
+
+        @Override
+        public void channelStateChanged(TargetExchangeState.ChannelState state, int delta) {}
+
+        void awaitPhase(TargetExchangeState.Phase phase) throws InterruptedException {
+            await(() -> activePhase.get() == phase);
+        }
+
+        void awaitNoActivePhase() throws InterruptedException {
+            await(() -> activePhase.get() == null);
+        }
+
+        void awaitEnteredPhaseCount(int count) throws InterruptedException {
+            await(() -> enteredPhases.size() == count);
+        }
+
+        boolean onlyOwnerThreadCallbacks() {
+            return !ownerThreadCallbacks.isEmpty() && ownerThreadCallbacks.stream().allMatch(Boolean::booleanValue);
+        }
+
+        List<TargetExchangeState.Phase> enteredPhases() {
+            return List.copyOf(enteredPhases);
+        }
     }
 
     private final class ImmediatePacketConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {

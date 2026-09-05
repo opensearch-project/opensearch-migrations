@@ -6,6 +6,7 @@ import java.util.function.BiFunction;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -32,6 +33,7 @@ public class ClientConnectionPool {
         channelCreator;
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
+    private final TargetExchangeState.Metrics metrics;
 
     @EqualsAndHashCode
     @AllArgsConstructor
@@ -54,7 +56,17 @@ public class ClientConnectionPool {
         @NonNull String targetConnectionPoolName,
         int numThreads
     ) {
+        this(channelCreator, targetConnectionPoolName, numThreads, TargetExchangeState.Metrics.NOOP);
+    }
+
+    public ClientConnectionPool(
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelCreator,
+        @NonNull String targetConnectionPoolName,
+        int numThreads,
+        @NonNull TargetExchangeState.Metrics metrics
+    ) {
         this.channelCreator = channelCreator;
+        this.metrics = metrics;
         this.eventLoopGroup = new NioEventLoopGroup(numThreads, new DefaultThreadFactory(targetConnectionPoolName));
 
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(CacheLoader.from(key -> {
@@ -82,7 +94,7 @@ public class ClientConnectionPool {
         // event loop that was tied to the original channel to bind all future channels to
         // the same event loop. That means that we don't have to worry about concurrent
         // accesses/changes to the OTHER value that we're storing within the cache.
-        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation);
+        return new ConnectionReplaySession(eventLoopGroup.next(), channelKeyCtx, channelCreator, generation, metrics);
     }
 
     @SneakyThrows
@@ -123,15 +135,16 @@ public class ClientConnectionPool {
         connectionId2ChannelCache.asMap().keySet().stream()
             .filter(key -> key.connectionId.equals(connectionId) && key.sessionNumber == sessionNumber)
             .toList()
-            .forEach(connectionId2ChannelCache::invalidate);
+            .forEach(this::retireAndInvalidate);
     }
 
     public void invalidateSession(String connectionId, int sessionNumber, int sourceGeneration) {
-        connectionId2ChannelCache.invalidate(getKey(connectionId, sessionNumber, sourceGeneration));
+        retireAndInvalidate(getKey(connectionId, sessionNumber, sourceGeneration));
     }
 
     public CompletableFuture<Void> shutdownNow() {
         log.atInfo().setMessage("Shutting down ClientConnectionPool").log();
+        connectionId2ChannelCache.asMap().values().forEach(ConnectionReplaySession::retireMetrics);
         var rval = NettyFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
         connectionId2ChannelCache.invalidateAll();
         return rval;
@@ -152,6 +165,7 @@ public class ClientConnectionPool {
                     .addArgument(channelFuture::channel)
                     .addArgument(session::getChannelKeyContext)
                     .log();
+                session.markChannelClosing(channelFuture);
 
                 return NettyFutureBinders.bindNettyFutureToTrackableFuture(
                         channelFuture.channel().close(), "calling channel.close()")
@@ -163,5 +177,13 @@ public class ClientConnectionPool {
                         return channelFuture.channel();
                     }, () -> "clearing work");
             }, () -> "composing close through retrieved channel from the session");
+    }
+
+    private void retireAndInvalidate(Key key) {
+        var session = connectionId2ChannelCache.getIfPresent(key);
+        if (session != null) {
+            session.retireMetrics();
+        }
+        connectionId2ChannelCache.invalidate(key);
     }
 }

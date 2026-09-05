@@ -28,6 +28,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -167,7 +168,13 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     public static ClientConnectionPool
     makeNettyPacketConsumerConnectionPool(URI serverUri, boolean allowInsecureConnections, int numSendingThreads) {
-        return makeNettyPacketConsumerConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
+        return makeNettyPacketConsumerConnectionPool(
+            serverUri,
+            allowInsecureConnections,
+            numSendingThreads,
+            null,
+            TargetExchangeState.Metrics.NOOP
+        );
     }
 
     public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
@@ -176,13 +183,30 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         int numSendingThreads,
         String connectionPoolName
     ) {
+        return makeNettyPacketConsumerConnectionPool(
+            serverUri,
+            allowInsecureConnections,
+            numSendingThreads,
+            connectionPoolName,
+            TargetExchangeState.Metrics.NOOP
+        );
+    }
+
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
+        URI serverUri,
+        boolean allowInsecureConnections,
+        int numSendingThreads,
+        String connectionPoolName,
+        TargetExchangeState.Metrics metrics
+    ) {
         return new ClientConnectionPool(
             NettyPacketToHttpConsumer.createClientConnectionFactory(
                 loadSslContext(serverUri, allowInsecureConnections), serverUri),
             connectionPoolName != null
                 ? connectionPoolName
                 : getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
-            numSendingThreads
+            numSendingThreads,
+            metrics
         );
     }
 
@@ -263,7 +287,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
             trafficSource::acknowledgeSessionTermination,
-            topLevelContext.getConnectionActorMetrics()
+            topLevelContext.getConnectionActorMetrics(),
+            topLevelContext.getTargetExchangeStateMetrics()
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
         var progressController = new ReplayProgressController(intakeMailbox, readGate);
