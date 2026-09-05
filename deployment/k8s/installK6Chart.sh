@@ -3,14 +3,14 @@
 # installK6Chart.sh — install or uninstall the standalone k6 load-test chart (operator + scenarios
 # + RBAC).
 #
-# The single implementation, used by deployCdcLoadTestConfig.sh and by the test automation runner
-# (libraries/testAutomation). It is deliberately separate from the migration assistant chart: a
-# normal migration deploy has no k6 operator, no scenarios and no RBAC, and does not pay for them.
+# The single implementation, used by the examples/cdc-load-test helper and by the test automation
+# runner (libraries/testAutomation). It is deliberately separate from the migration assistant chart:
+# a normal migration deploy has no k6 operator, no scenarios and no RBAC, and does not pay for them.
 #
 # It owns the whole release lifecycle: a caller that tears the chart down comes through here too,
 # and never runs helm itself. A caller may still choose the release with --release (or K6_RELEASE),
 # but must then pass the SAME name to both commands. One that passes neither gets one default for
-# both, which is why deployCdcLoadTestConfig.sh names no release at all.
+# both, which is why the example helper names no release at all.
 #
 # Two images are resolved here, by different rules:
 #   runner  — stock grafana/k6. Only the REPOSITORY is chosen (to reach a mirror); the k6 version is

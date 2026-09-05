@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Validation + example runner for the k6 load-test scenarios against a running data plane
-# (bring it up first with deployment/k8s/deployCdcLoadTestConfig.sh up). Optionally submits a
-# k6 run, then asserts the capture-and-replay pipeline and the scenario's Prometheus metrics via
-# kubectl / PromQL. The runtime control plane (pause/resume/set-rate) is validated separately by
-# run_test_chaos.sh.
+# (bring it up first with deployment/k8s/examples/cdc-load-test/deployCdcLoadTestConfig.sh up).
+# Optionally submits a k6 run, then asserts the capture-and-replay pipeline and the scenario's
+# Prometheus metrics via kubectl / PromQL. The runtime control plane (pause/resume/set-rate) is
+# validated separately by run_test_chaos.sh.
 #
 # Usage:
 #   ./scripts/run_test.sh --scenario ingest --run

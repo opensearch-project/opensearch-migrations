@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deployCdcLoadTestConfig.sh — submit a CDC (capture-and-replay) load-test migration config to the
+# Example: submit a CDC (capture-and-replay) load-test migration config to the
 # migration console, wait for the resources it creates, and install the k6 load-test chart.
 #
 #     k6 / client → capture-proxy → source cluster                     (capture path)
@@ -14,8 +14,8 @@
 #
 # The topology lives entirely in the config, so any CDC setup is expressible without touching this
 # script — more proxies, more replayers, an S3 traffic source, an external Kafka. Edit
-# configs/cdcLoadTest.yaml, or pass your own with -f. Resource names are read back from the cluster,
-# never predicted here.
+# the adjacent cdcLoadTest.yaml, or pass your own with -f. Resource names are read back from the
+# cluster, never predicted here.
 #
 # Requires the control plane (Argo, Strimzi, cert-manager, migration console) and the source/target
 # clusters to be up already — run kindTesting.sh first.
@@ -46,7 +46,8 @@ NAMESPACE="${NAMESPACE:-ma}"
 CONSOLE_POD="${CONSOLE_POD:-migration-console-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/configs/cdcLoadTest.yaml}"
+K8S_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CONFIG_FILE="${CONFIG_FILE:-${SCRIPT_DIR}/cdcLoadTest.yaml}"
 
 # The workflow that `workflow submit` creates. Matches DEFAULT_WORKFLOW_NAME in the console CLI.
 WORKFLOW_NAME="${WORKFLOW_NAME:-migration-workflow}"
@@ -284,7 +285,7 @@ cmd_up() {
   wait_for_resources
 
   say "Install k6 load-test chart (operator + example TestRuns + RBAC)"
-  "$SCRIPT_DIR/installK6Chart.sh" install --context "$CONTEXT" --namespace "$NAMESPACE"
+  "$K8S_DIR/installK6Chart.sh" install --context "$CONTEXT" --namespace "$NAMESPACE"
 
   # Read the proxy name back from the cluster: the CaptureProxy CR is the thing that actually
   # published an endpoint. A `range` jsonpath gives an empty string for an empty list, where
@@ -368,7 +369,7 @@ cmd_down() {
   say "Uninstall k6 load-test chart (operator + example TestRuns + RBAC)"
   # Through the same script that installed it: it owns the release name, so the two directions
   # cannot drift.
-  "$SCRIPT_DIR/installK6Chart.sh" uninstall --context "$CONTEXT" --namespace "$NAMESPACE" \
+  "$K8S_DIR/installK6Chart.sh" uninstall --context "$CONTEXT" --namespace "$NAMESPACE" \
     || { warn "k6 chart uninstall failed (continuing)"; failed=1; }
 
   say "Delete the migration resources"

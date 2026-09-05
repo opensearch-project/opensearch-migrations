@@ -484,8 +484,9 @@ class TestRunner:
         """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC).
 
         The install itself lives in deployment/k8s/installK6Chart.sh, shared with
-        deployCdcLoadTestConfig.sh, so subchart vendoring and image resolution (mirror repository,
-        digest pins, the ECR flat-repo layout) have exactly one implementation.
+        the CDC load-test example helper, so subchart vendoring and image resolution
+        (mirror repository, digest pins, the ECR flat-repo layout) have exactly one
+        implementation.
         """
         cmd = self._k6_chart_cmd("install") + ["--chart", self.k6_chart_path]
         if self.registry_prefix:
