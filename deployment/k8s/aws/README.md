@@ -9,6 +9,11 @@ For a high-level overview of all Kubernetes deployment options see the
 [K8s README](../README.md). For broader Migration Assistant documentation
 see the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
 
+To provision equivalent EKS infrastructure without CloudFormation, use the
+additive [AWS Terraform module](../../terraform/aws/README.md). The Terraform
+module leaves this CloudFormation workflow intact and can optionally install the
+same Helm chart directly.
+
 ## What you get
 
 A single command:

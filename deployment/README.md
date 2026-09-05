@@ -12,7 +12,10 @@ Detailed instructions for deploying the CDK and setting up its prerequisites can
 Current and future development of the Migration Assistant is built upon Kubernetes (K8s).  
 See the [user guide](https://github.com/opensearch-project/opensearch-migrations/wiki) for instructions 
 to install Migration Assistant into EKS.  
-More information to deploy in a development environment can be found [here](./k8s/aws/README.md)
+Use the additive [AWS Terraform module](./terraform/aws/README.md) to provision
+the EKS infrastructure without CloudFormation, or see the existing
+[AWS Kubernetes deployment](./k8s/aws/README.md) for the CloudFormation/bootstrap
+workflow.
 
 ### Deploying the Migration Assistant (GKE) Solution
 
@@ -30,4 +33,3 @@ Kubernetes quick start.
 
 A containerized end-to-end solution (including a source and target cluster as well as the migration services) can be deployed locally using the
 [Docker Solution](../TrafficCapture/dockerSolution/README.md).
-

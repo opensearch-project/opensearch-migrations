@@ -63,7 +63,9 @@ Run `kindTesting.sh` first — it expects the control plane and clusters to exis
 ### EKS
 
 If you're looking to use EKS as your Kubernetes cluster, follow the
-[instructions here](aws/README.md).
+[AWS deployment instructions](aws/README.md). You can provision the underlying
+EKS Auto Mode infrastructure with either the existing CloudFormation workflow or
+the additive [AWS Terraform module](../terraform/aws/README.md).
 
 ### GKE
 
