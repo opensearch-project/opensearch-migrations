@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
 import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
@@ -43,6 +44,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 class KafkaStructuralExpirationTest extends InstrumentationTest {
     private static final String TOPIC = "traffic";
@@ -94,6 +98,58 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
             assertEquals(RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD, expiredStatus.get());
             assertEquals(RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD, closeStatus.get());
             assertEquals(1, accumulator.numberOfConnectionsExpired());
+        }
+    }
+
+    @Test
+    void mismatchedGenerationCompletionCannotEraseCurrentStructuralExpirationState() throws Exception {
+        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        try (var source = source(mockConsumer, clock)) {
+            scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
+            var traffic = assertInstanceOf(
+                ITrafficStreamWithKey.class,
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .get(0)
+            );
+            var currentKey = traffic.getKey();
+            var staleKey = mock(
+                ITrafficStreamKey.class,
+                withSettings().extraInterfaces(KafkaCommitOffsetData.class)
+            );
+            when(staleKey.getNodeId()).thenReturn(NODE);
+            when(staleKey.getConnectionId()).thenReturn(CONNECTION);
+            when(((KafkaCommitOffsetData) staleKey).getPartition()).thenReturn(PARTITION.partition());
+            when(((KafkaCommitOffsetData) staleKey).getGeneration())
+                .thenReturn(currentKey.getSourceGeneration() - 1);
+
+            source.onConnectionAccumulationComplete(staleKey);
+
+            assertTrue(
+                source.partitionToActiveConnections.get(PARTITION.partition())
+                    .contains(new ScopedConnectionIdKey(NODE, CONNECTION)),
+                "another generation must not remove the current connection"
+            );
+
+            addRecord(mockConsumer, snapshotRecord(1, 10));
+            addRecord(mockConsumer, snapshotRecord(2, 11));
+            mockConsumer.updateEndOffsets(Map.of(PARTITION, 3L));
+            clock.advance(Duration.ofSeconds(2));
+            touch(source);
+
+            assertTrue(source.hasPendingSourceControl());
+            var confirmedDead = assertInstanceOf(
+                SourceControlEvent.ConfirmedDead.class,
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .get(0)
+            );
+            assertEquals(currentKey.getSourceGeneration(), confirmedDead.evidence().partition().sourceGeneration());
+
+            source.onConnectionAccumulationComplete(currentKey);
+            currentKey.getTrafficStreamsContext().close();
+            source.releaseTrafficStreamWithoutCommit(currentKey);
         }
     }
 

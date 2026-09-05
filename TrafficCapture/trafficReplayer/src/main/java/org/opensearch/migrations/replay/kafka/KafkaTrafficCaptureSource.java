@@ -150,6 +150,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     /** Active connections per Kafka partition. Entries removed when connections are closed */
     final ConcurrentHashMap<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections =
         new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<ScopedConnectionIdKey, SourcePartitionKey> activeConnectionSourcePartitions =
+        new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ScopedConnectionIdKey, ActiveConnectionScanState> activeConnectionScanStates =
         new ConcurrentHashMap<>();
     private final Set<SourceConnectionPartitionGenerationKey> pendingConfirmedDead =
@@ -237,10 +239,20 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             sourceControlQueue.removeIf(control ->
                 control.evidence().partition().equals(lostPartition)
             );
-            var active = partitionToActiveConnections.remove(partition);
+            var active = partitionToActiveConnections.get(partition);
             if (active == null) continue;
-            var batch = new ArrayList<TrafficSourceReaderInterruptedClose>();
+            var lostConnections = new ArrayList<ScopedConnectionIdKey>();
             for (var connKey : active) {
+                if (activeConnectionSourcePartitions.remove(connKey, lostPartition)) {
+                    active.remove(connKey);
+                    lostConnections.add(connKey);
+                }
+            }
+            if (active.isEmpty()) {
+                partitionToActiveConnections.remove(partition, active);
+            }
+            var batch = new ArrayList<TrafficSourceReaderInterruptedClose>();
+            for (var connKey : lostConnections) {
                 var ts = TrafficStream.newBuilder()
                     .setNodeId(connKey.nodeId).setConnectionId(connKey.connectionId)
                     .setNumberOfThisLastChunk(0).build();
@@ -374,19 +386,51 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
         var connKey = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
-        if (trafficStreamKey instanceof KafkaCommitOffsetData) {
-            var partition = ((KafkaCommitOffsetData) trafficStreamKey).getPartition();
+        var connection = new SourceConnectionKey(connKey.nodeId, connKey.connectionId);
+        if (trafficStreamKey instanceof KafkaCommitOffsetData kafkaKey) {
+            var completedPartition = new SourcePartitionKey(
+                trackingKafkaConsumer.topic,
+                kafkaKey.getPartition(),
+                kafkaKey.getGeneration()
+            );
+            var activePartition = activeConnectionSourcePartitions.get(connKey);
+            if (activePartition != null && !activePartition.equals(completedPartition)) {
+                log.atDebug()
+                    .setMessage("Ignoring stale accumulation completion for {} from {}; current source partition is {}")
+                    .addArgument(connection)
+                    .addArgument(completedPartition)
+                    .addArgument(activePartition)
+                    .log();
+                return;
+            }
+            activeConnectionSourcePartitions.remove(connKey, completedPartition);
+            var partition = kafkaKey.getPartition();
             var set = partitionToActiveConnections.get(partition);
             if (set != null) {
                 set.remove(connKey);
+                if (set.isEmpty()) {
+                    partitionToActiveConnections.remove(partition, set);
+                }
             }
+            activeConnectionScanStates.computeIfPresent(connKey, (ignored, existing) ->
+                existing.partition().equals(completedPartition) ? null : existing
+            );
+            pendingConfirmedDead.removeIf(key ->
+                key.connection().equals(connection)
+                    && key.partition() == completedPartition.partition()
+                    && key.sourceGeneration() == completedPartition.sourceGeneration()
+            );
+            sourceControlQueue.removeIf(control ->
+                control.evidence().connection().equals(connection)
+                    && control.evidence().partition().equals(completedPartition)
+            );
         } else {
             partitionToActiveConnections.values().forEach(set -> set.remove(connKey));
+            activeConnectionSourcePartitions.remove(connKey);
+            activeConnectionScanStates.remove(connKey);
+            pendingConfirmedDead.removeIf(key -> key.connection().equals(connection));
+            sourceControlQueue.removeIf(control -> control.evidence().connection().equals(connection));
         }
-        activeConnectionScanStates.remove(connKey);
-        pendingConfirmedDead.removeIf(key -> key.connection().equals(
-            new SourceConnectionKey(connKey.nodeId, connKey.connectionId)
-        ));
     }
 
     public static KafkaTrafficCaptureSource buildKafkaSource(
@@ -560,29 +604,46 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     // Track active connections per partition for synthetic close injection
                     var connKey = new ScopedConnectionIdKey(
                         ts.getNodeId(), ts.getConnectionId());
+                    var sourcePartition = new SourcePartitionKey(
+                        trackingKafkaConsumer.topic,
+                        offsetData.getPartition(),
+                        offsetData.getGeneration()
+                    );
+                    var previousSourcePartition = activeConnectionSourcePartitions.put(connKey, sourcePartition);
+                    if (previousSourcePartition != null
+                        && previousSourcePartition.partition() != sourcePartition.partition()) {
+                        var previousActiveSet = partitionToActiveConnections.get(previousSourcePartition.partition());
+                        if (previousActiveSet != null) {
+                            previousActiveSet.remove(connKey);
+                            if (previousActiveSet.isEmpty()) {
+                                partitionToActiveConnections.remove(
+                                    previousSourcePartition.partition(),
+                                    previousActiveSet
+                                );
+                            }
+                        }
+                    }
                     var activeSet = partitionToActiveConnections
                         .computeIfAbsent(offsetData.getPartition(),
                             p -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
-                    boolean isNewConnection = activeSet.add(connKey);
+                    activeSet.add(connKey);
+                    boolean isNewConnection = previousSourcePartition == null
+                        || !previousSourcePartition.equals(sourcePartition);
                     if (ts.hasPartition()) {
                         activeConnectionScanStates.compute(connKey, (ignored, previous) -> {
-                            var partition = new SourcePartitionKey(
-                                trackingKafkaConsumer.topic,
-                                offsetData.getPartition(),
-                                offsetData.getGeneration()
-                            );
                             if (previous != null
-                                && previous.partition().equals(partition)
+                                && previous.partition().equals(sourcePartition)
                                 && !previous.routingPlanId().equals(ts.getRoutingPlanId())) {
                                 throw new IllegalStateException(
                                     "Routing plan changed within connection " + connKey
                                 );
                             }
-                            var requirement = previous == null
-                                ? FollowUpRequirement.CONNECTION_TERMINATION
-                                : previous.requirement();
+                            var requirement = previous != null
+                                && previous.partition().equals(sourcePartition)
+                                    ? previous.requirement()
+                                    : FollowUpRequirement.CONNECTION_TERMINATION;
                             return new ActiveConnectionScanState(
-                                partition,
+                                sourcePartition,
                                 ts.getRoutingPlanId(),
                                 offsetData.getOffset(),
                                 requirement
