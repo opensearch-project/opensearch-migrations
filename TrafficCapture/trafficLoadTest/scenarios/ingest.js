@@ -73,6 +73,7 @@ const SEQ_FRACTION    = parseFloat(CFG.SEQUENCE_FRACTION || '0.15');
 const BULK_FRACTION   = parseFloat(CFG.BULK_FRACTION     || '0.70');
 const CONNECTION_MODE     = CFG.CONNECTION_MODE           || 'pinned';
 const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const LATENCY_THRESHOLDS_ENABLED = (CFG.LATENCY_THRESHOLDS_ENABLED || 'true') === 'true';
 const EXECUTOR            = CFG.EXECUTOR                 || 'constant-arrival-rate';
 const RAMP_STAGES     = CFG.RAMP_STAGES
   ? JSON.parse(CFG.RAMP_STAGES)
@@ -113,12 +114,14 @@ export const options = {
     'http_req_failed':                       ['rate<0.05'],
     'ingest_errors':                         ['rate<0.05'],
     'ingest_sequence_errors':                ['rate<0.05'],
-    'http_req_duration{name:bulk_write}':    ['p(95)<3000'],
-    'http_req_duration{name:single_doc}':    ['p(95)<2000'],
-    'http_req_duration{name:seq_create}':    ['p(95)<2000'],
-    'http_req_duration{name:seq_update}':    ['p(95)<2000'],
-    'http_req_duration{name:seq_query}':     ['p(95)<2000'],
-    'http_req_duration{name:seq_delete}':    ['p(95)<2000'],
+    ...(LATENCY_THRESHOLDS_ENABLED ? {
+      'http_req_duration{name:bulk_write}':  ['p(95)<3000'],
+      'http_req_duration{name:single_doc}':  ['p(95)<2000'],
+      'http_req_duration{name:seq_create}':  ['p(95)<2000'],
+      'http_req_duration{name:seq_update}':  ['p(95)<2000'],
+      'http_req_duration{name:seq_query}':   ['p(95)<2000'],
+      'http_req_duration{name:seq_delete}':  ['p(95)<2000'],
+    } : {}),
   },
 };
 

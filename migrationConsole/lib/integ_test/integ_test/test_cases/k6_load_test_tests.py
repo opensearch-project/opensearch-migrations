@@ -14,6 +14,12 @@ is selected; the case is explicit-selection only so it never runs in a normal mi
 import logging
 import uuid
 
+import boto3
+from kubernetes import client
+from kubernetes.client.rest import ApiException
+
+from console_link.models.cluster import AuthMethod
+
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
     CDC_SOURCE_TARGET_COMBINATIONS, PROXY_ENDPOINT,
@@ -24,6 +30,60 @@ logger = logging.getLogger(__name__)
 
 # The k6 ingest scenario writes the nyc_taxis schema to this index by default.
 K6_INDEX = "nyc_taxis"
+
+
+def _k6_auth_secret_data(source_cluster, session=None):
+    """Build runner-only environment from the source cluster's configured authentication."""
+    if source_cluster.auth_type == AuthMethod.NO_AUTH:
+        return {}
+    if source_cluster.auth_type == AuthMethod.BASIC_AUTH:
+        auth = source_cluster.get_basic_auth_details()
+        return {
+            "K6_AUTH_MODE": "basic",
+            "K6_AUTH_USERNAME": auth.username,
+            "K6_AUTH_PASSWORD": auth.password,
+        }
+    if source_cluster.auth_type != AuthMethod.SIGV4:
+        raise ValueError(f"Unsupported source authentication: {source_cluster.auth_type}")
+
+    session = session or boto3.Session()
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise RuntimeError("SigV4 source requires AWS credentials for the k6 runner")
+    frozen = credentials.get_frozen_credentials()
+    details = source_cluster.auth_details or {}
+    region = details.get("region") or session.region_name
+    if not region:
+        raise RuntimeError("SigV4 source requires an AWS region for the k6 runner")
+
+    data = {
+        "K6_AUTH_MODE": "sigv4",
+        "AWS_ACCESS_KEY_ID": frozen.access_key,
+        "AWS_SECRET_ACCESS_KEY": frozen.secret_key,
+        "AWS_REGION": region,
+        "SIGV4_SERVICE": details.get("service", "es"),
+        "SIGV4_SIGNING_ENDPOINT": source_cluster.endpoint,
+    }
+    if frozen.token:
+        data["AWS_SESSION_TOKEN"] = frozen.token
+    return data
+
+
+def _create_k6_auth_secret(namespace, name, data):
+    secret = client.V1Secret(
+        metadata=client.V1ObjectMeta(name=name, labels={"migration-test": "true"}),
+        string_data=data,
+        type="Opaque",
+    )
+    client.CoreV1Api().create_namespaced_secret(namespace=namespace, body=secret)
+
+
+def _delete_k6_auth_secret(namespace, name):
+    try:
+        client.CoreV1Api().delete_namespaced_secret(name=name, namespace=namespace)
+    except ApiException as e:
+        if e.status != 404:
+            raise
 
 
 class Test0080CdcK6LoadTest(MATestBase):
@@ -62,25 +122,44 @@ class Test0080CdcK6LoadTest(MATestBase):
         pass
 
     def _run_k6(self, namespace, target_url):
-        """Fire a short k6 ingest run at the proxy and wait for the workflow to finish."""
+        """Fire a short authenticated k6 ingest run and verify k6's own verdict."""
         # Imported inside the method so the case only depends on the k6 module when actually run.
+        from console_link.loadtest.health import HealthWatcher, format_health
         from console_link.loadtest.utils import load_k8s_config
         from console_link.loadtest.runs import (
             build_k6_parameters, submit_k6_run, wait_for_run, SUCCESS_PHASE,
         )
         load_k8s_config()
-        params = build_k6_parameters(
-            scenario="ingest", parallelism=self.K6_PARALLELISM, target_url=target_url,
-            duration=self.K6_DURATION, rate=self.K6_RATE,
-            extra_args="--no-thresholds",        # loaded test cluster may breach latency thresholds
-        )
-        name = submit_k6_run(namespace, params)
-        logger.info("Submitted k6 run %s against %s", name, target_url)
-        phase = wait_for_run(namespace, name, timeout=300, interval=5)
-        if phase != SUCCESS_PHASE:
-            raise AssertionError(f"k6 run {name} ended in phase '{phase}' "
-                                 f"(expected '{SUCCESS_PHASE}')")
-        logger.info("k6 run %s finished", name)
+        secret_name = f"k6-auth-{uuid.uuid4().hex[:12]}"
+        secret_data = _k6_auth_secret_data(self.source_cluster)
+        if secret_data:
+            _create_k6_auth_secret(namespace, secret_name, secret_data)
+
+        try:
+            params = build_k6_parameters(
+                scenario="ingest", parallelism=self.K6_PARALLELISM, target_url=target_url,
+                duration=self.K6_DURATION, rate=self.K6_RATE,
+                auth_secret_name=secret_name if secret_data else None,
+                # Keep request-error thresholds active while avoiding latency flakes on loaded CI.
+                overrides_text="LATENCY_THRESHOLDS_ENABLED=false",
+            )
+            name = submit_k6_run(namespace, params)
+            logger.info("Submitted k6 run %s against %s", name, target_url)
+            watcher = HealthWatcher(namespace, name)
+            phase = wait_for_run(
+                namespace, name, timeout=300, interval=5,
+                on_poll=lambda elapsed, _: logger.info("k6 %s", format_health(watcher.poll(elapsed))),
+            )
+            if phase != SUCCESS_PHASE:
+                raise AssertionError(f"k6 run {name} ended in phase '{phase}' "
+                                     f"(expected '{SUCCESS_PHASE}')")
+            verdict = watcher.verdict()
+            if verdict["failed_runners"] or verdict["thresholds_crossed"]:
+                raise AssertionError(f"k6 run {name} failed its request checks: {verdict}")
+            logger.info("k6 run %s finished with verdict %s", name, verdict)
+        finally:
+            if secret_data:
+                _delete_k6_auth_secret(namespace, secret_name)
 
     def workflow_perform_migrations(self, timeout_seconds: int = 3600):
         if not self.workflow_name:

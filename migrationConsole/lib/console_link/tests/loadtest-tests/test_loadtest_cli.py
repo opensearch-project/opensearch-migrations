@@ -66,6 +66,7 @@ def _template(profile, scenario=None, env=None):
                 {"name": "parallelism", "value": "1"},
                 {"name": "separate", "value": "false"},
                 {"name": "arguments", "value": ""},
+                {"name": "authSecretName", "value": "k6-load-test-auth"},
                 {"name": "runnerImage", "value": "grafana/k6:2.2.0"},
                 {"name": "scriptsRef", "value": "migrations/k6_scripts:latest"},
             ] + [{"name": k, "value": v} for k, v in sorted(env.items())]},
@@ -367,6 +368,14 @@ class TestLoadTestRun:
         _runner().invoke(loadtest_cli, [
             "run", "--config", "mixed-steady", "--no-registry-enabled"], env=ENV)
         assert _env_map(mock_create.call_args.args[1])["REGISTRY_ENABLED"] == "false"
+
+    @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
+    def test_auth_secret_name_is_forwarded_without_secret_values(self, mock_create, cluster):
+        _runner().invoke(loadtest_cli, [
+            "run", "--auth-secret-name", "k6-source-auth"], env=ENV)
+        params = _submitted_parameters(mock_create.call_args.args[1])
+        assert params["authSecretName"] == "k6-source-auth"
+        assert not any(key.startswith("AWS_") or "PASSWORD" in key for key in params)
 
     @patch(f"{RUNS}.create_workflow", return_value="k6-ingest-xy")
     def test_extra_args_set_arguments(self, mock_create, cluster):
@@ -1220,6 +1229,19 @@ class TestRenderedChartMatchesTheValues:
                         for p in template["spec"]["arguments"]["parameters"]}
             actual = {k: v for k, v in defaults.items() if runs_mod.ENV_PARAM.fullmatch(k)}
             assert actual == expected, f"{name}: rendered settings differ from values.yaml"
+
+    def test_auth_secret_is_imported_without_exposing_its_values(self):
+        for name, template in sorted(self._rendered().items()):
+            defaults = {p["name"]: p.get("value", "")
+                        for p in template["spec"]["arguments"]["parameters"]}
+            manifest = template["spec"]["templates"][0]["resource"]["manifest"]
+            substituted = re.sub(r"\{\{workflow\.parameters\.([A-Za-z0-9_-]+)\}\}",
+                                 lambda m: defaults[m.group(1)], manifest)
+            substituted = substituted.replace("{{workflow.name}}", "a-run")
+            runner = yaml.safe_load(substituted)["spec"]["runner"]
+            assert runner["envFrom"] == [{
+                "secretRef": {"name": "k6-load-test-auth", "optional": True}
+            }], name
 
     def test_a_ramping_profile_renders_no_duration(self):
         """The specific regression: the stage list carries the timing, so DURATION must not exist —
