@@ -12,23 +12,21 @@
 # but must then pass the SAME name to both commands. One that passes neither gets one default for
 # both, which is why deployCdcLoadTestConfig.sh names no release at all.
 #
-# Two images are resolved here, by different rules:
-#   runner  — stock grafana/k6. Only the REPOSITORY is chosen (to reach a mirror); the k6 version is
-#             pinned once in the chart's values.yaml. Pass a `:tag` to override the version too.
-#   scripts — migrations/k6_scripts, the data image mounted at /scripts. It is a migrations/* image,
-#             so its default is derived from the registry the migration's own images came from.
+# The load-test-only migrations/k6_runner image contains the pinned k6 executable, its compiled
+# extensions, and the scenarios under /scripts. Its default is derived from the registry holding the
+# migration images.
 #
 # Usage:
 #   ./installK6Chart.sh [install|uninstall] [--context CTX] [--namespace ma]
 #                       [--release k6-load-test] [--chart PATH] [--runner-image REF]
-#                       [--scripts-image REF] [--registry-prefix PREFIX]
+#                       [--registry-prefix PREFIX]
 #
 #   The command is optional and defaults to `install`. `uninstall` takes --context, --namespace and
 #   --release; the image and chart options are an error there, because they would say nothing about
 #   the release to remove. An absent release is not an error — uninstall is safe to run on a
 #   namespace that never had the chart.
 #
-#   --scripts-image    complete reference; wins over --registry-prefix. Accepts repo:tag and
+#   --runner-image     complete reference; wins over --registry-prefix. Accepts repo:tag and
 #                      repo@sha256:... (a digest pins exact content and wins over the tag).
 #   --registry-prefix  where the migration images live, e.g. "localhost:5001/". Omit it and the
 #                      prefix is read from the migration-image-config ConfigMap in the namespace.
@@ -40,13 +38,12 @@ CONTEXT="${CONTEXT:-$(kubectl config current-context)}"
 NAMESPACE="${NAMESPACE:-ma}"
 RELEASE="${K6_RELEASE:-k6-load-test}"
 CHART="${K6_CHART:-${SCRIPT_DIR}/charts/components/k6LoadTest}"
-RUNNER_IMAGE="${K6_IMAGE:-mirror.gcr.io/grafana/k6}"
-SCRIPTS_IMAGE="${K6_SCRIPTS_IMAGE:-}"
+RUNNER_IMAGE="${K6_IMAGE:-}"
 REGISTRY_PREFIX="${REGISTRY_PREFIX:-}"
 
 # ECR flattens every image into ONE repository and distinguishes them by tag
-# (<repo>:migrations_k6_scripts_latest). Every other registry keeps the <prefix>migrations/<image>
-# layout. The scripts-image default branches on this.
+# (<repo>:migrations_k6_runner_latest). Every other registry keeps the <prefix>migrations/<image>
+# layout. The runner-image default branches on this.
 ECR_PATTERN='^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/'
 
 die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -58,7 +55,7 @@ COMMAND=install
 
 # Flags that say nothing about an uninstall. A flag is an explicit statement about THIS command, so
 # an irrelevant one is a mistake worth reporting. The matching environment variables stay ignored:
-# they are ambient, and a developer with K6_SCRIPTS_IMAGE exported must still be able to tear down.
+# they are ambient, and a developer with K6_IMAGE exported must still be able to tear down.
 INSTALL_ONLY=()
 
 while [[ $# -gt 0 ]]; do
@@ -68,7 +65,6 @@ while [[ $# -gt 0 ]]; do
     --release)         RELEASE="$2"; shift 2 ;;
     --chart)           CHART="$2";           INSTALL_ONLY+=("$1"); shift 2 ;;
     --runner-image)    RUNNER_IMAGE="$2";    INSTALL_ONLY+=("$1"); shift 2 ;;
-    --scripts-image)   SCRIPTS_IMAGE="$2";   INSTALL_ONLY+=("$1"); shift 2 ;;
     --registry-prefix) REGISTRY_PREFIX="$2"; INSTALL_ONLY+=("$1"); shift 2 ;;
     -h|--help)         sed -n '2,/^[^#]/p' "$0"; exit 0 ;;
     *)                 die "unknown option '$1'" ;;
@@ -111,24 +107,17 @@ derive_registry_prefix() {
 cmd_install() {
   [[ -d "$CHART" ]] || die "chart not found: $CHART"
 
-  # Resolve the runner image. Repository only unless the caller spelled out a tag — the chart owns
-  # the k6 version.
-  local runner_repo="$RUNNER_IMAGE" runner_tag=""
-  if [[ "${RUNNER_IMAGE##*/}" == *:* ]]; then
-    runner_repo="${RUNNER_IMAGE%:*}"; runner_tag="${RUNNER_IMAGE##*:}"
-  fi
-
-  # Resolve the scripts image.
-  if [[ -z "$SCRIPTS_IMAGE" ]]; then
+  # Resolve the combined runner image.
+  if [[ -z "$RUNNER_IMAGE" ]]; then
     [[ -n "$REGISTRY_PREFIX" ]] || REGISTRY_PREFIX="$(derive_registry_prefix)"
     if [[ "$REGISTRY_PREFIX" =~ $ECR_PATTERN ]]; then
-      SCRIPTS_IMAGE="${REGISTRY_PREFIX%/}:migrations_k6_scripts_latest"
+      RUNNER_IMAGE="${REGISTRY_PREFIX%/}:migrations_k6_runner_latest"
     else
-      SCRIPTS_IMAGE="${REGISTRY_PREFIX}migrations/k6_scripts:latest"
+      RUNNER_IMAGE="${REGISTRY_PREFIX}migrations/k6_runner:latest"
     fi
   fi
-  split_ref "$SCRIPTS_IMAGE"
-  local scripts_repo="$ref_repo" scripts_tag="$ref_tag" scripts_digest="$ref_digest"
+  split_ref "$RUNNER_IMAGE"
+  local runner_repo="$ref_repo" runner_tag="$ref_tag" runner_digest="$ref_digest"
 
   helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1
   # Vendor the k6-operator subchart
@@ -136,23 +125,21 @@ cmd_install() {
     || helm dependency update "$CHART" >/dev/null 2>&1 \
     || die "helm dependency build failed for $CHART"
 
-  # Always re-pull the scripts image: it is rebuilt in place under a moving tag while iterating on
+  # Always re-pull the runner image: it is rebuilt in place under a moving tag while iterating on
   # scenarios, so IfNotPresent would pin runner pods to whatever the node cached first. A digest
   # reference is immutable, so it needs no such treatment — but Always costs nothing there either.
   helm --kube-context "$CONTEXT" upgrade --install "$RELEASE" "$CHART" -n "$NAMESPACE" --create-namespace \
-    --set image.repository="$runner_repo" ${runner_tag:+--set image.tag="$runner_tag"} \
-    --set image.pullPolicy=IfNotPresent \
-    --set scriptsImage.repository="$scripts_repo" \
-    ${scripts_digest:+--set scriptsImage.digest="$scripts_digest"} \
-    ${scripts_tag:+--set scriptsImage.tag="$scripts_tag"} \
-    --set scriptsImage.pullPolicy=Always \
+    --set image.repository="$runner_repo" \
+    ${runner_digest:+--set image.digest="$runner_digest"} \
+    ${runner_tag:+--set image.tag="$runner_tag"} \
+    --set image.pullPolicy=Always \
     --timeout 300s 2>&1 | sed 's/^/  /'
 
   kubectl --context "$CONTEXT" -n "$NAMESPACE" rollout status deploy \
     -l app.kubernetes.io/name=k6-operator --timeout=180s 2>&1 | tail -1 | sed 's/^/  /'
 
-  printf '  \033[1;32m✓\033[0m k6 chart installed (release: %s, runner: %s, scripts: %s)\n' \
-    "$RELEASE" "$RUNNER_IMAGE" "$SCRIPTS_IMAGE"
+  printf '  \033[1;32m✓\033[0m k6 chart installed (release: %s, runner: %s)\n' \
+    "$RELEASE" "$RUNNER_IMAGE"
 }
 
 # ── Uninstall ──────────────────────────────────────────────────────────────────

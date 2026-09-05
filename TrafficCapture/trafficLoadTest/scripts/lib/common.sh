@@ -82,22 +82,17 @@ header() { echo -e "\n${BOLD}$1${NC}"; }
 
 # ── k6 runs (console-independent, via k6-run.sh + kubectl) ─────────────────────
 # The scripts call these with console-style flags, passed straight through to k6-run.sh. Supported:
-#   --scenario X  --config NAME  --parallelism N  --registry-enabled  --extra-args STR  -e KEY=VAL
+#   --scenario X  --config NAME  --parallelism N  --auth-secret-name NAME
+#   --registry-enabled  --extra-args STR  -e KEY=VAL
 submit_k6() {
   # Submit a k6 run WITHOUT waiting; echo the generated run name.
-  local scenario="" config="" parallelism="" extra=""; local -a extra_env=()
-  # The proxy forwards to the source without adding credentials, so runs submitted from here carry
-  # the same ones the probes use. Harmless against a cluster with security disabled — it simply
-  # ignores the header — so this needs no auth/no-auth switch. A caller passing its own
-  # -e AUTH_USERNAME still wins, since later -e entries override earlier ones.
-  if [[ -n "$CLUSTER_USERNAME" ]]; then
-    extra_env+=(-e "AUTH_USERNAME=$CLUSTER_USERNAME" -e "AUTH_PASSWORD=$CLUSTER_PASSWORD")
-  fi
+  local scenario="" config="" parallelism="" auth_secret="" extra=""; local -a extra_env=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scenario) scenario="$2"; shift ;;
       --config) config="$2"; shift ;;
       --parallelism) parallelism="$2"; shift ;;
+      --auth-secret-name) auth_secret="$2"; shift ;;
       --registry-enabled) extra_env+=(-e REGISTRY_ENABLED=true) ;;
       --extra-args) extra="$2"; shift ;;
       -e) extra_env+=(-e "$2"); shift ;;
@@ -105,9 +100,16 @@ submit_k6() {
     esac
     shift
   done
+  # The proxy forwards to the source without adding credentials, so runs submitted without an auth
+  # Secret carry the same Basic credentials the probes use. A caller passing its own
+  # -e AUTH_USERNAME still wins, since later -e entries override earlier ones.
+  if [[ -z "$auth_secret" && -n "$CLUSTER_USERNAME" ]]; then
+    extra_env=(-e "AUTH_USERNAME=$CLUSTER_USERNAME" -e "AUTH_PASSWORD=$CLUSTER_PASSWORD" "${extra_env[@]}")
+  fi
   local -a args=("$scenario" --target "$PROXY_URL")
   [[ -n "$config" ]] && args+=(--config "$config")
   [[ -n "$parallelism" ]] && args+=(--parallelism "$parallelism")
+  [[ -n "$auth_secret" ]] && args+=(--auth-secret-name "$auth_secret")
   [[ -n "$extra" ]] && args+=(--extra-args "$extra")
   [[ ${#extra_env[@]} -gt 0 ]] && args+=("${extra_env[@]}")
   CONTEXT="$CONTEXT" NAMESPACE="$NAMESPACE" bash "$K6_RUN" "${args[@]}"
@@ -146,13 +148,11 @@ k6_active_count() {
     | grep -cvE 'Succeeded|Failed|Error' || true
 }
 
-# ── Webdis (chaos / consistency control bus) ───────────────────────────────────
-# Values with ':' must be URL-encoded (e.g. "set-rate:10" -> "set-rate%3A10").
-webdis_set() { kcurl -sf "http://webdis:7379/SET/${1}/${2}" >/dev/null; }
-webdis_get() {
-  kcurl -sf "http://webdis:7379/GET/${1}" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('GET') or '')" 2>/dev/null || true
-}
+# ── Valkey (chaos / consistency control bus) ──────────────────────────────────
+# valkey-cli is already present in the chart's Valkey container, so host-side validation can drive
+# the control bus without a permanent HTTP proxy or another client image.
+valkey_set() { K exec deploy/valkey -- valkey-cli SET "$1" "$2" >/dev/null; }
+valkey_get() { K exec deploy/valkey -- valkey-cli GET "$1" 2>/dev/null || true; }
 
 # ── Prometheus (kube-prometheus-stack, queried from the console pod) ────────────
 prom_query() {
@@ -269,8 +269,8 @@ check_workload_health() {
 }
 
 # Plain Deployment availability by name. Used for workloads that are NOT workflow-owned and so keep
-# fixed names — redis and webdis, which the k6LoadTest chart deploys when registry.enabled=true.
-# Usage: check_service_health "(post-burst)" redis webdis
+# fixed names — currently Valkey, which the k6LoadTest chart deploys when registry.enabled=true.
+# Usage: check_service_health "(post-burst)" valkey
 check_service_health() {
   local label="${1:-}"; shift
   for d in "$@"; do

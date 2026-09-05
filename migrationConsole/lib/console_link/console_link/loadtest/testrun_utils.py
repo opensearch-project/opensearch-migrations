@@ -10,9 +10,9 @@ chart (deployment/k8s/charts/components/k6LoadTest). A WorkflowTemplate is inert
 so the chart can ship the definition as a real cluster object. Submitting is then a small Workflow
 naming the template plus the parameters that differ from its defaults.
 
-The scenarios and load-profile presets themselves are not in the cluster to be read: they are baked
-into a data image (migrations/k6_scripts, built from TrafficCapture/trafficLoadTest) that the
-WorkflowTemplate mounts at /scripts, so a run names them rather than supplying them.
+The scenarios and load-profile presets themselves are baked into the load-test-only
+migrations/k6_runner image with the pinned k6 executable and extensions, so a run names them rather
+than supplying them.
 """
 
 import logging

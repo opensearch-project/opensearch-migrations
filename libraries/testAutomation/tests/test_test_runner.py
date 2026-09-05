@@ -310,14 +310,13 @@ class TestLoadTestChartTeardown:
         """installK6Chart.sh rejects the image and chart options on an uninstall."""
         runner = self._runner()
         runner.registry_prefix = "1234.dkr.ecr.us-east-1.amazonaws.com/repo"
-        runner.k6_scripts_image = "repo:migrations_k6_scripts_latest"
-        runner.load_test_image = "mirror.gcr.io/grafana/k6"
+        runner.k6_runner_image = "repo:migrations_k6_runner_latest"
         with patch("test_runner.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             runner._uninstall_load_test_chart()
 
         cmd = set(mock_run.call_args.args[0])
-        assert not cmd & {"--chart", "--runner-image", "--scripts-image", "--registry-prefix"}
+        assert not cmd & {"--chart", "--runner-image", "--registry-prefix"}
 
     def test_k6_uninstall_failure_does_not_blame_the_ma_release(self):
         runner = self._runner()

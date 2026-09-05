@@ -30,9 +30,9 @@
  *   RAMP_STAGES        — JSON array of k6 stage objects when EXECUTOR=ramping-arrival-rate
  *                        e.g. '[{"duration":"2m","target":150},{"duration":"1m","target":0}]'
  *                        Omit to use a single hold-at-INGEST_RATE-for-DURATION stage.
- *   CONTROL_ENABLED    — "true" to enable mid-test pause/resume/rate control via Webdis;
+ *   CONTROL_ENABLED    — "true" to enable mid-test pause/resume/rate control via Valkey;
  *                        defaults to "false" (no-op). See lib/control.js.
- *   CONTROL_CMD_KEY    — Redis key polled for control commands (default: "control_cmd")
+ *   CONTROL_CMD_KEY    — Valkey key polled for control commands (default: "control_cmd")
  */
 
 import http from '../lib/http-client.js';
@@ -73,6 +73,7 @@ const SEQ_FRACTION    = parseFloat(CFG.SEQUENCE_FRACTION || '0.15');
 const BULK_FRACTION   = parseFloat(CFG.BULK_FRACTION     || '0.70');
 const CONNECTION_MODE     = CFG.CONNECTION_MODE           || 'pinned';
 const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const LATENCY_THRESHOLDS_ENABLED = (CFG.LATENCY_THRESHOLDS_ENABLED || 'true') === 'true';
 const EXECUTOR            = CFG.EXECUTOR                 || 'constant-arrival-rate';
 const RAMP_STAGES     = CFG.RAMP_STAGES
   ? JSON.parse(CFG.RAMP_STAGES)
@@ -113,12 +114,14 @@ export const options = {
     'http_req_failed':                       ['rate<0.05'],
     'ingest_errors':                         ['rate<0.05'],
     'ingest_sequence_errors':                ['rate<0.05'],
-    'http_req_duration{name:bulk_write}':    ['p(95)<3000'],
-    'http_req_duration{name:single_doc}':    ['p(95)<2000'],
-    'http_req_duration{name:seq_create}':    ['p(95)<2000'],
-    'http_req_duration{name:seq_update}':    ['p(95)<2000'],
-    'http_req_duration{name:seq_query}':     ['p(95)<2000'],
-    'http_req_duration{name:seq_delete}':    ['p(95)<2000'],
+    ...(LATENCY_THRESHOLDS_ENABLED ? {
+      'http_req_duration{name:bulk_write}':  ['p(95)<3000'],
+      'http_req_duration{name:single_doc}':  ['p(95)<2000'],
+      'http_req_duration{name:seq_create}':  ['p(95)<2000'],
+      'http_req_duration{name:seq_update}':  ['p(95)<2000'],
+      'http_req_duration{name:seq_query}':   ['p(95)<2000'],
+      'http_req_duration{name:seq_delete}':  ['p(95)<2000'],
+    } : {}),
   },
 };
 
@@ -143,8 +146,8 @@ export function setup() {
 
 // ── VU function ────────────────────────────────────────────────────────────
 // Dispatch: SEQ_FRACTION → sequence; remaining budget → BULK_FRACTION bulk / rest single-doc.
-export default function () {
-  if (!checkControl(RATE)) return;
+export default async function () {
+  if (!await checkControl(RATE)) return;
 
   const r = Math.random();
   if (r < SEQ_FRACTION) {
