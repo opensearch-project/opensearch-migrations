@@ -9,6 +9,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartition
 import lombok.Getter;
 import lombok.NonNull;
 
+@SuppressWarnings("java:S110") // The typed cause must remain a CancellationException for lifecycle propagation.
 public final class SourceRunwayLostException extends CancellationException {
     @Getter
     private final SourcePartitionKey partition;

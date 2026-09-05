@@ -699,9 +699,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         ConsumerRecords<String, byte[]> polled
     ) {
         var minimumReturned = new HashMap<TopicPartition, Long>();
-        for (var record : polled) {
-            var partition = new TopicPartition(record.topic(), record.partition());
-            minimumReturned.merge(partition, record.offset(), Math::min);
+        for (var consumerRecord : polled) {
+            var partition = new TopicPartition(consumerRecord.topic(), consumerRecord.partition());
+            minimumReturned.merge(partition, consumerRecord.offset(), Math::min);
         }
         var resetPartitions = minimumReturned.entrySet()
             .stream()
