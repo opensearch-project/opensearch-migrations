@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -211,7 +212,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final ReplayDispositionPolicy dispositionPolicy;
         private final RecordDispositionLedger dispositionLedger;
         private final SourceReconstructionPolicy sourceReconstructionPolicy;
-        private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new LinkedHashMap<>();
+        private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new ConcurrentHashMap<>();
 
         TrafficReplayerAccumulationCallbacks(
             ReplayEngine replayEngine,
@@ -285,7 +286,33 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
 
         SourcePartitionLifecycleListener sourcePartitionLifecycleListener() {
-            return dispositionLedger;
+            return SourcePartitionLifecycleListener.combine(
+                dispositionLedger,
+                new SourcePartitionLifecycleListener() {
+                    @Override
+                    public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {
+                        // The disposition ledger owns assignment state.
+                    }
+
+                    @Override
+                    public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
+                        var revoked = java.util.Set.copyOf(partitions);
+                        sessionPartitions.forEach((sessionKey, partition) -> {
+                            if (!revoked.contains(partition)) {
+                                return;
+                            }
+                            replayEngine.observeRunwayLost(
+                                sessionKey,
+                                ReplayTransaction.RunwayLossReason.SOURCE_REASSIGNMENT
+                            ).whenComplete((ignored, failure) -> {
+                                if (failure != null) {
+                                    failReplayForSessionLifecycle(sessionKey, unwrap(failure));
+                                }
+                            });
+                        });
+                    }
+                }
+            );
         }
 
         @Override
@@ -333,9 +360,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 dispositionPolicy,
                 dispositionLedger,
                 List.of(),
-                List.of(ctx)
+                List.of(ctx),
+                topLevelContext.getReplayTransactionMetrics()
             );
-            runtime.register(transaction.completion()).whenComplete((ignored, failure) -> {
+            runtime.register(transaction).whenComplete((ignored, failure) -> {
                 if (failure != null) {
                     transaction.fail(unwrap(failure));
                 }

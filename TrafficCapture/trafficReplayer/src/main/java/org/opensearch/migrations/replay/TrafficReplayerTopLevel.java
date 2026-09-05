@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -27,6 +28,7 @@ import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
@@ -600,13 +602,33 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             return shutdownFutureRef.get();
         }
         stopReadingRef.set(true);
+        var replayEngine = currentReplayEngine.get();
+        var runwayLossFuture = replayEngine == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : replayEngine.observeAllRunwaysLost(ReplayTransaction.RunwayLossReason.SHUTDOWN)
+                .toCompletableFuture();
         var permitPool = permitPoolRef.get();
         if (permitPool != null) {
             permitPool.close(new CancellationException("replay is shutting down"));
         }
 
-
-        var nettyShutdownFuture = clientConnectionPool.shutdownNow();
+        var nettyShutdownFuture = runwayLossFuture
+            .handle((ignored, runwayFailure) -> runwayFailure)
+            .thenCompose(runwayFailure ->
+                clientConnectionPool.shutdownNow()
+                    .handle((ignored, nettyFailure) -> {
+                        if (runwayFailure != null) {
+                            if (nettyFailure != null) {
+                                runwayFailure.addSuppressed(nettyFailure);
+                            }
+                            throw new CompletionException(runwayFailure);
+                        }
+                        if (nettyFailure != null) {
+                            throw new CompletionException(nettyFailure);
+                        }
+                        return null;
+                    })
+            );
         nettyShutdownFuture.whenComplete((v, t) -> {
             if (t != null) {
                 shutdownFutureRef.get().completeExceptionally(t);

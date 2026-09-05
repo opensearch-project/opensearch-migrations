@@ -18,10 +18,16 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
+import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
+import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -424,6 +430,63 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         );
         Assertions.assertEquals("disposition failed", error.getCause().getMessage());
         Assertions.assertFalse(acknowledgementStarted.isDone());
+    }
+
+    @Test
+    void globalRunwayLossReachesAnActorCreatedDuringShutdown() throws Exception {
+        orchestrator.observeAllRunwaysLost(ReplayTransaction.RunwayLossReason.SHUTDOWN)
+            .toCompletableFuture()
+            .get(5, TimeUnit.SECONDS);
+        var context = rootContext.getTestConnectionRequestContext("late-shutdown-actor", 0);
+        var runtime = orchestrator.transactionRuntime(
+            context.getReplayerRequestKey(),
+            context.getChannelKeyContext()
+        );
+        var runwayObserved = new CompletableFuture<ReplayTransaction.RunwayLossReason>();
+        var transaction = new ReplayTransaction<String>(
+            runtime.requestId(),
+            runtime.mailbox(),
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            new RecordDispositionLedger(Runnable::run),
+            List.of(),
+            List.of(),
+            new ReplayTransaction.Metrics() {
+                @Override
+                public void phaseChanged(ReplayTransaction.Phase phase, int delta) {}
+
+                @Override
+                public void runwayStateChanged(ReplayTransaction.RunwayState state, int delta) {}
+
+                @Override
+                public void runwayLost(ReplayTransaction.RunwayLossReason reason) {
+                    runwayObserved.complete(reason);
+                }
+
+                @Override
+                public void terminalOutcome(ReplayTransaction.TerminalOutcome outcome) {}
+
+                @Override
+                public void disposition(RecordDisposition disposition) {}
+            }
+        );
+
+        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        Assertions.assertEquals(
+            ReplayTransaction.RunwayLossReason.SHUTDOWN,
+            runwayObserved.get(5, TimeUnit.SECONDS)
+        );
+
+        transaction.settleSource(new SourceOutcome.Interrupted("shutdown"))
+            .toCompletableFuture()
+            .get(5, TimeUnit.SECONDS);
+        transaction.settleTarget(new TargetOutcome.Cancelled<>(new CancellationException("shutdown")))
+            .toCompletableFuture()
+            .get(5, TimeUnit.SECONDS);
+        transaction.completion().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        closeActor(context);
     }
 
     @Test

@@ -37,6 +37,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.PreparationOutc
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransactionRegistry;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -79,6 +80,8 @@ public class RequestSenderOrchestrator {
     private final ConnectionActor.Metrics actorMetrics;
     private final TargetExchangeState.Metrics targetExchangeMetrics;
     private final ConcurrentHashMap<ConnectionSessionKey, ActorRuntime> actorRuntimes = new ConcurrentHashMap<>();
+    private final AtomicReference<ReplayTransaction.RunwayLossReason> globalRunwayLossReason =
+        new AtomicReference<>();
 
     /**
      * Notice that the two arguments need to be in agreement with each other.  The clientConnectionPool will need to
@@ -1111,6 +1114,32 @@ public class RequestSenderOrchestrator {
         public CompletionStage<Void> register(CompletionStage<?> transactionCompletion) {
             return registry.register(requestId, transactionCompletion);
         }
+
+        public CompletionStage<Void> register(ReplayTransaction<?> transaction) {
+            return registry.register(requestId, transaction);
+        }
+    }
+
+    public CompletionStage<Void> observeRunwayLost(
+        @NonNull ConnectionSessionKey sessionKey,
+        @NonNull ReplayTransaction.RunwayLossReason reason
+    ) {
+        var runtime = actorRuntimes.get(sessionKey);
+        return runtime == null
+            ? CompletableFuture.completedFuture(null)
+            : runtime.transactions.observeRunwayLost(reason);
+    }
+
+    public CompletionStage<Void> observeAllRunwaysLost(
+        @NonNull ReplayTransaction.RunwayLossReason reason
+    ) {
+        globalRunwayLossReason.compareAndSet(null, reason);
+        var acceptedReason = globalRunwayLossReason.get();
+        var acknowledgements = actorRuntimes.values()
+            .stream()
+            .map(runtime -> runtime.transactions.observeRunwayLost(acceptedReason).toCompletableFuture())
+            .toArray(CompletableFuture[]::new);
+        return CompletableFuture.allOf(acknowledgements);
     }
 
     public TrackedFuture<String, SessionOutcome> scheduleActorClose(
@@ -1170,7 +1199,12 @@ public class RequestSenderOrchestrator {
         ConnectionSessionKey key,
         IReplayContexts.IChannelKeyContext channelContext
     ) {
-        return actorRuntimes.computeIfAbsent(key, ignored -> new ActorRuntime(key, channelContext));
+        var runtime = actorRuntimes.computeIfAbsent(key, ignored -> new ActorRuntime(key, channelContext));
+        var runwayLossReason = globalRunwayLossReason.get();
+        if (runwayLossReason != null) {
+            runtime.transactions.observeRunwayLost(runwayLossReason);
+        }
+        return runtime;
     }
 
     private static ReplayRequestId toReplayRequestId(UniqueReplayerRequestKey requestKey) {

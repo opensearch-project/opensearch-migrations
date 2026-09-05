@@ -22,6 +22,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final AsyncPermitPoolMetrics permitPoolMetrics;
     public final ConnectionActorMetrics connectionActorMetrics;
     public final TargetExchangeStateMetrics targetExchangeStateMetrics;
+    public final ReplayTransactionMetrics replayTransactionMetrics;
 
     public final TrafficSourceContexts.ReadChunkContext.MetricInstruments readChunkInstruments;
     public final TrafficSourceContexts.BackPressureBlockContext.MetricInstruments backPressureInstruments;
@@ -56,6 +57,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         permitPoolMetrics = new AsyncPermitPoolMetrics(meter);
         connectionActorMetrics = new ConnectionActorMetrics(meter);
         targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
+        replayTransactionMetrics = new ReplayTransactionMetrics(meter);
 
         readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
         backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);

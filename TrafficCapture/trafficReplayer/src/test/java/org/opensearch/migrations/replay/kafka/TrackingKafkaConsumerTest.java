@@ -247,6 +247,28 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    void runwayRevocationPrecedesSyntheticCloseGeneration() {
+        var consumer = buildConsumer(buildMockConsumer());
+        var partition = new TopicPartition(TOPIC, 0);
+        var callbackOrder = new ArrayList<String>();
+        consumer.setSourcePartitionLifecycleListener(new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
+                callbackOrder.add("runway-revoked");
+            }
+        });
+        consumer.setOnPartitionsTrulyLostCallback(ignored -> callbackOrder.add("synthetic-close"));
+        consumer.onPartitionsAssigned(List.of(partition));
+
+        consumer.onPartitionsRevoked(List.of(partition));
+
+        Assertions.assertEquals(List.of("runway-revoked", "synthetic-close"), callbackOrder);
+    }
+
+    @Test
     void backwardOffsetFencesTheOldGenerationBeforeRedelivery() {
         var mockConsumer = buildMockConsumer();
         var consumer = buildConsumer(mockConsumer);
