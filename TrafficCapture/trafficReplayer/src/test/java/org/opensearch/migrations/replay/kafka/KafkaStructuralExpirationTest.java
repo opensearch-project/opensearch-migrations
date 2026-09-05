@@ -19,12 +19,15 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
 import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
 import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -43,6 +46,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -54,6 +58,11 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
     private static final String CONNECTION = "connection";
     private static final String PLAN = "plan";
     private static final TopicPartition PARTITION = new TopicPartition(TOPIC, 0);
+
+    @Override
+    protected TestContext makeInstrumentationContext() {
+        return TestContext.withAllTracking();
+    }
 
     @Test
     void stampedPartialRequestSettlesOnlyAfterStructuralProof() throws Exception {
@@ -98,6 +107,40 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
             assertEquals(RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD, expiredStatus.get());
             assertEquals(RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD, closeStatus.get());
             assertEquals(1, accumulator.numberOfConnectionsExpired());
+            assertLivenessScanMetrics(
+                2,
+                IKafkaConsumerContexts.LivenessScanVerdict.CONFIRMED_ABSENT
+            );
+        }
+    }
+
+    @Test
+    void futureTrafficIsReportedAsALivenessFollowUp() throws Exception {
+        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        try (var source = source(mockConsumer, clock)) {
+            scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
+            var traffic = assertInstanceOf(
+                ITrafficStreamWithKey.class,
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .get(0)
+            );
+
+            addRecord(mockConsumer, trafficRecord(1, true));
+            mockConsumer.updateEndOffsets(Map.of(PARTITION, 2L));
+            clock.advance(Duration.ofSeconds(2));
+            touch(source);
+
+            assertFalse(source.hasPendingSourceControl());
+            assertLivenessScanMetrics(
+                1,
+                IKafkaConsumerContexts.LivenessScanVerdict.FOLLOW_UP_FOUND
+            );
+
+            source.onConnectionAccumulationComplete(traffic.getKey());
+            traffic.getKey().getTrafficStreamsContext().close();
+            source.releaseTrafficStreamWithoutCommit(traffic.getKey());
         }
     }
 
@@ -210,6 +253,64 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
             clock,
             new KafkaBehavioralPolicy()
         );
+    }
+
+    private void assertLivenessScanMetrics(
+        long recordsScanned,
+        IKafkaConsumerContexts.LivenessScanVerdict terminalVerdict
+    ) {
+        var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+        var scanCount = metrics.stream()
+            .filter(metric -> metric.getName().equals(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_COUNT))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(
+            2,
+            scanCount.getLongSumData().getPoints().stream().findFirst().orElseThrow().getValue()
+        );
+        var distance = metrics.stream()
+            .filter(metric -> metric.getName().equals(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_DISTANCE))
+            .findFirst()
+            .orElseThrow();
+        var distancePoint = distance.getHistogramData().getPoints().stream().findFirst().orElseThrow();
+        assertEquals(2, distancePoint.getCount());
+        assertEquals(recordsScanned, distancePoint.getSum());
+        var latency = metrics.stream()
+            .filter(metric -> metric.getName().equals(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_LATENCY))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(2, latency.getHistogramData().getPoints().stream().findFirst().orElseThrow().getCount());
+        var discardedBytes = metrics.stream()
+            .filter(metric -> metric.getName().equals(
+                IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_BYTES_DISCARDED
+            ))
+            .findFirst()
+            .orElseThrow();
+        assertTrue(discardedBytes.getLongSumData().getPoints().stream().findFirst().orElseThrow().getValue() > 0);
+        var verdictMetric = metrics.stream()
+            .filter(metric -> metric.getName().equals(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_VERDICT_COUNT))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(2, verdictMetric.getLongSumData().getPoints().size());
+        assertVerdictCount(verdictMetric, IKafkaConsumerContexts.LivenessScanVerdict.INCONCLUSIVE, 1);
+        assertVerdictCount(verdictMetric, terminalVerdict, 1);
+    }
+
+    private static void assertVerdictCount(
+        io.opentelemetry.sdk.metrics.data.MetricData verdictMetric,
+        IKafkaConsumerContexts.LivenessScanVerdict verdict,
+        long expectedCount
+    ) {
+        var verdictPoint = verdictMetric.getLongSumData()
+            .getPoints()
+            .stream()
+            .filter(point -> verdict.metricLabel().equals(
+                point.getAttributes().get(KafkaConsumerContexts.LivenessScanContext.VERDICT_ATTRIBUTE)
+            ))
+            .findFirst()
+            .orElse(null);
+        assertNotNull(verdictPoint);
+        assertEquals(expectedCount, verdictPoint.getValue());
     }
 
     private void scheduleFirstPoll(

@@ -40,7 +40,9 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartition
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.lifecycle.SourceRunwayLostException;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
@@ -141,6 +143,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final AtomicLong trafficStreamsRead;
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
+    private final KafkaConsumerContexts.LivenessScanContext livenessScanContext;
     private final AtomicBoolean isClosed;
     private final Clock clock;
     private final KafkaLivenessScanner livenessScanner = new KafkaLivenessScanner();
@@ -206,6 +209,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         @NonNull KafkaBehavioralPolicy behavioralPolicy
     ) {
         this.channelContextManager = new ChannelContextManager(globalContext);
+        this.livenessScanContext = new KafkaConsumerContexts.LivenessScanContext(globalContext);
         trackingKafkaConsumer = new TrackingKafkaConsumer(
             globalContext,
             kafkaConsumer,
@@ -715,8 +719,30 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 entry.getValue().requirement()
             ))
             .toList();
-        var cycle = trackingKafkaConsumer.scanAhead(MAX_LIVENESS_SCAN_RECORDS, LIVENESS_SCAN_BUDGET);
-        for (var evidence : livenessScanner.evaluate(candidates, cycle)) {
+        TrackingKafkaConsumer.ScanCycle cycle;
+        List<ScanEvidence> evidenceResults;
+        long scanStartNanos = System.nanoTime();
+        try {
+            cycle = trackingKafkaConsumer.scanAhead(MAX_LIVENESS_SCAN_RECORDS, LIVENESS_SCAN_BUDGET);
+            evidenceResults = livenessScanner.evaluate(candidates, cycle);
+            livenessScanContext.recordCycle(
+                cycle.records().size(),
+                cycle.records().stream().mapToLong(KafkaTrafficCaptureSource::serializedRecordSize).sum(),
+                Duration.ofNanos(System.nanoTime() - scanStartNanos)
+            );
+        } catch (RuntimeException e) {
+            livenessScanContext.addCaughtException(e);
+            throw e;
+        }
+        for (var evidence : evidenceResults) {
+            livenessScanContext.recordVerdict(switch (evidence) {
+                case ScanEvidence.FollowUpPresent ignored ->
+                    IKafkaConsumerContexts.LivenessScanVerdict.FOLLOW_UP_FOUND;
+                case ScanEvidence.ConfirmedAbsent ignored ->
+                    IKafkaConsumerContexts.LivenessScanVerdict.CONFIRMED_ABSENT;
+                case ScanEvidence.Inconclusive ignored ->
+                    IKafkaConsumerContexts.LivenessScanVerdict.INCONCLUSIVE;
+            });
             if (!(evidence instanceof ScanEvidence.ConfirmedAbsent confirmedAbsent)) {
                 continue;
             }
@@ -734,6 +760,20 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     .log();
             }
         }
+    }
+
+    private static long serializedRecordSize(
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> record
+    ) {
+        int keySize = record.serializedKeySize();
+        if (keySize < 0 && record.key() != null) {
+            keySize = record.key().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        }
+        int valueSize = record.serializedValueSize();
+        if (valueSize < 0 && record.value() != null) {
+            valueSize = record.value().length;
+        }
+        return Math.max(0, keySize) + Math.max(0, valueSize);
     }
 
     private List<SourceInput> drainSourceControls() {

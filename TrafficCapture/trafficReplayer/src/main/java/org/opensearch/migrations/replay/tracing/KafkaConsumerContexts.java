@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.time.Duration;
 import java.util.Collection;
 
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
@@ -8,7 +9,11 @@ import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
@@ -19,6 +24,75 @@ import org.apache.kafka.common.TopicPartition;
 public class KafkaConsumerContexts {
 
     private KafkaConsumerContexts() {}
+
+    public static class LivenessScanContext implements IKafkaConsumerContexts.ILivenessScanContext {
+        public static final AttributeKey<String> VERDICT_ATTRIBUTE = AttributeKey.stringKey("verdict");
+
+        @Getter
+        @NonNull
+        public final RootReplayerContext enclosingScope;
+        @Getter
+        @Setter
+        Exception observedExceptionToIncludeInMetrics;
+
+        public static class MetricInstruments extends CommonMetricInstruments {
+            public final LongCounter scanCounter;
+            public final LongHistogram distance;
+            public final DoubleHistogram latency;
+            public final LongCounter bytesDiscarded;
+            public final LongCounter verdictCounter;
+
+            private MetricInstruments(Meter meter) {
+                super(meter, "livenessScan");
+                scanCounter = meter.counterBuilder(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_COUNT)
+                    .setUnit("scans")
+                    .build();
+                distance = meter.histogramBuilder(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_DISTANCE)
+                    .ofLongs()
+                    .setUnit("records")
+                    .build();
+                latency = meter.histogramBuilder(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_LATENCY)
+                    .setUnit("ms")
+                    .build();
+                bytesDiscarded = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_BYTES_DISCARDED
+                ).setUnit("By").build();
+                verdictCounter = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_VERDICT_COUNT
+                ).setUnit("verdicts").build();
+            }
+        }
+
+        public LivenessScanContext(@NonNull RootReplayerContext enclosingScope) {
+            this.enclosingScope = enclosingScope;
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter);
+        }
+
+        @Override
+        public @NonNull MetricInstruments getMetrics() {
+            return enclosingScope.livenessScanInstruments;
+        }
+
+        @Override
+        public void recordCycle(int recordsScanned, long discardedBytes, Duration duration) {
+            meterIncrementEvent(getMetrics().scanCounter);
+            meterHistogram(getMetrics().distance, recordsScanned);
+            meterHistogramMillis(getMetrics().latency, duration);
+            meterIncrementEvent(getMetrics().bytesDiscarded, discardedBytes);
+        }
+
+        @Override
+        public void recordVerdict(@NonNull IKafkaConsumerContexts.LivenessScanVerdict verdict) {
+            meterIncrementEvent(
+                getMetrics().verdictCounter,
+                1,
+                Attributes.builder().put(VERDICT_ATTRIBUTE, verdict.metricLabel())
+            );
+        }
+    }
 
     public static class AsyncListeningContext implements IKafkaConsumerContexts.IAsyncListeningContext {
         @Getter

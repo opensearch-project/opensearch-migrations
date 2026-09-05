@@ -13,6 +13,7 @@ import lombok.Getter;
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
     public static final String SCOPE_NAME = "replayer";
 
+    public final KafkaConsumerContexts.LivenessScanContext.MetricInstruments livenessScanInstruments;
     public final KafkaConsumerContexts.AsyncListeningContext.MetricInstruments asyncListeningInstruments;
     public final KafkaConsumerContexts.TouchScopeContext.MetricInstruments touchInstruments;
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
@@ -43,6 +44,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         super(SCOPE_NAME, contextTracker, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
+        livenessScanInstruments = KafkaConsumerContexts.LivenessScanContext.makeMetrics(meter);
         asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);
         touchInstruments = KafkaConsumerContexts.TouchScopeContext.makeMetrics(meter);
         pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
