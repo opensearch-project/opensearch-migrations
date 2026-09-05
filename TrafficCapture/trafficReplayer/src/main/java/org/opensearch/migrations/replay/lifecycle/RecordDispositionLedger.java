@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
@@ -70,6 +71,8 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
     private final Map<RecordId, PendingDisposition> pending = new LinkedHashMap<>();
     private final Map<RecordId, DispositionResult> resolved = new LinkedHashMap<>();
     private final Map<SourcePartitionKey, Boolean> generationRunway = new LinkedHashMap<>();
+    private final AtomicReference<CompletionGate<Void>> quiescenceGate =
+        new AtomicReference<>(completedGate());
 
     public RecordDispositionLedger(@NonNull Executor ownerExecutor) {
         this.ownerExecutor = ownerExecutor;
@@ -95,6 +98,9 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
                     new IllegalStateException("record obligation already exists for " + handle.id())
                 );
                 return;
+            }
+            if (unresolved.isEmpty() && pending.isEmpty()) {
+                quiescenceGate.set(new CompletionGate<>());
             }
             generationRunway.putIfAbsent(handle.sourcePartition(), true);
             unresolved.put(handle.id(), new Obligation(handle, owner));
@@ -197,12 +203,13 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             return;
         }
         commitStage.whenComplete((ignored, failure) ->
-            ownerExecutor.execute(() -> completeCommit(id, result, failure, completion))
+            ownerExecutor.execute(() -> completeCommit(id, obligation, result, failure, completion))
         );
     }
 
     private void completeCommit(
         RecordId id,
+        Obligation obligation,
         DispositionResult result,
         Throwable failure,
         CompletableFuture<DispositionResult> completion
@@ -210,6 +217,17 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         if (failure == null) {
             resolve(id, result);
             completion.complete(result);
+        } else if (failure instanceof SourceRunwayLostException runwayLost
+            && runwayLost.getPartition().equals(obligation.handle().sourcePartition())) {
+            var retainedResult = new DispositionResult(
+                id,
+                result.owner(),
+                new RecordDisposition.Retain(
+                    "source-runway-lost-after-" + result.disposition().reasonCode()
+                )
+            );
+            resolve(id, retainedResult);
+            completion.complete(retainedResult);
         } else {
             completion.completeExceptionally(failure);
         }
@@ -224,6 +242,10 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             completion.complete(Map.copyOf(snapshot));
         });
         return completion.minimalCompletionStage();
+    }
+
+    public CompletionStage<Void> whenQuiescent() {
+        return quiescenceGate.get().stage();
     }
 
     private <T> Obligation requireOwnedObligation(
@@ -260,5 +282,14 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
     private void resolve(RecordId id, DispositionResult result) {
         pending.remove(id);
         resolved.put(id, result);
+        if (unresolved.isEmpty() && pending.isEmpty()) {
+            quiescenceGate.get().complete(null);
+        }
+    }
+
+    private static CompletionGate<Void> completedGate() {
+        var gate = new CompletionGate<Void>();
+        gate.complete(null);
+        return gate;
     }
 }

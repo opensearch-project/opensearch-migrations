@@ -71,6 +71,20 @@ class TrafficReplayerCoreProgressTest {
         Assertions.assertFalse(progress.isWorkOutstanding());
     }
 
+    @Test
+    void recordDispositionAcknowledgementBlocksWholeReplayDrain() {
+        var recordDisposition = new CompletableFuture<Void>();
+        var drain = TrafficReplayerTopLevel.combineReplayDrainGates(
+            CompletableFuture.completedFuture(null),
+            CompletableFuture.completedFuture(null),
+            recordDisposition
+        );
+
+        Assertions.assertFalse(drain.isDone());
+        recordDisposition.complete(null);
+        drain.join();
+    }
+
     private static final class NoopFlowController implements BufferedFlowController {
         @Override
         public void stopReadsPast(Instant pointInTime) {}

@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -501,8 +502,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var replayQuiescenceFuture = replayEngine == null
             ? CompletableFuture.<Void>completedFuture(null)
             : replayEngine.whenQuiescent().toCompletableFuture();
+        var ledger = dispositionLedgerRef.get();
+        var recordDispositionFuture = ledger == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : ledger.whenQuiescent().toCompletableFuture();
         var allWorkFuture = new TextTrackedFuture<>(
-            CompletableFuture.allOf(requestWorkFuture.future, replayQuiescenceFuture),
+            combineReplayDrainGates(
+                requestWorkFuture.future,
+                replayQuiescenceFuture,
+                recordDispositionFuture
+            ),
             () -> "TrafficReplayer.AllWorkFinished"
         );
         try {
@@ -526,6 +535,18 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         } finally {
             allRemainingWorkFutureOrShutdownSignalRef.set(null);
         }
+    }
+
+    static CompletableFuture<Void> combineReplayDrainGates(
+        CompletionStage<Void> requestWork,
+        CompletionStage<Void> replayQuiescence,
+        CompletionStage<Void> recordDisposition
+    ) {
+        return CompletableFuture.allOf(
+            requestWork.toCompletableFuture(),
+            replayQuiescence.toCompletableFuture(),
+            recordDisposition.toCompletableFuture()
+        );
     }
 
     private void handleAlreadySetFinishedSignal() throws InterruptedException, ExecutionException {

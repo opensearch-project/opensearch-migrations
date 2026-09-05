@@ -134,6 +134,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     protected final AtomicReference<CompletableFuture<List<SourceInput>>> nextChunkFutureRef;
     protected final AtomicReference<AsyncPermitPool> permitPoolRef;
     protected final AtomicReference<ReplayIntakeMailbox> intakeMailboxRef;
+    protected final AtomicReference<RecordDispositionLedger> dispositionLedgerRef;
 
     protected TrafficReplayerCore(
         IRootReplayerContext context,
@@ -193,6 +194,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         stopReadingRef = new AtomicBoolean();
         permitPoolRef = new AtomicReference<>();
         intakeMailboxRef = new AtomicReference<>();
+        dispositionLedgerRef = new AtomicReference<>();
         this.targetResponseClassifier = Objects.requireNonNull(targetResponseClassifier);
     }
 
@@ -237,6 +239,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.dispositionLedger = new RecordDispositionLedger(
                 java.util.Objects.requireNonNull(intakeMailboxRef.get(), "replay intake mailbox")
             );
+            dispositionLedgerRef.set(this.dispositionLedger);
         }
 
         private final class TransactionEvidenceState {

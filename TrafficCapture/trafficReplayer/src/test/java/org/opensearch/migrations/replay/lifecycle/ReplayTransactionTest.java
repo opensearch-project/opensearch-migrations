@@ -259,6 +259,47 @@ class ReplayTransactionTest {
     }
 
     @Test
+    void sourceRunwayLossDuringCommitRetainsAndReleasesTheTransaction() {
+        var mailbox = new QueuedMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var record = new TestRecordHandle(record(11));
+        record.commitCompletion = new CompletableFuture<>();
+        var resource = new TestResource();
+        ledger.onAssigned(List.of(record.sourcePartition()));
+        register(ledger, record, request().toString());
+        var transaction = transaction(
+            mailbox,
+            ledger,
+            CompletableFuture.completedFuture(new EvidenceOutcome.Durable("receipt")),
+            record.id(),
+            resource
+        );
+
+        transaction.settleSource(new SourceOutcome.Complete());
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(1, record.commits.get());
+        Assertions.assertFalse(transaction.completion().toCompletableFuture().isDone());
+
+        ledger.onRevoked(List.of(record.sourcePartition()));
+        record.commitCompletion.completeExceptionally(
+            new SourceRunwayLostException(record.sourcePartition())
+        );
+        mailbox.runUntilIdle();
+
+        var outcome = transaction.completion().toCompletableFuture().join();
+        Assertions.assertInstanceOf(RecordDisposition.Retain.class, outcome.disposition());
+        Assertions.assertEquals(
+            "source-runway-lost-after-replay-succeeded",
+            outcome.disposition().reasonCode()
+        );
+        Assertions.assertFalse(outcome.haltReplay());
+        Assertions.assertEquals(1, resource.closes);
+        Assertions.assertEquals(0, record.releasesWithoutCommit.get());
+        ledger.whenQuiescent().toCompletableFuture().join();
+    }
+
+    @Test
     void failureDuringDispositionWaitsForKafkaAcknowledgementBeforeReleasingResources() {
         var mailbox = new QueuedMailbox();
         var ledger = new RecordDispositionLedger(Runnable::run);
@@ -611,6 +652,7 @@ class ReplayTransactionTest {
         private final KafkaRecordId id;
         private final AtomicInteger contextCloses = new AtomicInteger();
         private final AtomicInteger commits = new AtomicInteger();
+        private final AtomicInteger releasesWithoutCommit = new AtomicInteger();
         private CompletableFuture<Void> commitCompletion = CompletableFuture.completedFuture(null);
 
         private TestRecordHandle(KafkaRecordId id) {
@@ -634,7 +676,7 @@ class ReplayTransactionTest {
 
         @Override
         public void releaseWithoutCommit() {
-            // Test handles have no source-owned parent context.
+            releasesWithoutCommit.incrementAndGet();
         }
 
         @Override
