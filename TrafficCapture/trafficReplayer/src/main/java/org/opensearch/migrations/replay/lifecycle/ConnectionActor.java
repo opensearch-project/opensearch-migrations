@@ -467,6 +467,9 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         }
         closeStage.whenComplete((ignored, failure) ->
             mailbox.execute(() -> {
+                if (state == State.ABORTING || state == State.TERMINATED) {
+                    return;
+                }
                 orderedCloseActive = false;
                 var outcome = failure == null
                     ? new SessionOutcome.Closed()
@@ -506,6 +509,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         abortStage.whenComplete((ignored, failure) ->
             mailbox.execute(() -> {
                 metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
+                orderedCloseActive = false;
                 if (activeRequest != null) {
                     recordActiveDuration();
                     activeRequest.settled = true;

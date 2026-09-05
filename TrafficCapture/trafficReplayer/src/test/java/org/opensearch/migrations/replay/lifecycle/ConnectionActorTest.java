@@ -161,6 +161,54 @@ class ConnectionActorTest extends InstrumentationTest {
     }
 
     @Test
+    void abortRemainsAuthoritativeWhenOrderedCloseCompletesDuringDrain() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        exchange.closeCompletion = new CompletableFuture<>();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var close = actor.admitClose(Instant.EPOCH).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        var termination = actor.abort(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("rebalance")
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, close.join());
+
+        exchange.closeCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertFalse(termination.isDone());
+
+        exchange.abortCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
+    }
+
+    @Test
+    void lateOrderedCloseCompletionCannotMutateTerminatedActor() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        exchange.closeCompletion = new CompletableFuture<>();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        actor.admitClose(Instant.EPOCH);
+        mailbox.runUntilIdle();
+
+        var termination = actor.abort(
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("rebalance")
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+        exchange.abortCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
+
+        exchange.closeCompletion.complete(null);
+        mailbox.runUntilIdle();
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, actor.termination().toCompletableFuture().join());
+    }
+
+    @Test
     void recordsAuthoritativeQueueWaitActiveAndAbortState() {
         var mailbox = new DeterministicMailbox();
         var exchange = new TestExchange();
@@ -308,6 +356,7 @@ class ConnectionActorTest extends InstrumentationTest {
         private final List<TestPrepared> prepared = new ArrayList<>();
         private final Queue<CompletableFuture<TargetOutcome<String>>> active = new ArrayDeque<>();
         private final CompletableFuture<Void> abortCompletion = new CompletableFuture<>();
+        private CompletableFuture<Void> closeCompletion = CompletableFuture.completedFuture(null);
         private int closeCalls;
 
         @Override
@@ -322,7 +371,7 @@ class ConnectionActorTest extends InstrumentationTest {
         @Override
         public CompletableFuture<Void> close() {
             closeCalls++;
-            return CompletableFuture.completedFuture(null);
+            return closeCompletion;
         }
 
         @Override
