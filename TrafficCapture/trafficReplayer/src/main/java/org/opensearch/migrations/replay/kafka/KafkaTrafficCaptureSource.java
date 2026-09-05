@@ -63,6 +63,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.errors.RetriableException;
 
 /**
  * Adapt a Kafka stream into a TrafficCaptureSource.
@@ -730,6 +731,21 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 cycle.records().stream().mapToLong(KafkaTrafficCaptureSource::serializedRecordSize).sum(),
                 Duration.ofNanos(System.nanoTime() - scanStartNanos)
             );
+        } catch (RetriableException e) {
+            livenessScanContext.addCaughtException(e);
+            evidenceResults = livenessScanner.evaluate(
+                candidates,
+                new TrackingKafkaConsumer.ScanCycle(List.of(), false, false)
+            );
+            livenessScanContext.recordCycle(
+                0,
+                0,
+                Duration.ofNanos(System.nanoTime() - scanStartNanos)
+            );
+            log.atWarn()
+                .setCause(e)
+                .setMessage("Kafka liveness scan was unavailable; leaving all candidates inconclusive")
+                .log();
         } catch (RuntimeException e) {
             livenessScanContext.addCaughtException(e);
             throw e;

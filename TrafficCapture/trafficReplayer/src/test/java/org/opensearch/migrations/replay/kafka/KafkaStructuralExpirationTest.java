@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -58,6 +60,26 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
     private static final String CONNECTION = "connection";
     private static final String PLAN = "plan";
     private static final TopicPartition PARTITION = new TopicPartition(TOPIC, 0);
+
+    private static final class TransientMetadataFailureConsumer extends MockConsumer<String, byte[]> {
+        private boolean failNextEndOffsets;
+
+        private TransientMetadataFailureConsumer() {
+            super(OffsetResetStrategy.EARLIEST);
+        }
+
+        @Override
+        public synchronized Map<TopicPartition, Long> endOffsets(
+            Collection<TopicPartition> partitions,
+            Duration timeout
+        ) {
+            if (failNextEndOffsets) {
+                failNextEndOffsets = false;
+                throw new TimeoutException("metadata temporarily unavailable");
+            }
+            return super.endOffsets(partitions, timeout);
+        }
+    }
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -137,6 +159,45 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
                 1,
                 IKafkaConsumerContexts.LivenessScanVerdict.FOLLOW_UP_FOUND
             );
+
+            source.onConnectionAccumulationComplete(traffic.getKey());
+            traffic.getKey().getTrafficStreamsContext().close();
+            source.releaseTrafficStreamWithoutCommit(traffic.getKey());
+        }
+    }
+
+    @Test
+    void transientMetadataFailureRemainsInconclusiveAndTheNextScanCanConfirmAbsence() throws Exception {
+        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var mockConsumer = new TransientMetadataFailureConsumer();
+        try (var source = source(mockConsumer, clock)) {
+            scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
+            var traffic = assertInstanceOf(
+                ITrafficStreamWithKey.class,
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .get(0)
+            );
+
+            mockConsumer.failNextEndOffsets = true;
+            clock.advance(Duration.ofSeconds(2));
+            touch(source);
+
+            assertFalse(source.hasPendingSourceControl());
+
+            addRecord(mockConsumer, snapshotRecord(1, 10));
+            addRecord(mockConsumer, snapshotRecord(2, 11));
+            mockConsumer.updateEndOffsets(Map.of(PARTITION, 3L));
+            clock.advance(Duration.ofSeconds(2));
+            touch(source);
+
+            var confirmedDead = assertInstanceOf(
+                SourceControlEvent.ConfirmedDead.class,
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .get(0)
+            );
+            assertEquals(traffic.getKey().getSourceGeneration(), confirmedDead.evidence().partition().sourceGeneration());
 
             source.onConnectionAccumulationComplete(traffic.getKey());
             traffic.getKey().getTrafficStreamsContext().close();
