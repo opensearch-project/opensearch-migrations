@@ -371,10 +371,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 getParentContext().onBytesReceived(size);
             })
         );
-        pipeline.addLast(
-            READ_TIMEOUT_HANDLER_NAME,
-            new ReadTimeoutHandler(this.readTimeoutDuration.toMillis(), TimeUnit.MILLISECONDS)
-        );
         addLoggingHandlerLast(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "C");
@@ -500,7 +496,16 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 () -> "NettyPacketToHttpConsumer.finalizeRequest()"
             );
             if (t == null) {
-                var responseWatchHandler = (BacksideHttpWatcherHandler) channel.pipeline()
+                var pipeline = channel.pipeline();
+                var timeoutPredecessor = pipeline.get(SSL_HANDLER_NAME) == null
+                    ? WRITE_COUNT_WATCHER_HANDLER_NAME
+                    : SSL_HANDLER_NAME;
+                pipeline.addAfter(
+                    timeoutPredecessor,
+                    READ_TIMEOUT_HANDLER_NAME,
+                    new ReadTimeoutHandler(this.readTimeoutDuration.toMillis(), TimeUnit.MILLISECONDS)
+                );
+                var responseWatchHandler = (BacksideHttpWatcherHandler) pipeline
                     .get(BACKSIDE_HTTP_WATCHER_HANDLER_NAME);
                 responseWatchHandler.addCallback(responseFuture::complete);
             } else {

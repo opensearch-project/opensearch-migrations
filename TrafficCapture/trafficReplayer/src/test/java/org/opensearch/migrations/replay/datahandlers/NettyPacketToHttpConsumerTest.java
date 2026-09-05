@@ -243,6 +243,42 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         }
     }
 
+    @Test
+    void targetResponseTimeoutStartsAfterRequestWriteCompletes() throws Exception {
+        var responseTimeout = Duration.ofMillis(50);
+        try (
+            var testServer = SimpleNettyHttpServer.makeServer(
+                false,
+                NettyPacketToHttpConsumerTest::makeResponseContext
+            )
+        ) {
+            var clientConnectionPool = new ClientConnectionPool(
+                NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint()),
+                "targetPool for targetResponseTimeoutStartsAfterRequestWriteCompletes",
+                1
+            );
+            try {
+                var requestContext = rootContext.getTestConnectionRequestContext(0);
+                var consumer = new NettyPacketToHttpConsumer(
+                    clientConnectionPool.buildConnectionReplaySession(requestContext.getChannelKeyContext()),
+                    requestContext,
+                    responseTimeout
+                );
+                consumer.activeChannelFuture.get(REGULAR_RESPONSE_TIMEOUT);
+
+                parkForAtLeast(responseTimeout.multipliedBy(10));
+
+                consumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)).get();
+                var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);
+
+                Assertions.assertNull(response.getError());
+                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, getResponsePacketsAsString(response));
+            } finally {
+                clientConnectionPool.shutdownNow().get();
+            }
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
     @Tag("longTest")
