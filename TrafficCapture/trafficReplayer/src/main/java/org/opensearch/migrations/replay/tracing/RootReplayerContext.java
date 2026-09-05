@@ -20,6 +20,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final KafkaConsumerContexts.CommitScopeContext.MetricInstruments commitInstruments;
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
     public final AsyncPermitPoolMetrics permitPoolMetrics;
+    public final ConnectionActorMetrics connectionActorMetrics;
 
     public final TrafficSourceContexts.ReadChunkContext.MetricInstruments readChunkInstruments;
     public final TrafficSourceContexts.BackPressureBlockContext.MetricInstruments backPressureInstruments;
@@ -52,6 +53,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         commitInstruments = KafkaConsumerContexts.CommitScopeContext.makeMetrics(meter);
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
         permitPoolMetrics = new AsyncPermitPoolMetrics(meter);
+        connectionActorMetrics = new ConnectionActorMetrics(meter);
 
         readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
         backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);

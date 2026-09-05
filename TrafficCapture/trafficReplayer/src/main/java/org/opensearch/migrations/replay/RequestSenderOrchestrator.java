@@ -75,6 +75,7 @@ public class RequestSenderOrchestrator {
     private final Duration maxRetryDelay;
     private final BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory;
     private final Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger;
+    private final ConnectionActor.Metrics actorMetrics;
     private final ConcurrentHashMap<ConnectionSessionKey, ActorRuntime> actorRuntimes = new ConcurrentHashMap<>();
 
     /**
@@ -96,7 +97,24 @@ public class RequestSenderOrchestrator {
             Duration.ofMillis(100),
             Duration.ofSeconds(300),
             packetConsumerFactory,
-            sessionTerminationAcknowledger
+            sessionTerminationAcknowledger,
+            ConnectionActor.Metrics.NOOP
+        );
+    }
+
+    public RequestSenderOrchestrator(
+        ClientConnectionPool clientConnectionPool,
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
+        ConnectionActor.Metrics actorMetrics
+    ) {
+        this(
+            clientConnectionPool,
+            Duration.ofMillis(100),
+            Duration.ofSeconds(300),
+            packetConsumerFactory,
+            sessionTerminationAcknowledger,
+            actorMetrics
         );
     }
 
@@ -107,11 +125,30 @@ public class RequestSenderOrchestrator {
         BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger
     ) {
+        this(
+            clientConnectionPool,
+            initialRetryDelay,
+            maxRetryDelay,
+            packetConsumerFactory,
+            sessionTerminationAcknowledger,
+            ConnectionActor.Metrics.NOOP
+        );
+    }
+
+    public RequestSenderOrchestrator(
+        ClientConnectionPool clientConnectionPool,
+        Duration initialRetryDelay,
+        Duration maxRetryDelay,
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
+        ConnectionActor.Metrics actorMetrics
+    ) {
         this.clientConnectionPool = clientConnectionPool;
         this.initialRetryDelay = initialRetryDelay;
         this.maxRetryDelay = maxRetryDelay;
         this.packetConsumerFactory = packetConsumerFactory;
         this.sessionTerminationAcknowledger = sessionTerminationAcknowledger;
+        this.actorMetrics = actorMetrics;
     }
 
     public static Function<ConnectionSessionKey, CompletionStage<Void>> noSourceTerminationObligations() {
@@ -205,7 +242,8 @@ public class RequestSenderOrchestrator {
             this.actor = new ConnectionActor<>(
                 key,
                 mailbox,
-                new RuntimeTargetExchange(this)
+                new RuntimeTargetExchange(this),
+                actorMetrics
             );
             actor.termination().whenComplete((outcome, failure) ->
                 mailbox.execute(() -> onActorTerminated(outcome, failure))
