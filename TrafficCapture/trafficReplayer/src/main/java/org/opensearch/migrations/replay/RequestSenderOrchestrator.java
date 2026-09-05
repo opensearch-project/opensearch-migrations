@@ -17,13 +17,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.AttemptPayload;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.OwnedPreparedRequest;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.lifecycle.ActorMailbox;
@@ -39,6 +42,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransactionRegistry;
+import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
@@ -48,7 +52,6 @@ import org.opensearch.migrations.utils.TrackedFuture;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
-import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -79,6 +82,7 @@ public class RequestSenderOrchestrator {
     private final Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger;
     private final ConnectionActor.Metrics actorMetrics;
     private final TargetExchangeState.Metrics targetExchangeMetrics;
+    private final ResourceOwnership.Metrics resourceOwnershipMetrics;
     private final ConcurrentHashMap<ConnectionSessionKey, ActorRuntime> actorRuntimes = new ConcurrentHashMap<>();
     private final AtomicReference<ReplayTransaction.RunwayLossReason> globalRunwayLossReason =
         new AtomicReference<>();
@@ -139,7 +143,28 @@ public class RequestSenderOrchestrator {
             packetConsumerFactory,
             sessionTerminationAcknowledger,
             actorMetrics,
-            targetExchangeMetrics
+            targetExchangeMetrics,
+            ResourceOwnership.Metrics.NOOP
+        );
+    }
+
+    public RequestSenderOrchestrator(
+        ClientConnectionPool clientConnectionPool,
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
+        ConnectionActor.Metrics actorMetrics,
+        TargetExchangeState.Metrics targetExchangeMetrics,
+        ResourceOwnership.Metrics resourceOwnershipMetrics
+    ) {
+        this(
+            clientConnectionPool,
+            Duration.ofMillis(100),
+            Duration.ofSeconds(300),
+            packetConsumerFactory,
+            sessionTerminationAcknowledger,
+            actorMetrics,
+            targetExchangeMetrics,
+            resourceOwnershipMetrics
         );
     }
 
@@ -189,6 +214,28 @@ public class RequestSenderOrchestrator {
         ConnectionActor.Metrics actorMetrics,
         TargetExchangeState.Metrics targetExchangeMetrics
     ) {
+        this(
+            clientConnectionPool,
+            initialRetryDelay,
+            maxRetryDelay,
+            packetConsumerFactory,
+            sessionTerminationAcknowledger,
+            actorMetrics,
+            targetExchangeMetrics,
+            ResourceOwnership.Metrics.NOOP
+        );
+    }
+
+    public RequestSenderOrchestrator(
+        ClientConnectionPool clientConnectionPool,
+        Duration initialRetryDelay,
+        Duration maxRetryDelay,
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
+        ConnectionActor.Metrics actorMetrics,
+        TargetExchangeState.Metrics targetExchangeMetrics,
+        ResourceOwnership.Metrics resourceOwnershipMetrics
+    ) {
         this.clientConnectionPool = clientConnectionPool;
         this.initialRetryDelay = initialRetryDelay;
         this.maxRetryDelay = maxRetryDelay;
@@ -196,6 +243,7 @@ public class RequestSenderOrchestrator {
         this.sessionTerminationAcknowledger = sessionTerminationAcknowledger;
         this.actorMetrics = actorMetrics;
         this.targetExchangeMetrics = targetExchangeMetrics;
+        this.resourceOwnershipMetrics = resourceOwnershipMetrics;
     }
 
     public static Function<ConnectionSessionKey, CompletionStage<Void>> noSourceTerminationObligations() {
@@ -217,7 +265,7 @@ public class RequestSenderOrchestrator {
         private final IReplayContexts.IReplayerHttpTransactionContext context;
         private final Instant start;
         private final Duration interval;
-        private final ByteBufListProducer packetProducer;
+        private final OwnedPreparedRequest packetProducer;
         private final RetryVisitor<Object> visitor;
         private final AsyncPermitPool.Permit permit;
         private final IReplayContexts.IScheduledContext scheduledContext;
@@ -228,7 +276,7 @@ public class RequestSenderOrchestrator {
             IReplayContexts.IReplayerHttpTransactionContext context,
             Instant start,
             Duration interval,
-            ByteBufListProducer packetProducer,
+            OwnedPreparedRequest packetProducer,
             RetryVisitor<Object> visitor,
             AsyncPermitPool.Permit permit,
             IReplayContexts.IScheduledContext scheduledContext
@@ -255,9 +303,13 @@ public class RequestSenderOrchestrator {
                     beginExecution();
                 } finally {
                     try {
-                        packetProducer.release();
+                        visitor.close();
                     } finally {
-                        permit.close();
+                        try {
+                            packetProducer.close();
+                        } finally {
+                            permit.close();
+                        }
                     }
                 }
             }
@@ -378,6 +430,7 @@ public class RequestSenderOrchestrator {
     private final class RuntimeTargetExchange implements ConnectionActor.TargetExchange<PreparedActorRequest, Object> {
         private final ActorRuntime runtime;
         private final Map<ScheduledFuture<?>, CompletableFuture<Void>> cancellableSchedules = new LinkedHashMap<>();
+        private final AtomicReference<AttemptPayload> activeAttempt = new AtomicReference<>();
         private CompletableFuture<TargetOutcome<Object>> activeExchange;
         private IPacketFinalizingConsumer<AggregatedRawResponse> activePacketReceiver;
         private CancellationException cancellationCause;
@@ -393,10 +446,11 @@ public class RequestSenderOrchestrator {
             if (cancellationCause != null) {
                 return CompletableFuture.completedFuture(new TargetOutcome.Cancelled<>(cancellationCause));
             }
-            TrackedFuture<String, Object> exchange;
+            TrackedFuture<String, DeterminedTransformedResponse<Object>> exchange;
             try {
                 @SuppressWarnings("unchecked")
-                var typedExchange = (TrackedFuture<String, Object>) (TrackedFuture<?, ?>) sendRequestWithRetries(
+                var typedExchange = (TrackedFuture<String, DeterminedTransformedResponse<Object>>)
+                    (TrackedFuture<?, ?>) sendRequestWithRetries(
                     () -> packetConsumerFactory.apply(runtime.session, preparedRequest.context),
                     runtime.session.eventLoop,
                     preparedRequest.packetProducer,
@@ -410,17 +464,30 @@ public class RequestSenderOrchestrator {
                 clearPhase();
                 return CompletableFuture.completedFuture(new TargetOutcome.Failed<>(unwrap(t)));
             }
-            CompletableFuture<TargetOutcome<Object>> normalized = exchange.future.handle((value, failure) -> {
-                if (failure == null) {
-                    return new TargetOutcome.Succeeded<>(value);
-                }
-                var cause = unwrap(failure);
-                if (cause instanceof CancellationException cancellation) {
-                    return new TargetOutcome.Cancelled<>(cancellation);
-                }
-                return new TargetOutcome.Failed<>(cause);
-            });
+            var normalized = new CompletableFuture<TargetOutcome<Object>>();
             activeExchange = normalized;
+            exchange.future.whenComplete((result, failure) -> {
+                if (failure != null) {
+                    var cause = unwrap(failure);
+                    if (cause instanceof CancellationException cancellation) {
+                        normalized.complete(new TargetOutcome.Cancelled<>(cancellation));
+                    } else {
+                        normalized.complete(new TargetOutcome.Failed<>(cause));
+                    }
+                    return;
+                }
+                if (result == null) {
+                    normalized.complete(new TargetOutcome.Failed<>(
+                        new IllegalStateException("target exchange completed without a result")
+                    ));
+                    return;
+                }
+                if (normalized.complete(new TargetOutcome.Succeeded<>(result.value))) {
+                    result.transferOwnership();
+                } else {
+                    closeRejectedResult(result);
+                }
+            });
             normalized.whenComplete((value, failure) -> {
                 runtime.session.eventLoop.execute(() -> {
                     if (activeExchange == normalized) {
@@ -447,16 +514,31 @@ public class RequestSenderOrchestrator {
             transitionPhase(TargetExchangeState.Phase.ABORTING);
             cancelScheduledWork(cancellationCause);
             cancelActivePacketReceiver(cancellationCause);
+            var attemptReleaseFailure = releaseActiveAttempt();
             runtime.session.setCancelled(true);
             var exchangeToJoin = activeExchange;
             if (exchangeToJoin != null) {
                 exchangeToJoin.complete(new TargetOutcome.Cancelled<>(cancellationCause));
             }
-            return closeRuntimeChannel().thenCompose(ignored ->
-                exchangeToJoin == null
-                    ? CompletableFuture.<Void>completedFuture(null)
-                    : exchangeToJoin.handle((outcome, failure) -> null)
-            ).whenComplete((ignored, failure) -> clearPhase());
+            return closeRuntimeChannel()
+                .handle((ignored, channelFailure) -> {
+                    var failure = channelFailure == null ? null : unwrap(channelFailure);
+                    if (failure == null) {
+                        failure = attemptReleaseFailure;
+                    } else {
+                        addSuppressed(failure, attemptReleaseFailure);
+                    }
+                    if (failure != null) {
+                        throw new CompletionException(failure);
+                    }
+                    return null;
+                })
+                .thenCompose(ignored ->
+                    exchangeToJoin == null
+                        ? CompletableFuture.<Void>completedFuture(null)
+                        : exchangeToJoin.handle((outcome, failure) -> null)
+                )
+                .whenComplete((ignored, failure) -> clearPhase());
         }
 
         private void cancelActivePacketReceiver(CancellationException cause) {
@@ -485,10 +567,10 @@ public class RequestSenderOrchestrator {
             });
         }
 
-        private <T> TrackedFuture<String, T> sendRequestWithRetries(
+        private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> sendRequestWithRetries(
             Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
             EventLoop eventLoop,
-            ByteBufListProducer packetProducer,
+            OwnedPreparedRequest packetProducer,
             Instant referenceStartTime,
             Duration nextRetryDelay,
             Duration interval,
@@ -508,19 +590,57 @@ public class RequestSenderOrchestrator {
                 );
             }
             var attempt = packetProducer.newAttempt();
+            if (!activeAttempt.compareAndSet(null, attempt)) {
+                attempt.close();
+                return TextTrackedFuture.failedFuture(
+                    new IllegalStateException("another target request attempt is still active"),
+                    () -> "sendRequestWithRetries rejected overlapping request attempts"
+                );
+            }
+            final IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver;
+            try {
+                packetReceiver = Objects.requireNonNull(senderSupplier.get(), "sender supplier returned null");
+            } catch (Throwable t) {
+                addSuppressed(t, releaseAttempt(attempt));
+                return TextTrackedFuture.failedFuture(
+                    t,
+                    () -> "sendRequestWithRetries failed while creating the target request sender"
+                );
+            }
             var byteBufList = attempt.packets();
-            var packetReceiver = senderSupplier.get();
-            activePacketReceiver = packetReceiver;
-            transitionPhase(TargetExchangeState.Phase.SENDING_REQUEST);
-            return sendPackets(
-                packetReceiver,
-                eventLoop,
-                byteBufList.streamUnretained().iterator(),
-                referenceStartTime,
-                interval,
-                new AtomicInteger()
-            )
+            final TrackedFuture<String, AggregatedRawResponse> sendFuture;
+            try {
+                activePacketReceiver = packetReceiver;
+                transitionPhase(TargetExchangeState.Phase.SENDING_REQUEST);
+                sendFuture = Objects.requireNonNull(
+                    sendPackets(
+                        packetReceiver,
+                        eventLoop,
+                        byteBufList.streamUnretained().iterator(),
+                        referenceStartTime,
+                        interval,
+                        new AtomicInteger()
+                    ),
+                    "packet sender returned null"
+                );
+            } catch (Throwable t) {
+                if (activePacketReceiver == packetReceiver) {
+                    activePacketReceiver = null;
+                }
+                addSuppressed(t, releaseAttempt(attempt));
+                return TextTrackedFuture.failedFuture(
+                    t,
+                    () -> "sendRequestWithRetries failed while starting the packet send"
+                );
+            }
+            return sendFuture
                 .getDeferredFutureThroughHandle((response, t) -> {
+                        if (cancellationCause != null) {
+                            return TextTrackedFuture.failedFuture(
+                                cancellationCause,
+                                () -> "request exchange was cancelled before evaluating its response"
+                            );
+                        }
                         transitionPhase(TargetExchangeState.Phase.EVALUATING_RETRY);
                         try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
                             return visitor.visit(requestBytesHolder.get(), response, t);
@@ -528,7 +648,13 @@ public class RequestSenderOrchestrator {
                     },
                     () -> "checking response to determine if the request should be retried")
                 .whenComplete((response, failure) -> {
-                    attempt.close();
+                    var releaseFailure = releaseAttempt(attempt);
+                    if (releaseFailure != null) {
+                        if (failure == null) {
+                            throw new CompletionException(releaseFailure);
+                        }
+                        addSuppressed(unwrap(failure), releaseFailure);
+                    }
                     if (activePacketReceiver == packetReceiver) {
                         activePacketReceiver = null;
                     }
@@ -546,30 +672,40 @@ public class RequestSenderOrchestrator {
                 ), () -> "determining if the response must be retried or if it should be returned now");
         }
 
-        private <T> TrackedFuture<String, T> retryIfNeeded(
+        private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> retryIfNeeded(
             DeterminedTransformedResponse<T> result,
             Throwable failure,
             Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
             EventLoop eventLoop,
-            ByteBufListProducer packetProducer,
+            OwnedPreparedRequest packetProducer,
             Instant referenceStartTime,
             Duration nextRetryDelay,
             Duration interval,
             RetryVisitor<T> visitor
         ) {
             if (cancellationCause != null) {
+                addSuppressed(cancellationCause, closeResult(result));
                 return TextTrackedFuture.failedFuture(
                     cancellationCause,
                     () -> "request exchange was cancelled while evaluating a retry"
                 );
             }
             if (failure != null) {
-                return TextTrackedFuture.failedFuture(failure, () -> "failed future");
+                var cause = unwrap(failure);
+                addSuppressed(cause, closeResult(result));
+                return TextTrackedFuture.failedFuture(cause, () -> "failed future");
             }
             if (result.directive != RetryDirective.RETRY) {
                 return TextTrackedFuture.completedFuture(
-                    result.value,
+                    result,
                     () -> "done retrying and returning received response"
+                );
+            }
+            var releaseFailure = closeResult(result);
+            if (releaseFailure != null) {
+                return TextTrackedFuture.failedFuture(
+                    releaseFailure,
+                    () -> "failed to release a completed retry decision"
                 );
             }
 
@@ -633,6 +769,44 @@ public class RequestSenderOrchestrator {
             return Duration.ofMillis(Math.min(delay.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
         }
 
+        private Throwable releaseActiveAttempt() {
+            var attempt = activeAttempt.getAndSet(null);
+            return attempt == null ? null : closeResource(attempt);
+        }
+
+        private Throwable releaseAttempt(AttemptPayload attempt) {
+            return activeAttempt.compareAndSet(attempt, null) ? closeResource(attempt) : null;
+        }
+
+        private Throwable closeResult(DeterminedTransformedResponse<?> result) {
+            return result == null ? null : closeResource(result);
+        }
+
+        private void closeRejectedResult(DeterminedTransformedResponse<?> result) {
+            var closeFailure = closeResult(result);
+            if (closeFailure != null) {
+                log.atError()
+                    .setMessage("Failed to release a target result after cancellation won")
+                    .setCause(closeFailure)
+                    .log();
+            }
+        }
+
+        private Throwable closeResource(AutoCloseable resource) {
+            try {
+                resource.close();
+                return null;
+            } catch (Throwable t) {
+                return t;
+            }
+        }
+
+        private void addSuppressed(Throwable failure, Throwable additionalFailure) {
+            if (additionalFailure != null && additionalFailure != failure) {
+                failure.addSuppressed(additionalFailure);
+            }
+        }
+
         private TrackedFuture<String, AggregatedRawResponse> sendPackets(
             IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
             EventLoop eventLoop,
@@ -651,7 +825,24 @@ public class RequestSenderOrchestrator {
             log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
             assert iterator.hasNext() : "Should not have called this with no items to send";
 
-            var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
+            var packet = iterator.next().retainedDuplicate();
+            final TrackedFuture<String, Void> consumeFuture;
+            try {
+                consumeFuture = Objects.requireNonNull(
+                    packetReceiver.consumeBytes(packet),
+                    "packet consumer returned null"
+                );
+            } catch (Throwable t) {
+                try {
+                    packet.release();
+                } catch (Throwable releaseFailure) {
+                    addSuppressed(t, releaseFailure);
+                }
+                return TextTrackedFuture.failedFuture(
+                    t,
+                    () -> "packet consumer failed synchronously"
+                );
+            }
             if (iterator.hasNext()) {
                 return consumeFuture.thenCompose(
                     ignored -> scheduleCancellable(
@@ -888,18 +1079,26 @@ public class RequestSenderOrchestrator {
             }
 
             var packetProducer = transformed.transformedOutput;
-            var packetCount = packetProducer.numByteBufs();
-            var interval = packetCount > 1
-                ? Duration.between(sendStart, sendEnd).dividedBy(packetCount - 1L)
-                : Duration.ZERO;
+            Duration interval;
             RetryVisitor<T> typedVisitor;
             try {
+                packetProducer.trackOwnership(resourceOwnershipMetrics);
+                var packetCount = packetProducer.numByteBufs();
+                interval = packetCount > 1
+                    ? Duration.between(sendStart, sendEnd).dividedBy(packetCount - 1L)
+                    : Duration.ZERO;
                 typedVisitor = Objects.requireNonNull(
                     retryVisitorFactory.apply(transformed),
                     "retry visitor factory returned null"
                 );
             } catch (Throwable t) {
-                packetProducer.release();
+                try {
+                    packetProducer.close();
+                } catch (Throwable closeFailure) {
+                    if (closeFailure != t) {
+                        t.addSuppressed(closeFailure);
+                    }
+                }
                 failPreparation(t);
                 return;
             }
@@ -992,18 +1191,51 @@ public class RequestSenderOrchestrator {
             TransformedOutputAndResult<ByteBufListProducer> transformed
         ) {
             if (transformed != null && transformed.transformedOutput != null) {
-                transformed.transformedOutput.release();
+                var packetProducer = transformed.transformedOutput;
+                try {
+                    packetProducer.trackOwnership(resourceOwnershipMetrics);
+                } finally {
+                    packetProducer.close();
+                }
             }
         }
     }
 
-    @AllArgsConstructor
-    public static class DeterminedTransformedResponse<T> {
-        RetryDirective directive;
-        T value;
+    public static class DeterminedTransformedResponse<T> implements AutoCloseable {
+        private final RetryDirective directive;
+        private final T value;
+        private final Consumer<? super T> valueReleaser;
+        private final AtomicBoolean ownsValue = new AtomicBoolean(true);
+
+        public DeterminedTransformedResponse(RetryDirective directive, T value) {
+            this(directive, value, ignored -> {});
+        }
+
+        public DeterminedTransformedResponse(
+            @NonNull RetryDirective directive,
+            T value,
+            @NonNull Consumer<? super T> valueReleaser
+        ) {
+            this.directive = directive;
+            this.value = value;
+            this.valueReleaser = valueReleaser;
+        }
+
+        public void transferOwnership() {
+            if (!ownsValue.compareAndSet(true, false)) {
+                throw new IllegalStateException("target response ownership was already settled");
+            }
+        }
+
+        @Override
+        public void close() {
+            if (ownsValue.compareAndSet(true, false)) {
+                valueReleaser.accept(value);
+            }
+        }
     }
 
-    public interface RetryVisitor<T> {
+    public interface RetryVisitor<T> extends AutoCloseable {
         /**
          * Return null to continue trying according to
          * @param arr
@@ -1011,6 +1243,9 @@ public class RequestSenderOrchestrator {
          */
         TrackedFuture<String,DeterminedTransformedResponse<T>>
         visit(ByteBuf requestBytes, AggregatedRawResponse arr, Throwable t);
+
+        @Override
+        default void close() {}
     }
 
     public <T> TrackedFuture<String, T> scheduleRequestLifecycle(

@@ -290,7 +290,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
             trafficSource::acknowledgeSessionTermination,
             topLevelContext.getConnectionActorMetrics(),
-            topLevelContext.getTargetExchangeStateMetrics()
+            topLevelContext.getTargetExchangeStateMetrics(),
+            topLevelContext.getResourceOwnershipMetrics()
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
         var progressController = new ReplayProgressController(intakeMailbox, readGate);

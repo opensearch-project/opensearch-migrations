@@ -33,26 +33,38 @@ public class RequestTransformerAndSender<T> {
                          Consumer<AggregatedRawResponse> resultsConsumer) {
         var perRequestStatefulVisitor =
             retryVisitorFactory.getRetryCheckVisitor(transformedResult, finishedAccumulatingResponseFuture);
-        return (requestBytes, aggResponse, t) -> {
-            resultsConsumer.accept(aggResponse);
-            if (!shouldRetry()) {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.DONE,
-                        null),
-                    () -> "Returning a future to NOT retry because the class is currently prohibiting retries" +
-                        "");
-            }
-            if (t != null) {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.RETRY,
-                        null),
-                    () -> "Returning a future to retry due to a connection exception");
-            } else {
+        return new RequestSenderOrchestrator.RetryVisitor<>() {
+            @Override
+            public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<T>> visit(
+                io.netty.buffer.ByteBuf requestBytes,
+                AggregatedRawResponse aggResponse,
+                Throwable t
+            ) {
+                resultsConsumer.accept(aggResponse);
+                if (!shouldRetry()) {
+                    return TextTrackedFuture.completedFuture(
+                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                            RequestSenderOrchestrator.RetryDirective.DONE,
+                            null),
+                        () -> "Returning a future to NOT retry because the class is currently prohibiting retries"
+                    );
+                }
+                if (t != null) {
+                    return TextTrackedFuture.completedFuture(
+                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                            RequestSenderOrchestrator.RetryDirective.RETRY,
+                            null),
+                        () -> "Returning a future to retry due to a connection exception"
+                    );
+                }
                 assert (aggResponse != null);
+                return perRequestStatefulVisitor.visit(requestBytes, aggResponse, null);
             }
-            return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
+
+            @Override
+            public void close() {
+                perRequestStatefulVisitor.close();
+            }
         };
     }
 

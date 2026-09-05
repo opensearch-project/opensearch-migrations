@@ -3,8 +3,10 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import java.util.List;
 import java.util.function.Function;
 
+import org.opensearch.migrations.replay.datatypes.AttemptPayload;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
+import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.transform.IAuthTransformer;
 
 import io.netty.buffer.ByteBuf;
@@ -56,12 +58,22 @@ public class SigningByteBufListProducer extends ByteBufListProducer {
 
     @Override
     public AttemptPayload newAttempt() {
-        return AttemptPayload.owned(get());
+        return AttemptPayload.owned(get(), ownershipMetrics());
     }
 
     @Override
-    public ByteBufList diagnosticSnapshot() {
-        return get();
+    public DiagnosticPayload retainDiagnosticCopy() {
+        return new DiagnosticPayload(get(), ownershipMetrics());
+    }
+
+    @Override
+    protected int ownedBufferCount() {
+        return bodyByteBufs.size();
+    }
+
+    @Override
+    protected long ownedBytes() {
+        return bodyByteBufs.stream().mapToLong(ByteBuf::readableBytes).sum();
     }
 
     @Override

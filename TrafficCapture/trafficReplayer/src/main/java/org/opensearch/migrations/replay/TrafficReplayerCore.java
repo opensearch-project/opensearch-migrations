@@ -424,8 +424,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             TextTrackedFuture<RequestResponsePacketPair> sourceFuture,
             TransactionEvidenceState evidenceState
         ) {
-            targetFuture.future
-                .handle((summary, failure) -> captureTargetResult(evidenceState, summary, failure))
+            CompletionStage<TargetExchangeResult> capturedTarget = targetFuture.future
+                .handle((summary, failure) ->
+                    captureTargetResult(transaction, evidenceState, summary, failure)
+                )
+                .thenCompose(stage -> stage);
+            capturedTarget
                 .thenCombine(
                     sourceFuture.future,
                     (targetResult, source) -> toTargetOutcome(
@@ -437,7 +441,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .whenComplete((outcome, failure) -> settleTargetOrFail(transaction, outcome, failure));
         }
 
-        private TargetExchangeResult captureTargetResult(
+        private CompletionStage<TargetExchangeResult> captureTargetResult(
+            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
             TransactionEvidenceState evidenceState,
             TransformedTargetRequestAndResponseList summary,
             Throwable failure
@@ -445,7 +450,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var cause = failure == null ? null : unwrap(failure);
             evidenceState.target = summary;
             evidenceState.targetFailure = cause;
-            return new TargetExchangeResult(summary, cause);
+            var result = new TargetExchangeResult(summary, cause);
+            return summary == null
+                ? CompletableFuture.completedFuture(result)
+                : transaction.ownResource(summary).thenApply(ignored -> result);
         }
 
         private void settleTargetOrFail(

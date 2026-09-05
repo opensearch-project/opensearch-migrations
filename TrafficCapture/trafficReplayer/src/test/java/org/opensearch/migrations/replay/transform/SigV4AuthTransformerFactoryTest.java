@@ -241,14 +241,14 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
             "application/json",
             List.of("{\"message\":\"hello\"}")
         );
-        var snapshot = producer.diagnosticSnapshot();
+        var snapshot = producer.retainDiagnosticCopy();
 
-        producer.release();
+        producer.close();
 
-        var composite = snapshot.asCompositeByteBufRetained();
+        var composite = snapshot.packets().asCompositeByteBufRetained();
         Assertions.assertTrue(composite.toString(StandardCharsets.UTF_8).contains("Authorization:"));
         composite.release();
-        snapshot.release();
+        snapshot.close();
     }
 
     private io.netty.buffer.CompositeByteBuf runSigningPipeline(

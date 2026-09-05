@@ -3,8 +3,11 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -150,6 +153,8 @@ public final class ReplayTransaction<R> {
     private final RecordDispositionLedger dispositionLedger;
     private final List<RecordId> recordIds;
     private final Deque<AutoCloseable> ownedResources = new ArrayDeque<>();
+    private final Set<AutoCloseable> ownedResourceIdentities =
+        Collections.newSetFromMap(new IdentityHashMap<>());
     private final CompletionGate<TransactionOutcome> completion = new CompletionGate<>();
     private final Metrics metrics;
     private SourceOutcome sourceOutcome;
@@ -157,6 +162,7 @@ public final class ReplayTransaction<R> {
     private EvidenceOutcome evidenceOutcome;
     private Phase phase = Phase.WAITING_FOR_JOIN;
     private RunwayState runwayState = RunwayState.AVAILABLE;
+    private Throwable pendingFailure;
     private boolean metricsActive;
     private boolean resourcesReleased;
     private boolean terminated;
@@ -200,7 +206,7 @@ public final class ReplayTransaction<R> {
         this.dispositionLedger = dispositionLedger;
         this.recordIds = new ArrayList<>(recordIds);
         this.metrics = metrics;
-        resources.forEach(ownedResources::addLast);
+        resources.forEach(this::adoptResource);
         mailbox.execute(this::activateMetrics);
     }
 
@@ -268,6 +274,35 @@ public final class ReplayTransaction<R> {
         return acknowledgement.minimalCompletionStage();
     }
 
+    public CompletionStage<Void> ownResource(@NonNull AutoCloseable resource) {
+        var acknowledgement = new CompletableFuture<Void>();
+        try {
+            mailbox.execute(() -> {
+                if (terminated) {
+                    var closeFailure = closeResource(resource);
+                    var failure = new IllegalStateException(ALREADY_TERMINATED + requestId);
+                    if (closeFailure != null) {
+                        failure.addSuppressed(closeFailure);
+                    }
+                    acknowledgement.completeExceptionally(failure);
+                    return;
+                }
+                if (!ownedResourceIdentities.add(resource)) {
+                    acknowledgement.completeExceptionally(
+                        new IllegalStateException("transaction already owns resource for " + requestId)
+                    );
+                    return;
+                }
+                ownedResources.addLast(resource);
+                acknowledgement.complete(null);
+            });
+        } catch (Throwable admissionFailure) {
+            addSuppressed(admissionFailure, closeResource(resource));
+            acknowledgement.completeExceptionally(admissionFailure);
+        }
+        return acknowledgement.minimalCompletionStage();
+    }
+
     public CompletionStage<TransactionOutcome> completion() {
         return completion.stage();
     }
@@ -299,12 +334,17 @@ public final class ReplayTransaction<R> {
                 );
                 return;
             }
-            var releaseFailure = releaseResources();
-            if (releaseFailure != null) {
-                cause.addSuppressed(releaseFailure);
+            if (pendingFailure != null) {
+                acknowledgement.completeExceptionally(
+                    new IllegalStateException("transaction failure already recorded for " + requestId)
+                );
+                return;
             }
-            recordTermination(TerminalOutcome.FAILED);
-            completion.completeExceptionally(cause);
+            if (phase == Phase.DISPOSING) {
+                pendingFailure = cause;
+            } else {
+                completeFailure(cause, null);
+            }
             acknowledgement.complete(null);
         });
         return acknowledgement.minimalCompletionStage();
@@ -387,16 +427,18 @@ public final class ReplayTransaction<R> {
         if (terminated) {
             return;
         }
-        Throwable releaseFailure = releaseResources();
-        if (dispositionFailure != null) {
-            if (releaseFailure != null) {
-                dispositionFailure.addSuppressed(releaseFailure);
-            }
-            recordTermination(TerminalOutcome.FAILED);
-            completion.completeExceptionally(dispositionFailure);
+        if (dispositionFailure == null) {
+            metrics.disposition(acceptedDisposition);
+        }
+        if (pendingFailure != null) {
+            completeFailure(pendingFailure, dispositionFailure);
             return;
         }
-        metrics.disposition(acceptedDisposition);
+        if (dispositionFailure != null) {
+            completeFailure(dispositionFailure, null);
+            return;
+        }
+        Throwable releaseFailure = releaseResources();
         if (releaseFailure != null) {
             recordTermination(TerminalOutcome.FAILED);
             completion.completeExceptionally(releaseFailure);
@@ -417,6 +459,20 @@ public final class ReplayTransaction<R> {
                 decision.haltReplay()
             )
         );
+    }
+
+    private void completeFailure(Throwable failure, Throwable additionalFailure) {
+        assertInMailbox();
+        addSuppressed(failure, additionalFailure);
+        addSuppressed(failure, releaseResources());
+        recordTermination(TerminalOutcome.FAILED);
+        completion.completeExceptionally(failure);
+    }
+
+    private static void addSuppressed(Throwable failure, Throwable additionalFailure) {
+        if (additionalFailure != null && additionalFailure != failure) {
+            failure.addSuppressed(additionalFailure);
+        }
     }
 
     private void activateMetrics() {
@@ -464,17 +520,34 @@ public final class ReplayTransaction<R> {
         resourcesReleased = true;
         Throwable firstFailure = null;
         while (!ownedResources.isEmpty()) {
-            try {
-                ownedResources.removeLast().close();
-            } catch (Exception t) {
+            var resource = ownedResources.removeLast();
+            ownedResourceIdentities.remove(resource);
+            var closeFailure = closeResource(resource);
+            if (closeFailure != null) {
                 if (firstFailure == null) {
-                    firstFailure = t;
+                    firstFailure = closeFailure;
                 } else {
-                    firstFailure.addSuppressed(t);
+                    firstFailure.addSuppressed(closeFailure);
                 }
             }
         }
         return firstFailure;
+    }
+
+    private void adoptResource(AutoCloseable resource) {
+        if (!ownedResourceIdentities.add(resource)) {
+            throw new IllegalArgumentException("duplicate transaction resource for " + requestId);
+        }
+        ownedResources.addLast(resource);
+    }
+
+    private static Throwable closeResource(AutoCloseable resource) {
+        try {
+            resource.close();
+            return null;
+        } catch (Throwable t) {
+            return t;
+        }
     }
 
     private void assertInMailbox() {

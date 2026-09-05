@@ -438,8 +438,8 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         try {
             releasePrepared(request);
             settleRequest(request, outcome);
-        } catch (Exception e) {
-            settleRequest(request, new TargetOutcome.Failed<>(e));
+        } catch (Throwable t) {
+            settleRequest(request, new TargetOutcome.Failed<>(t));
         }
     }
 
@@ -501,13 +501,18 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         abortStartedNanos = nanoTime.getAsLong();
         setHeadWaitReason(null);
         cancelHeadTimer();
+        Throwable queuedCleanupFailure = null;
         for (var command : commands) {
             if (command instanceof RequestCommand<P, R> request && request != activeRequest) {
-                cancelQueuedRequest(request, cause);
+                queuedCleanupFailure = combineFailures(
+                    queuedCleanupFailure,
+                    cancelQueuedRequest(request, cause)
+                );
             } else if (command instanceof CloseCommand<P, R> close) {
                 close.completion.complete(new SessionOutcome.Aborted(reason, cause));
             }
         }
+        var settledQueuedCleanupFailure = queuedCleanupFailure;
 
         CompletionStage<Void> abortStage;
         metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, 1);
@@ -520,32 +525,43 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             mailbox.execute(() -> {
                 metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
                 orderedCloseActive = false;
+                var terminationFailure = failure == null ? null : unwrap(failure);
                 if (activeRequest != null) {
                     recordActiveDuration();
                     activeRequest.settled = true;
                     activeRequest.completion.complete(new TargetOutcome.Cancelled<>(cause));
-                    releasePreparedQuietly(activeRequest);
+                    terminationFailure = combineFailures(
+                        terminationFailure,
+                        releasePreparedFailure(activeRequest)
+                    );
                     activeRequest = null;
                 }
+                terminationFailure = combineFailures(
+                    terminationFailure,
+                    settledQueuedCleanupFailure
+                );
                 if (!commands.isEmpty()) {
                     metrics.queuedCommandsChanged(-commands.size());
                 }
                 commands.clear();
                 metrics.abortDuration(elapsedSince(abortStartedNanos));
                 finishTermination(
-                    failure == null
+                    terminationFailure == null
                         ? new SessionOutcome.Aborted(reason, cause)
-                        : new SessionOutcome.Failed(unwrap(failure))
+                        : new SessionOutcome.Failed(terminationFailure)
                 );
             })
         );
     }
 
-    private void cancelQueuedRequest(RequestCommand<P, R> request, CancellationException cause) {
+    private Throwable cancelQueuedRequest(
+        RequestCommand<P, R> request,
+        CancellationException cause
+    ) {
         request.settled = true;
         request.preparationCompletion.cancel(false);
         request.completion.complete(new TargetOutcome.Cancelled<>(cause));
-        releasePreparedQuietly(request);
+        return releasePreparedFailure(request);
     }
 
     private void finishTermination(SessionOutcome outcome) {
@@ -566,11 +582,26 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     }
 
     private void releasePreparedQuietly(RequestCommand<P, R> request) {
+        releasePreparedFailure(request);
+    }
+
+    private Throwable releasePreparedFailure(RequestCommand<P, R> request) {
         try {
             releasePrepared(request);
-        } catch (Exception ignored) {
-            // The owning operation has already reached a stronger terminal outcome.
+            return null;
+        } catch (Throwable t) {
+            return t;
         }
+    }
+
+    private static Throwable combineFailures(Throwable first, Throwable additional) {
+        if (first == null) {
+            return additional;
+        }
+        if (additional != null && additional != first) {
+            first.addSuppressed(additional);
+        }
+        return first;
     }
 
     private void cancelHeadTimer() {

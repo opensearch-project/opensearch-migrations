@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +29,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
+import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -39,6 +41,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     private final List<Integer> targetExecutionOrder = new CopyOnWriteArrayList<>();
@@ -128,6 +132,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     @Test
     void abortCancelsAnAlreadyScheduledRetryWithoutWaitingForItsDelay() throws Exception {
         var retryStarted = new CompletableFuture<Void>();
+        var visitorClosed = new CompletableFuture<Void>();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
             Duration.ofSeconds(30),
@@ -154,15 +159,27 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 ),
                 () -> "prepared request"
             ),
-            transformed -> (requestBytes, response, failure) -> {
-                retryStarted.complete(null);
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.RETRY,
-                        "retry"
-                    ),
-                    () -> "force a delayed retry"
-                );
+            transformed -> new RequestSenderOrchestrator.RetryVisitor<>() {
+                @Override
+                public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<String>> visit(
+                    ByteBuf requestBytes,
+                    AggregatedRawResponse response,
+                    Throwable failure
+                ) {
+                    retryStarted.complete(null);
+                    return TextTrackedFuture.completedFuture(
+                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                            RequestSenderOrchestrator.RetryDirective.RETRY,
+                            "retry"
+                        ),
+                        () -> "force a delayed retry"
+                    );
+                }
+
+                @Override
+                public void close() {
+                    visitorClosed.complete(null);
+                }
             },
             status -> status.getClass().getSimpleName()
         );
@@ -177,6 +194,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         Assertions.assertTrue(request.future.isCompletedExceptionally());
         Assertions.assertEquals(1, targetExchanges.get());
+        visitorClosed.get(2, TimeUnit.SECONDS);
         var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
         probe.close();
     }
@@ -185,6 +203,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     void abortDoesNotWaitForAResponseFinalizerThatNeverCompletes() throws Exception {
         var finalizationStarted = new CompletableFuture<Void>();
         var consumerAborted = new CompletableFuture<CancellationException>();
+        var ownershipMetrics = new RecordingOwnershipMetrics();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
             (session, context) -> new IPacketFinalizingConsumer<>() {
@@ -208,7 +227,10 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                     consumerAborted.complete(cause);
                 }
             },
-            RequestSenderOrchestrator.noSourceTerminationObligations()
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ownershipMetrics
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("cancel-finalizer", 0);
@@ -229,8 +251,79 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         Assertions.assertSame(cancellation, consumerAborted.get(2, TimeUnit.SECONDS));
         Assertions.assertTrue(request.future.isCompletedExceptionally());
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
+        Assertions.assertEquals(1, ownershipMetrics.maxHandles(ResourceOwnership.Type.ATTEMPT_PAYLOAD));
         var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
         probe.close();
+    }
+
+    @Test
+    void terminalRetryResultIsReleasedWhenAbortWins() throws Exception {
+        var retryStarted = new CompletableFuture<Void>();
+        var retryDecision =
+            new CompletableFuture<RequestSenderOrchestrator.DeterminedTransformedResponse<String>>();
+        var releasedResults = new AtomicInteger();
+        var ownershipMetrics = new RecordingOwnershipMetrics();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> new IPacketFinalizingConsumer<>() {
+                @Override
+                public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+                    nextRequestPacket.release();
+                    return TextTrackedFuture.completedFuture(null, () -> "packet consumed");
+                }
+
+                @Override
+                public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
+                    return TextTrackedFuture.completedFuture(
+                        new AggregatedRawResponse(null, 0, Duration.ZERO, null, null),
+                        () -> "response completed"
+                    );
+                }
+            },
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ownershipMetrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("abort-terminal-result", 0);
+        var now = Instant.now();
+        var request = orchestrator.scheduleRequestLifecycle(
+            context.getReplayerRequestKey(),
+            context,
+            now.minusSeconds(1),
+            now.minusMillis(1),
+            now,
+            permits,
+            () -> TextTrackedFuture.completedFuture(transformedRequest(), () -> "prepared request"),
+            transformed -> (requestBytes, response, failure) -> {
+                retryStarted.complete(null);
+                return new TextTrackedFuture<>(retryDecision, "controlled terminal retry decision");
+            },
+            status -> status.getClass().getSimpleName()
+        );
+
+        retryStarted.get(5, TimeUnit.SECONDS);
+        orchestrator.abortActor(
+            context.getChannelKeyContext(),
+            0,
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("source reassigned")
+        ).get(Duration.ofSeconds(2));
+        retryDecision.complete(
+            new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                RequestSenderOrchestrator.RetryDirective.DONE,
+                "discarded",
+                ignored -> releasedResults.incrementAndGet()
+            )
+        );
+
+        await(() -> releasedResults.get() == 1);
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
+        Assertions.assertTrue(request.future.isCompletedExceptionally());
     }
 
     @Test
@@ -347,6 +440,239 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             metrics.enteredPhases()
         );
         closeActor(context);
+    }
+
+    @Test
+    void synchronousPacketConsumerCreationFailureReleasesOwnedRequestResources() throws Exception {
+        var ownershipMetrics = new RecordingOwnershipMetrics();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> {
+                throw new IllegalStateException("packet consumer creation failed");
+            },
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ownershipMetrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("sender-factory-failure", 0);
+
+        var request = schedule(
+            context,
+            permits,
+            CompletableFuture.completedFuture(transformedRequest())
+        );
+
+        var failure = Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> request.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertEquals("packet consumer creation failed", failure.getCause().getMessage());
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
+        Assertions.assertEquals(1, ownershipMetrics.maxHandles(ResourceOwnership.Type.PREPARED_REQUEST));
+        Assertions.assertEquals(1, ownershipMetrics.maxHandles(ResourceOwnership.Type.ATTEMPT_PAYLOAD));
+
+        var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
+        probe.close();
+        closeActor(context);
+    }
+
+    @Test
+    void visitorCreationFailureSettlesPreparationWhenPreparedCleanupAlsoFails() throws Exception {
+        var ownershipMetrics = new RecordingOwnershipMetrics();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> new ImmediatePacketConsumer(
+                context.getReplayerRequestKey().getReplayerRequestIndex()
+            ),
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ownershipMetrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("visitor-factory-failure", 0);
+        var transformed = transformedRequest();
+        var producer = transformed.transformedOutput;
+        producer.retain();
+        var visitorFailure = new IllegalStateException("visitor factory failed");
+        var now = Instant.now();
+
+        try {
+            var request = orchestrator.scheduleRequestLifecycle(
+                context.getReplayerRequestKey(),
+                context,
+                now.minusSeconds(1),
+                now.minusMillis(1),
+                now,
+                permits,
+                () -> TextTrackedFuture.completedFuture(transformed, () -> "prepared request"),
+                ignored -> {
+                    throw visitorFailure;
+                },
+                status -> status.getClass().getSimpleName()
+            );
+
+            var failure = Assertions.assertThrows(
+                java.util.concurrent.ExecutionException.class,
+                () -> request.get(Duration.ofSeconds(5))
+            );
+            Assertions.assertSame(visitorFailure, failure.getCause());
+            Assertions.assertEquals(1, visitorFailure.getSuppressed().length);
+            Assertions.assertEquals(
+                "prepared request has shared ownership; refCnt=2",
+                visitorFailure.getSuppressed()[0].getMessage()
+            );
+
+            var probe = permits.acquire(requestId("probe", 0), 1)
+                .toCompletableFuture()
+                .get(2, TimeUnit.SECONDS);
+            probe.close();
+        } finally {
+            if (producer.refCnt() == 2) {
+                producer.release();
+            }
+            if (producer.refCnt() == 1) {
+                producer.close();
+            }
+        }
+
+        Assertions.assertEquals(0, ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST));
+        closeActor(context);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void synchronousPacketConsumerFailureReleasesOwnedRequestResources(boolean returnsNull) throws Exception {
+        var ownershipMetrics = new RecordingOwnershipMetrics();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> new IPacketFinalizingConsumer<>() {
+                @Override
+                public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+                    if (returnsNull) {
+                        return null;
+                    }
+                    throw new IllegalStateException("packet write rejected");
+                }
+
+                @Override
+                public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
+                    throw new AssertionError("synchronous packet failure must not finalize");
+                }
+            },
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ownershipMetrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext(
+            returnsNull ? "sender-returned-null" : "sender-threw",
+            0
+        );
+        var transformed = transformedRequest();
+        var now = Instant.now();
+        var request = orchestrator.scheduleRequestLifecycle(
+            context.getReplayerRequestKey(),
+            context,
+            now.minusSeconds(1),
+            now.minusMillis(1),
+            now,
+            permits,
+            () -> TextTrackedFuture.completedFuture(transformed, () -> "prepared request"),
+            transformedResult -> (requestBytes, response, sendFailure) -> {
+                var failure = sendFailure == null
+                    ? new AssertionError("synchronous packet failure was not propagated")
+                    : sendFailure;
+                return TextTrackedFuture.failedFuture(
+                    failure,
+                    () -> "propagating the synchronous packet failure"
+                );
+            },
+            status -> status.getClass().getSimpleName()
+        );
+
+        var failure = Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> request.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertEquals(
+            returnsNull ? "packet consumer returned null" : "packet write rejected",
+            failure.getCause().getMessage()
+        );
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
+        Assertions.assertEquals(0, transformed.transformedOutput.refCnt());
+        Assertions.assertEquals(1, ownershipMetrics.maxHandles(ResourceOwnership.Type.ATTEMPT_PAYLOAD));
+
+        var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
+        probe.close();
+        closeActor(context);
+    }
+
+    @Test
+    void lateTransformationAfterCancellationIsTrackedAndReleased() throws Exception {
+        var ownershipMetrics = new RecordingOwnershipMetrics();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context) -> new ImmediatePacketConsumer(
+                context.getReplayerRequestKey().getReplayerRequestIndex()
+            ),
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ownershipMetrics
+        );
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("late-transformation", 0);
+        var preparationStarted = new CompletableFuture<Void>();
+        var transformation = new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>() {
+            @Override
+            public boolean cancel(boolean mayInterruptIfRunning) {
+                return false;
+            }
+        };
+        var now = Instant.now();
+        var request = orchestrator.scheduleRequestLifecycle(
+            context.getReplayerRequestKey(),
+            context,
+            now.minusSeconds(1),
+            now.minusMillis(1),
+            now,
+            permits,
+            () -> {
+                preparationStarted.complete(null);
+                return new TextTrackedFuture<>(transformation, "non-cancellable transformation");
+            },
+            transformed -> (requestBytes, response, failure) ->
+                TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.DONE,
+                        "unused"
+                    ),
+                    () -> "unused retry visitor"
+                ),
+            status -> status.getClass().getSimpleName()
+        );
+
+        preparationStarted.get(2, TimeUnit.SECONDS);
+        orchestrator.abortActor(
+            context.getChannelKeyContext(),
+            0,
+            AbortReason.SOURCE_REASSIGNMENT,
+            new CancellationException("source reassigned")
+        ).get(Duration.ofSeconds(2));
+
+        var transformed = transformedRequest();
+        transformation.complete(transformed);
+
+        await(() -> ownershipMetrics.maxHandles(ResourceOwnership.Type.PREPARED_REQUEST) == 1);
+        await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
+        Assertions.assertEquals(0, transformed.transformedOutput.refCnt());
+        Assertions.assertTrue(request.future.isCompletedExceptionally());
     }
 
     @Test
@@ -636,6 +962,32 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         List<TargetExchangeState.Phase> enteredPhases() {
             return List.copyOf(enteredPhases);
+        }
+    }
+
+    private static final class RecordingOwnershipMetrics implements ResourceOwnership.Metrics {
+        private final EnumMap<ResourceOwnership.Type, Integer> handles =
+            new EnumMap<>(ResourceOwnership.Type.class);
+        private final EnumMap<ResourceOwnership.Type, Integer> maxHandles =
+            new EnumMap<>(ResourceOwnership.Type.class);
+
+        @Override
+        public synchronized void ownershipChanged(
+            ResourceOwnership.Type type,
+            int handleDelta,
+            int bufferDelta,
+            long byteDelta
+        ) {
+            var current = handles.merge(type, handleDelta, Integer::sum);
+            maxHandles.merge(type, current, Math::max);
+        }
+
+        private synchronized int handles(ResourceOwnership.Type type) {
+            return handles.getOrDefault(type, 0);
+        }
+
+        private synchronized int maxHandles(ResourceOwnership.Type type) {
+            return maxHandles.getOrDefault(type, 0);
         }
     }
 
