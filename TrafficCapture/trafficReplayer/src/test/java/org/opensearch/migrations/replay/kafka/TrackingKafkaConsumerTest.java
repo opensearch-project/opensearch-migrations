@@ -2,6 +2,9 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,6 +38,62 @@ import org.mockito.Mockito;
 class TrackingKafkaConsumerTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
+
+    private static final class MutableClock extends Clock {
+        private Instant now = Instant.EPOCH;
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+    }
+
+    private static final class RecordingCommitMetrics implements TrackingKafkaConsumer.Metrics {
+        int unresolvedObligations;
+        int stagedCommitPartitions;
+        final Map<Integer, Integer> pendingAcknowledgements = new HashMap<>();
+        final List<Duration> commitLatencies = new ArrayList<>();
+        final List<String> observedHeads = new ArrayList<>();
+
+        @Override
+        public void unresolvedObligationsChanged(int delta) {
+            unresolvedObligations += delta;
+        }
+
+        @Override
+        public void stagedCommitPartitionsChanged(int delta) {
+            stagedCommitPartitions += delta;
+        }
+
+        @Override
+        public void pendingAcknowledgementsChanged(int generation, int delta) {
+            pendingAcknowledgements.merge(generation, delta, Integer::sum);
+        }
+
+        @Override
+        public void commitAcknowledged(int generation, Duration latency) {
+            commitLatencies.add(latency);
+        }
+
+        @Override
+        public void commitHeadObserved(int partition, int generation, Duration age) {
+            observedHeads.add(partition + ":" + generation + ":" + age.toMillis());
+        }
+    }
 
     private static class BlockingOffsetLifecycleTracker extends OffsetLifecycleTracker {
         private final CountDownLatch removeEntered = new CountDownLatch(1);
@@ -71,6 +130,124 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         return new TrackingKafkaConsumer(
             rootContext, mc, TOPIC, Duration.ofSeconds(30), Clock.systemUTC(), tsk -> {}
         );
+    }
+
+    @Test
+    void commitMetricsFollowAcceptanceAcknowledgementAndGenerationLoss() {
+        var mockConsumer = buildMockConsumer();
+        var clock = new MutableClock();
+        var metrics = new RecordingCommitMetrics();
+        var committedKeys = new ArrayList<ITrafficStreamKey>();
+        var consumer = new TrackingKafkaConsumer(
+            rootContext,
+            mockConsumer,
+            TOPIC,
+            Duration.ofSeconds(30),
+            clock,
+            committedKeys::add,
+            metrics
+        );
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+
+        var firstKey = Mockito.mock(ITrafficStreamKey.class);
+        var secondKey = Mockito.mock(ITrafficStreamKey.class);
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "first", new byte[] { 0 }));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 1, "second", new byte[] { 1 }));
+        List<KafkaCommitOffsetData> offsets;
+        try (var context = rootContext.createReadChunkContext()) {
+            offsets = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+        Assertions.assertEquals(2, metrics.unresolvedObligations);
+
+        clock.advance(Duration.ofSeconds(5));
+        consumer.logHeartbeat();
+        Assertions.assertEquals(List.of("0:1:5000"), metrics.observedHeads);
+
+        Assertions.assertEquals(
+            ITrafficCaptureSource.CommitResult.BLOCKED_BY_OTHER_COMMITS,
+            consumer.commitKafkaKey(secondKey, offsets.get(1))
+        );
+        Assertions.assertEquals(
+            ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ,
+            consumer.commitKafkaKey(firstKey, offsets.get(0))
+        );
+        Assertions.assertEquals(0, metrics.unresolvedObligations);
+        Assertions.assertEquals(1, metrics.stagedCommitPartitions);
+        Assertions.assertEquals(2, metrics.pendingAcknowledgements.get(1));
+
+        clock.advance(Duration.ofSeconds(2));
+        try (var context = rootContext.createReadChunkContext()) {
+            consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+        Assertions.assertEquals(List.of(firstKey, secondKey), committedKeys);
+        Assertions.assertEquals(0, metrics.stagedCommitPartitions);
+        Assertions.assertEquals(0, metrics.pendingAcknowledgements.get(1));
+        Assertions.assertEquals(List.of(Duration.ofSeconds(2), Duration.ofSeconds(2)), metrics.commitLatencies);
+        Assertions.assertFalse(consumer.nextSetOfKeysContextsBeingCommitted.containsKey(partition));
+
+        var thirdKey = Mockito.mock(ITrafficStreamKey.class);
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 2, "third", new byte[] { 2 }));
+        KafkaCommitOffsetData thirdOffset;
+        try (var context = rootContext.createReadChunkContext()) {
+            thirdOffset = consumer.getNextBatchOfRecords(context, (offset, record) -> offset)
+                .findFirst()
+                .orElseThrow();
+        }
+        Assertions.assertEquals(1, metrics.unresolvedObligations);
+        Assertions.assertEquals(
+            ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ,
+            consumer.commitKafkaKey(thirdKey, thirdOffset)
+        );
+        Assertions.assertEquals(1, metrics.stagedCommitPartitions);
+        Assertions.assertEquals(1, metrics.pendingAcknowledgements.get(1));
+
+        consumer.onPartitionsLost(List.of(partition));
+
+        Assertions.assertEquals(0, metrics.unresolvedObligations);
+        Assertions.assertEquals(0, metrics.stagedCommitPartitions);
+        Assertions.assertEquals(0, metrics.pendingAcknowledgements.get(1));
+        Assertions.assertEquals(List.of(firstKey, secondKey), committedKeys);
+    }
+
+    @Test
+    void closeClearsCommitMetricsWithoutARebalanceCallback() {
+        var mockConsumer = buildMockConsumer();
+        var metrics = new RecordingCommitMetrics();
+        var consumer = new TrackingKafkaConsumer(
+            rootContext,
+            mockConsumer,
+            TOPIC,
+            Duration.ofSeconds(30),
+            Clock.systemUTC(),
+            ignored -> {},
+            metrics
+        );
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "first", new byte[] { 0 }));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 1, "second", new byte[] { 1 }));
+        List<KafkaCommitOffsetData> offsets;
+        try (var context = rootContext.createReadChunkContext()) {
+            offsets = consumer.getNextBatchOfRecords(context, (commitOffset, record) -> commitOffset).toList();
+        }
+        Assertions.assertEquals(
+            ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ,
+            consumer.commitKafkaKey(Mockito.mock(ITrafficStreamKey.class), offsets.get(0))
+        );
+        Assertions.assertEquals(1, metrics.unresolvedObligations);
+        Assertions.assertEquals(1, metrics.stagedCommitPartitions);
+        Assertions.assertEquals(1, metrics.pendingAcknowledgements.get(1));
+
+        consumer.close();
+
+        Assertions.assertEquals(0, metrics.unresolvedObligations);
+        Assertions.assertEquals(0, metrics.stagedCommitPartitions);
+        Assertions.assertEquals(0, metrics.pendingAcknowledgements.get(1));
+        Assertions.assertTrue(consumer.partitionToOffsetLifecycleTrackerMap.isEmpty());
+        Assertions.assertTrue(consumer.nextSetOfCommitsMap.isEmpty());
+        Assertions.assertTrue(consumer.nextSetOfKeysContextsBeingCommitted.isEmpty());
     }
 
     // -------------------------------------------------------------------------

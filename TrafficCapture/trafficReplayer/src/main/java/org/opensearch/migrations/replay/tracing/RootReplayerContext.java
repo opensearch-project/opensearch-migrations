@@ -23,6 +23,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ConnectionActorMetrics connectionActorMetrics;
     public final TargetExchangeStateMetrics targetExchangeStateMetrics;
     public final ReplayTransactionMetrics replayTransactionMetrics;
+    public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
 
     public final TrafficSourceContexts.ReadChunkContext.MetricInstruments readChunkInstruments;
     public final TrafficSourceContexts.BackPressureBlockContext.MetricInstruments backPressureInstruments;
@@ -58,6 +59,7 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         connectionActorMetrics = new ConnectionActorMetrics(meter);
         targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
         replayTransactionMetrics = new ReplayTransactionMetrics(meter);
+        kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
 
         readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
         backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);
