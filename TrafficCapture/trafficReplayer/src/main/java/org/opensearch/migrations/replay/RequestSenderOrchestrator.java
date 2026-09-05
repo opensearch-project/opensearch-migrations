@@ -455,7 +455,7 @@ public class RequestSenderOrchestrator {
             return closeRuntimeChannel().thenCompose(ignored ->
                 exchangeToJoin == null
                     ? CompletableFuture.<Void>completedFuture(null)
-                    : exchangeToJoin.handle((outcome, failure) -> (Void) null)
+                    : exchangeToJoin.handle((outcome, failure) -> null)
             ).whenComplete((ignored, failure) -> clearPhase());
         }
 
