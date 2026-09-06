@@ -29,8 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ClientConnectionPool {
 
-    private final BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>>
-        channelCreator;
+    private final ConnectionReplaySession.ChannelFutureFactory channelCreator;
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
     private final TargetExchangeState.Metrics metrics;
@@ -56,11 +55,28 @@ public class ClientConnectionPool {
         @NonNull String targetConnectionPoolName,
         int numThreads
     ) {
+        this(adapt(channelCreator), targetConnectionPoolName, numThreads, TargetExchangeState.Metrics.NOOP);
+    }
+
+    public ClientConnectionPool(
+        ConnectionReplaySession.ChannelFutureFactory channelCreator,
+        @NonNull String targetConnectionPoolName,
+        int numThreads
+    ) {
         this(channelCreator, targetConnectionPoolName, numThreads, TargetExchangeState.Metrics.NOOP);
     }
 
     public ClientConnectionPool(
         BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelCreator,
+        @NonNull String targetConnectionPoolName,
+        int numThreads,
+        @NonNull TargetExchangeState.Metrics metrics
+    ) {
+        this(adapt(channelCreator), targetConnectionPoolName, numThreads, metrics);
+    }
+
+    public ClientConnectionPool(
+        ConnectionReplaySession.ChannelFutureFactory channelCreator,
         @NonNull String targetConnectionPoolName,
         int numThreads,
         @NonNull TargetExchangeState.Metrics metrics
@@ -72,6 +88,12 @@ public class ClientConnectionPool {
         connectionId2ChannelCache = CacheBuilder.newBuilder().build(CacheLoader.from(key -> {
             throw new UnsupportedOperationException("Use Cache.get(key, callable) instead");
         }));
+    }
+
+    private static ConnectionReplaySession.ChannelFutureFactory adapt(
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelCreator
+    ) {
+        return (eventLoop, context, ignoredCancellation) -> channelCreator.apply(eventLoop, context);
     }
 
     public ScheduledFuture<?> scheduleAtFixedRate(Runnable runnable,

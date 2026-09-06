@@ -11,7 +11,11 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -37,6 +41,10 @@ import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaderValues;
@@ -52,6 +60,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @Slf4j
 @WrapWithNettyLeakDetection
@@ -151,12 +165,76 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         }
     }
 
+    @Test
+    void abortBeforeDelayedAcquisitionNeverWritesAndReleasesThePacket() throws Exception {
+        var eventLoopGroup = new NioEventLoopGroup(
+            1,
+            new DefaultThreadFactory("delayed-acquisition-abort")
+        );
+        try {
+            var eventLoop = eventLoopGroup.next();
+            var delayedAcquisition = new CompletableFuture<ChannelFuture>();
+            var channel = mock(Channel.class);
+            var connectFuture = new DefaultChannelPromise(channel, eventLoop);
+            var closeFuture = new DefaultChannelPromise(channel, eventLoop);
+            var closeCalls = new AtomicInteger();
+            when(channel.isActive()).thenReturn(true);
+            when(channel.closeFuture()).thenReturn(closeFuture);
+            when(channel.close()).thenAnswer(ignored -> {
+                closeCalls.incrementAndGet();
+                closeFuture.trySuccess();
+                return closeFuture;
+            });
+            connectFuture.setSuccess();
+
+            var requestContext = rootContext.getTestConnectionRequestContext("delayed-abort", 0);
+            var session = new ConnectionReplaySession(
+                eventLoop,
+                requestContext.getChannelKeyContext(),
+                (ignoredEventLoop, ignoredContext) ->
+                    new TextTrackedFuture<>(delayedAcquisition, "delayed target channel")
+            );
+            var consumer = new NettyPacketToHttpConsumer(
+                session,
+                requestContext,
+                REGULAR_RESPONSE_TIMEOUT
+            );
+            var packet = Unpooled.buffer().writeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8));
+            var send = consumer.consumeBytes(packet);
+            var cancellation = new CancellationException("source reassigned");
+
+            consumer.abort(cancellation);
+            Assertions.assertNull(session.cancelAndClose(cancellation).get(Duration.ofSeconds(5)));
+            var sendFailure = Assertions.assertThrows(
+                ExecutionException.class,
+                () -> send.get(Duration.ofSeconds(5))
+            );
+            Assertions.assertSame(cancellation, sendFailure.getCause());
+            Assertions.assertEquals(0, packet.refCnt());
+
+            delayedAcquisition.complete(connectFuture);
+            await(() -> closeCalls.get() == 1);
+            verify(channel, never()).writeAndFlush(any());
+            session.retireMetrics();
+        } finally {
+            eventLoopGroup.shutdownGracefully().sync();
+        }
+    }
+
     private SimpleHttpResponse makeTestRequestViaClient(SimpleHttpClientForTesting client, URI endpoint)
         throws IOException {
         return client.makeGetRequest(
             endpoint,
             Map.of("Host", "localhost", "User-Agent", "UnitTest").entrySet().stream()
         );
+    }
+
+    private static void await(java.util.function.BooleanSupplier condition) throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        Assertions.assertTrue(condition.getAsBoolean(), "condition did not become true before timeout");
     }
 
     @ParameterizedTest

@@ -522,12 +522,11 @@ public class RequestSenderOrchestrator {
             cancelScheduledWork(cancellationCause);
             cancelActivePacketReceiver(cancellationCause);
             var attemptReleaseFailure = releaseActiveAttempt();
-            runtime.session.setCancelled(true);
             var exchangeToJoin = activeExchange;
             if (exchangeToJoin != null) {
                 exchangeToJoin.complete(new TargetOutcome.Cancelled<>(cancellationCause));
             }
-            return closeRuntimeChannel()
+            return cancelRuntimeChannel()
                 .handle((ignored, channelFailure) -> {
                     var failure = channelFailure == null ? null : unwrap(channelFailure);
                     if (failure == null) {
@@ -546,6 +545,15 @@ public class RequestSenderOrchestrator {
                         : exchangeToJoin.handle((outcome, failure) -> null)
                 )
                 .whenComplete((ignored, failure) -> clearPhase());
+        }
+
+        private CompletionStage<Void> cancelRuntimeChannel() {
+            return runtime.session.cancelAndClose(cancellationCause).future.handle((channel, failure) -> {
+                if (failure != null) {
+                    throw new CompletionException(unwrap(failure));
+                }
+                return null;
+            });
         }
 
         private void cancelActivePacketReceiver(CancellationException cause) {

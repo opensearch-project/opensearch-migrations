@@ -12,7 +12,9 @@ open-connection snapshots complete, chunked, and ordered through the same produc
 traffic. The cancellation review additionally made two contracts explicit: aborting an active target
 exchange must actively settle and clean up every owned sub-operation rather than wait for the normal
 response path, and reassignment/shutdown revokes a transaction's generation-scoped runway
-independently of source and target outcomes.
+independently of source and target outcomes. A later editorial pass reworked the §7 and §13.2
+diagrams for legibility (per-component nodes, one message per arrow, ownership moved to companion
+tables) and tightened prose; it changed no contracts, invariants, or decisions.
 
 **Companion mapping:** [replayerCurrentToProposedArchitectureMap.md](replayerCurrentToProposedArchitectureMap.md)
 — which current class becomes what, and in which migration slice.
@@ -32,24 +34,21 @@ idle-only snapshot and finite-window-exhaustion proposals.
 ## 0. How to Read This Document
 
 **The short version.** Today the replayer's lifecycle decisions are spread across a graph of
-callbacks that run on whichever thread happens to settle a future. Answering "does this Kafka record
-reach a deliberate commit-or-retain decision on every path?" therefore requires inspecting every path
-that might touch it. This design replaces the graph with two objects that each own a defined piece of
-state and make their own terminal decisions — a **connection actor** that owns ordered target-side
-execution and connection termination, and a **replay transaction** that owns one request's resources,
-evidence, and final record disposition. Everything else becomes a producer of typed messages to one of
-those two, so that each lifecycle question is answerable from a single state machine rather than from
-the whole callback graph.
+callbacks running on whichever thread happens to settle a future, so answering "does this Kafka
+record reach a deliberate commit-or-retain decision on every path?" requires inspecting every path.
+This design replaces the graph with two single-owner state machines — a **connection actor** owning
+ordered target-side execution and connection termination, and a **replay transaction** owning one
+request's resources, evidence, and final record disposition. Everything else becomes a producer of
+typed messages to one of those two, so each lifecycle question is answerable from one state machine.
 
-**What is *not* being claimed.** Kafka delivery stays at-least-once and this design does not change
-that. A record may be delivered again after a crash, after a rebalance, or any time a staged offset
-was never durably acknowledged to the broker; deliberate `Retain` decisions exist precisely to cause
-that. The guarantee here is one **explicit disposition decision per accepted record inside a
-process** — never zero (an orphaned offset) and never two (a double-commit crash). Nor does the design
-make correctness a purely local property: actors and transactions localize the lifecycle state that
-today leaks across callbacks, but source assembly, offset low-watermarks, permit accounting, and the
-disposition ledger remain genuinely cross-component, and §6's invariants are the part that holds
-*those* together.
+**What is *not* being claimed.** Kafka delivery stays at-least-once: a record may be redelivered
+after a crash, a rebalance, or any staged offset never durably acknowledged — and deliberate
+`Retain` decisions exist precisely to cause that. The guarantee is one **explicit disposition
+decision per accepted record inside a process** — never zero (an orphaned offset), never two (a
+double-commit crash). Nor does correctness become purely local: actors and transactions localize the
+lifecycle state that today leaks across callbacks, but source assembly, offset low-watermarks,
+permit accounting, and the disposition ledger remain genuinely cross-component, held together by
+§6's invariants.
 
 **Reading order.** §1–§4 are conceptual and worth reading in sequence: the problem, the core
 idea, the vocabulary, and a worked example that traces one request end to end. §5–§14 are the
@@ -57,22 +56,20 @@ mechanisms; each opens with the problem it solves, so they can be read in any or
 the example in mind. §15–§18 are rules, metrics, tests, and gates. §19 records the design decisions
 that constrain the first implementation.
 
-**Two things this document deliberately does not do.** It does not name current classes or
-prescribe a migration sequence — that is the companion crosswalk's job. And it does not claim the
-current replayer is broken in general: Kafka consumption, HTTP reconstruction, transformation,
-Netty I/O, tuple sinks, and offset-commit mechanics are all retained. Only their orchestration
-contracts change.
+**Deliberate omissions.** Current class names and the migration sequence live in the companion
+crosswalk, not here. And the current replayer is not claimed to be broken in general: Kafka
+consumption, HTTP reconstruction, transformation, Netty I/O, tuple sinks, and offset-commit
+mechanics are all retained. Only their orchestration contracts change.
 
 ---
 
 ## 1. The Problem
 
 The trouble is concentrated in one place: **the connective tissue that decides when work is
-finished.** Four distinct failure mechanisms found in this machinery have the same shape, and that
-shape is what the design is built to make impossible. They are four *mechanisms*, not four separate
-outages — F3 and F4 were both found while diagnosing the same rebalance incident — which is if
-anything the more useful observation: one incident was able to hide two independent instances of the
-same structural defect.
+finished.** Four distinct failure mechanisms found there share one shape, and that shape is what the
+design makes impossible. They are four *mechanisms*, not four outages — F3 and F4 surfaced while
+diagnosing the same rebalance incident, which is itself telling: one incident hid two independent
+instances of the same structural defect.
 
 ### 1.1 The recurring failure: a required signal silently disappears
 
@@ -210,12 +207,11 @@ This ambiguity is a real source of bugs, so the design keeps the five lexically 
 - **Completion gate** — see §6.4. A future for a whole lifecycle operation, with an owner and
   documented postconditions that are already true when it completes successfully.
 - **Obligation** — a per-item record that something must be acknowledged or disposed of, completed
-  exactly once. It replaces a counter not because completion is automatic — an obligation can sit
-  unfulfilled forever, exactly as a counter can stay nonzero forever — but because it is
-  *attributable*: an unfulfilled obligation names the connection, session, and record still owed, so
-  the stall is diagnosable and a watchdog can report precisely what is missing. A leaked counter only
-  tells you the total is wrong. Obligations also make double-fulfillment structurally impossible,
-  which is the other half of F2.
+  exactly once. It replaces a counter because it is *attributable* — an unfulfilled obligation names
+  the connection, session, and record still owed, where a leaked counter only says the total is
+  wrong — and because double-fulfillment becomes structurally impossible (the other half of F2).
+  Completion is not automatic: an obligation can sit unfulfilled forever, exactly as a counter can
+  stay nonzero forever; it just tells you what is stuck.
 - **Out of runway** — we lost the right or the time to finish this work (partition reassigned,
   process shutting down). Never commit-eligible: someone else must be able to pick it up.
 - **Runway state** — generation-scoped authority to enter a commit disposition. The authoritative
@@ -293,10 +289,10 @@ machinery — it is §2 traced concretely.
 
    Nothing has been transformed and no permit has been acquired yet. Because admission precedes
    all asynchrony, **the actor's queue is source order** — which is why no sorter is needed later.
-   Admission performs only bounded O(1) control work: registry lookup, occasional runtime creation,
-   small ownership/token allocations, and one event-loop enqueue. It never waits for a permit,
-   transformation, signing, a timer, target I/O, retry, or evidence output. The design should be
-   benchmark-validated, but it does not move expensive request processing onto the control thread.
+   Admission itself is bounded O(1) control work (registry lookup, occasional runtime creation,
+   token allocation, one event-loop enqueue); it never waits for a permit, transformation, signing,
+   a timer, target I/O, retry, or evidence output. Benchmarks should confirm the control thread
+   stays cheap, but no expensive request processing moves onto it.
 
 4. **Prepare, concurrently.** The transaction asynchronously acquires a permit from
    `AsyncPermitPool`, then asks `RequestPreparationService` to transform and sign. That yields an
@@ -510,111 +506,180 @@ produce a false successful result or leave state that the next generation can ob
 
 ## 7. Proposed System
 
+Three views answer three different questions: §7.1 which thread owns which state, §7.2 what one
+request waits on and what releases each wait, §7.3 what must drain before a lifecycle operation may
+complete. In every diagram an arrow is a message, a future completion, or a network exchange — never
+direct cross-thread mutation, and never a thread blocking.
+
+### 7.1 Thread ownership and cross-thread messages
+
+Containers are execution domains: everything inside one mutates state only on that container's
+thread. **Solid arrows cross a thread boundary** and are always queued messages or future
+completions. **Dotted arrows stay on one thread** and show phase order or direct delivery.
+
 ```mermaid
-flowchart TD
-    subgraph SOURCE_CONTROL_THREAD["One source/control thread"]
-        KAFKA["KafkaSourceActor<br/>replay cursor + scan cursor"]
-        LEDGER["RecordDispositionLedger"]
-        COMMIT["Kafka commit adapter"]
-        READ_GATE["ReplayReadGate<br/>source admission"]
-        PROGRESS["ReplayProgressController<br/>work ledger + settled watermark"]
-        ASSEMBLER["SourceAssembler<br/>single-threaded reconstruction"]
-        COORDINATOR["ReplayCoordinator<br/>transaction and session registry"]
-        PERMITS["AsyncPermitPool"]
+flowchart LR
+    subgraph CONTROL["Source/control thread — exactly one"]
+        direction TB
+        KSA["KafkaSourceActor<br/>+ ReplayReadGate"]
+        ASM["SourceAssembler"]
+        COORD["ReplayCoordinator"]
+        POOL["AsyncPermitPool"]
+        LEDGER["RecordDispositionLedger<br/>+ ReplayProgressController<br/>+ Kafka commit adapter"]
     end
 
-    subgraph TRANSFORM_WORKERS["Existing transformation workers"]
-        PREP["RequestPreparationService<br/>transform and sign"]
+    subgraph LOOP["One session's ConnectionRuntime — its assigned Netty event loop"]
+        direction TB
+        ACTOR["ConnectionActor"]
+        EXCH["TargetExchange"]
+        TXN["ReplayTransaction"]
     end
 
-    subgraph NETTY_EVENT_LOOP["One assigned existing Netty event loop per session"]
-        RUNTIME["ConnectionRuntime<br/>session mailbox + registries"]
-        ACTOR["ConnectionActor<br/>FIFO command queue + head timer + channel"]
-        TXN["ReplayTransaction<br/>source + target + evidence + disposition"]
-    end
+    PREP["RequestPreparationService<br/>(transformation workers)"]
+    EVID["EvidenceWriter<br/>(evidence sink executor)"]
+    TARGET["Target cluster"]
 
-    subgraph EVIDENCE_EXECUTOR["Evidence sink executor"]
-        EVIDENCE["EvidenceWriter"]
-    end
+    KSA -.->|"decoded observations"| ASM
+    ASM -.->|"completed request / close"| COORD
 
-    subgraph EXTERNAL_SYSTEM["External system"]
-        TARGET["Target cluster"]
-    end
+    COORD -->|"AdmitRequest"| ACTOR
+    COORD -->|"abort(sessionKey)"| ACTOR
+    ASM -->|"SourceOutcome"| TXN
+    COORD -->|"RunwayLost"| TXN
 
-    subgraph COMPLETION_GATES["Completion gates: threadless, non-mutable stage views"]
-        TXN_GATE(["Transaction completion gate"])
-        SESSION_GATE(["Session termination completion gate"])
-        DRAIN_GATE(["Replay quiescence completion gate"])
-        LIFECYCLE_GATE(["Rebalance or shutdown completion gate"])
-    end
+    POOL <-->|"PermitRequested /<br/>PermitGranted"| TXN
+    TXN <-->|"PrepareRequest /<br/>Prepared"| PREP
+    TXN <-->|"write evidence /<br/>EvidenceOutcome"| EVID
+    EXCH <-->|"target request /<br/>response or failure"| TARGET
 
-    KAFKA -->|"source record"| READ_GATE
-    KAFKA -->|"ScanEvidence or source-control message"| ASSEMBLER
-    KAFKA -->|"revoke generation runway"| LEDGER
-    READ_GATE -->|"admitted record"| ASSEMBLER
-    ASSEMBLER --> COORDINATOR
-    COORDINATOR -->|"AdmitRequest envelope"| RUNTIME
-    RUNTIME -->|"create transaction"| TXN
-    RUNTIME -->|"append ordered command"| ACTOR
-    COORDINATOR -->|"RunwayLost on termination"| TXN
-    COORDINATOR -->|"register work token"| PROGRESS
-    TXN -->|"acquire or release"| PERMITS
-    PERMITS -->|"PermitGranted"| TXN
-    TXN -->|"prepare"| PREP
-    PREP -->|"Prepared"| TXN
-    TXN -->|"command ready"| ACTOR
-    ACTOR -->|"target request"| TARGET
-    TARGET -->|"target response"| ACTOR
-    ACTOR -->|"TargetOutcome"| TXN
-    ASSEMBLER -->|"SourceOutcome"| TXN
-    TXN -->|"write evidence"| EVIDENCE
-    EVIDENCE -->|"EvidenceOutcome"| TXN
-    TXN -->|"DispositionDecision"| LEDGER
-    LEDGER -->|"commit eligible"| COMMIT
-    PROGRESS -->|"settled watermark + epsilon"| READ_GATE
+    TXN -.->|"head ready"| ACTOR
+    ACTOR -.->|"execute head"| EXCH
+    EXCH -.->|"TargetOutcome"| TXN
 
-    TXN -.->|"completes"| TXN_GATE
-    ACTOR -.->|"completes"| SESSION_GATE
-    TXN_GATE -.->|"settle request work token"| PROGRESS
-    SESSION_GATE -.->|"settle session work token"| PROGRESS
-    PROGRESS -.->|"zero admitted work"| DRAIN_GATE
-    TXN_GATE -.->|"join when in scope"| LIFECYCLE_GATE
-    SESSION_GATE -.->|"join when in scope"| LIFECYCLE_GATE
-    DRAIN_GATE -.->|"join when in scope"| LIFECYCLE_GATE
-    LIFECYCLE_GATE -.->|"resume generation or continue shutdown"| KAFKA
+    TXN -->|"DispositionDecision ·<br/>settle work token ·<br/>PermitReleased"| LEDGER
 
-    style SOURCE_CONTROL_THREAD fill:#e9f3fb,stroke:#2f6687
-    style TRANSFORM_WORKERS fill:#eaf6e8,stroke:#4f7a46
-    style NETTY_EVENT_LOOP fill:#fbe9dc,stroke:#9a5a2e
-    style EVIDENCE_EXECUTOR fill:#f5efdc,stroke:#7d6c32
-    style EXTERNAL_SYSTEM fill:#eeeeee,stroke:#666666
-    style COMPLETION_GATES fill:#f4f4f4,stroke:#555555,stroke-dasharray:5 5
+    style CONTROL fill:#e9f3fb,stroke:#2f6687
+    style LOOP fill:#fbe9dc,stroke:#9a5a2e
+    style PREP fill:#eaf6e8,stroke:#4f7a46
+    style EVID fill:#f5efdc,stroke:#7d6c32
+    style TARGET fill:#eeeeee,stroke:#666666
 ```
 
-**How to read it.** The labeled containers show thread or executor affinity, **not a synchronous
-call stack**. Nodes in the Netty container share one event loop for a particular session; other
-sessions may use other event loops from the existing group. An arrow crossing a container boundary
-is a queued message, an asynchronous request, or a future completion — never direct cross-thread
-state mutation. Solid arrows are work and data flow; dashed arrows are completion-gate control
-flow.
+`AdmitRequest` lands on the session's assigned event loop, which creates the `ReplayTransaction` and
+appends its command to the actor's FIFO — so the actor, exchange, and transaction for one session
+share one event loop and exchange no cross-thread messages among themselves. Other sessions may use
+other loops from the existing group.
 
-Four details that are easy to misread:
+Kafka polling, scanning, reconstruction, admission, permits, progress, and disposition are phases of
+the one source/control loop, so the control-thread components likewise pass no cross-thread messages
+among themselves. When source admission is closed, that loop keeps servicing mailbox commands, Kafka
+heartbeats, commits, rebalances, and bounded scans. `RecordDispositionLedger` owns authoritative
+runway on that thread; `ReplayTransaction` receives `RunwayLost` only so it can begin draining
+promptly.
 
-- Kafka polling and replay intake are phases of one serialized source/control loop, not two
-  application threads. The loop never blocks waiting for replay progress: when admission is closed it
-  continues servicing mailbox commands and Kafka heartbeats, commits, rebalances, or bounded scans.
-- Runway has two views with different owners. `RecordDispositionLedger` owns the authoritative
-  generation state on the source/control thread and rejects stale commits. `ReplayTransaction`
-  receives a `RunwayLost` message so it can drain promptly, but that local observation is not the
-  commit fence.
-- `ReplayProgressController` receives admitted and settled work-token events and computes the
-  contiguous settled watermark. `ReplayReadGate` separately uses that watermark plus epsilon to
-  decide whether another source record may enter the assembler. The transaction and session arrows
-  point *into* the progress controller because their gates settle previously registered work; they
-  do not send source data backward through the read path.
-- Completion gates and `ScanEvidence` are threadless values. A gate's owner completes its private
-  mutable future on the owner's thread; every other component holds only the non-mutable stage view
-  shown in the diagram.
+### 7.2 One request: wait states and their releasing events
+
+The numbered states are the only places a request can be waiting. No wait blocks an OS thread: the
+owner records which conditions remain unsatisfied, returns to its event loop, and reevaluates only
+when one of the labeled events arrives. The table under the diagram gives each wait's owner and
+thread.
+
+```mermaid
+flowchart TD
+    ADMITTED["ADMITTED — transaction created,<br/>command queued in the actor's FIFO"]
+    W1["1 · awaiting permit AND prepared request"]
+    W2["2 · awaiting FIFO head, scheduled time,<br/>and no active exchange"]
+    W3["3 · awaiting terminal target outcome"]
+    W4["4 · awaiting join: every required<br/>source and target outcome terminal"]
+    W5["5 · awaiting evidence durability<br/>(when required)"]
+    W6["6 · awaiting disposition, commit ack<br/>when accepted, and resource release"]
+    DONE(["Transaction completion gate succeeds"])
+
+    SRC["Source slot — settles independently:<br/>before, during, or after target work"]
+    CANCEL["Cancellation or runway loss — any phase"]
+    DRAIN["DRAINING — actively settle timers, permit<br/>acquisition, preparation, exchange, resources"]
+
+    ADMITTED -->|"permit acquisition and preparation<br/>start concurrently"| W1
+    W1 -->|"PermitGranted AND Prepared"| W2
+    W2 -->|"all three conditions hold"| W3
+    W3 -->|"TargetOutcome, including abort"| W4
+    SRC -->|"SourceOutcome"| W4
+    W4 -->|"last required outcome terminal"| W5
+    W5 -->|"EvidenceOutcome, or not required"| W6
+    W6 -->|"DispositionSettled AND resources closed"| DONE
+    CANCEL -->|"never skips disposition"| DRAIN
+    DRAIN -->|"owned children terminal"| W6
+
+    classDef wait fill:#fff2cc,stroke:#9a6700,stroke-width:2px
+    classDef action fill:#e9f3fb,stroke:#2f6687
+    classDef terminal fill:#eaf6e8,stroke:#4f7a46,stroke-width:2px
+    class W1,W2,W3,W4,W5,W6 wait
+    class ADMITTED,SRC,CANCEL,DRAIN action
+    class DONE terminal
+```
+
+| # | Waiting for | Wait owner (thread) | Released by |
+| --- | --- | --- | --- |
+| 1 | Permit and prepared request | `ReplayTransaction` (event loop) | `AsyncPermitPool`: `PermitGranted` **and** `RequestPreparationService`: `Prepared` |
+| 2 | FIFO head, scheduled send time, previous exchange terminal | `ConnectionActor` (event loop) | All three conditions holding at once |
+| 3 | Terminal target outcome | `ConnectionActor` (event loop) | `TargetExchange`: `TargetOutcome` or abort outcome |
+| 4 | Every policy-required source and target outcome | `ReplayTransaction` (event loop) | The last required outcome turning terminal |
+| 5 | Evidence outcome, when required | `ReplayTransaction` (event loop) | `EvidenceWriter`: `EvidenceOutcome`, or policy: not required |
+| 6 | Authoritative disposition, commit acknowledgement when accepted, owned-resource release | `ReplayTransaction` waits (event loop); `RecordDispositionLedger` decides (source/control) | Ledger settles the disposition; transaction closes its resources |
+
+The two side entries are orthogonal to the main path on purpose. The source slot may settle at any
+time relative to target work — state 4 simply requires both. Cancellation from any phase actively
+settles every owned child, then rejoins the same disposition path; it never jumps to successful
+completion. And a later request may already hold `Prepared` yet sit in state 2 until it is the FIFO
+head — that is the ordering rule.
+
+### 7.3 Drain dependencies and completion gates
+
+An arrow means the downstream gate cannot complete until the upstream gate has completed. Each gate
+additionally has local postconditions (table below) that must already be true when it completes.
+Requesting cancellation, closing a channel, removing a cache entry, or observing a counter change
+releases nothing by itself.
+
+```mermaid
+flowchart TD
+    TXN(["Transaction gate<br/>ReplayTransaction · event loop"])
+    COMMIT(["Accepted-commit gate<br/>RecordDispositionLedger · source/control"])
+    SESSION(["Session termination gate<br/>ConnectionActor · event loop"])
+    DRAIN(["Replay quiescence gate<br/>ReplayProgressController · source/control"])
+    LIFE(["Rebalance / shutdown gate<br/>KafkaSourceActor · source/control"])
+    GO(["Resume the next generation<br/>or finish shutdown"])
+
+    TXN -->|"every session transaction joined"| SESSION
+    COMMIT -->|"every session commit joined"| SESSION
+    TXN -->|"settles its request work token"| DRAIN
+    SESSION -->|"settles its session work token"| DRAIN
+    SESSION -->|"every in-scope session joined"| LIFE
+    DRAIN -->|"replay quiescent"| LIFE
+    LIFE -->|"all joined gates succeeded"| GO
+
+    classDef gate fill:#f4f4f4,stroke:#555555,stroke-width:2px
+    classDef terminal fill:#eaf6e8,stroke:#4f7a46,stroke-width:2px
+    class TXN,COMMIT,SESSION,DRAIN,LIFE gate
+    class GO terminal
+```
+
+| Gate | Local postconditions, beyond joined child gates |
+| --- | --- |
+| Transaction | Required outcomes terminal; disposition accepted; contexts and resources released |
+| Accepted commit | Generation-valid broker acknowledgement received, or an explicit failure |
+| Session termination | Queue empty; `TargetExchange` cleanup joined; channel closed; cache entry removed; source acknowledgement delivered |
+| Replay quiescence | Every admitted request and session work token settled — outstanding work reaches zero |
+| Rebalance / shutdown | Every in-scope transaction, accepted-commit, session, and quiescence gate succeeded. Transactions and commits join through their session gates in the picture, but the lifecycle owner verifies all four kinds. |
+
+Two further waits gate record flow rather than lifecycle completion: `ReplayReadGate` admits another
+source record only when the settled watermark plus epsilon allows it and lifecycle admission is
+open, and `RecordDispositionLedger` advances a partition's contiguous offset only when every
+preceding obligation has been deliberately committed or retained, with accepted commits
+acknowledged.
+
+`ReplayProgressController` computes the contiguous settled watermark and owns the replay-quiescence
+gate. Completion gates and `ScanEvidence` are threadless values: each owner completes its private
+mutable future on its own thread, while other components hold only a non-mutable stage view.
 
 ---
 
@@ -1280,24 +1345,25 @@ messages; target outcomes are delivered directly on that event loop.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ADMITTED
-    ADMITTED --> PREPARING
-    PREPARING --> READY
-    READY --> TARGET_ACTIVE
-    TARGET_ACTIVE --> WAITING_FOR_JOIN
-    ADMITTED --> WAITING_FOR_JOIN: target not required
-    WAITING_FOR_JOIN --> WRITING_EVIDENCE: all required outcomes settled
+    direction TB
+    state "Normal progression" as RUNNING {
+        [*] --> ADMITTED
+        ADMITTED --> PREPARING
+        PREPARING --> READY
+        READY --> TARGET_ACTIVE
+        TARGET_ACTIVE --> WAITING_FOR_JOIN
+        ADMITTED --> WAITING_FOR_JOIN: target not required
+        WAITING_FOR_JOIN --> WRITING_EVIDENCE: all required outcomes settled
+    }
+    RUNNING --> DRAINING: runway lost in any normal state
     WRITING_EVIDENCE --> DISPOSING
-    DISPOSING --> TERMINATED
-
-    ADMITTED --> DRAINING: runway lost
-    PREPARING --> DRAINING: runway lost
-    READY --> DRAINING: runway lost
-    TARGET_ACTIVE --> DRAINING: runway lost
-    WAITING_FOR_JOIN --> DRAINING: runway lost
-    WRITING_EVIDENCE --> DRAINING: runway lost
     DRAINING --> DISPOSING: outcomes and owned child cleanup settled
-    DISPOSING --> DISPOSING: runway lost, source acceptance order decides
+    DISPOSING --> TERMINATED
+    note right of DISPOSING
+        Runway lost while DISPOSING stays DISPOSING.
+        The source/control thread's ordering of runway
+        revocation vs. source acceptance decides the commit.
+    end note
 ```
 
 Two facts are deliberately *not* linear states:
@@ -1358,7 +1424,7 @@ commit.
 `SourceOutcome` is also where the overloaded-status problem is fixed — but the problem is narrower than
 "today everything collapses into one status," so it is worth stating exactly.
 `ReconstructionStatus` already distinguishes `CLOSED_PREMATURELY` from
-`TRAFFIC_SOURCE_READER_INTERRUPTED`, and the commit path already suppresses both. The two real gaps:
+`TRAFFIC_SOURCE_READER_INTERRUPTED`, and the commit path already suppresses both. The three real gaps:
 
 * **There is no proof-bearing confirmed-dead value.** `EXPIRED_PREMATURELY` covers *any* expiry and is
   commit-eligible, so a timestamp sweep and an offset-ordered proxy declaration are indistinguishable

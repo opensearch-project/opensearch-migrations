@@ -6,9 +6,11 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
@@ -146,6 +148,82 @@ class ConnectionReplaySessionStateTest extends InstrumentationTest {
         Assertions.assertSame(secondChannel.connectFuture, second);
     }
 
+    @Test
+    void cancellationRejectsAndClosesAChannelDeliveredAfterAcquisition() throws Exception {
+        var metrics = new RecordingMetrics();
+        var transactionContext = rootContext.getTestConnectionRequestContext("cancel-acquisition", 0);
+        var targetContext = transactionContext.createTargetRequestContext();
+        var eventLoop = eventLoopGroup.next();
+        var delayedAcquisition = new CompletableFuture<ChannelFuture>();
+        var delayedChannel = new ControlledChannel(eventLoop);
+        var connectorCancellations = new AtomicInteger();
+        var session = new ConnectionReplaySession(
+            eventLoop,
+            transactionContext.getChannelKeyContext(),
+            (ignoredEventLoop, ignoredContext, cancellationSignal) -> {
+                var registration = cancellationSignal.register(connectorCancellations::incrementAndGet);
+                delayedAcquisition.whenComplete((ignored, failure) -> registration.close());
+                return new TextTrackedFuture<>(delayedAcquisition, "delayed channel connection");
+            },
+            0,
+            metrics
+        );
+        var cancellation = new CancellationException("source reassigned");
+
+        var acquisition = session.getChannelFutureInActiveState(targetContext);
+        metrics.awaitCount(TargetExchangeState.ChannelState.CONNECTING, 1);
+        Assertions.assertNull(session.cancelAndClose(cancellation).get(Duration.ofSeconds(5)));
+
+        var acquisitionFailure = Assertions.assertThrows(
+            CancellationException.class,
+            () -> acquisition.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertSame(cancellation, acquisitionFailure);
+        Assertions.assertEquals(1, connectorCancellations.get());
+        delayedAcquisition.complete(delayedChannel.connectFuture);
+
+        await(() -> delayedChannel.closeCalls.get() == 1);
+        metrics.awaitCount(TargetExchangeState.ChannelState.CLOSED, 1);
+        Assertions.assertNull(session.getChannelFutureInAnyState().get(Duration.ofSeconds(5)));
+
+        var postCancellation = session.getChannelFutureInActiveState(targetContext);
+        var postCancellationFailure = Assertions.assertThrows(
+            CancellationException.class,
+            () -> postCancellation.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertSame(cancellation, postCancellationFailure);
+        Assertions.assertEquals(1, delayedChannel.closeCalls.get());
+        session.retireMetrics();
+        metrics.awaitAllZero();
+    }
+
+    @Test
+    void cancellationWaitsForAnOwnedChannelToClose() throws Exception {
+        var transactionContext = rootContext.getTestConnectionRequestContext("wait-for-close", 0);
+        var targetContext = transactionContext.createTargetRequestContext();
+        var eventLoop = eventLoopGroup.next();
+        var controlledChannel = new ControlledChannel(eventLoop, false);
+        var session = new ConnectionReplaySession(
+            eventLoop,
+            transactionContext.getChannelKeyContext(),
+            (ignoredEventLoop, ignoredContext) ->
+                TextTrackedFuture.completedFuture(
+                    controlledChannel.connectFuture,
+                    () -> "controlled channel connection"
+                )
+        );
+
+        session.getChannelFutureInActiveState(targetContext).get(Duration.ofSeconds(5));
+        var cancellation = session.cancelAndClose(new CancellationException("source reassigned"));
+
+        await(() -> controlledChannel.closeCalls.get() == 1);
+        Assertions.assertFalse(cancellation.future.isDone());
+        controlledChannel.closeFuture.setSuccess();
+
+        Assertions.assertSame(controlledChannel.channel, cancellation.get(Duration.ofSeconds(5)));
+        Assertions.assertEquals(1, controlledChannel.closeCalls.get());
+    }
+
     private TextTrackedFuture<ChannelFuture> connect(
         EventLoop eventLoop,
         org.opensearch.migrations.replay.tracing.IReplayContexts.ITargetRequestContext ignored
@@ -223,14 +301,30 @@ class ConnectionReplaySessionStateTest extends InstrumentationTest {
 
     private static final class ControlledChannel {
         private final AtomicBoolean active = new AtomicBoolean(true);
+        private final AtomicInteger closeCalls = new AtomicInteger();
+        private final Channel channel;
         private final DefaultChannelPromise connectFuture;
         private final DefaultChannelPromise closeFuture;
+        private final boolean completeCloseImmediately;
 
         private ControlledChannel(EventLoop eventLoop) {
-            Channel channel = mock(Channel.class);
+            this(eventLoop, true);
+        }
+
+        private ControlledChannel(EventLoop eventLoop, boolean completeCloseImmediately) {
+            this.completeCloseImmediately = completeCloseImmediately;
+            channel = mock(Channel.class);
             when(channel.isActive()).thenAnswer(ignored -> active.get());
             closeFuture = new DefaultChannelPromise(channel, eventLoop);
             when(channel.closeFuture()).thenReturn(closeFuture);
+            when(channel.close()).thenAnswer(ignored -> {
+                closeCalls.incrementAndGet();
+                active.set(false);
+                if (this.completeCloseImmediately) {
+                    closeFuture.trySuccess();
+                }
+                return closeFuture;
+            });
             connectFuture = new DefaultChannelPromise(channel, eventLoop);
             connectFuture.setSuccess();
         }
