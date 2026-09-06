@@ -11,6 +11,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,6 +27,7 @@ import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
@@ -52,6 +54,8 @@ import org.slf4j.spi.LoggingEventBuilder;
 public class TrafficReplayerTopLevel extends TrafficReplayerCore implements AutoCloseable {
     public static final String TARGET_CONNECTION_POOL_NAME = "targetConnectionPool";
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
+    private static final Duration SHUTDOWN_PROGRESS_REPORT_INTERVAL = Duration.ofSeconds(15);
+    private static final Duration ACTOR_TERMINATION_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
     private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
@@ -636,7 +640,12 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             permitPool.close(cancellationCause);
         }
 
-        var actorShutdownFuture = beginReplayShutdownAfterIntakeFence(replayEngine, cancellationCause);
+        // Releasing Netty's event loops must not depend on the actors settling: one session that never
+        // reaches termination would otherwise hold every thread in the pool and keep the process alive.
+        // Reaching this bound is always a bug, and the shutdown watchdog above names the stuck session.
+        var actorShutdownFuture = beginReplayShutdownAfterIntakeFence(replayEngine, cancellationCause)
+            .copy()
+            .orTimeout(ACTOR_TERMINATION_SHUTDOWN_LIMIT.toSeconds(), TimeUnit.SECONDS);
         var nettyShutdownFuture = actorShutdownFuture
             .handle((ignored, actorFailure) -> actorFailure)
             .thenCompose(actorFailure ->
@@ -682,19 +691,27 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     ) {
         var dispositionLedger = dispositionLedgerRef.get();
         var completion = new CompletableFuture<Void>();
+        var stage = new AtomicReference<>(ShutdownStage.SEALING_RECORD_REGISTRATIONS);
         Runnable beginShutdown = () -> {
             try {
                 var registrationFence = dispositionLedger == null
                     ? CompletableFuture.<Void>completedFuture(null)
                     : dispositionLedger.sealRegistrations();
                 registrationFence
-                    .thenCompose(ignored -> replayEngine == null
-                        ? CompletableFuture.<Void>completedFuture(null)
-                        : replayEngine.shutdownConnections(cause))
-                    .thenCompose(ignored -> dispositionLedger == null
-                        ? CompletableFuture.<Void>completedFuture(null)
-                        : dispositionLedger.whenQuiescent())
+                    .thenCompose(ignored -> {
+                        stage.set(ShutdownStage.TERMINATING_CONNECTION_ACTORS);
+                        return replayEngine == null
+                            ? CompletableFuture.<Void>completedFuture(null)
+                            : replayEngine.shutdownConnections(cause);
+                    })
+                    .thenCompose(ignored -> {
+                        stage.set(ShutdownStage.SETTLING_RECORD_DISPOSITIONS);
+                        return dispositionLedger == null
+                            ? CompletableFuture.<Void>completedFuture(null)
+                            : dispositionLedger.whenQuiescent();
+                    })
                     .whenComplete((ignored, failure) -> {
+                        stage.set(ShutdownStage.DONE);
                         if (failure == null) {
                             completion.complete(null);
                         } else {
@@ -702,9 +719,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                         }
                     });
             } catch (Throwable t) {
+                stage.set(ShutdownStage.DONE);
                 completion.completeExceptionally(t);
             }
         };
+        reportShutdownProgressUntilComplete(stage, completion, replayEngine, dispositionLedger);
         synchronized (intakeLifecycleLock) {
             var intakeMailbox = intakeMailboxRef.get();
             if (intakeMailbox != null) {
@@ -714,6 +733,51 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
         beginShutdown.run();
         return completion;
+    }
+
+    private enum ShutdownStage {
+        SEALING_RECORD_REGISTRATIONS,
+        TERMINATING_CONNECTION_ACTORS,
+        SETTLING_RECORD_DISPOSITIONS,
+        DONE
+    }
+
+    /**
+     * A shutdown that cannot finish is otherwise silent, which leaves nothing to diagnose from. Name
+     * the stage that hasn't finished along with the work it is still waiting on.
+     */
+    private void reportShutdownProgressUntilComplete(
+        AtomicReference<ShutdownStage> stage,
+        CompletableFuture<Void> completion,
+        ReplayEngine replayEngine,
+        RecordDispositionLedger dispositionLedger
+    ) {
+        if (completion.isDone()) {
+            return;
+        }
+        CompletableFuture.runAsync(() -> {
+            if (completion.isDone()) {
+                return;
+            }
+            var unterminatedSessions = replayEngine == null
+                ? Map.<Object, String>of().keySet()
+                : replayEngine.describeUnterminatedSessions();
+            log.atWarn()
+                .setMessage("Replay shutdown has not finished stage {}.  Unterminated connection sessions={}")
+                .addArgument(stage::get)
+                .addArgument(unterminatedSessions)
+                .log();
+            if (dispositionLedger != null) {
+                dispositionLedger.unresolvedObligations().whenComplete((obligations, failure) ->
+                    log.atWarn()
+                        .setCause(failure)
+                        .setMessage("Record obligations that shutdown is still waiting on: {}")
+                        .addArgument(obligations)
+                        .log()
+                );
+            }
+            reportShutdownProgressUntilComplete(stage, completion, replayEngine, dispositionLedger);
+        }, CompletableFuture.delayedExecutor(SHUTDOWN_PROGRESS_REPORT_INTERVAL.toSeconds(), TimeUnit.SECONDS));
     }
 
     void finishIntakeLifecycle(

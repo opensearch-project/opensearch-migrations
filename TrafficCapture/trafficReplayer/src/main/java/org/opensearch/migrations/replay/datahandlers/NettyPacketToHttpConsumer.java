@@ -82,6 +82,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private final CompletableFuture<AggregatedRawResponse> responseFuture = new CompletableFuture<>();
     private final OutboundRequestMethod outboundRequestMethod = new OutboundRequestMethod();
     private CancellationException cancellationCause;
+    private boolean spansClosed;
 
     private static final class OutboundRequestMethod {
         private int bytesRead;
@@ -609,7 +610,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 if (size == 0) {
                     return;
                 }
-                if (!(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
+                if (!spansClosed
+                    && !(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
                     this.getCurrentRequestSpan().close();
                     this.setCurrentMessageContext(getParentContext().createHttpSendingContext());
                 }
@@ -624,7 +626,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 if (size == 0) {
                     return;
                 }
-                if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
+                if (!spansClosed
+                    && !(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
                     this.getCurrentRequestSpan().close();
                     this.setCurrentMessageContext(getParentContext().createHttpReceivingContext());
                 }
@@ -678,8 +681,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 .addArgument(pipeline)
                 .log();
         } finally {
-            getCurrentRequestSpan().close();
-            getParentContext().close();
+            closeSpans();
         }
     }
 
@@ -748,7 +750,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v, t) -> {
             log.atDebug().setMessage("[{}] finalization running since all prior work has completed for {}")
                 .addArgument(this::connId).addArgument(() -> httpContext()).log();
-            if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
+            if (!spansClosed
+                && !(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
                 this.getCurrentRequestSpan().close();
                 this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
             }
@@ -779,8 +782,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             if (channel == null) {
                 log.atTrace().setMessage(
                     "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
-                getCurrentRequestSpan().close();
-                getParentContext().close();
+                closeSpans();
             } else {
                 deactivateChannel();
             }
@@ -800,5 +802,23 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             cancellationCause = cause;
         }
         responseFuture.completeExceptionally(cause);
+        // Channel activation retries connections until something stops it, so an abort can arrive while the
+        // activation future is still outstanding, which means finalizeRequest may never run and the spans
+        // opened in the constructor would never be closed.  Close them here; the parent http transaction
+        // span will close as soon as its caller is settled, and it must not outlive this one.
+        closeSpans();
+    }
+
+    /**
+     * Closes the target request span and whichever phase span is current.  Every path that finishes a target
+     * request funnels through here so that an abort racing an orderly finalization closes each span once.
+     */
+    private void closeSpans() {
+        if (spansClosed) {
+            return;
+        }
+        spansClosed = true;
+        getCurrentRequestSpan().close();
+        getParentContext().close();
     }
 }

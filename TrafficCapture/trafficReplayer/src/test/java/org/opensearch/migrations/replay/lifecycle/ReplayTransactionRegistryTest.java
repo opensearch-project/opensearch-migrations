@@ -125,6 +125,99 @@ class ReplayTransactionRegistryTest {
         Assertions.assertEquals("disposition failed", error.getCause().getMessage());
     }
 
+    /**
+     * The hang this guards against: a transaction settles only once both of its sides have reported, so
+     * an aborted session leaves the ones it was running unsettleable.  Waiting for them would keep the
+     * connection actor, and with it the whole replay shutdown, alive forever.
+     */
+    @Test
+    void cancellingOutstandingTransactionsLetsAnAbortedSessionTerminate() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var stranded = new ReplayTransaction<String>(
+            request(1),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new ReplayOutcomes.EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            ledger,
+            java.util.List.of(),
+            java.util.List.of(),
+            ReplayTransaction.Metrics.NOOP
+        );
+        var strandedHandle = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 6, 1)
+        );
+        ledger.register(strandedHandle, stranded.ledgerOwner()).toCompletableFuture().join();
+        registry.register(request(1), stranded);
+        // Only the source side reports, so the transaction owns the record; termination is what makes
+        // the target side unreachable.
+        stranded.settleSource(
+            new ReplayOutcomes.SourceOutcome.Complete(),
+            java.util.List.of(strandedHandle.id())
+        );
+        mailbox.runUntilIdle();
+        Assertions.assertFalse(stranded.completion().toCompletableFuture().isDone());
+
+        // Termination alone waits, because a session that closed cleanly still has intake behind it.
+        var patientTermination = registry.beginTermination().toCompletableFuture();
+        mailbox.runUntilIdle();
+        Assertions.assertFalse(patientTermination.isDone());
+
+        registry.cancelOutstanding(new java.util.concurrent.CancellationException("replay is shutting down"));
+        var termination = registry.beginTermination().toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(termination.isDone(), "termination must not wait for an unreachable side");
+        Assertions.assertDoesNotThrow(termination::join, "a cancelled transaction is not a session failure");
+        var completionError = Assertions.assertThrows(
+            CompletionException.class,
+            () -> stranded.completion().toCompletableFuture().join()
+        );
+        Assertions.assertInstanceOf(java.util.concurrent.CancellationException.class, completionError.getCause());
+        Assertions.assertEquals(0, strandedHandle.commits.get(), "a cancelled transaction cannot commit");
+        Assertions.assertEquals(1, strandedHandle.contextCloses.get());
+        Assertions.assertTrue(unresolved(registry, mailbox).isEmpty());
+    }
+
+    private static final class RetentionWatchingHandle implements RecordDispositionLedger.RecordHandle {
+        private final ReplayIdentity.KafkaRecordId id;
+        private final AtomicInteger commits = new AtomicInteger();
+        private final AtomicInteger contextCloses = new AtomicInteger();
+
+        private RetentionWatchingHandle(ReplayIdentity.KafkaRecordId id) {
+            this.id = id;
+        }
+
+        @Override
+        public ReplayIdentity.KafkaRecordId id() {
+            return id;
+        }
+
+        @Override
+        public ReplayIdentity.SourcePartitionKey sourcePartition() {
+            return new ReplayIdentity.SourcePartitionKey(id.topic(), id.partition(), id.sourceGeneration());
+        }
+
+        @Override
+        public void closeContext() {
+            contextCloses.incrementAndGet();
+        }
+
+        @Override
+        public void releaseWithoutCommit() {
+            // Retention is asserted through the absence of a commit.
+        }
+
+        @Override
+        public CompletableFuture<Void> commit() {
+            commits.incrementAndGet();
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
     private static ConnectionSessionKey session() {
         return new ConnectionSessionKey(new SourceConnectionKey("node", "connection"), 3, 7);
     }

@@ -51,8 +51,6 @@ public final class AsyncPermitPool {
     public interface Permit extends AutoCloseable {
         ReplayRequestId requestId();
 
-        int cost();
-
         @Override
         void close();
     }
@@ -206,11 +204,6 @@ public final class AsyncPermitPool {
         @Override
         public ReplayRequestId requestId() {
             return requestId;
-        }
-
-        @Override
-        public int cost() {
-            return cost;
         }
 
         @Override

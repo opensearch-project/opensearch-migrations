@@ -1,7 +1,9 @@
 package org.opensearch.migrations.replay.lifecycle;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -13,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public final class ReplayTransactionRegistry {
+    static final String SESSION_TERMINATED = "session terminated before the transaction settled: ";
+
     private static final class Entry {
         private final ReplayTransaction<?> transaction;
 
@@ -26,6 +30,7 @@ public final class ReplayTransactionRegistry {
     private final Map<ReplayRequestId, Entry> active = new LinkedHashMap<>();
     private final CompletionGate<Void> termination = new CompletionGate<>();
     private boolean terminating;
+    private CancellationException cancellationCause;
     private ReplayTransaction.RunwayLossReason runwayLossReason;
     private Throwable firstFailure;
 
@@ -79,6 +84,9 @@ public final class ReplayTransactionRegistry {
             if (transaction != null && runwayLossReason != null) {
                 transaction.observeRunwayLost(runwayLossReason);
             }
+            if (cancellationCause != null) {
+                cancel(requestId, transaction);
+            }
             acknowledgement.complete(null);
         });
         return acknowledgement.minimalCompletionStage();
@@ -124,6 +132,45 @@ public final class ReplayTransactionRegistry {
         return termination.stage();
     }
 
+    /**
+     * Cancels the transactions still waiting to settle.  A transaction settles only once both its source
+     * and target sides have reported, so when the machinery behind one of those sides has stopped -- a
+     * shutdown, an abort, a source reassignment -- waiting for it would wait forever.  Cancellation
+     * retains the records, which is always the safe outcome, and the reason is remembered so that a
+     * transaction registered after this point is cancelled too rather than stranding the session.
+     */
+    public CompletionStage<Void> cancelOutstanding(@NonNull CancellationException cause) {
+        var acknowledgement = new CompletableFuture<Void>();
+        mailbox.execute(() -> {
+            if (cancellationCause == null) {
+                cancellationCause = cause;
+            }
+            if (!active.isEmpty()) {
+                log.atInfo()
+                    .setMessage("Cancelling {} unsettled transaction(s) for {}: {}")
+                    .addArgument(active::size)
+                    .addArgument(sessionKey)
+                    .addArgument(cause::getMessage)
+                    .log();
+            }
+            for (var entry : List.copyOf(active.entrySet())) {
+                cancel(entry.getKey(), entry.getValue().transaction);
+            }
+            acknowledgement.complete(null);
+        });
+        return acknowledgement.minimalCompletionStage();
+    }
+
+    private void cancel(ReplayRequestId requestId, ReplayTransaction<?> transaction) {
+        assertInMailbox();
+        if (transaction == null) {
+            return;
+        }
+        transaction.fail(
+            new CancellationException(SESSION_TERMINATED + requestId + ": " + cancellationCause.getMessage())
+        );
+    }
+
     public CompletionStage<Map<ReplayRequestId, String>> unresolvedTransactions() {
         var completion = new CompletableFuture<Map<ReplayRequestId, String>>();
         mailbox.execute(() -> {
@@ -145,7 +192,10 @@ public final class ReplayTransactionRegistry {
             .addArgument(failure)
             .addArgument(active::size)
             .log();
-        if (failure != null && firstFailure == null) {
+        // A cancelled transaction retained its records, which is the safe outcome; it is the expected
+        // way an in-flight transaction ends when its session terminates, so it must not be reported as
+        // a session failure.
+        if (failure != null && firstFailure == null && !(unwrap(failure) instanceof CancellationException)) {
             firstFailure = unwrap(failure);
         }
         tryCompleteTermination();

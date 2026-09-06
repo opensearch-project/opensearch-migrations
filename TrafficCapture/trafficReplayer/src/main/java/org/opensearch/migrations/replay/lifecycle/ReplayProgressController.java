@@ -25,10 +25,6 @@ import lombok.experimental.Accessors;
  */
 public final class ReplayProgressController implements SourcePartitionLifecycleListener {
     public interface WorkToken extends AutoCloseable {
-        ReplayWorkId workId();
-
-        SourcePartitionKey partition();
-
         CompletionStage<Void> settled();
 
         @Override
@@ -208,16 +204,6 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         private OwnedWorkToken(SourcePartitionKey partition, WorkEntry entry) {
             this.partition = partition;
             this.entry = entry;
-        }
-
-        @Override
-        public ReplayWorkId workId() {
-            return entry.workId;
-        }
-
-        @Override
-        public SourcePartitionKey partition() {
-            return partition;
         }
 
         @Override

@@ -7,11 +7,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -20,6 +23,7 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.AttemptPayload;
@@ -110,33 +114,15 @@ public class RequestSenderOrchestrator {
     ) {
         this(
             clientConnectionPool,
-            Duration.ofMillis(100),
-            Duration.ofSeconds(300),
             packetConsumerFactory,
             sessionTerminationAcknowledger,
             ConnectionActor.Metrics.NOOP,
-            TargetExchangeState.Metrics.NOOP
+            TargetExchangeState.Metrics.NOOP,
+            ResourceOwnership.Metrics.NOOP
         );
     }
 
-    public RequestSenderOrchestrator(
-        ClientConnectionPool clientConnectionPool,
-        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
-        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
-        ConnectionActor.Metrics actorMetrics
-    ) {
-        this(
-            clientConnectionPool,
-            Duration.ofMillis(100),
-            Duration.ofSeconds(300),
-            packetConsumerFactory,
-            sessionTerminationAcknowledger,
-            actorMetrics,
-            TargetExchangeState.Metrics.NOOP
-        );
-    }
-
-    public RequestSenderOrchestrator(
+    RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
         BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
@@ -145,8 +131,6 @@ public class RequestSenderOrchestrator {
     ) {
         this(
             clientConnectionPool,
-            Duration.ofMillis(100),
-            Duration.ofSeconds(300),
             packetConsumerFactory,
             sessionTerminationAcknowledger,
             actorMetrics,
@@ -175,7 +159,7 @@ public class RequestSenderOrchestrator {
         );
     }
 
-    public RequestSenderOrchestrator(
+    RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
         Duration initialRetryDelay,
         Duration maxRetryDelay,
@@ -189,51 +173,12 @@ public class RequestSenderOrchestrator {
             packetConsumerFactory,
             sessionTerminationAcknowledger,
             ConnectionActor.Metrics.NOOP,
-            TargetExchangeState.Metrics.NOOP
-        );
-    }
-
-    public RequestSenderOrchestrator(
-        ClientConnectionPool clientConnectionPool,
-        Duration initialRetryDelay,
-        Duration maxRetryDelay,
-        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
-        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
-        ConnectionActor.Metrics actorMetrics
-    ) {
-        this(
-            clientConnectionPool,
-            initialRetryDelay,
-            maxRetryDelay,
-            packetConsumerFactory,
-            sessionTerminationAcknowledger,
-            actorMetrics,
-            TargetExchangeState.Metrics.NOOP
-        );
-    }
-
-    public RequestSenderOrchestrator(
-        ClientConnectionPool clientConnectionPool,
-        Duration initialRetryDelay,
-        Duration maxRetryDelay,
-        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
-        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
-        ConnectionActor.Metrics actorMetrics,
-        TargetExchangeState.Metrics targetExchangeMetrics
-    ) {
-        this(
-            clientConnectionPool,
-            initialRetryDelay,
-            maxRetryDelay,
-            packetConsumerFactory,
-            sessionTerminationAcknowledger,
-            actorMetrics,
-            targetExchangeMetrics,
+            TargetExchangeState.Metrics.NOOP,
             ResourceOwnership.Metrics.NOOP
         );
     }
 
-    public RequestSenderOrchestrator(
+    RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
         Duration initialRetryDelay,
         Duration maxRetryDelay,
@@ -328,6 +273,7 @@ public class RequestSenderOrchestrator {
         private final ConnectionReplaySession session;
         private final ActorMailbox mailbox;
         private final ConnectionActor<PreparedActorRequest, Object> actor;
+        private final RuntimeTargetExchange exchange;
         private final ReplayTransactionRegistry transactions;
         private final CompletableFuture<SessionOutcome> terminationOwner = new CompletableFuture<>();
         private final CompletionStage<SessionOutcome> termination = terminationOwner.minimalCompletionStage();
@@ -345,15 +291,57 @@ public class RequestSenderOrchestrator {
             );
             this.mailbox = new NettyEventLoopActorMailbox(session.eventLoop);
             this.transactions = new ReplayTransactionRegistry(key, mailbox);
+            this.exchange = new RuntimeTargetExchange(this);
             this.actor = new ConnectionActor<>(
                 key,
                 mailbox,
-                new RuntimeTargetExchange(this),
+                exchange,
                 actorMetrics
             );
             actor.termination().whenComplete((outcome, failure) ->
                 mailbox.execute(() -> onActorTerminated(outcome, failure))
             );
+            // The event loop is both the channel's thread and the actor's mailbox, so once it terminates
+            // nothing can advance this session: a target exchange parked on the network has no one left to
+            // complete it, and no posted command will ever run again.  Fence the session here so its
+            // callers get an answer instead of waiting on a thread that no longer exists.
+            session.eventLoop.terminationFuture().addListener(ignored -> onEventLoopTerminated());
+        }
+
+        private void onEventLoopTerminated() {
+            if (actorTerminated && terminationOwner.isDone()) {
+                return;
+            }
+            var cause = new CancellationException(
+                "the event loop for " + key + " terminated before the session finished"
+            );
+            log.atWarn()
+                .setMessage("The event loop for {} terminated while the session was still live; "
+                    + "failing its outstanding work")
+                .addArgument(key)
+                .log();
+            // Settle the exchange before the actor, so that a target request still holding open
+            // instrumentation closes it while the transaction span that encloses it is still open.
+            exchange.fenceAfterMailboxLoss(cause);
+            // Fence the actor before anything that might post: the registry's mailbox is the same dead
+            // event loop, so asking it to do work throws, and that must not skip the fencing below.
+            actor.abandonBecauseMailboxStopped(cause);
+            // onActorTerminated runs as a posted command, so a dead mailbox never delivers it; complete
+            // the runtime's own gate directly rather than relying on that path.
+            if (!terminationOwner.isDone()) {
+                actorTerminated = true;
+                failTermination(cause);
+            }
+            try {
+                transactions.cancelOutstanding(cause);
+            } catch (RejectedExecutionException e) {
+                log.atDebug()
+                    .setMessage("Could not cancel the transactions for {} through its event loop, "
+                        + "which has already stopped accepting work")
+                    .addArgument(key)
+                    .setCause(e)
+                    .log();
+            }
         }
 
         private CompletionStage<SessionOutcome> termination() {
@@ -376,9 +364,22 @@ public class RequestSenderOrchestrator {
                 key.sessionNumber(),
                 key.sourceGeneration()
             );
+            // A session that closed normally still has intake behind it, so its transactions can still
+            // settle and the registry should wait for them.  An aborted or failed session has nothing
+            // left to settle them, so they have to be cancelled or termination would never complete.
             if (actorFailure != null) {
-                terminationOwner.completeExceptionally(unwrap(actorFailure));
+                transactions.cancelOutstanding(
+                    new CancellationException("connection session failed: " + unwrap(actorFailure))
+                );
+                failTermination(actorFailure);
                 return;
+            }
+            if (outcome instanceof SessionOutcome.Aborted aborted) {
+                transactions.cancelOutstanding(aborted.cause());
+            } else if (outcome instanceof SessionOutcome.Failed failed) {
+                transactions.cancelOutstanding(
+                    new CancellationException("connection session failed: " + failed.cause())
+                );
             }
             transactions.beginTermination().whenComplete((ignored, transactionFailure) ->
                 mailbox.execute(() -> {
@@ -388,16 +389,31 @@ public class RequestSenderOrchestrator {
                         .addArgument(transactionFailure)
                         .log();
                     if (transactionFailure != null) {
-                        terminationOwner.completeExceptionally(unwrap(transactionFailure));
+                        failTermination(transactionFailure);
                         return;
                     }
                     if (outcome instanceof SessionOutcome.Failed failed) {
-                        terminationOwner.complete(failed);
+                        settleTermination(failed);
                         return;
                     }
                     acknowledgeSourceTermination(outcome);
                 })
             );
+        }
+
+        /**
+         * Every terminal path has to drop the runtime, not just the successful one.  A retained entry
+         * would keep the session in shutdown's set of live actors forever and would shadow any later
+         * session that reuses the key.
+         */
+        private void settleTermination(SessionOutcome outcome) {
+            actorRuntimes.remove(key, this);
+            terminationOwner.complete(outcome);
+        }
+
+        private void failTermination(Throwable failure) {
+            actorRuntimes.remove(key, this);
+            terminationOwner.completeExceptionally(unwrap(failure));
         }
 
         private void acknowledgeSourceTermination(SessionOutcome outcome) {
@@ -413,7 +429,7 @@ public class RequestSenderOrchestrator {
                     "session termination acknowledger returned no completion stage"
                 );
             } catch (Throwable t) {
-                terminationOwner.completeExceptionally(t);
+                failTermination(t);
                 return;
             }
             acknowledgement.whenComplete((ignored, failure) ->
@@ -424,11 +440,10 @@ public class RequestSenderOrchestrator {
                         .addArgument(failure)
                         .log();
                     if (failure != null) {
-                        terminationOwner.completeExceptionally(unwrap(failure));
+                        failTermination(failure);
                         return;
                     }
-                    actorRuntimes.remove(key, this);
-                    terminationOwner.complete(outcome);
+                    settleTermination(outcome);
                 })
             );
         }
@@ -545,6 +560,35 @@ public class RequestSenderOrchestrator {
                         : exchangeToJoin.handle((outcome, failure) -> null)
                 )
                 .whenComplete((ignored, failure) -> clearPhase());
+        }
+
+        /**
+         * Settles the exchange when its event loop has terminated, without waiting on anything that loop
+         * would have had to run.  {@link #abort} is the orderly counterpart, but it waits for the channel to
+         * close and for the active exchange to report, neither of which can still happen here.  This is safe
+         * to run off-thread for the same reason: a loop that no longer runs tasks cannot be running one now,
+         * so there is nothing to race with.
+         */
+        private void fenceAfterMailboxLoss(CancellationException cause) {
+            if (cancellationCause == null) {
+                cancellationCause = cause;
+            }
+            cancelScheduledWork(cancellationCause);
+            // The consumer's connection attempts retry until something stops them, so it can still be
+            // holding an open target request span with no path left to close it.
+            cancelActivePacketReceiver(cancellationCause);
+            var releaseFailure = releaseActiveAttempt();
+            if (releaseFailure != null) {
+                log.atWarn().setCause(releaseFailure)
+                    .setMessage("Failed to release the in-flight request payload for {} after its event loop "
+                        + "terminated")
+                    .addArgument(runtime.key)
+                    .log();
+            }
+            var exchangeToJoin = activeExchange;
+            if (exchangeToJoin != null) {
+                exchangeToJoin.complete(new TargetOutcome.Cancelled<>(cancellationCause));
+            }
         }
 
         private CompletionStage<Void> cancelRuntimeChannel() {
@@ -767,7 +811,28 @@ public class RequestSenderOrchestrator {
 
             var completion = new CompletableFuture<Void>();
             var delayMillis = Math.max(0, delay.toMillis());
-            var scheduled = eventLoop.schedule(() -> completion.complete(null), delayMillis, TimeUnit.MILLISECONDS);
+            final ScheduledFuture<?> scheduled;
+            try {
+                scheduled = eventLoop.schedule(() -> completion.complete(null), delayMillis, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                return TextTrackedFuture.failedFuture(
+                    new CancellationException(operation + " schedule was rejected by a terminated event loop"),
+                    () -> operation + " schedule was rejected because the event loop already terminated"
+                );
+            }
+            // The task body is the only thing that completes this gate on the happy path, and an event
+            // loop that shuts down cancels its pending scheduled tasks without ever running them.  The
+            // isShuttingDown check above races with shutdown, so the cancellation itself has to complete
+            // the gate or the whole exchange would wait on it forever.
+            scheduled.addListener(f -> {
+                if (f.isCancelled()) {
+                    completion.completeExceptionally(
+                        new CancellationException(operation + " schedule was cancelled before it could run")
+                    );
+                } else if (!f.isSuccess()) {
+                    completion.completeExceptionally(f.cause());
+                }
+            });
             cancellableSchedules.put(scheduled, completion);
             completion.whenComplete((ignored, failure) -> cancellableSchedules.remove(scheduled));
             if (cancellationCause != null) {
@@ -1361,6 +1426,7 @@ public class RequestSenderOrchestrator {
             return mailbox;
         }
 
+        /** Registers bare completion; the transaction-typed overload is what production uses. */
         public CompletionStage<Void> register(CompletionStage<?> transactionCompletion) {
             return registry.register(requestId, transactionCompletion);
         }
@@ -1409,6 +1475,10 @@ public class RequestSenderOrchestrator {
         var terminations = runtimes.stream()
             .map(runtime -> {
                 runtime.transactions.observeRunwayLost(runwayReason);
+                // Sessions that already terminated will not run their termination path again, so their
+                // registries have to be told here; intake has stopped, so anything they are still
+                // waiting on will never arrive.
+                runtime.transactions.cancelOutstanding(cause);
                 runtime.actor.abort(AbortReason.SHUTDOWN, cause);
                 return runtime.termination()
                     .thenCompose(RequestSenderOrchestrator::mapAbortOutcome)
@@ -1423,6 +1493,14 @@ public class RequestSenderOrchestrator {
             }
         });
         return shutdown.completion.minimalCompletionStage();
+    }
+
+    /** Connection sessions whose actor has not reached termination, for shutdown diagnostics. */
+    public Set<String> describeUnterminatedSessions() {
+        return actorRuntimes.values().stream()
+            .filter(runtime -> !runtime.terminationOwner.isDone())
+            .map(runtime -> runtime.key.toString())
+            .collect(Collectors.toCollection(TreeSet::new));
     }
 
     public TrackedFuture<String, SessionOutcome> scheduleActorClose(

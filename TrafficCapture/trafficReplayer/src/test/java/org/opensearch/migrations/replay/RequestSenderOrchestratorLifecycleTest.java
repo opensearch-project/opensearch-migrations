@@ -351,7 +351,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
-            metrics
+            metrics,
+            org.opensearch.migrations.replay.lifecycle.ResourceOwnership.Metrics.NOOP
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("phase-state", 0);
@@ -905,6 +906,51 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         sourceAcknowledgement.complete(null);
         abort.get(Duration.ofSeconds(5));
+    }
+
+    /**
+     * Shutting the connection pool down without aborting the actors first takes each session's event loop
+     * -- which is also its actor mailbox -- away mid-exchange.  Nothing can report the outcome after that,
+     * so the request has to be failed rather than left pending; a caller blocked on it would never return.
+     */
+    @Test
+    void poolShutdownUnderALiveExchangeFailsTheRequestInsteadOfStrandingIt() throws Exception {
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("pool-yanked", 0);
+        var neverCompletes = new CompletableFuture<Void>();
+        var writesStarted = new AtomicInteger();
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, ctx) -> new IPacketFinalizingConsumer<AggregatedRawResponse>() {
+                @Override
+                public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+                    nextRequestPacket.release();
+                    writesStarted.incrementAndGet();
+                    // Stands in for a target exchange that is waiting on the network when the loop dies.
+                    return new TextTrackedFuture<>(neverCompletes, "never-completing packet write");
+                }
+
+                @Override
+                public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
+                    return new TextTrackedFuture<>(new CompletableFuture<>(), "never-completing response");
+                }
+            },
+            sessionKey -> sessionAcknowledger.get().apply(sessionKey)
+        );
+
+        var request = schedule(context, permits, CompletableFuture.completedFuture(transformedRequest()));
+        // The exchange has to actually be parked on the write before the loop goes away, otherwise the
+        // shutdown could land on some earlier phase and the test would pass without exercising the fence.
+        await(() -> writesStarted.get() > 0);
+        Assertions.assertFalse(request.future.isDone());
+
+        connectionPool.shutdownNow().get(30, TimeUnit.SECONDS);
+
+        Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> request.future.get(30, TimeUnit.SECONDS),
+            "the request must settle once its event loop is gone"
+        );
     }
 
     private TrackedFuture<String, String> schedule(

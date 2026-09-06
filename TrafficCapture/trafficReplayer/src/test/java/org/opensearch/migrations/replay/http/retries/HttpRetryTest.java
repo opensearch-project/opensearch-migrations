@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -186,8 +187,13 @@ public class HttpRetryTest {
             var shutdownResult = ccpShutdownFuture.get();
             log.atInfo().setCause(e).setMessage("exception: ").log();
             // doubly-nested ExecutionException.  Once for the get() call here and once for the work done in submit,
-            // which wraps the scheduled request's future
-            Assertions.assertInstanceOf(IllegalStateException.class, e.getCause().getCause());
+            // which wraps the scheduled request's future.  Which exception surfaces depends on where the
+            // shutdown lands: IllegalStateException when a connection attempt was in flight,
+            // CancellationException when a retry delay was pending and the event loop cancelled it.
+            var rootFailure = e.getCause().getCause();
+            Assertions.assertTrue(
+                rootFailure instanceof IllegalStateException || rootFailure instanceof CancellationException,
+                "expected the shutdown to fail the request, but got: " + rootFailure);
             executor.shutdown();
 
             // connection issues won't count as retries since they aren't related to resending the data.
@@ -205,9 +211,15 @@ public class HttpRetryTest {
         var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         final var retryMetricCount =
             InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "numRetriedRequests");
-        Assertions.assertEquals(retryMetricCount,
-            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "targetTransactionCount")
-                - InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "httpTransactionCount"));
+        final var targetTransactions =
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "targetTransactionCount");
+        final var httpTransactions =
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "httpTransactionCount");
+        Assertions.assertEquals(retryMetricCount, targetTransactions - httpTransactions,
+            "every http transaction should have one closed target transaction span per attempt, so the "
+                + "surplus of target spans is exactly the retry count; got numRetriedRequests="
+                + retryMetricCount + " targetTransactionCount=" + targetTransactions
+                + " httpTransactionCount=" + httpTransactions);
         return retryMetricCount;
     }
 

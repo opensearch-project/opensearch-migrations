@@ -378,6 +378,36 @@ class ConnectionActorTest extends InstrumentationTest {
         return new ReplayRequestId(session(), index);
     }
 
+    /**
+     * The actor's mailbox is the session's event loop, so shutting the connection pool down without
+     * aborting its actors first takes the mailbox away mid-session.  Every transition is a posted
+     * command, so if a rejected post were dropped, whoever was waiting on the request would wait forever.
+     */
+    @Test
+    void aMailboxThatStopsAcceptingWorkSettlesTheRequestsItCanNoLongerRun() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var request = actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(new TestPrepared("stranded")))
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+        Assertions.assertEquals(List.of("stranded"), exchange.executed);
+        Assertions.assertFalse(request.isDone());
+
+        // The event loop terminates underneath the running exchange.
+        mailbox.rejectFurtherWork();
+        actor.abort(AbortReason.SHUTDOWN, new CancellationException("pool went away"));
+
+        Assertions.assertTrue(request.isDone(), "a request the actor can no longer run must not stay pending");
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, request.join());
+        var termination = actor.termination().toCompletableFuture();
+        Assertions.assertTrue(termination.isDone(), "termination must not wait on a mailbox that is gone");
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
+    }
+
     private static final class TestPrepared implements AutoCloseable {
         private final String name;
         private final AssertionError closeFailure;
@@ -444,10 +474,20 @@ class ConnectionActorTest extends InstrumentationTest {
         private Instant now = Instant.EPOCH;
         private long nextSequence;
         private boolean running;
+        private boolean rejecting;
 
         @Override
         public void execute(Runnable command) {
+            if (rejecting) {
+                throw new java.util.concurrent.RejectedExecutionException("mailbox has terminated");
+            }
             immediate.add(command);
+        }
+
+        /** Mimics a Netty event loop that has finished terminating and now rejects every task. */
+        void rejectFurtherWork() {
+            rejecting = true;
+            immediate.clear();
         }
 
         @Override

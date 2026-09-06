@@ -410,9 +410,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture.future.complete(rrPair);
                 registerTransactionRecords(transaction, rrPair.getTrafficStreamsHeld())
                     .thenCompose(recordIds -> transaction.settleSource(
-                        sourceReconstructionPolicy.classify(rrPair),
-                        recordIds
-                    ))
+                            sourceReconstructionPolicy.classify(rrPair),
+                            recordIds
+                        )
+                        .whenComplete((ignored, failure) -> {
+                            if (failure != null) {
+                                retainRecordsRejectedBySettlement(transaction, recordIds, unwrap(failure));
+                            }
+                        }))
                     .whenComplete((ignored, failure) -> {
                         if (failure != null) {
                             transaction.fail(unwrap(failure));
@@ -490,6 +495,41 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .toArray(CompletableFuture[]::new);
             return CompletableFuture.allOf(registrations)
                 .thenApply(ignored -> List.copyOf(handlesById.keySet()));
+        }
+
+        /**
+         * settleSource rejects the records it was handed when the transaction has already terminated,
+         * which leaves them registered with the ledger but owned by something that will never dispose
+         * them.  An obligation nobody can resolve holds the quiescence gate open forever, so retain them
+         * here; retention is always safe because a rejected settlement carries no commit authority.
+         */
+        private void retainRecordsRejectedBySettlement(
+            ReplayTransaction<?> transaction,
+            List<RecordId> recordIds,
+            Throwable cause
+        ) {
+            if (recordIds.isEmpty()) {
+                return;
+            }
+            log.atWarn()
+                .setCause(cause)
+                .setMessage("Source settlement was rejected for {}; retaining its {} record(s) directly")
+                .addArgument(transaction::ledgerOwner)
+                .addArgument(recordIds::size)
+                .log();
+            var disposition = new RecordDisposition.Retain("source-settlement-rejected");
+            for (var recordId : recordIds) {
+                dispositionLedger.dispose(recordId, transaction.ledgerOwner(), disposition)
+                    .whenComplete((ignored, failure) -> {
+                        if (failure != null) {
+                            log.atError()
+                                .setCause(failure)
+                                .setMessage("Could not retain orphaned record {}")
+                                .addArgument(recordId)
+                                .log();
+                        }
+                    });
+            }
         }
 
         private CompletionStage<EvidenceOutcome> writeTransactionEvidence(TransactionEvidenceState state) {
@@ -630,6 +670,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             IReplayContexts.IReplayerHttpTransactionContext context,
             Throwable failure
         ) {
+            if (failure instanceof CancellationException) {
+                // The transaction was abandoned by a session teardown or a source reassignment.  Its
+                // records were retained, so another worker can replay them; this is not a replay failure.
+                log.atInfo()
+                    .setMessage("Replay transaction for {} was cancelled before settling; its source "
+                        + "records were retained for a later attempt")
+                    .addArgument(context)
+                    .log();
+                return;
+            }
             var fatalError = failure instanceof Error error
                 ? error
                 : new Error(

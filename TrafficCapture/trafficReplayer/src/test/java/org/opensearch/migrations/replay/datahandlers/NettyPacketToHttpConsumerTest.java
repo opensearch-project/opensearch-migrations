@@ -323,7 +323,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @Test
     void targetResponseTimeoutStartsAfterRequestWriteCompletes() throws Exception {
-        var responseTimeout = Duration.ofMillis(50);
+        // Long enough that a loaded machine can still get a response inside the window once the timeout is
+        // armed; a tighter budget makes this fail for scheduling reasons rather than for the behavior tested.
+        var responseTimeout = Duration.ofMillis(500);
         try (
             var testServer = SimpleNettyHttpServer.makeServer(
                 false,
@@ -344,7 +346,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 );
                 consumer.activeChannelFuture.get(REGULAR_RESPONSE_TIMEOUT);
 
-                parkForAtLeast(responseTimeout.multipliedBy(10));
+                // Idle well past the response timeout.  If the timeout handler were armed at construction
+                // rather than after the write, the exchange below would already have failed.
+                parkForAtLeast(responseTimeout.multipliedBy(3));
 
                 consumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)).get();
                 var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);

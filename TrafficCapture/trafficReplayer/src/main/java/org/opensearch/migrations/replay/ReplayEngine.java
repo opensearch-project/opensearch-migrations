@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -196,6 +197,11 @@ public class ReplayEngine {
     public CompletionStage<Void> shutdownConnections(CancellationException cause) {
         updateContentTimeControllerScheduledFuture.cancel(false);
         return networkSendOrchestrator.shutdownActors(cause);
+    }
+
+    /** Connection sessions whose actors have not yet reached termination, for shutdown diagnostics. */
+    public Set<String> describeUnterminatedSessions() {
+        return networkSendOrchestrator.describeUnterminatedSessions();
     }
 
     /**

@@ -619,7 +619,14 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         if (routingInitializer != null) {
             routingInitializer.shutdownNow();
         }
-        var readyPublisher = publisher;
+        // Routing initialization decides whether to build a publisher while holding this lock and after
+        // checking the flag set above, so close has to take the lock to read the result of that decision.
+        // Reading it unlocked can observe no publisher while one is being constructed, which would leave
+        // it running -- with its liveness snapshot timer -- against the producer closed just below.
+        CaptureKafkaPublisher readyPublisher;
+        synchronized (routingInitializationLock) {
+            readyPublisher = publisher;
+        }
         if (readyPublisher != null) {
             readyPublisher.close();
             return;

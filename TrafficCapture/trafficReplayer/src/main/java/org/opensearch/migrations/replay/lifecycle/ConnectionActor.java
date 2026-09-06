@@ -7,6 +7,7 @@ import java.util.Deque;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
@@ -183,6 +184,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     private long abortStartedNanos;
     private boolean orderedCloseActive;
     private State state = State.OPEN;
+    private volatile boolean mailboxAbandoned;
 
     public ConnectionActor(
         @NonNull ConnectionSessionKey sessionKey,
@@ -215,8 +217,59 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         this.nanoTime = nanoTime;
     }
 
-    public ConnectionSessionKey sessionKey() {
-        return sessionKey;
+    /**
+     * The actor's mailbox is the session's event loop, so a pool shut down without first aborting its
+     * actors takes the mailbox with it.  Every transition runs as a posted command, so a dropped post
+     * leaves whoever is waiting on the corresponding gate waiting forever.  Route posts through here so
+     * that a rejected one fences the actor instead of vanishing.
+     */
+    private void post(Runnable command) {
+        if (mailboxAbandoned) {
+            return;
+        }
+        try {
+            mailbox.execute(command);
+        } catch (RejectedExecutionException e) {
+            abandonOnDeadMailbox(e);
+        }
+    }
+
+    /**
+     * Fences the actor when its mailbox has stopped running commands for good.  A target exchange can be
+     * parked on the network with nothing left to complete it, so waiting for an orderly abort would wait
+     * forever; whoever owns the mailbox calls this once it knows the mailbox is gone.
+     */
+    public void abandonBecauseMailboxStopped(@NonNull CancellationException cause) {
+        abandon(cause);
+    }
+
+    private void abandonOnDeadMailbox(RejectedExecutionException rejection) {
+        var cause = new CancellationException(
+            "the event loop backing session " + sessionKey + " terminated before the session did"
+        );
+        cause.initCause(rejection);
+        abandon(cause);
+    }
+
+    /**
+     * Settles everything the actor still owes, directly rather than through the mailbox.  Bypassing the
+     * mailbox is what makes this safe to do off-thread: a mailbox that no longer runs commands cannot be
+     * running one now, so there is no concurrent transition to race with.  Every gate involved ignores a
+     * repeated completion, so being called more than once is harmless.
+     */
+    private void abandon(CancellationException cause) {
+        if (mailboxAbandoned) {
+            return;
+        }
+        mailboxAbandoned = true;
+        for (var command : commands) {
+            if (command instanceof RequestCommand<P, R> request) {
+                request.completion.complete(new TargetOutcome.Cancelled<>(cause));
+            } else if (command instanceof CloseCommand<P, R> close) {
+                close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
+            }
+        }
+        termination.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
     }
 
     public CompletionStage<TargetOutcome<R>> admitRequest(
@@ -229,16 +282,16 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         }
         var command = new RequestCommand<P, R>(requestId, scheduledStart);
         command.preparationCompletion = preparation.toCompletableFuture();
-        mailbox.execute(() -> admit(command));
+        post(() -> admit(command));
         preparation.whenComplete((outcome, failure) ->
-            mailbox.execute(() -> onPreparationSettled(command, outcome, failure))
+            post(() -> onPreparationSettled(command, outcome, failure))
         );
         return command.completion.stage();
     }
 
     public CompletionStage<SessionOutcome> admitClose(@NonNull Instant scheduledStart) {
         var command = new CloseCommand<P, R>(scheduledStart);
-        mailbox.execute(() -> admit(command));
+        post(() -> admit(command));
         return command.completion.stage();
     }
 
@@ -246,7 +299,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         @NonNull AbortReason reason,
         @NonNull CancellationException cause
     ) {
-        mailbox.execute(() -> beginAbort(reason, cause));
+        post(() -> beginAbort(reason, cause));
         return termination.stage();
     }
 
@@ -408,7 +461,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             return;
         }
         exchange.whenComplete((outcome, failure) ->
-            mailbox.execute(() -> {
+            post(() -> {
                 if (request.settled) {
                     releasePreparedQuietly(request);
                     return;
@@ -462,7 +515,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             state = State.OPEN;
         }
         startHead();
-        mailbox.execute(() -> request.completion.complete(outcome));
+        post(() -> request.completion.complete(outcome));
     }
 
     private void runOrderedClose(CloseCommand<P, R> close) {
@@ -476,7 +529,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             closeStage = CompletableFuture.failedFuture(t);
         }
         closeStage.whenComplete((ignored, failure) ->
-            mailbox.execute(() -> {
+            post(() -> {
                 if (state == State.ABORTING || state == State.TERMINATED) {
                     return;
                 }
@@ -522,7 +575,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             abortStage = CompletableFuture.failedFuture(t);
         }
         abortStage.whenComplete((ignored, failure) ->
-            mailbox.execute(() -> {
+            post(() -> {
                 metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
                 orderedCloseActive = false;
                 var terminationFailure = failure == null ? null : unwrap(failure);
