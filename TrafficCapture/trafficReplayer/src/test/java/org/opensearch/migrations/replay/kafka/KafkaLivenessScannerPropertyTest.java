@@ -31,7 +31,10 @@ class KafkaLivenessScannerPropertyTest {
     private static final int GENERATION = 7;
     private static final long LAST_REPLAYED_OFFSET = 10;
 
-    private final KafkaLivenessScanner scanner = new KafkaLivenessScanner();
+    // The scanner retains evidence across calls so that a proof split across two reads is still found, which
+    // means each generated scenario needs its own instance: the scenarios are independent histories that all
+    // start their offsets from the same base, and a shared scanner would treat the second one's records as
+    // already-seen re-reads.
 
     @Test
     void randomizedScanHistoriesOnlyConfirmFromCompleteConsecutiveOmissions() {
@@ -39,7 +42,7 @@ class KafkaLivenessScannerPropertyTest {
 
         for (int seed = 0; seed < GENERATED_CASES; ++seed) {
             var scenario = Scenario.generate(seed);
-            var evidence = scanner.evaluate(
+            var evidence = new KafkaLivenessScanner().evaluate(
                 List.of(candidate()),
                 new TrackingKafkaConsumer.ScanCycle(
                     scenario.records(),
@@ -104,7 +107,7 @@ class KafkaLivenessScannerPropertyTest {
             var cycle = new TrackingKafkaConsumer.ScanCycle(List.of(invalidRecord), true, false);
             Assertions.assertThrows(
                 IllegalStateException.class,
-                () -> scanner.evaluate(List.of(candidate()), cycle),
+                () -> new KafkaLivenessScanner().evaluate(List.of(candidate()), cycle),
                 "seed " + seed + " accepted a routing violation"
             );
         }
@@ -208,7 +211,9 @@ class KafkaLivenessScannerPropertyTest {
 
         long expectedFollowUpOffset() {
             if (!trafficFollowUps.isEmpty()) {
-                return trafficFollowUps.stream().mapToLong(Long::longValue).min().orElseThrow();
+                // The highest offset the connection was seen at, not the earliest unreplayed one -- see
+                // ScanEvidence.FollowUpPresent for why retained evidence reports a lower bound.
+                return trafficFollowUps.stream().mapToLong(Long::longValue).max().orElseThrow();
             }
             return firstContainingSnapshot().lastOffset();
         }

@@ -643,6 +643,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         // Releasing Netty's event loops must not depend on the actors settling: one session that never
         // reaches termination would otherwise hold every thread in the pool and keep the process alive.
         // Reaching this bound is always a bug, and the shutdown watchdog above names the stuck session.
+        //
+        // Timing out here and shutting the pool down anyway is safe only because of the four event-loop
+        // death gates documented in docs/replayerHardenedArchitectureDesign.md, section 16.3.  A session's
+        // event loop is both its channel's I/O thread and its actor's mailbox, so once this pool goes away
+        // nothing can advance a session that is still live: work parked on the network has no thread left
+        // to complete it, and posted commands are dropped.  Those gates turn that into prompt cancellation
+        // rather than a hang.  Cancellation always retains records (never commits), so the cost of landing
+        // here is re-replaying in-flight work after restart, not data loss.  If you change this ordering or
+        // the timeout, re-read 16.3 first -- removing any one of the four gates reintroduces a shutdown
+        // that never completes.
         var actorShutdownFuture = beginReplayShutdownAfterIntakeFence(replayEngine, cancellationCause)
             .copy()
             .orTimeout(ACTOR_TERMINATION_SHUTDOWN_LIMIT.toSeconds(), TimeUnit.SECONDS);

@@ -24,8 +24,61 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.NonNull;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
+/**
+ * Tracks what the capture proxies say is still open, and answers whether a given connection has been
+ * proved dead.
+ *
+ * <p>Records are handed to {@link #ingest} in offset order and the evidence they carry is <em>retained</em>
+ * across calls.  This is the load-bearing property: an omission proof needs two consecutive snapshots, so
+ * an evaluator that rebuilt its state from one batch of records could only ever find a proof whose halves
+ * happened to land in the same batch.  Any proof straddling a batch boundary -- which is what a record or
+ * time budget produces under load -- was silently unreachable, and an unreachable proof becomes
+ * {@code Inconclusive}, which retains records and halts replay.  Retaining state means a proof is found as
+ * soon as its second half is seen, regardless of how the reads were chunked.
+ *
+ * <p>Because state is retained, {@link #ingest} must tolerate seeing the same record twice; the current
+ * scan-ahead caller re-reads the same window on every cycle.  Offsets are monotonic per partition, so
+ * per-partition high-water marks make re-delivery free rather than corrupting chunk reassembly.
+ *
+ * <p>Not thread-safe: it is driven from the single source-intake thread.
+ */
 final class KafkaLivenessScanner {
     private static final int MAXIMUM_CHUNKS_PER_SNAPSHOT = 100_000;
+    /** Reassembly and recent-history state for one (node, partition, routing plan) snapshot stream. */
+    private static final class SnapshotStream {
+        private final Map<Long, PartialSnapshot> partialsBySequence = new HashMap<>();
+        private final java.util.NavigableMap<Long, CompleteSnapshot> completeBySequence = new java.util.TreeMap<>();
+
+        private void add(long offset, SnapshotKey key, ProxyLivenessSnapshotChunk chunk) {
+            if (completeBySequence.containsKey(key.sequence())) {
+                return;
+            }
+            var partial = partialsBySequence.computeIfAbsent(
+                key.sequence(),
+                ignored -> new PartialSnapshot(key, chunk)
+            );
+            partial.add(offset, chunk);
+            if (partial.isComplete()) {
+                partialsBySequence.remove(key.sequence());
+                completeBySequence.put(key.sequence(), partial.complete());
+            }
+        }
+
+        /**
+         * Drops history that no candidate can still use.  Relevance requires a snapshot to begin after the
+         * candidate's last replayed record, so a snapshot entirely at or below the furthest-along replay
+         * position is unreachable for every candidate, present or future.  Bounding on replay progress
+         * rather than on a fixed count is what keeps the retained window equal to the un-replayed working
+         * set -- and it keeps the aliveness rule intact, since a "connection is listed here" sighting stays
+         * visible for exactly as long as a proof that would contradict it.
+         */
+        private void pruneThroughReplayedOffset(long replayedThroughOffset) {
+            completeBySequence.values()
+                .removeIf(snapshot -> snapshot.span().firstOffset() <= replayedThroughOffset);
+            partialsBySequence.values()
+                .removeIf(partial -> partial.lastOffset <= replayedThroughOffset);
+        }
+    }
 
     static final class Candidate {
         private final SourcePartitionKey partition;
@@ -147,6 +200,20 @@ final class KafkaLivenessScanner {
         }
     }
 
+    /** Identity of one snapshot stream: a single proxy's snapshots for a single partition under one plan. */
+    private record SnapshotStreamKey(String nodeId, int partition, String routingPlanId) {}
+
+    /**
+     * A connection's traffic scoped to where it was routed.  The partition and routing plan belong in the
+     * key: traffic for the same connection under a different plan or partition says nothing about this
+     * candidate, since every proof rests on offset ordering within one partition under one plan.
+     */
+    private record TrafficKey(SourceConnectionKey connection, int partition, String routingPlanId) {}
+
+    private final Map<SnapshotStreamKey, SnapshotStream> snapshotStreams = new HashMap<>();
+    private final Map<TrafficKey, Long> latestTrafficOffsetByConnection = new HashMap<>();
+    private final Map<Integer, Long> highestIngestedOffsetByPartition = new HashMap<>();
+
     List<ScanEvidence> evaluate(
         Collection<Candidate> candidates,
         TrackingKafkaConsumer.ScanCycle cycle
@@ -154,26 +221,77 @@ final class KafkaLivenessScanner {
         if (!cycle.stableGeneration()) {
             return generationChangedVerdicts(candidates);
         }
-        var candidateByConnection = new HashMap<SourceConnectionKey, Candidate>();
-        candidates.forEach(candidate -> candidateByConnection.put(candidate.connection(), candidate));
-        var followUps = new HashMap<SourceConnectionKey, Long>();
-        var partialSnapshots = new HashMap<SnapshotKey, PartialSnapshot>();
-
-        for (var kafkaRecord : cycle.records()) {
-            if (isLivenessRecord(kafkaRecord)) {
-                addSnapshotRecord(kafkaRecord, partialSnapshots);
-            } else {
-                addTrafficFollowUp(kafkaRecord, candidateByConnection, followUps);
-            }
-        }
-
-        var completeSnapshots = completeSnapshots(partialSnapshots);
+        cycle.records().forEach(this::ingest);
 
         var verdicts = new ArrayList<ScanEvidence>(candidates.size());
         for (var candidate : candidates) {
-            verdicts.add(evaluateCandidate(candidate, followUps, completeSnapshots, cycle.exhaustedBudget()));
+            verdicts.add(evaluateCandidate(candidate));
         }
+        releaseEvidenceBehindReplay(candidates);
         return List.copyOf(verdicts);
+    }
+
+    /**
+     * Drops retained evidence that replay has already moved past.  Pruning happens after the verdicts so a
+     * candidate is never evaluated against a window this call just trimmed.  A partition with no candidates
+     * is left alone: it has nothing outstanding, so its streams are already empty or about to be released by
+     * {@link #forgetPartition}.
+     */
+    private void releaseEvidenceBehindReplay(Collection<Candidate> candidates) {
+        var replayedThroughByPartition = new HashMap<Integer, Long>();
+        for (var candidate : candidates) {
+            replayedThroughByPartition.merge(
+                candidate.partition().partition(),
+                candidate.lastReplayedOffset(),
+                Math::min
+            );
+        }
+        snapshotStreams.forEach((streamKey, stream) -> {
+            var replayedThrough = replayedThroughByPartition.get(streamKey.partition());
+            if (replayedThrough != null) {
+                stream.pruneThroughReplayedOffset(replayedThrough);
+            }
+        });
+    }
+
+    /**
+     * Folds one record into the retained evidence.  Records must arrive in per-partition offset order, which
+     * is what Kafka delivers; a record at or below the partition's high-water mark is a re-read and is
+     * skipped so that repeated scans of the same window are idempotent.
+     */
+    void ingest(ConsumerRecord<String, byte[]> kafkaRecord) {
+        var previousHighest = highestIngestedOffsetByPartition.get(kafkaRecord.partition());
+        // Only the state mutation is skipped for a re-read, never the stamp validation.  Those checks guard
+        // the one assumption whose silent failure would commit live data -- that a connection's records and
+        // its node's snapshots share a partition -- so they must not become order-dependent.
+        var alreadySeen = previousHighest != null && kafkaRecord.offset() <= previousHighest;
+        if (!alreadySeen) {
+            highestIngestedOffsetByPartition.put(kafkaRecord.partition(), kafkaRecord.offset());
+        }
+        if (isLivenessRecord(kafkaRecord)) {
+            addSnapshotRecord(kafkaRecord, alreadySeen);
+        } else {
+            addTrafficFollowUp(kafkaRecord, alreadySeen);
+        }
+    }
+
+    /**
+     * Releases the evidence held for a connection that has reached a terminal decision.  Retained state is
+     * otherwise unbounded in the number of connections ever seen.
+     */
+    void forget(@NonNull SourceConnectionKey connection) {
+        latestTrafficOffsetByConnection.keySet().removeIf(key -> key.connection().equals(connection));
+    }
+
+    /**
+     * Discards everything retained for a partition.  Offset ordering -- which every proof rests on -- is
+     * only meaningful within one assignment of one partition, so a revoke or generation change invalidates
+     * the retained evidence rather than merely interrupting it.
+     */
+    void forgetPartition(int partition) {
+        highestIngestedOffsetByPartition.remove(partition);
+        snapshotStreams.keySet().removeIf(key -> key.partition() == partition);
+        latestTrafficOffsetByConnection.keySet().removeIf(key -> key.partition() == partition);
     }
 
     private List<ScanEvidence> generationChangedVerdicts(Collection<Candidate> candidates) {
@@ -187,26 +305,16 @@ final class KafkaLivenessScanner {
             .toList();
     }
 
-    private List<CompleteSnapshot> completeSnapshots(Map<SnapshotKey, PartialSnapshot> partialSnapshots) {
-        return partialSnapshots.values()
-            .stream()
-            .filter(PartialSnapshot::isComplete)
-            .map(PartialSnapshot::complete)
-            .sorted(Comparator.comparingLong(snapshot -> snapshot.span().firstOffset()))
-            .toList();
-    }
-
-    private ScanEvidence evaluateCandidate(
-        Candidate candidate,
-        Map<SourceConnectionKey, Long> followUps,
-        List<CompleteSnapshot> completeSnapshots,
-        boolean exhaustedBudget
-    ) {
-        var followUpOffset = followUps.get(candidate.connection());
-        if (followUpOffset != null) {
+    private ScanEvidence evaluateCandidate(Candidate candidate) {
+        var followUpOffset = latestTrafficOffsetByConnection.get(new TrafficKey(
+            candidate.connection(),
+            candidate.partition().partition(),
+            candidate.routingPlanId()
+        ));
+        if (followUpOffset != null && followUpOffset > candidate.lastReplayedOffset()) {
             return followUpPresent(candidate, followUpOffset);
         }
-        var relevantSnapshots = relevantSnapshots(candidate, completeSnapshots);
+        var relevantSnapshots = relevantSnapshots(candidate);
         var containing = relevantSnapshots.stream()
             .filter(snapshot -> snapshot.openConnections().contains(candidate.connection().connectionId()))
             .findFirst();
@@ -222,12 +330,12 @@ final class KafkaLivenessScanner {
                 proof
             );
         }
+        // Not a budget failure any more: retained evidence means this only says the proxy has not yet
+        // emitted two consecutive snapshots that omit the connection and sit after its last record.
         return new ScanEvidence.Inconclusive(
             candidate.partition(),
             candidate.connection(),
-            exhaustedBudget
-                ? "Scan budget ended before two complete omission snapshots"
-                : "Two complete consecutive omission snapshots were not available"
+            "Two consecutive omission snapshots after the connection's last record have not arrived yet"
         );
     }
 
@@ -239,15 +347,19 @@ final class KafkaLivenessScanner {
         );
     }
 
-    private List<CompleteSnapshot> relevantSnapshots(
-        Candidate candidate,
-        List<CompleteSnapshot> completeSnapshots
-    ) {
-        return completeSnapshots.stream()
-            .filter(snapshot -> snapshot.key().nodeId().equals(candidate.connection().nodeId()))
-            .filter(snapshot -> snapshot.key().partition() == candidate.partition().partition())
-            .filter(snapshot -> snapshot.key().routingPlanId().equals(candidate.routingPlanId()))
+    private List<CompleteSnapshot> relevantSnapshots(Candidate candidate) {
+        var stream = snapshotStreams.get(new SnapshotStreamKey(
+            candidate.connection().nodeId(),
+            candidate.partition().partition(),
+            candidate.routingPlanId()
+        ));
+        if (stream == null) {
+            return List.of();
+        }
+        return stream.completeBySequence.values()
+            .stream()
             .filter(snapshot -> snapshot.span().firstOffset() > candidate.lastReplayedOffset())
+            .sorted(Comparator.comparingLong(snapshot -> snapshot.span().firstOffset()))
             .toList();
     }
 
@@ -283,11 +395,12 @@ final class KafkaLivenessScanner {
             && first.span().lastOffset() < second.span().firstOffset();
     }
 
-    private void addTrafficFollowUp(
-        ConsumerRecord<String, byte[]> kafkaRecord,
-        Map<SourceConnectionKey, Candidate> candidateByConnection,
-        Map<SourceConnectionKey, Long> followUps
-    ) {
+    /**
+     * Records that a connection was still producing traffic at this offset.  Unlike the per-cycle version
+     * this cannot filter by candidate: retained state has to answer for connections that only become
+     * candidates on a later cycle, by which time the record is long gone.
+     */
+    private void addTrafficFollowUp(ConsumerRecord<String, byte[]> kafkaRecord, boolean alreadySeen) {
         final TrafficStream stream;
         try {
             stream = TrafficStream.parseFrom(kafkaRecord.value());
@@ -298,20 +411,18 @@ final class KafkaLivenessScanner {
             return;
         }
         validateTrafficStamp(kafkaRecord, stream);
-        var connection = new SourceConnectionKey(stream.getNodeId(), stream.getConnectionId());
-        var candidate = candidateByConnection.get(connection);
-        if (candidate != null
-            && candidate.partition().partition() == kafkaRecord.partition()
-            && candidate.routingPlanId().equals(stream.getRoutingPlanId())
-            && kafkaRecord.offset() > candidate.lastReplayedOffset()) {
-            followUps.merge(connection, kafkaRecord.offset(), Math::min);
+        if (alreadySeen) {
+            return;
         }
+        var key = new TrafficKey(
+            new SourceConnectionKey(stream.getNodeId(), stream.getConnectionId()),
+            kafkaRecord.partition(),
+            stream.getRoutingPlanId()
+        );
+        latestTrafficOffsetByConnection.merge(key, kafkaRecord.offset(), Math::max);
     }
 
-    private void addSnapshotRecord(
-        ConsumerRecord<String, byte[]> kafkaRecord,
-        Map<SnapshotKey, PartialSnapshot> partialSnapshots
-    ) {
+    private void addSnapshotRecord(ConsumerRecord<String, byte[]> kafkaRecord, boolean alreadySeen) {
         final ProxyLivenessSnapshotChunk chunk;
         try {
             chunk = ProxyLivenessSnapshotChunk.parseFrom(kafkaRecord.value());
@@ -329,14 +440,19 @@ final class KafkaLivenessScanner {
         if (chunk.getRoutingPlanId().isBlank()) {
             throw new IllegalStateException("Liveness snapshot is missing its routing-plan identity");
         }
+        if (alreadySeen) {
+            return;
+        }
         var key = new SnapshotKey(
             chunk.getNodeId(),
             chunk.getPartition(),
             chunk.getRoutingPlanId(),
             chunk.getSnapshotSequence()
         );
-        partialSnapshots.computeIfAbsent(key, ignored -> new PartialSnapshot(key, chunk))
-            .add(kafkaRecord.offset(), chunk);
+        snapshotStreams.computeIfAbsent(
+            new SnapshotStreamKey(key.nodeId(), key.partition(), key.routingPlanId()),
+            ignored -> new SnapshotStream()
+        ).add(kafkaRecord.offset(), key, chunk);
     }
 
     static void validateTrafficStamp(ConsumerRecord<String, byte[]> kafkaRecord, TrafficStream stream) {

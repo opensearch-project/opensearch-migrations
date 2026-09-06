@@ -241,6 +241,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             pendingConfirmedDead.removeIf(key ->
                 key.partition() == partition && key.sourceGeneration() == lostPartition.sourceGeneration()
             );
+            // The scanner's proofs rest on offset ordering within one assignment of one partition, so a
+            // revoke invalidates its retained evidence rather than merely pausing it.
+            livenessScanner.forgetPartition(partition);
             sourceControlQueue.removeIf(control ->
                 control.evidence().partition().equals(lostPartition)
             );
@@ -434,6 +437,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             activeConnectionSourcePartitions.remove(connKey);
             activeConnectionScanStates.remove(connKey);
             pendingConfirmedDead.removeIf(key -> key.connection().equals(connection));
+            // The scanner retains a last-seen offset per connection it has ever observed, not just per
+            // candidate, so a settled connection has to be released or that map grows for the life of the
+            // process.
+            livenessScanner.forget(connection);
             sourceControlQueue.removeIf(control -> control.evidence().connection().equals(connection));
         }
     }

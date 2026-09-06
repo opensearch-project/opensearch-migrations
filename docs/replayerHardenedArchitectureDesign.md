@@ -1633,6 +1633,62 @@ Fatal process termination may interrupt this sequence, but the reusable API and 
 depend on JVM exit for correctness — otherwise shutdown is untestable and the replayer is not
 embeddable.
 
+### 16.3 Event-loop death is the last-resort backstop
+
+Steps 5–6 above give every actor a bounded chance to settle
+(`ACTOR_TERMINATION_SHUTDOWN_LIMIT`, 2 minutes) *before* step 9 releases the event loops. That
+ordering is deliberate and it is the primary mechanism. This section covers what happens when it
+fails, because the failure mode is severe and non-obvious.
+
+**The hazard.** A session's Netty event loop is simultaneously the channel's I/O thread *and* the
+actor's mailbox (§7.1, §8). Those are the same thread by design — it is what makes actor state
+free of locks. The consequence is that when the loop stops running tasks, *nothing can advance the
+session*: a target exchange parked on a network future has no thread left to complete it, and every
+posted command that would settle a gate is silently dropped. Waiting for an orderly abort waits
+forever. So a session that outlives its loop does not fail — it hangs, and it hangs holding the
+completion gates that shutdown itself is waiting on.
+
+**Why an unbounded wait is not acceptable even though this only happens at process exit.** In
+production the loops are released from exactly one place (`TrafficReplayerTopLevel.shutdown`), so
+reaching this state always means a session missed the 2-minute bound, which is always a bug. But
+"a bug already happened" is the worst time to depend on a thread that no longer exists: the process
+stops making progress and never exits, and embedders (and tests, which shut pools down directly)
+see a hang instead of a failure. The gates below convert that hang into a prompt, attributable
+failure.
+
+**Four independent gates, one per thing that only the loop could have completed.** Each is a
+distinct code path; missing any one of them reintroduces the hang.
+
+| Gate | Location | What could otherwise never complete |
+|---|---|---|
+| 1 | `RequestSenderOrchestrator.scheduleCancellable` | A **scheduled** task's gate. Netty's `confirmShutdown()` cancels pending scheduled tasks *without running them*, and the task body is the only thing that completes the gate. Affects the retry delay and packet pacing. |
+| 2 | `ConnectionActor.post` / `abandonOnDeadMailbox` | Any **actor state transition**. All transitions run as posted commands; on a terminated loop `execute` throws `RejectedExecutionException` into a caller that cannot act on it, and the actor simply stops. |
+| 3 | `RequestSenderOrchestrator.ActorRuntime.onEventLoopTerminated` | The **whole session**, in the case where nothing tries to post at all — e.g. an exchange parked on the network. Requires an explicit `EventLoop.terminationFuture()` subscription; there is no other notification. |
+| 4 | `NettyPacketToHttpConsumer.closeSpans` | The **target-request span**, opened in the constructor and closed only by `finalizeRequest()`. Connection activation retries indefinitely, so a loop death mid-connect leaves a child span open inside a parent transaction span that then closes — corrupting the trace and the `targetTransactionCount`/`httpTransactionCount` relationship. |
+
+Gate 3's internal ordering is load-bearing: settle the exchange, then the actor, then the runtime's
+own termination gate, and only then the transaction registry — the registry posts to the same dead
+loop, so it must come last and its rejection must be tolerated.
+
+**Disposition consequences — no durable risk.** All four gates settle their work as
+`TargetOutcome.Cancelled`, and cancellation is *always* `retain("target-cancelled", false)` in both
+branches of the decision matrix (§14.2). Three properties follow, and they are the reason this
+backstop is safe to fire:
+
+- **It can never commit wrongly.** Committing requires a durable-evidence outcome *and* a target
+  outcome of `Succeeded`/`Filtered`/`ClassifiedSkip`. A fenced session retains, so offsets do not
+  advance and the next owner of the partition re-reads the work. The cost is duplicate delivery,
+  which is the at-least-once contract the replayer already provides.
+- **It cannot become a poison pill.** The `false` is `haltReplay`; a `true` there raises a fatal
+  `Error`. Cancellation deliberately does not halt, so a fenced session cannot wedge the successor
+  process either.
+- **It leaves no durable state.** Nothing about the fence is persisted. The next process sees only
+  uncommitted offsets, indistinguishable from a hard kill. There is no cross-restart or perpetual
+  effect once the partition is reassigned.
+
+The residual cost is therefore bounded to re-replaying work that was already in flight when the
+process was going down — which any hard kill would also cost.
+
 ---
 
 ## 17. Evidence API and Phase 2 Compatibility
