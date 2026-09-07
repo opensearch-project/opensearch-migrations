@@ -8,6 +8,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
 import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
@@ -111,6 +112,28 @@ class CaptureKafkaPublisherTest {
                 assertEquals(0, chunk.getOpenConnectionsCount());
             }
         }
+        publisher.close();
+    }
+
+    @Test
+    void snapshotsCoverAssignedPartitionsAndRevokedPartitionsThatAreStillDraining() throws Exception {
+        var producer = producer(true);
+        var registry = new ProxyLivenessRegistry();
+        var plan = PartitionRoutingPlan.forTopic(3, 3, NODE_ID);
+        var assignment = new CapturePartitionAssignment(3, List.of(0, 1, 2));
+        var publisher = publisher(producer, plan, assignment, registry);
+        registry.register("draining", 2);
+        assignment.replaceAssignedPartitions(List.of(0, 1));
+
+        publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
+
+        assertEquals(List.of(0, 1, 2), producer.history().stream()
+            .map(ProducerRecord::partition)
+            .toList());
+        assertEquals(
+            List.of("draining"),
+            openConnections(producer.history().get(2))
+        );
         publisher.close();
     }
 
@@ -221,6 +244,63 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
+    void terminalGateFailsInFlightTrafficWithoutRemovingTheConnection() throws Exception {
+        var producer = producer(false);
+        var registry = new ProxyLivenessRegistry();
+        var plan = PartitionRoutingPlan.forTopic(1, 1, NODE_ID);
+        var gate = new CaptureKafkaWriteGate(Duration.ofSeconds(1), new AtomicLong()::get);
+        gate.recordSuccessfulPoll();
+        var publisher = publisher(producer, plan, registry, gate);
+        registry.register("connection", 0);
+
+        var finalSend = publisher.publishTraffic("connection", 0, new byte[] { 1 }, true);
+        awaitHistorySize(producer, 1);
+        var terminalFailure = new IllegalStateException("membership lost");
+        gate.trip(terminalFailure);
+
+        var failure = assertThrows(
+            ExecutionException.class,
+            () -> finalSend.get(1, TimeUnit.SECONDS)
+        );
+        assertEquals(terminalFailure, failure.getCause());
+        assertEquals(List.of("connection"), registry.snapshot(0));
+
+        assertTrue(producer.completeNext());
+        assertEquals(List.of("connection"), registry.snapshot(0));
+        publisher.close();
+    }
+
+    @Test
+    void aLaterSuccessfulPollCannotReopenAStalePublisher() throws Exception {
+        var producer = producer(true);
+        var registry = new ProxyLivenessRegistry();
+        var plan = PartitionRoutingPlan.forTopic(1, 1, NODE_ID);
+        var ticker = new AtomicLong();
+        var gate = new CaptureKafkaWriteGate(Duration.ofSeconds(1), ticker::get);
+        gate.recordSuccessfulPoll();
+        var publisher = publisher(producer, plan, registry, gate);
+        registry.register("connection", 0);
+
+        publisher.publishTraffic("connection", 0, new byte[] { 1 }, false)
+            .get(1, TimeUnit.SECONDS);
+        ticker.set(Duration.ofSeconds(2).toNanos());
+        assertThrows(
+            ExecutionException.class,
+            () -> publisher.publishTraffic("connection", 0, new byte[] { 2 }, false)
+                .get(1, TimeUnit.SECONDS)
+        );
+        gate.recordSuccessfulPoll();
+        assertThrows(
+            ExecutionException.class,
+            () -> publisher.publishTraffic("connection", 0, new byte[] { 3 }, false)
+                .get(1, TimeUnit.SECONDS)
+        );
+
+        assertEquals(1, producer.history().size());
+        publisher.close();
+    }
+
+    @Test
     void trafficRecordsUseExplicitPlanPartitionAndTypeHeader() throws Exception {
         var producer = producer(true);
         var registry = new ProxyLivenessRegistry();
@@ -243,6 +323,33 @@ class CaptureKafkaPublisherTest {
         publisher.close();
     }
 
+    @Test
+    void trafficUsesThePartitionStoredAtAdmissionInsteadOfRecomputingTheHashRoute() throws Exception {
+        var producer = producer(true);
+        var registry = new ProxyLivenessRegistry();
+        var plan = PartitionRoutingPlan.forTopic(8, 3, NODE_ID);
+        var publisher = publisher(producer, plan, registry);
+        var connection = "connection";
+        int hashPartition = plan.partitionFor(connection);
+        int admittedPartition = plan.getSelectedPartitions()
+            .stream()
+            .filter(partition -> partition != hashPartition)
+            .findFirst()
+            .orElseThrow();
+        registry.register(connection, admittedPartition);
+
+        publisher.publishTraffic(connection, admittedPartition, new byte[] { 1, 2 }, false)
+            .get(1, TimeUnit.SECONDS);
+
+        assertEquals(admittedPartition, producer.history().get(0).partition());
+        assertThrows(
+            ExecutionException.class,
+            () -> publisher.publishTraffic(connection, hashPartition, new byte[] { 3 }, false)
+                .get(1, TimeUnit.SECONDS)
+        );
+        publisher.close();
+    }
+
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
         PartitionRoutingPlan plan,
@@ -259,6 +366,25 @@ class CaptureKafkaPublisherTest {
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
         PartitionRoutingPlan plan,
+        CapturePartitionAssignment partitionAssignment,
+        ProxyLivenessRegistry registry
+    ) {
+        return new CaptureKafkaPublisher(
+            producer,
+            TOPIC,
+            NODE_ID,
+            plan,
+            partitionAssignment,
+            registry,
+            MESSAGE_SIZE,
+            Duration.ofDays(1),
+            Clock.fixed(Instant.ofEpochMilli(1234), ZoneOffset.UTC)
+        );
+    }
+
+    private static CaptureKafkaPublisher publisher(
+        MockProducer<String, byte[]> producer,
+        PartitionRoutingPlan plan,
         ProxyLivenessRegistry registry,
         Clock clock
     ) {
@@ -267,10 +393,37 @@ class CaptureKafkaPublisherTest {
             TOPIC,
             NODE_ID,
             plan,
+            new CapturePartitionAssignment(
+                plan.getTopicPartitionCount(),
+                plan.getSelectedPartitions()
+            ),
             registry,
             MESSAGE_SIZE,
             Duration.ofDays(1),
             clock
+        );
+    }
+
+    private static CaptureKafkaPublisher publisher(
+        MockProducer<String, byte[]> producer,
+        PartitionRoutingPlan plan,
+        ProxyLivenessRegistry registry,
+        CaptureKafkaWriteGate writeGate
+    ) {
+        return new CaptureKafkaPublisher(
+            producer,
+            TOPIC,
+            NODE_ID,
+            plan,
+            new CapturePartitionAssignment(
+                plan.getTopicPartitionCount(),
+                plan.getSelectedPartitions()
+            ),
+            registry,
+            MESSAGE_SIZE,
+            Duration.ofDays(1),
+            Clock.fixed(Instant.ofEpochMilli(1234), ZoneOffset.UTC),
+            writeGate
         );
     }
 

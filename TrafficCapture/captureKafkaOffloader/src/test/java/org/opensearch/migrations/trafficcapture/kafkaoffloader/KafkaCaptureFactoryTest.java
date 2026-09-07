@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -27,6 +28,8 @@ import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 import io.netty.buffer.Unpooled;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -512,6 +515,10 @@ public class KafkaCaptureFactoryTest {
             factory.getPublisher().getRoutingPlan().getRoutingPlanId(),
             stream.getRoutingPlanId()
         );
+        Assertions.assertEquals(
+            record.partition(),
+            factory.getPublisher().getLivenessRegistry().partitionFor(stream.getConnectionId())
+        );
         Assertions.assertEquals(1, factory.getPublisher().getLivenessRegistry().size());
 
         offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
@@ -686,6 +693,66 @@ public class KafkaCaptureFactoryTest {
 
         Assertions.assertEquals(2, discoveryAttempts.get());
         factory.close();
+    }
+
+    @Test
+    public void membershipAssignmentReleasesPendingCaptureAndCapsAdmissionWidth() throws Exception {
+        var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var partition0 = new TopicPartition(topic, 0);
+        var partition1 = new TopicPartition(topic, 1);
+        var partition2 = new TopicPartition(topic, 2);
+        membershipConsumer.updateBeginningOffsets(Map.of(
+            partition0,
+            0L,
+            partition1,
+            0L,
+            partition2,
+            0L
+        ));
+        membershipConsumer.schedulePollTask(() ->
+            membershipConsumer.rebalance(List.of(partition0, partition1, partition2))
+        );
+        when(mockProducer.partitionsFor(topic)).thenReturn(List.of(
+            new PartitionInfo(topic, 0, null, new Node[0], new Node[0]),
+            new PartitionInfo(topic, 1, null, new Node[0], new Node[0]),
+            new PartitionInfo(topic, 2, null, new Node[0], new Node[0])
+        ));
+        var sentRecord = new CompletableFuture<ProducerRecord<String, byte[]>>();
+        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
+            ProducerRecord<String, byte[]> record = invocation.getArgument(0);
+            Callback callback = invocation.getArgument(1);
+            var metadata = generateRecordMetadata(record.topic(), record.partition());
+            sentRecord.complete(record);
+            callback.onCompletion(metadata, null);
+            return CompletableFuture.completedFuture(metadata);
+        });
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            membershipConsumer,
+            topic,
+            1024 * 1024,
+            2,
+            Duration.ofDays(1)
+        );
+
+        var offloader = factory.createOffloader(createCtx());
+        var payload = Unpooled.wrappedBuffer("pending-membership".getBytes(StandardCharsets.UTF_8));
+        offloader.addReadEvent(Instant.EPOCH, payload);
+        var published = offloader.flushCommitAndResetStream(false);
+        payload.release();
+
+        published.get(5, TimeUnit.SECONDS);
+        var record = sentRecord.get(5, TimeUnit.SECONDS);
+        Assertions.assertTrue(List.of(0, 1).contains(record.partition()));
+        Assertions.assertEquals(
+            List.of(0, 1),
+            factory.getPublisher().getPartitionAssignment().assignedPartitions()
+        );
+        offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
+        factory.close();
+        Assertions.assertTrue(membershipConsumer.closed());
     }
 
     private KafkaCaptureFactory createFactory(Producer<String, byte[]> producer, int messageSize) {

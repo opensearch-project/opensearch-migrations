@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 import org.junit.jupiter.api.Test;
@@ -98,5 +99,37 @@ public class KafkaConfigTest {
         assertEquals(true, properties.get(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG));
         assertEquals("all", properties.get(ProducerConfig.ACKS_CONFIG));
         assertEquals(5, properties.get(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION));
+    }
+
+    @Test
+    void membershipConsumerPropertiesCannotBeRedirectedOrChangedToAnEagerAssignor() throws IOException {
+        var propertyFile = tempDir.resolve("consumer.properties");
+        Files.writeString(
+            propertyFile,
+            ConsumerConfig.GROUP_ID_CONFIG
+                + "=wrong-group\n"
+                + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG
+                + "=org.apache.kafka.clients.consumer.RangeAssignor\n"
+        );
+        var params = new KafkaConfig.KafkaParameters();
+        params.kafkaPropertyFile = propertyFile.toString();
+        params.kafkaBrokers = "broker:9092";
+        params.kafkaClientId = "capture";
+
+        var properties = KafkaConfig.buildMembershipConsumerProperties(
+            params,
+            "node-a",
+            "traffic"
+        );
+
+        assertEquals("broker:9092", properties.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        assertEquals("capture-membership", properties.get(ConsumerConfig.CLIENT_ID_CONFIG));
+        assertEquals("capture-proxy-membership-traffic", properties.get(ConsumerConfig.GROUP_ID_CONFIG));
+        assertEquals(
+            CaptureCooperativeStickyAssignor.class.getName(),
+            properties.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG)
+        );
+        assertEquals("node-a", properties.get(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG));
+        assertEquals(false, properties.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
     }
 }

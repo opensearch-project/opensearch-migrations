@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
@@ -35,6 +36,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     protected final BacksideConnectionPool backsideConnectionPool;
     protected final RequestCapturePredicate requestCapturePredicate;
     protected final Duration maximumConnectionDuration;
+    protected final CaptureFailurePolicy captureFailurePolicy;
     private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
 
     public ProxyChannelInitializer(
@@ -50,7 +52,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             sslEngineSupplier,
             connectionCaptureFactory,
             requestCapturePredicate,
-            Duration.ZERO
+            Duration.ZERO,
+            CaptureFailurePolicy.FAIL_OPEN
         );
     }
 
@@ -62,12 +65,33 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         @NonNull RequestCapturePredicate requestCapturePredicate,
         @NonNull Duration maximumConnectionDuration
     ) {
+        this(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionCaptureFactory,
+            requestCapturePredicate,
+            maximumConnectionDuration,
+            CaptureFailurePolicy.FAIL_OPEN
+        );
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Duration maximumConnectionDuration,
+        @NonNull CaptureFailurePolicy captureFailurePolicy
+    ) {
         this.rootContext = rootContext;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
         this.requestCapturePredicate = requestCapturePredicate;
         this.maximumConnectionDuration = maximumConnectionDuration;
+        this.captureFailurePolicy = captureFailurePolicy;
         this.unauthenticatedClientLogDeduper =
             new UnauthenticatedClientLogDeduper(UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW);
     }
@@ -98,7 +122,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
                     connectionCaptureFactory,
                     requestCapturePredicate,
                     this::shouldGuaranteeMessageOffloading,
-                    maximumConnectionDuration
+                    maximumConnectionDuration,
+                    captureFailurePolicy
                 )
             );
         ch.pipeline().addLast(new FrontsideHandler(backsideConnectionPool));

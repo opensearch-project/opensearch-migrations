@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,8 +20,10 @@ class ProxyLivenessRegistryTest {
         registry.remove("connection-a", 1);
 
         assertEquals(List.of("connection-a", "connection-b"), snapshot);
+        assertEquals(1, registry.partitionFor("connection-b"));
         assertEquals(List.of("connection-b"), registry.snapshot(1));
         assertEquals(List.of("connection-c"), registry.snapshot(2));
+        assertEquals(Set.of(1, 2), registry.partitionsWithConnections());
     }
 
     @Test
@@ -32,5 +35,6 @@ class ProxyLivenessRegistryTest {
         assertThrows(IllegalStateException.class, () -> registry.remove("connection", 2));
         registry.remove("connection", 1);
         assertThrows(IllegalStateException.class, () -> registry.remove("connection", 1));
+        assertThrows(IllegalStateException.class, () -> registry.partitionFor("connection"));
     }
 }

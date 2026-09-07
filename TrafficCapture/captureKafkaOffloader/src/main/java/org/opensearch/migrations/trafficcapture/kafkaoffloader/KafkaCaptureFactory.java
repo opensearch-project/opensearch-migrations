@@ -4,6 +4,7 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +29,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
@@ -56,12 +58,16 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private final Set<String> connectionsAwaitingRouting = new HashSet<>();
     private final PendingCaptureBudget pendingCaptureBudget;
     private final Producer<String, byte[]> producer;
+    private final Consumer<String, byte[]> membershipConsumer;
     private final Integer requestedShardWidth;
     private final Duration livenessSnapshotInterval;
     private final Duration routingDiscoveryRetryDelay;
     private final ScheduledThreadPoolExecutor routingInitializer;
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile CaptureKafkaPublisher publisher;
+    private volatile CaptureKafkaPublisher initializingPublisher;
+    private volatile CaptureKafkaMembership membership;
+    private volatile CaptureKafkaWriteGate writeGate;
     private final AtomicReference<Throwable> routingInitializationFailure = new AtomicReference<>();
     private int routingDiscoveryFailures;
 
@@ -106,6 +112,31 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         );
     }
 
+    public KafkaCaptureFactory(
+        IRootKafkaOffloaderContext rootScope,
+        String nodeId,
+        Producer<String, byte[]> producer,
+        Consumer<String, byte[]> membershipConsumer,
+        String topicNameForTraffic,
+        int messageSize,
+        Integer requestedShardWidth,
+        Duration livenessSnapshotInterval
+    ) {
+        this(
+            rootScope,
+            nodeId,
+            producer,
+            membershipConsumer,
+            topicNameForTraffic,
+            messageSize,
+            requestedShardWidth,
+            livenessSnapshotInterval,
+            DEFAULT_ROUTING_DISCOVERY_RETRY_DELAY,
+            DEFAULT_PENDING_CAPTURE_BYTES,
+            DEFAULT_PENDING_CAPTURE_RECORDS
+        );
+    }
+
     KafkaCaptureFactory(
         IRootKafkaOffloaderContext rootScope,
         String nodeId,
@@ -118,9 +149,38 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         long maximumPendingCaptureBytes,
         int maximumPendingCaptureRecords
     ) {
+        this(
+            rootScope,
+            nodeId,
+            producer,
+            null,
+            topicNameForTraffic,
+            messageSize,
+            requestedShardWidth,
+            livenessSnapshotInterval,
+            routingDiscoveryRetryDelay,
+            maximumPendingCaptureBytes,
+            maximumPendingCaptureRecords
+        );
+    }
+
+    KafkaCaptureFactory(
+        IRootKafkaOffloaderContext rootScope,
+        String nodeId,
+        Producer<String, byte[]> producer,
+        Consumer<String, byte[]> membershipConsumer,
+        String topicNameForTraffic,
+        int messageSize,
+        Integer requestedShardWidth,
+        Duration livenessSnapshotInterval,
+        Duration routingDiscoveryRetryDelay,
+        long maximumPendingCaptureBytes,
+        int maximumPendingCaptureRecords
+    ) {
         this.rootScope = Objects.requireNonNull(rootScope);
         this.nodeId = Objects.requireNonNull(nodeId);
         this.producer = Objects.requireNonNull(producer);
+        this.membershipConsumer = membershipConsumer;
         this.topicNameForTraffic = Objects.requireNonNull(topicNameForTraffic);
         this.requestedShardWidth = requestedShardWidth;
         this.livenessSnapshotInterval = requirePositive(livenessSnapshotInterval, "livenessSnapshotInterval");
@@ -168,6 +228,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             DEFAULT_PENDING_CAPTURE_RECORDS
         );
         this.producer = null;
+        this.membershipConsumer = null;
         this.requestedShardWidth = null;
         this.livenessSnapshotInterval = null;
         this.routingDiscoveryRetryDelay = null;
@@ -201,6 +262,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             if (closed.get()) {
                 throw new IllegalStateException("Kafka capture factory is closed");
             }
+            var terminalFailure = routingInitializationFailure.get();
+            if (terminalFailure != null) {
+                throw new IllegalStateException("Kafka capture is permanently unavailable", terminalFailure);
+            }
             var readyPublisher = publisher;
             if (readyPublisher == null) {
                 if (routingInitializationFailure.get() == null && !connectionsAwaitingRouting.add(connectionId)) {
@@ -228,7 +293,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         String connectionId,
         CaptureKafkaPublisher readyPublisher
     ) {
-        int partition = readyPublisher.getRoutingPlan().partitionFor(connectionId);
+        int partition = readyPublisher.getPartitionAssignment().partitionForNewConnection(connectionId);
         livenessRegistry.register(connectionId, partition);
         try {
             return new StreamChannelConnectionCaptureSerializer<>(
@@ -253,7 +318,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 producer,
                 topicNameForTraffic,
                 nodeId,
-                requestedShardWidth
+                membershipConsumer == null ? requestedShardWidth : null
             );
             finishRoutingInitialization(routingPlan);
         } catch (IllegalArgumentException e) {
@@ -264,19 +329,31 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
 
     private void finishRoutingInitialization(PartitionRoutingPlan routingPlan) {
+        if (membershipConsumer != null) {
+            startMembershipInitialization(routingPlan);
+            return;
+        }
         CaptureKafkaPublisher initializedPublisher;
         synchronized (routingInitializationLock) {
             if (closed.get() || routingInitializationFailure.get() != null) {
                 return;
             }
-            for (var connectionId : connectionsAwaitingRouting) {
-                livenessRegistry.register(connectionId, routingPlan.partitionFor(connectionId));
-            }
+            var partitionAssignment = new CapturePartitionAssignment(
+                routingPlan.getTopicPartitionCount(),
+                routingPlan.getSelectedPartitions()
+            );
+            connectionsAwaitingRouting.forEach(connectionId ->
+                livenessRegistry.register(
+                    connectionId,
+                    partitionAssignment.partitionForNewConnection(connectionId)
+                )
+            );
             initializedPublisher = new CaptureKafkaPublisher(
                 producer,
                 topicNameForTraffic,
                 nodeId,
                 routingPlan,
+                partitionAssignment,
                 livenessRegistry,
                 bufferSize + KAFKA_MESSAGE_OVERHEAD_BYTES,
                 livenessSnapshotInterval
@@ -291,6 +368,90 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             .addArgument(routingDiscoveryFailures)
             .addArgument(routingPlan)
             .log();
+    }
+
+    private void startMembershipInitialization(PartitionRoutingPlan routingPlan) {
+        CaptureKafkaMembership initializedMembership;
+        synchronized (routingInitializationLock) {
+            if (closed.get() || routingInitializationFailure.get() != null) {
+                return;
+            }
+            int assignmentWidth = requestedShardWidth == null
+                ? routingPlan.getTopicPartitionCount()
+                : requestedShardWidth;
+            var partitionAssignment = new CapturePartitionAssignment(
+                routingPlan.getTopicPartitionCount(),
+                assignmentWidth,
+                List.of()
+            );
+            var createdWriteGate = new CaptureKafkaWriteGate(
+                CaptureKafkaMembership.DEFAULT_MAXIMUM_POLL_STALENESS,
+                System::nanoTime
+            );
+            var createdPublisher = new CaptureKafkaPublisher(
+                producer,
+                topicNameForTraffic,
+                nodeId,
+                routingPlan,
+                partitionAssignment,
+                livenessRegistry,
+                bufferSize + KAFKA_MESSAGE_OVERHEAD_BYTES,
+                livenessSnapshotInterval,
+                java.time.Clock.systemUTC(),
+                createdWriteGate
+            );
+            writeGate = createdWriteGate;
+            initializingPublisher = createdPublisher;
+            initializedMembership = new CaptureKafkaMembership(
+                membershipConsumer,
+                topicNameForTraffic,
+                nodeId,
+                partitionAssignment,
+                createdPublisher,
+                createdWriteGate,
+                this::finishMembershipInitialization,
+                this::failRoutingInitialization
+            );
+            membership = initializedMembership;
+        }
+        routingInitializer.shutdown();
+        initializedMembership.start();
+        log.atInfo()
+            .setMessage("Kafka capture metadata is ready; waiting for the first proxy-group assignment")
+            .log();
+    }
+
+    private void finishMembershipInitialization() {
+        CaptureKafkaPublisher initializedPublisher;
+        try {
+            var gateFailure = Objects.requireNonNull(writeGate).failureIfNotWritable();
+            if (gateFailure != null) {
+                failRoutingInitialization(gateFailure);
+                return;
+            }
+            synchronized (routingInitializationLock) {
+                if (closed.get() || routingInitializationFailure.get() != null || publisher != null) {
+                    return;
+                }
+                initializedPublisher = Objects.requireNonNull(initializingPublisher);
+                for (var connectionId : connectionsAwaitingRouting) {
+                    livenessRegistry.register(
+                        connectionId,
+                        initializedPublisher.getPartitionAssignment().partitionForNewConnection(connectionId)
+                    );
+                }
+                publisher = initializedPublisher;
+                initializingPublisher = null;
+                connectionsAwaitingRouting.clear();
+            }
+            publisherFuture.complete(initializedPublisher);
+            log.atInfo()
+                .setMessage("Initialized Kafka capture from proxy-group assignment {}")
+                .addArgument(initializedPublisher.getPartitionAssignment().assignedPartitions())
+                .log();
+        } catch (RuntimeException e) {
+            failRoutingInitialization(e);
+        }
     }
 
     private void retryRoutingDiscovery(RuntimeException failure) {
@@ -326,12 +487,18 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     }
 
     private void failRoutingInitialization(Throwable failure) {
+        CaptureKafkaPublisher publisherToFail;
         synchronized (routingInitializationLock) {
-            if (routingInitializationFailure.get() != null || publisher != null) {
+            if (routingInitializationFailure.get() != null) {
                 return;
             }
             routingInitializationFailure.set(failure);
             connectionsAwaitingRouting.clear();
+            publisherToFail = publisher == null ? initializingPublisher : publisher;
+            initializingPublisher = null;
+        }
+        if (publisherToFail != null) {
+            publisherToFail.failClosed(failure);
         }
         publisherFuture.completeExceptionally(failure);
         if (routingInitializer != null) {
@@ -540,7 +707,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             byte[] unstampedPayload,
             int index
         ) {
-            int partition = readyPublisher.getRoutingPlan().partitionFor(connectionId);
+            int partition = livenessRegistry.partitionFor(connectionId);
             try {
                 var finalRecord = isFinalRecord(unstampedPayload);
                 var stampedPayload = stampRouting(
@@ -624,11 +791,22 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         // Reading it unlocked can observe no publisher while one is being constructed, which would leave
         // it running -- with its liveness snapshot timer -- against the producer closed just below.
         CaptureKafkaPublisher readyPublisher;
+        CaptureKafkaPublisher publisherStillInitializing;
+        CaptureKafkaMembership readyMembership;
         synchronized (routingInitializationLock) {
             readyPublisher = publisher;
+            publisherStillInitializing = initializingPublisher;
+            readyMembership = membership;
+        }
+        if (readyMembership != null) {
+            readyMembership.close();
         }
         if (readyPublisher != null) {
             readyPublisher.close();
+            return;
+        }
+        if (publisherStillInitializing != null) {
+            publisherStillInitializing.close();
             return;
         }
         publisherFuture.completeExceptionally(new IllegalStateException("Kafka capture factory closed before routing"));

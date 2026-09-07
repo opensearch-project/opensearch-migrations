@@ -4,6 +4,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.Properties;
 
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+
+import com.beust.jcommander.ParameterException;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
@@ -16,6 +19,28 @@ import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfi
 public class CaptureProxySetupTest {
 
     public static final String kafkaBrokerString = "invalid:9092";
+
+    @Test
+    void captureFailuresDefaultToFailClosedAndCanBeConfiguredFailOpen() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var failOpen = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--capture-failure-policy", "fail-open"
+        });
+
+        Assertions.assertEquals(CaptureFailurePolicy.FAIL_CLOSED, defaults.captureFailurePolicy);
+        Assertions.assertEquals(CaptureFailurePolicy.FAIL_OPEN, failOpen.captureFailurePolicy);
+        Assertions.assertThrows(
+            ParameterException.class,
+            () -> new CaptureProxy.CaptureFailurePolicyConverter().convert("sometimes")
+        );
+    }
 
     @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {

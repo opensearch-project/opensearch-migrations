@@ -385,4 +385,35 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         }
     }
 
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 32)
+    void failClosedPolicyDoesNotForwardAMutationWhenOffloadFails() throws IOException {
+        byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
+
+        try (var rootContext = new TestRootContext()) {
+            var failingStreamManager = new FailingStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", failingStreamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "n",
+                    "c",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    Duration.ZERO,
+                    CaptureFailurePolicy.FAIL_CLOSED
+                )
+            );
+
+            channel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            channel.runPendingTasks();
+
+            Assertions.assertTrue(channel.inboundMessages().isEmpty());
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, failingStreamManager.flushCount.get());
+            channel.finishAndReleaseAll();
+        }
+    }
+
 }

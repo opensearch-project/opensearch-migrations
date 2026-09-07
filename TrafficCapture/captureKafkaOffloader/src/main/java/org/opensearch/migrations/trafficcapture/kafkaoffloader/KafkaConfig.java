@@ -7,6 +7,7 @@ import java.util.Properties;
 import com.beust.jcommander.Parameter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 
@@ -108,31 +109,20 @@ public class KafkaConfig {
 
     public static Properties buildKafkaProperties(String kafkaPropertiesFile, String kafkaConnection, String kafkaClientId,
                                                   String authType, String kafkaUserName, String kafkaPassword) throws IOException {
-        var kafkaProps = new Properties();
-        kafkaProps.put(
+        var kafkaProps = loadKafkaProperties(kafkaPropertiesFile);
+        kafkaProps.putIfAbsent(
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.StringSerializer"
         );
-        kafkaProps.put(
+        kafkaProps.putIfAbsent(
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                 "org.apache.kafka.common.serialization.ByteArraySerializer"
         );
         // Property details:
         // https://docs.confluent.io/platform/current/installation/configuration/producer-configs.html#delivery-timeout-ms
-        kafkaProps.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
-        kafkaProps.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
-        kafkaProps.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
-
-        if (kafkaPropertiesFile != null) {
-            try (var fileReader = new FileReader(kafkaPropertiesFile)) {
-                kafkaProps.load(fileReader);
-            } catch (IOException e) {
-                log.error(
-                        "Unable to locate provided Kafka producer properties file path: " + kafkaPropertiesFile
-                );
-                throw e;
-            }
-        }
+        kafkaProps.putIfAbsent(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10000);
+        kafkaProps.putIfAbsent(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5000);
+        kafkaProps.putIfAbsent(ProducerConfig.MAX_BLOCK_MS_CONFIG, 10000);
 
         kafkaProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConnection);
         kafkaProps.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaClientId);
@@ -142,6 +132,60 @@ public class KafkaConfig {
         kafkaProps.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
         applySaslAuthProperties(kafkaProps, authType, kafkaUserName, kafkaPassword);
         return kafkaProps;
+    }
+
+    public static Properties buildMembershipConsumerProperties(
+        KafkaParameters params,
+        String nodeId,
+        String topic
+    ) throws IOException {
+        var kafkaProps = loadKafkaProperties(params.kafkaPropertyFile);
+        kafkaProps.remove(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
+        kafkaProps.remove(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG);
+        kafkaProps.remove(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG);
+        kafkaProps.remove(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+        kafkaProps.remove(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG);
+        kafkaProps.remove(ProducerConfig.ACKS_CONFIG);
+
+        kafkaProps.put(
+            ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+            "org.apache.kafka.common.serialization.StringDeserializer"
+        );
+        kafkaProps.put(
+            ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+            "org.apache.kafka.common.serialization.ByteArrayDeserializer"
+        );
+        kafkaProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, params.kafkaBrokers);
+        kafkaProps.put(ConsumerConfig.CLIENT_ID_CONFIG, params.kafkaClientId + "-membership");
+        kafkaProps.put(ConsumerConfig.GROUP_ID_CONFIG, "capture-proxy-membership-" + topic);
+        kafkaProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        kafkaProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        kafkaProps.put(
+            ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
+            CaptureCooperativeStickyAssignor.class.getName()
+        );
+        kafkaProps.put(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG, nodeId);
+        applySaslAuthProperties(
+            kafkaProps,
+            params.getEffectiveKafkaAuthType(),
+            params.kafkaUserName,
+            params.kafkaPassword
+        );
+        return kafkaProps;
+    }
+
+    private static Properties loadKafkaProperties(String kafkaPropertiesFile) throws IOException {
+        var kafkaProps = new Properties();
+        if (kafkaPropertiesFile == null) {
+            return kafkaProps;
+        }
+        try (var fileReader = new FileReader(kafkaPropertiesFile)) {
+            kafkaProps.load(fileReader);
+            return kafkaProps;
+        } catch (IOException e) {
+            log.error("Unable to locate provided Kafka properties file path: " + kafkaPropertiesFile);
+            throw e;
+        }
     }
 
     static void applySaslAuthProperties(Properties props, String authType, String kafkaUserName, String kafkaPassword) {

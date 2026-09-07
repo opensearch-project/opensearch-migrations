@@ -36,6 +36,7 @@ import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
@@ -46,6 +47,7 @@ import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelIn
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.URIHelper;
 
+import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
@@ -59,10 +61,24 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 
 @Slf4j
 public class CaptureProxy {
+
+    public static class CaptureFailurePolicyConverter implements IStringConverter<CaptureFailurePolicy> {
+        @Override
+        public CaptureFailurePolicy convert(String value) {
+            return switch (value.toLowerCase(java.util.Locale.ROOT)) {
+                case "fail-open" -> CaptureFailurePolicy.FAIL_OPEN;
+                case "fail-closed" -> CaptureFailurePolicy.FAIL_CLOSED;
+                default -> throw new ParameterException(
+                    "--capture-failure-policy must be fail-open or fail-closed"
+                );
+            };
+        }
+    }
 
     public static class Parameters {
         @Parameter(required = false,
@@ -214,6 +230,12 @@ public class CaptureProxy {
             arity = 1,
             description = "Maximum frontside connection duration. Zero disables the cap.")
         public long maximumConnectionDurationSeconds;
+        @Parameter(required = false,
+            names = { "--capture-failure-policy" },
+            arity = 1,
+            converter = CaptureFailurePolicyConverter.class,
+            description = "Behavior when required request capture fails: fail-closed or fail-open.")
+        public CaptureFailurePolicy captureFailurePolicy = CaptureFailurePolicy.FAIL_CLOSED;
         @ParametersDelegate
         public KafkaParameters kafkaParameters = new KafkaParameters();
     }
@@ -299,15 +321,31 @@ public class CaptureProxy {
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
         } else if (params.kafkaParameters.kafkaBrokers != null) {
-            return new KafkaCaptureFactory(
-                rootContext,
-                nodeId,
-                new KafkaProducer<>(KafkaConfig.buildKafkaProperties(params.kafkaParameters)),
-                params.kafakTopicName,
-                params.maximumTrafficStreamSize,
-                params.trafficPartitionShardWidth,
-                Duration.ofSeconds(params.livenessSnapshotIntervalSeconds)
+            var producer = new KafkaProducer<String, byte[]>(
+                KafkaConfig.buildKafkaProperties(params.kafkaParameters)
             );
+            try {
+                var membershipConsumer = new KafkaConsumer<String, byte[]>(
+                    KafkaConfig.buildMembershipConsumerProperties(
+                        params.kafkaParameters,
+                        nodeId,
+                        params.kafakTopicName
+                    )
+                );
+                return new KafkaCaptureFactory(
+                    rootContext,
+                    nodeId,
+                    producer,
+                    membershipConsumer,
+                    params.kafakTopicName,
+                    params.maximumTrafficStreamSize,
+                    params.trafficPartitionShardWidth,
+                    Duration.ofSeconds(params.livenessSnapshotIntervalSeconds)
+                );
+            } catch (RuntimeException | IOException e) {
+                producer.close(Duration.ZERO);
+                throw e;
+            }
         } else if (params.noCapture) {
             return getNullConnectionCaptureFactory();
         } else {
@@ -461,7 +499,8 @@ public class CaptureProxy {
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
                     params.headerOverrides, connectionCaptureFactory,
-                    Duration.ofSeconds(params.maximumConnectionDurationSeconds));
+                    Duration.ofSeconds(params.maximumConnectionDurationSeconds),
+                    params.captureFailurePolicy);
             proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
             closeCaptureFactory(connectionCaptureFactory);
@@ -509,7 +548,8 @@ public class CaptureProxy {
             headerCapturePredicate,
             headerOverridesArgs,
             connectionFactory,
-            Duration.ZERO
+            Duration.ZERO,
+            CaptureFailurePolicy.FAIL_OPEN
         );
     }
 
@@ -520,6 +560,27 @@ public class CaptureProxy {
                                                                 List<String> headerOverridesArgs,
                                                                 IConnectionCaptureFactory<T> connectionFactory,
                                                                 Duration maximumConnectionDuration)
+    {
+        return buildProxyChannelInitializer(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            headerCapturePredicate,
+            headerOverridesArgs,
+            connectionFactory,
+            maximumConnectionDuration,
+            CaptureFailurePolicy.FAIL_OPEN
+        );
+    }
+
+    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
+                                                                BacksideConnectionPool backsideConnectionPool,
+                                                                Supplier<SSLEngine> sslEngineSupplier,
+                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
+                                                                List<String> headerOverridesArgs,
+                                                                IConnectionCaptureFactory<T> connectionFactory,
+                                                                Duration maximumConnectionDuration,
+                                                                CaptureFailurePolicy captureFailurePolicy)
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
@@ -538,7 +599,8 @@ public class CaptureProxy {
             sslEngineSupplier,
             connectionFactory,
             headerCapturePredicate,
-            maximumConnectionDuration
+            maximumConnectionDuration,
+            captureFailurePolicy
         ) {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {
