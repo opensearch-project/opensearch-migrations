@@ -1,6 +1,10 @@
 # Current-to-Proposed Replayer Architecture Map
 
-**Status:** Draft migration crosswalk
+**Status:** Draft migration crosswalk. **Stale as a status ledger** — the "Current state" columns
+describe the code as of 2026-09-04, before the branch implemented most of the target design (the
+scanner, liveness snapshots, actor/transaction/ledger lifecycle, and routing plan all exist now).
+For what is actually done versus future, see the hardened design's Implementation Status section.
+The name mappings here remain accurate and useful.
 
 **Date:** 2026-09-04
 

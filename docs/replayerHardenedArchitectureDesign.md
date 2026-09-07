@@ -29,6 +29,66 @@ idle-only snapshot and finite-window-exhaustion proposals.
 **Tactical alternative:** [replayerSimplifiedLifecycleDesign.md](replayerSimplifiedLifecycleDesign.md)
 — the same invariants achieved by flattening contracts instead of changing the execution model.
 
+**Scaling proposal (sketch, unimplemented):**
+[proxyHorizontalScalingAndNodeDeath.md](proxyHorizontalScalingAndNodeDeath.md)
+— horizontal proxy scaling via consumer-group membership, plus a per-`(nodeId, partition)`
+declaration that a writer is finished, turning a dead proxy into an observed event instead of the
+retain-and-halt-loudly outcome §10.5 prescribes. (It removes no wall-clock code: §10.5's last row
+and §20 already forbid any.) It revisits how a proxy chooses its partitions (§19.7) and adds one
+declaration record type alongside the snapshots in §10.8. The expiry policy and the omission
+predicate are unchanged; what changes is the admissible-evidence set, plus one new rule that
+discards later records from a writer a *peer* declared finished. See its §2.1 — "the absence proof is unchanged" is
+true of the predicate and misleading about the system.
+
+---
+
+## Implementation Status (2026-09-07, branch `integrating3231`)
+
+This design is now substantially **implemented** on this branch; "Draft for discussion" above
+describes its origin, not its state. The table below marks what is finished, what was deliberately
+scoped out of the first implementation, and what is future work. Component names in §3.3 were
+working names: some became classes verbatim, others landed inside retained current classes per the
+crosswalk — naming drift is listed under the table.
+
+| Mechanism | Status | Where |
+| --- | --- | --- |
+| §6.4 Completion gates | **Done** | `lifecycle/CompletionGate.java`; gate discipline through actor/session/shutdown paths |
+| §9 Typed identity | **Done** | `lifecycle/ReplayIdentity.java` — all five key records plus work/record ids |
+| §10.2 One consumer, two cursors | **Done** | `TrackingKafkaConsumer.scanAhead` |
+| §10.3 Proof-bearing verdicts | **Done** | `traffic/source/ScanEvidence.java`, `AbsenceProof`, `FollowUpRequirement` |
+| §10.4 Verdicts via control loop | **Done** | scan-blocker listener in `CapturedTrafficToHttpTransactionAccumulator`; `runLivenessScanIfDue` |
+| §10.5 Expiration policy matrix | **Done** | `lifecycle/ReplayDispositionPolicy.java` |
+| §10.6 Epsilon lookahead | **Done** | `ReplayReadGate`, `ReplayProgressController`, `ReplayEngine` |
+| §10.7 Capture-side duration cap | **Not implemented** — and explicitly optional here | No proxy flag exists. The scaling sketch removes its residual correctness role entirely, so implement it (if ever) as operational policy only |
+| §10.8 Proxy open-connection declarations | **Done** | `ProxyLivenessSnapshotChunk` (proto), `ProxyLivenessRegistry` (exact, synchronized), `CaptureKafkaPublisher` (ordered submission), `PartitionRoutingPlan`, reassembly + validation in `KafkaLivenessScanner` |
+| §11 Connection actor | **Done** | `lifecycle/ConnectionActor.java`, `ActorMailbox`, `NettyEventLoopActorMailbox`; sorter and schedule map **deleted** (acceptance criterion 15) |
+| §12 Async permit pool | **Done** | `lifecycle/AsyncPermitPool.java`; `TrafficStreamLimiter` **deleted** |
+| §13 Replay transaction | **Done** | `lifecycle/ReplayTransaction.java`, `ReplayOutcomes`, `TargetExchangeState`, `ReplayTransactionRegistry` |
+| §14 Record disposition | **Done** | `lifecycle/RecordDisposition.java`, `RecordDispositionLedger.java`, `ReplayDispositionPolicy.java` |
+| §15 Resource ownership | **Done** | `lifecycle/ResourceOwnership.java` (tracker + metrics) |
+| §16.1–16.2 Rebalance / shutdown | **Done** | synthetic-close pipeline, generation fencing, drain-before-Netty-stop, shutdown-before-JVM-exit (see branch history) |
+| §16.3 Event-loop-death gates | **Done** | all four gates: `scheduleCancellable`, `ConnectionActor.post`/`abandonOnDeadMailbox`, `onEventLoopTerminated`, `closeSpans` |
+| §17 Evidence API | **Done to first-impl scope** | whole-tuple sink retained; disposition depends on explicit evidence; part-level receipts remain internal per §19.5 |
+| §19.1 Poison classifier | **Done** | `TargetResponseClassifier` + shared `ExceptionTypeAllowlist`, default empty |
+| §19.7 Routing plan + flags | **Done** | `PartitionRoutingPlan`, `--traffic-partition-shard-width`, snapshot-interval flag |
+
+Naming drift between this document and the code: `ProxyOmissionProof` → `AbsenceProof`;
+`ProxyOpenConnectionRegistry` → `ProxyLivenessRegistry`; `ProxyOpenConnectionSnapshotChunk` →
+`ProxyLivenessSnapshotChunk`; `--open-connection-snapshot-interval-seconds` →
+`--liveness-snapshot-interval-seconds`. Of the §3.3 working names, `KafkaSourceActor`,
+`SourceAssembler`, `ReplayCoordinator`, `ConnectionRuntime`, `TargetExchange`,
+`RequestPreparationService`, and `EvidenceWriter` did not become classes — their responsibilities
+live in the retained current classes (`TrackingKafkaConsumer`/`KafkaTrafficCaptureSource`,
+`CapturedTrafficToHttpTransactionAccumulator`, `RequestSenderOrchestrator` and its `ActorRuntime`,
+`NettyPacketToHttpConsumer`, the transformation pipeline, and the tuple sink), adapted to the
+contracts here.
+
+**Future work** is concentrated in one place: the scaling sketch
+([proxyHorizontalScalingAndNodeDeath.md](proxyHorizontalScalingAndNodeDeath.md)), none of which is
+implemented. Its §7 delta table is the workplan; until it lands, this document's §10.5
+retain-and-halt row is the dead-proxy behavior and §19.7's hash-based routing is the partition
+scheme.
+
 ---
 
 ## 0. How to Read This Document
@@ -965,6 +1025,14 @@ The last row is a hard rule with a specific reason: if a wall-clock expiry mecha
 the scanner, the two resolve in favor of whichever fires first — and the impatient one always does.
 That would defeat the scanner entirely while leaving it in the codebase looking authoritative.
 
+The "No proxy snapshots arriving" row is the one that costs availability: it is correct, but a proxy
+that dies with connections open halts progress until an operator intervenes. That is the residual
+[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md) §6.2 targets,
+by making non-membership in the capture fleet's consumer group an admissible death signal. Note what
+that does *not* do: it adds an observation, so the row's verdict for genuine silence from a member
+that is still live stays **Never**. Retain-and-halt remains the fallback whenever the group cannot be
+queried.
+
 That rule governs Kafka and any other source with durable redelivery or offset obligations. Finite
 legacy sources such as an in-memory array or an input stream have no Kafka commit authority to
 advance. They may continue to use the configured inactivity timeout to end local reconstruction and
@@ -1019,6 +1087,26 @@ The proxy holds the channels, so it can replace the inference with a statement.
 The earlier mechanism exploration, sizing work, and rejected alternatives are in
 [`replayer-expiration-hardening.md`](replayer-expiration-hardening.md) §5.4. The contracts below
 supersede that document's idle-only snapshots and finite-window fallback.
+
+Snapshots still cannot say anything about a node that has stopped emitting them, so this section
+leaves two residuals for that case — not a wall-clock backstop, which §10.5 and §20 forbid, but
+retain-and-halt-loudly per §10.5's "No proxy snapshots arriving" row, and a continued dependence on
+the proxy duration cap as the finite window that makes "nothing in the window" mean anything
+(`replayer-expiration-hardening.md` §5.3).
+[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md) proposes closing that
+by adding a positive declaration, `NoMoreWrites{nodeId, partition, declaredBy}` — written either by
+the node itself as it finishes with a partition, or by a surviving fleet member that observed the
+node depart — so that a finished writer becomes an observed event rather than an inferred silence.
+Note that the declaration is scoped to a single partition, not to the node: a reader settles each
+partition from that partition's records alone, so a peer reporting a departure must write one copy
+per partition. That declaration is an additional evidence type, not a change to the omission
+predicate below, and it arrives with a new rule that discards later records from a node a *peer*
+declared finished — peer-declared only, since a node may be reassigned a partition it released
+itself;
+that rule is what bounds the zombie hazard and also what makes the traffic it drops a completeness
+gap. That sketch also lets two nodes emit snapshots to one partition concurrently while a reassigned
+node drains its existing connections, which the per-`(nodeId, partition)` keying below already
+accommodates but which would require dropping the reader's chunk-contiguity requirement.
 
 **What is emitted.** Every `snapshotInterval` (default 30s), each proxy declares **all** open
 connections whose traffic routes to each partition in its shard set. Active connections are not
@@ -1948,6 +2036,14 @@ verdict.
 `nodeId`. Reducing `K` changes cost and distribution, not proof semantics, provided that shared plan
 remains self-consistent. Snapshot chunking remains mandatory for every `K`, including the full-set
 default.
+
+[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md) proposes replacing
+both halves of this decision: the partition set would come from consumer-group assignment rather than
+from hashing `nodeId` with a configured width, and a connection's partition would be recorded at open
+rather than recomputed from a plan. The decision above stands until that sketch is accepted. Note that
+its model makes the immutability guaranteed here unnecessary rather than merely different — a recorded
+per-connection partition cannot be remapped by a plan change, because there is no plan left to
+change.
 
 ---
 
