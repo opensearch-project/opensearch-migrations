@@ -37,7 +37,7 @@ class KafkaLivenessScannerPropertyTest {
     // already-seen re-reads.
 
     @Test
-    void randomizedScanHistoriesOnlyConfirmFromCompleteConsecutiveOmissions() {
+    void randomizedScanHistoriesOnlyConfirmFromLatestCompleteOmission() {
         var observed = new ObservedOutcomes();
 
         for (int seed = 0; seed < GENERATED_CASES; ++seed) {
@@ -201,11 +201,15 @@ class KafkaLivenessScannerPropertyTest {
             if (!stableGeneration) {
                 return ExpectedEvidence.INCONCLUSIVE;
             }
-            if (!trafficFollowUps.isEmpty() || firstContainingSnapshot() != null) {
+            if (!trafficFollowUps.isEmpty()) {
                 return ExpectedEvidence.FOLLOW_UP;
             }
-            return validProofPairs().isEmpty()
-                ? ExpectedEvidence.INCONCLUSIVE
+            var latest = latestRelevantSnapshot();
+            if (latest == null) {
+                return ExpectedEvidence.INCONCLUSIVE;
+            }
+            return latest.containsConnection()
+                ? ExpectedEvidence.FOLLOW_UP
                 : ExpectedEvidence.CONFIRMED_ABSENT;
         }
 
@@ -215,40 +219,23 @@ class KafkaLivenessScannerPropertyTest {
                 // ScanEvidence.FollowUpPresent for why retained evidence reports a lower bound.
                 return trafficFollowUps.stream().mapToLong(Long::longValue).max().orElseThrow();
             }
-            return firstContainingSnapshot().lastOffset();
+            return latestRelevantSnapshot().lastOffset();
         }
 
         boolean isValidProof(AbsenceProof.LivenessOmission proof) {
+            var latest = latestRelevantSnapshot();
             return proof.nodeId().equals(NODE)
                 && proof.partition() == PARTITION
                 && proof.lastRecordOffsetForConnection() == LAST_REPLAYED_OFFSET
-                && validProofPairs().stream()
-                    .anyMatch(pair ->
-                        pair.first().span().equals(proof.firstOmittingSnapshot())
-                            && pair.second().span().equals(proof.secondOmittingSnapshot()));
+                && latest != null
+                && !latest.containsConnection()
+                && latest.span().equals(proof.omittingSnapshot());
         }
 
-        private ValidSnapshot firstContainingSnapshot() {
+        private ValidSnapshot latestRelevantSnapshot() {
             return relevantSnapshots().stream()
-                .filter(ValidSnapshot::containsConnection)
-                .findFirst()
+                .max(Comparator.comparingLong(ValidSnapshot::firstOffset))
                 .orElse(null);
-        }
-
-        private List<SnapshotPair> validProofPairs() {
-            var relevant = relevantSnapshots();
-            var pairs = new ArrayList<SnapshotPair>();
-            for (int i = 1; i < relevant.size(); ++i) {
-                var first = relevant.get(i - 1);
-                var second = relevant.get(i);
-                if (!first.containsConnection()
-                    && !second.containsConnection()
-                    && second.sequence() == first.sequence() + 1
-                    && first.lastOffset() < second.firstOffset()) {
-                    pairs.add(new SnapshotPair(first, second));
-                }
-            }
-            return pairs;
         }
 
         private List<ValidSnapshot> relevantSnapshots() {
@@ -261,8 +248,6 @@ class KafkaLivenessScannerPropertyTest {
                 .toList();
         }
     }
-
-    private record SnapshotPair(ValidSnapshot first, ValidSnapshot second) {}
 
     private static final class ScenarioBuilder {
         private final Random random;
@@ -281,11 +266,7 @@ class KafkaLivenessScannerPropertyTest {
         private void addBaseCase() {
             long sequence = takeSequence();
             switch (random.nextInt(5)) {
-                case 0 -> {
-                    addValidSnapshot(NODE, PLAN, sequence, false);
-                    addValidSnapshot(NODE, PLAN, sequence + 1, false);
-                    nextSequence = Math.max(nextSequence, sequence + 2);
-                }
+                case 0 -> addValidSnapshot(NODE, PLAN, sequence, false);
                 case 1 -> addValidSnapshot(NODE, PLAN, sequence, true);
                 case 2 -> addTraffic(NODE, CONNECTION, PLAN);
                 case 3 -> addInvalidSnapshot();

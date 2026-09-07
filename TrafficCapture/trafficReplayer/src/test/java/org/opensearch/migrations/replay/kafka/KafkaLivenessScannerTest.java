@@ -31,27 +31,24 @@ class KafkaLivenessScannerTest {
     private final KafkaLivenessScanner scanner = new KafkaLivenessScanner();
 
     @Test
-    void twoCompleteConsecutiveOmissionsProduceStructuralProof() {
+    void oneCompleteOmissionProducesStructuralProof() {
         var result = evaluate(List.of(
             snapshot(11, 4, 0, 2, 1_000, "other-a"),
-            snapshot(12, 4, 1, 2, 1_000, "other-b"),
-            snapshot(13, 5, 0, 1, 2_000, "other-c")
+            snapshot(12, 4, 1, 2, 1_000, "other-b")
         ));
 
         var confirmed = assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, result);
         var proof = assertInstanceOf(AbsenceProof.LivenessOmission.class, confirmed.proof());
         assertEquals(10, proof.lastRecordOffsetForConnection());
-        assertEquals(11, proof.firstOmittingSnapshot().firstOffset());
-        assertEquals(12, proof.firstOmittingSnapshot().lastOffset());
-        assertEquals(13, proof.secondOmittingSnapshot().firstOffset());
+        assertEquals(11, proof.omittingSnapshot().firstOffset());
+        assertEquals(12, proof.omittingSnapshot().lastOffset());
         assertEquals(FollowUpRequirement.RESPONSE_COMPLETION, confirmed.requirement());
     }
 
     @Test
-    void oneOmissionOrNonconsecutiveSnapshotsRemainInconclusive() {
+    void incompleteSnapshotRemainsInconclusive() {
         assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
-            snapshot(11, 4, 0, 1, 1_000),
-            snapshot(12, 6, 0, 1, 2_000)
+            snapshot(11, 4, 0, 2, 1_000)
         )));
     }
 
@@ -62,30 +59,61 @@ class KafkaLivenessScannerTest {
         )));
         assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
             snapshot(11, 4, 0, 2, 1_000),
-            snapshot(12, 4, 0, 2, 1_000),
-            snapshot(13, 5, 0, 1, 2_000)
+            snapshot(12, 4, 0, 2, 1_000)
         )));
         assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
             snapshot(11, 4, 1, 2, 1_000),
-            snapshot(12, 4, 0, 2, 1_000),
-            snapshot(13, 5, 0, 1, 2_000)
+            snapshot(12, 4, 0, 2, 1_000)
         )));
         assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
             snapshot(11, 4, 0, 2, 1_000),
-            snapshot(12, 4, 1, 2, 1_001),
-            snapshot(13, 5, 0, 1, 2_000)
+            snapshot(12, 4, 1, 2, 1_001)
         )));
     }
 
     @Test
-    void futureTrafficOrSnapshotPresenceKeepsConnectionAlive() {
+    void futureTrafficKeepsConnectionAlive() {
         assertInstanceOf(ScanEvidence.FollowUpPresent.class, evaluate(List.of(
             traffic(11, PARTITION, PLAN)
         )));
-        assertInstanceOf(ScanEvidence.FollowUpPresent.class, evaluate(List.of(
+    }
+
+    @Test
+    void latestCompleteSnapshotDeterminesWhetherConnectionIsStillOpen() {
+        assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, evaluate(List.of(
             snapshot(11, 4, 0, 1, 1_000, CONNECTION),
             snapshot(12, 5, 0, 1, 2_000)
         )));
+        assertInstanceOf(ScanEvidence.FollowUpPresent.class, evaluate(List.of(
+            snapshot(13, 6, 0, 1, 3_000, CONNECTION)
+        )));
+    }
+
+    @Test
+    void manifestChunksMayHaveUnrelatedRecordsBetweenThem() {
+        var result = evaluate(List.of(
+            snapshot(11, 4, 0, 2, 1_000, "other-a"),
+            traffic(12, PARTITION, PLAN, "other-connection"),
+            snapshot(13, 4, 1, 2, 1_000, "other-b")
+        ));
+
+        var confirmed = assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, result);
+        var proof = assertInstanceOf(AbsenceProof.LivenessOmission.class, confirmed.proof());
+        assertEquals(11, proof.omittingSnapshot().firstOffset());
+        assertEquals(13, proof.omittingSnapshot().lastOffset());
+    }
+
+    @Test
+    void manifestMayCompleteAcrossScanCycles() {
+        assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
+            snapshot(11, 4, 0, 2, 1_000, "other-a")
+        )));
+
+        var result = evaluate(List.of(
+            snapshot(11, 4, 0, 2, 1_000, "other-a"),
+            snapshot(12, 4, 1, 2, 1_000, "other-b")
+        ));
+        assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, result);
     }
 
     @Test
@@ -106,8 +134,7 @@ class KafkaLivenessScannerTest {
     @Test
     void oversizedSnapshotIsUnusableRatherThanEmpty() {
         assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
-            snapshot(11, 4, 0, 100_001, 1_000),
-            snapshot(12, 5, 0, 1, 2_000)
+            snapshot(11, 4, 0, 100_001, 1_000)
         )));
     }
 
@@ -197,9 +224,18 @@ class KafkaLivenessScannerTest {
     }
 
     private ConsumerRecord<String, byte[]> traffic(long offset, int partitionStamp, String routingPlanId) {
+        return traffic(offset, partitionStamp, routingPlanId, CONNECTION);
+    }
+
+    private ConsumerRecord<String, byte[]> traffic(
+        long offset,
+        int partitionStamp,
+        String routingPlanId,
+        String connectionId
+    ) {
         var stream = TrafficStream.newBuilder()
             .setNodeId(NODE)
-            .setConnectionId(CONNECTION)
+            .setConnectionId(connectionId)
             .setPartition(partitionStamp)
             .setRoutingPlanId(routingPlanId)
             .build();

@@ -1,6 +1,9 @@
 # Proxy Horizontal Scaling and Writer-Completion Declarations
 
-**Status: sketch, for review.** Nothing here is implemented.
+**Status: partially implemented, remaining scaling protocol is a sketch.** Exact full manifests,
+ordered publishing, strict manifest timestamps, and interleaved chunk reconstruction are implemented.
+Consumer-group assignment, `NoMoreWrites`, zombie containment, and their integration tests remain
+future work.
 
 A note on terminology, since "node death" was the earlier framing and misled: nothing in the
 protocol asserts that a node is dead. Every declaration is scoped to one `(nodeId, partition)`
@@ -13,10 +16,10 @@ rejection, and it closes the dead-proxy residual that both that document's §5.4
 `replayerHardenedArchitectureDesign.md` §10.8 leave open. It revisits
 `replayerHardenedArchitectureDesign.md` §19.7 (how a proxy chooses its partitions).
 
-It does not change the expiry *policy*, the omission *predicate*, or §10.8's decision to declare
-all open connections rather than idle-only. What it changes is the set of admissible signals.
-§2.1 states that split precisely, and reviewers should start there — "the absence proof is
-unchanged" is true of the predicate and misleading about the system.
+It does not change the expiry *policy* or §10.8's decision to declare all open connections rather
+than idle-only. It updates the omission predicate to match the exact-registry proof: one complete
+manifest copied after the connection's last record is sufficient. What the remaining scaling work
+changes is the set of admissible positive signals.
 
 ## 1. What problem this solves
 
@@ -27,8 +30,9 @@ claims `shardWidth` consecutive partitions from there (`PartitionRoutingPlan.for
 Ranges collide at random, growing the topic reshuffles every proxy's range, and there is no
 way to add capture capacity deliberately.
 
-**Proving a proxy is dead.** The absence-proof rule (`replayer-expiration-hardening.md` §5.4.1)
-can prove an open connection is gone using two consecutive manifests from its own node. It
+**Proving a connection is gone.** The absence-proof rule
+(`replayerHardenedArchitectureDesign.md` §10.8) can prove an open connection is gone using one
+complete, exact manifest from its own node after the connection's last record. It
 cannot prove anything about a node that stopped emitting manifests, because absence of
 manifests is indistinguishable from a slow node.
 
@@ -36,20 +40,17 @@ Be precise about what that residual currently is, because it is *not* a timeout.
 commit is already rejected (`replayer-expiration-hardening.md` §7) and already banned
 (`replayerHardenedArchitectureDesign.md` §10.5's "Wall-clock age → **Never**" row and §20's
 non-goal "any path by which wall-clock timeout code can commit Kafka"). What the shipped design
-does instead is two things:
+does instead is:
 
 - **Retain and halt loudly** (§10.5, "No proxy snapshots arriving → **Never** → Retain; halt
   loudly if it blocks progress"). Correct, but it converts a dead proxy into an operator page.
-- **Keep the proxy-side max connection/request duration cap mandatory for correctness**
-  (`replayer-expiration-hardening.md` §5.3): with no further snapshots from a `nodeId`, "nothing
-  in the window" is the only available proof, and that means nothing unless the window is finite.
-
-So the fudge factor to shake is not a replayer clock — it is the cap's *correctness* role, and the
-stall. **Turning both into a settled outcome, rather than tuning either, is a goal of this
-design**; see §6.2.
+- **Emit unresolved-head metrics and diagnostics.** Operators may let the run wait indefinitely or
+  terminate it in this premature terminal state. Neither choice advances the commit.
 
 The connection: if the fleet has a membership protocol, then a departure is an *event* a
-surviving member observes, not a silence it has to interpret.
+surviving member observes, not a silence it has to interpret. A surviving member can record that
+event as `NoMoreWrites`. If no member survives, the protocol deliberately has no automatic
+settlement path; a fresh replacement process cannot retroactively speak for an old `nodeId`.
 
 ## 2. Core reframe
 
@@ -81,34 +82,31 @@ unused; a partition assigned to two nodes is the drain case, which is already le
 
 ### 2.1 What changes and what doesn't
 
-"The absence proof is unchanged" is true of the predicate and misleading about the system, so
-the layers are separated here.
+The layers are separated here because omission and writer completion authorize the same downstream
+disposition through different structural facts.
 
 | Layer | Status |
 |---|---|
 | **Expiry policy** — what a confirmation authorizes (commit vs. retain, per the disposition matrix) | **Unchanged.** A declaration-based confirmation produces the same `ConfirmedAbsent` verdict and takes the same downstream path. |
-| **Omission predicate** — two consecutive omitting manifests from one node on one partition, with the connection's last record before the first span | **Unchanged as a rule**, but it is needed in strictly fewer places. |
+| **Omission predicate** — the latest complete exact manifest from one node on one partition after the connection's last record omits it | **Implemented.** One manifest is sufficient because registry copy and final-record acknowledgement are linearized. |
 | **Admissible signals** | **Strengthened.** One added, one deleted outright. |
 | **Discard rule** | **New.** Not an absence proof at all. |
 
 The evidence set gets strictly better in three ways:
 
 - A **positive declaration** (`NoMoreWrites`, §3.3) is added as an independent evidence type.
-  It is stronger than omission: one record instead of two manifests, and no reasoning about flush
-  latency or weakly-consistent map iteration, because it is an assertion by or about the writer
+  It covers writer completion rather than one connection: one record can settle every prior
+  connection for that writer/partition, because it is an assertion by or about the writer
   rather than an inference from what is missing.
 - **Omission's scope of necessity shrinks.** A node holds a partition until every connection it
   placed there has closed, and its `NoMoreWrites` is ordered after the last of those records — so every
   *terminal* and *handover* case is now settled by a statement. Omission is left covering only
   the connections of a node that is alive and still assigned, which is the case where the node is
-  demonstrably able to speak for itself. The predicate did not change, but what rests on it did.
-- The **dead-proxy residual is removed rather than narrowed** — but note what it actually was.
-  There is no wall-clock commit to delete; that was already rejected and banned. What is removed
-  is the pair above: the halt-loudly stall becomes a settled verdict, and the proxy duration cap
-  loses its correctness role. The cap survives as an operational policy about how long a request
-  may run, which is what an operator wants to reason about, instead of doubling as the finite
-  window a death proof depends on. §6.2 supplies the replacement, a consumer-group membership
-  query that is broker-maintained rather than elapsed-time-based.
+  demonstrably able to speak for itself.
+- The **dead-proxy residual narrows but does not disappear.** A surviving member can write
+  `NoMoreWrites` after observing departure. If every member is gone, no process can produce that
+  ordered fact, so unresolved work remains retained. §6.2 makes that accepted terminal behavior
+  explicit instead of adding a second, out-of-band proof mechanism.
 
 The **discard rule** is genuinely new policy and deserves its own line rather than riding along
 under "absence proofs are unchanged": records arriving from a *peer*-declared finished node after
@@ -119,8 +117,9 @@ writes harmless to the commit decision, and it is also the direct cause of the c
 §6.1 — the traffic reached the source and is then deliberately dropped. Nothing in the
 absence-proof framework implies it.
 
-So: the policy is constant, the predicate is constant, the evidence set is solidified, and one
-new rule is introduced whose cost is stated in §6.1.
+So: the policy is constant, the omission predicate is strengthened around the exact registry, the
+evidence set gains writer completion, and one new discard rule is introduced whose cost is stated in
+§6.1.
 
 ## 3. Protocol
 
@@ -209,8 +208,8 @@ genuinely is broader — that node really is gone from every partition, not just
 breadth of fact cannot turn into breadth of scope here, because no reader is in a position to use
 it. So it surfaces as **how many records get written** — M copies, one per partition (§3.5's crash
 case) — rather than as what any single record means. That is also why the two rows in §4.1
-collapsed into one, and why the membership query in §6.2, which the replayer *can* apply across
-partitions at will, is the one signal that needs no copies at all.
+collapsed into one. There is deliberately no out-of-band replayer query that can settle all
+partitions at once: without a log position it cannot prove which records it covers.
 
 The record carries no generation or epoch. `nodeId` is fresh per process, so a declaration is
 unambiguous forever without a counter.
@@ -222,20 +221,23 @@ emit a manifest listing **all** of that node's open connections on that partitio
 ones. This inherits `replayerHardenedArchitectureDesign.md` §10.8's reasoning unchanged: "it was
 active before the first snapshot" does not imply it will emit a record after that snapshot.
 
-The reason that matters is that the two-consecutive-omission rule is a **budget of exactly one**
-accidental omission, and idle-only filtering spends it in advance. Under weakly-consistent iteration
-an entry present for a whole traversal is always visited, and only an entry added mid-traversal can
-be skipped — so a connection open across both traversals cannot be missed twice, and one accidental
-miss yields omit-then-present, which proves nothing. But if an *active* connection is intentionally
-omitted from the first manifest, a single accidental miss on the second completes two consecutive
-omissions and falsely proves a live connection dead.
+The registry is exact and this is load-bearing, not defense in depth. Registration linearizes before
+the first traffic submission, a manifest copies the registry at one linearization point, and removal
+linearizes only after Kafka acknowledges the final traffic record. Therefore a connection is present
+in every manifest copied during its writable lifetime and absent only after its complete record set
+is durably ordered before that manifest. One complete omission is enough; a second omission would
+not repair an early-removal bug because both copies could occur during the same invalid gap.
 
-Today that accidental miss cannot occur: `ProxyLivenessRegistry` is a plain `HashMap` behind
-`synchronized` methods, and §10.8 requires it stay exact rather than assigning proof semantics to a
-`ConcurrentHashMap` traversal. (`replayer-expiration-hardening.md` §5.4.1 still describes the
-weakly-consistent case; it predates the exact registry.) So this is defense in depth — the point is
-that correctness must not *depend* on the registry being exact, because declaring all open
-connections keeps the proof sound even if that property is ever lost.
+Listing all open connections remains the simpler protocol even with an exact registry. It avoids an
+activity classifier, makes an empty manifest unambiguous, and allows the replayer to compare the
+latest complete manifest directly rather than combine traffic recency with declaration filtering.
+Replacing the synchronized registry with weakly consistent iteration would invalidate the proof and
+is not permitted.
+
+Each manifest declares `chunkCount`; chunks are numbered exactly `0..chunkCount-1`. Every chunk in
+one manifest carries one shared `emittedAtMillis`, and that value strictly increases per
+`(nodeId, partition)` even if the proxy clock stalls or moves backward. Timestamps are diagnostic;
+manifest completeness and authority come from chunk indexes and Kafka offsets.
 
 Listing the full open set also means the fan-out in §8's transient-spike note is over all open
 connections, not a filtered subset.
@@ -307,24 +309,16 @@ to both variants; discarding applies only to peer-declared ones. §4.3 explains 
 | Observation | Conclusion |
 |---|---|
 | `NoMoreWrites{X, P, *}` at offset O | every connection of X on P **already known at O** is dead as of O |
-| X absent from consumer-group membership, **and the replayer is at the tip** (§6.2) | every connection of X, on every partition |
-| two consecutive manifests from X on P omitting C, after C's last record | C is dead (§5.4.1, unchanged) |
+| latest complete exact manifest from X on P omits C, after C's last record | C is dead (§3.4) |
 
 "Already known at O" is the load-bearing qualifier. The declaration settles the connections whose
 last record precedes O; it is not a standing rule about the pair (X, P) that also condemns
 connections X opens later. A connection first seen after O was never in the declaration's scope,
 so it accumulates normally.
 
-The membership row is the one signal that needs no per-partition copy, because the replayer obtains
-it out-of-band and can apply it on whichever partition it is settling. That is also its weakness: not
-being in the log is exactly why it has no offset to compare against, hence the tip precondition and
-its inability to fence. The in-band record pays the per-partition cost and gets log position in
-return.
-
-Only the first and third rows are usable while the replayer is lagging, which is its normal state.
-The membership row carries a precondition rather than a caveat: a query answers a question about
-*now*, i.e. about the tip, so applying it at a lagging offset would settle connections that have
-unread follow-up records later in the log. §6.2 states the required ordering.
+Both signals are usable while the replayer is lagging because both are positioned in the same Kafka
+partition as the traffic they describe. There is no out-of-band membership verdict: a present-time
+membership answer has no offset and therefore cannot prove which historical records it covers.
 
 **Discard rule (peer-declared only).** Records arriving from X on P after a
 `NoMoreWrites{X, P, declaredBy}` offset where `declaredBy != X` are **discarded** and counted. That
@@ -445,91 +439,30 @@ strictness. That framing belongs in customer-facing docs.
 
 Detected by the discarded-record counter being non-zero.
 
-### 6.2 The last proxy crashing — closed by a membership query, not a clock
+### 6.2 The last proxy crashing — retained, never inferred
 
-**There is no wall-clock backstop in this design, and there was none to remove.** No timeout, no
-fudge factor, no abandon-after-N setting — elapsed-time commits were already rejected and banned
-(see §1). The point of this section is that the design does not *reintroduce* one to close its
-last hole, which is the tempting move and the thing most likely to be blamed — fairly or not —
-when something goes wrong in the field.
+If every member disappears, no survivor can write `NoMoreWrites`. The protocol deliberately has no
+second settlement mechanism for that case. A group-membership query describes the present but has no
+Kafka offset, so it cannot prove which historical records it covers. A clock has the same defect and
+is also inadmissible.
 
-What this section actually retires is the **halt-loudly stall**: §10.5's "No proxy snapshots
-arriving → Retain; halt loudly if it blocks progress." That rule is sound, and it stays as the
-fallback, but on its own it turns a dead proxy into an operator page. Below, the same situation
-resolves itself.
+The replayer retains the unresolved commit head and either waits indefinitely or terminates the
+current run in a premature terminal state. It emits:
 
-The case it would have covered: if *every* member dies, no survivor writes `NoMoreWrites`, and a
-proxy starting later has no prior membership view so it writes nothing either. X is never
-declared dead.
+- unresolved connection and commit-head counts;
+- retained record and byte counts;
+- the blocked partition, `nodeId`, and head offset;
+- the last authoritative manifest offset, plus source and manifest timestamps for diagnostics only.
 
-While the fleet is down that is harmless. Nothing is arriving, so the pinned commit head sits at
-the partition tail with no backlog accumulating behind it, and the retained set is fixed at
-whatever was in flight when the last proxy died. The cost of never committing it is bounded and
-already inside the system's contract:
+If the original process was stalled rather than dead and resumes under the same `nodeId`, later
+traffic and manifests resolve the blocker normally. If a survivor observed the departure, its
+ordered `NoMoreWrites` record resolves the blocker. A fresh replacement process has a new `nodeId`
+and cannot retroactively prove what happened to its predecessor. Permanent retention after a real
+total fleet crash is therefore an accepted availability outcome.
 
-- Connections whose records are incomplete were never dispatched to the target at all, so there
-  is nothing to re-apply.
-- Connections that were dispatched but whose responses were never closed out get re-sent on
-  restart — which is precisely the at-least-once duplicate the replayer already accepts.
-
-The hazard is only when the fleet **returns**: new traffic then lands behind a permanently pinned
-head, and the uncommitted window grows without bound. That is the poison pill, and it needs a
-real answer rather than a timer.
-
-**The answer is to ask the authority.** The replayer queries consumer-group membership and treats
-"X is not a current member" as X being dead. That is broker-maintained rather than inferred, and
-it is the explicit "all proxies are down" signal, available directly instead of by timeout.
-
-**Precondition: the query is only admissible at the partition tip.** This is the constraint that
-makes it a narrow backstop rather than a general-purpose signal, and getting it wrong would lose
-data.
-
-A membership answer is a fact about *now*, which corresponds to the **tip** of the log. Every other
-signal in this design is positioned in the log, so it can be compared against the offset the
-replayer is actually working at. The query cannot. If the replayer is lagging — the normal
-condition — then "X is not a member now" says nothing about whether X was alive at offset O and
-wrote more records for connection C at offsets after O. Those records are sitting in the log
-unread. Settling C on the query would discard an accumulation that provably has follow-up, which is
-exactly the failure the absence proof exists to prevent. Mixing a present-time fact with a
-log-position question is the same category error as using a clock.
-
-The ordering also matters, and query-then-drain is the sound direction:
-
-1. Observe X absent from the group at time T. Given fresh `nodeId`s per process (§3.3) and the
-   latch (§3.5), X will never write again after T, so X's record set is now final.
-2. Read to an end offset observed **after** T. Everything X ever wrote is below it.
-3. Only now may X's connections be settled.
-
-Draining to the tip first and then querying is *not* sufficient, because X could have written
-between the end-offset read and the query.
-
-**This does not weaken the case §6.2 exists for**, because the no-survivor stall is precisely the
-state where the replayer has already drained to the tip and nothing is arriving — the condition
-argued two paragraphs above. The query's validity window coincides with the only situation that
-needs it.
-
-Requirements:
-
-- The proxy sets its consumer's `client.id` to its `nodeId`. `MemberDescription.clientId()` is
-  exposed by `describeConsumerGroups`; subscription `userData` is not. **Assumed stable** for now;
-  see §9.2.
-- The replayer gains `Describe` on the group. Read-only; it still needs no write access anywhere
-  and no admin mutation.
-
-**Peer-declared `NoMoreWrites` records are therefore mandatory, not a redundant fast path.** They
-are a point-in-time observation written *into the log*, so their temporal ordering against the
-traffic they speak about is total and readable at any lag. That is what lets them settle
-connections while the replayer is far behind, and what supplies the fence offset the discard rule
-in §4.1 needs — a query result has no position, so it can settle but can never fence. The two
-signals do different jobs; the query covers only the case no peer survived to write a record, and
-only at the tip.
-
-The residual is benign in the right direction: if the replayer cannot reach the group, it cannot
-settle, so it retains and the head stays pinned. Every failure mode of this section is "stall,"
-never "commit wrongly."
-
-Detected by "commit head not advancing" plus the membership answer, and an idle-but-alive node
-still emits empty manifests, so quiet is never ambiguous.
+When capture resumes behind a retained head, hard record and byte budgets prevent unbounded local
+growth. Reaching a budget pauses or terminates replay without advancing the commit. Every failure
+direction remains "stall or stop," never "commit wrongly."
 
 ### 6.3 Not separate holes
 
@@ -541,12 +474,13 @@ still emits empty manifests, so quiet is never ambiguous.
 
 | Change | Where |
 |---|---|
-| Remove the chunk-contiguity requirement | `KafkaLivenessScanner.java:508` — `(nextChunkIndex > 0 && offset != lastOffset + 1)`. **Mandatory**, not optional: with two nodes writing one partition, manifest chunks are always interleaved with traffic, so no snapshot would ever reassemble. Only implementable because reassembly now survives across reads. |
+| Remove the chunk-contiguity requirement | **Implemented.** `KafkaLivenessScanner` groups chunks by node, partition, plan, and sequence; unrelated records may appear between chunk offsets. |
+| Use one complete exact omission | **Implemented.** `AbsenceProof.LivenessOmission` carries one complete manifest span after the connection's last record; scanner tests cover presence/omission replacement and malformed manifests. |
+| Allocate one strict timestamp per manifest | **Implemented.** `CaptureKafkaPublisher` copies one strictly increasing timestamp to every chunk. It remains diagnostic only. |
 | Record the partition per connection instead of hashing | replaces `PartitionRoutingPlan.partitionFor`; the registry already stores it |
 | Delete level-1 routing (nodeId hash → shard start) | `PartitionRoutingPlan.forTopic`; `selectedPartitions` becomes the assignment |
 | Drop `topicPartitionCount` from the plan digest, or drop `routingPlanId` outright | `PartitionRoutingPlan.makePlanId`. The mapping is fully determined by the stored per-connection partition, so the guard collapses to "a connection's partition stamp never changes", which `KafkaTrafficCaptureSource.java:648` already checks. |
-| Group membership client | new, in the proxy: subscribe, pause, poll on a dedicated thread (§3.1), callbacks, `userData`, and `client.id = nodeId` |
-| Membership query for the no-survivor case | new, in the replayer: `describeConsumerGroups`, plus `Describe` on the group in its ACL. Replaces the halt-loudly stall; see §6.2. |
+| Group membership client | new, in the proxy: subscribe, pause, poll on a dedicated thread (§3.1), callbacks, and subscription `userData` carrying `nodeId` |
 | Relieve the proxy duration cap of its correctness role | no code deleted — `replayer-expiration-hardening.md` §5.3/§5.4 and `replayerHardenedArchitectureDesign.md` §10.8 stop citing the cap as the finite window a dead-proxy proof needs. The cap stays as operational policy. **No wall-clock setting is removed, because none exists**: force-expiry was rejected (§7 there) and banned (§10.5 row, §20 non-goal). Verified by grep — nothing clock-driven is reachable from the Kafka commit path. |
 | `NoMoreWrites` record | `TrafficCaptureStream.proto`; emitted by `CaptureKafkaPublisher` |
 | Settle-on-declaration evidence | new `ScanEvidence` variant; `KafkaLivenessScanner` |
@@ -563,8 +497,8 @@ still emits empty manifests, so quiet is never ambiguous.
   avoiding.
 - Deliberate expiry of over-old connections. This is the only sound way to shrink post-scale-up
   manifest fan-out: capping *manifests* is unsafe, since skipping one for a partition that has live
-  connections manufactures an omission, and two of those falsely prove a live connection dead
-  (§3.4). So the lever is connection lifetime, not manifest count. Deferred — the spike is
+  connections manufactures a false omission (§3.4). So the lever is connection lifetime, not
+  manifest count. Deferred — the spike is
   transient and bounded by the request-duration cap.
 
 ## 9. Decisions and remaining follow-ups
@@ -573,8 +507,8 @@ still emits empty manifests, so quiet is never ambiguous.
 
 **Peer-declared `NoMoreWrites` records are mandatory.** They are a point-in-time observation whose
 temporal ordering against the traffic they describe is critical, and putting them in the log is what
-makes that ordering readable. A membership query is only valid at the tip, which the replayer will
-rarely be at, so it cannot substitute. See §4.1 and §6.2.
+makes that ordering readable. An out-of-band membership answer has no offset and cannot substitute.
+See §4.1 and §6.2.
 
 **`declaredBy` stores the full `nodeId`,** not a self/peer bit. Declarations are rare enough that the
 size is irrelevant, and storing the id makes "this is a self-release" checkable by comparison
@@ -591,17 +525,7 @@ patience, which is what the defaults already do.
 **Manifest fan-out gets no cap;** connection-lifetime expiry is the only sound lever and it is
 deferred to §8.
 
-**`MemberDescription.clientId()` is assumed to carry the configured `client.id` stably.** Taken as an
-assumption for now rather than a blocker — see §9.2.
-
 ### 9.2 Follow-up
 
-**Verify the `clientId` round-trip.** `client.id` travels in the Kafka request header and the group
-coordinator records it in member metadata at join, so this is expected to hold, but it is an
-implementation detail rather than a documented contract. Confirm with a test: start a consumer with a
-known `client.id`, `describeConsumerGroups`, assert the value comes back — and check it survives a
-rejoin. If it does not, the fallback is `group.instance.id`, which is definitely operator-set but
-turns on static membership, where a departing member keeps its assignment for a full session timeout
-instead of triggering a rebalance. That works directly against prompt death detection, so it is a
-real fallback with a real cost.
-
+Implement the remaining §7 rows and add multi-proxy integration coverage for scale-up, scale-down,
+graceful departure, peer-observed loss, stale-writer discard metrics, and total-fleet-loss retention.

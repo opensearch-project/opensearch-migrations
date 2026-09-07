@@ -29,12 +29,9 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
  * proved dead.
  *
  * <p>Records are handed to {@link #ingest} in offset order and the evidence they carry is <em>retained</em>
- * across calls.  This is the load-bearing property: an omission proof needs two consecutive snapshots, so
- * an evaluator that rebuilt its state from one batch of records could only ever find a proof whose halves
- * happened to land in the same batch.  Any proof straddling a batch boundary -- which is what a record or
- * time budget produces under load -- was silently unreachable, and an unreachable proof becomes
- * {@code Inconclusive}, which retains records and halts replay.  Retaining state means a proof is found as
- * soon as its second half is seen, regardless of how the reads were chunked.
+ * across calls.  A complete manifest may span scan batches, so an evaluator that rebuilt its state from one
+ * batch could silently lose the chunks needed to prove an omission.  Retaining state makes manifest
+ * completion independent of how scan reads are chunked.
  *
  * <p>Because state is retained, {@link #ingest} must tolerate seeing the same record twice; the current
  * scan-ahead caller re-reads the same window on every cycle.  Offsets are monotonic per partition, so
@@ -315,27 +312,27 @@ final class KafkaLivenessScanner {
             return followUpPresent(candidate, followUpOffset);
         }
         var relevantSnapshots = relevantSnapshots(candidate);
-        var containing = relevantSnapshots.stream()
-            .filter(snapshot -> snapshot.openConnections().contains(candidate.connection().connectionId()))
-            .findFirst();
-        if (containing.isPresent()) {
-            return followUpPresent(candidate, containing.get().span().lastOffset());
-        }
-        var proof = findOmissionProof(candidate, relevantSnapshots);
-        if (proof != null) {
+        if (!relevantSnapshots.isEmpty()) {
+            var latest = relevantSnapshots.get(relevantSnapshots.size() - 1);
+            if (latest.openConnections().contains(candidate.connection().connectionId())) {
+                return followUpPresent(candidate, latest.span().lastOffset());
+            }
             return new ScanEvidence.ConfirmedAbsent(
                 candidate.partition(),
                 candidate.connection(),
                 candidate.requirement(),
-                proof
+                new AbsenceProof.LivenessOmission(
+                    candidate.connection().nodeId(),
+                    candidate.partition().partition(),
+                    latest.span(),
+                    candidate.lastReplayedOffset()
+                )
             );
         }
-        // Not a budget failure any more: retained evidence means this only says the proxy has not yet
-        // emitted two consecutive snapshots that omit the connection and sit after its last record.
         return new ScanEvidence.Inconclusive(
             candidate.partition(),
             candidate.connection(),
-            "Two consecutive omission snapshots after the connection's last record have not arrived yet"
+            "A complete liveness manifest after the connection's last record has not arrived yet"
         );
     }
 
@@ -361,38 +358,6 @@ final class KafkaLivenessScanner {
             .filter(snapshot -> snapshot.span().firstOffset() > candidate.lastReplayedOffset())
             .sorted(Comparator.comparingLong(snapshot -> snapshot.span().firstOffset()))
             .toList();
-    }
-
-    private AbsenceProof.LivenessOmission findOmissionProof(
-        Candidate candidate,
-        List<CompleteSnapshot> snapshots
-    ) {
-        for (int i = 1; i < snapshots.size(); ++i) {
-            var first = snapshots.get(i - 1);
-            var second = snapshots.get(i);
-            if (isOmissionProof(candidate, first, second)) {
-                return new AbsenceProof.LivenessOmission(
-                    candidate.connection().nodeId(),
-                    candidate.partition().partition(),
-                    first.span(),
-                    second.span(),
-                    candidate.lastReplayedOffset()
-                );
-            }
-        }
-        return null;
-    }
-
-    private boolean isOmissionProof(
-        Candidate candidate,
-        CompleteSnapshot first,
-        CompleteSnapshot second
-    ) {
-        var connectionId = candidate.connection().connectionId();
-        return second.key().sequence() == first.key().sequence() + 1
-            && !first.openConnections().contains(connectionId)
-            && !second.openConnections().contains(connectionId)
-            && first.span().lastOffset() < second.span().firstOffset();
     }
 
     /**
@@ -505,7 +470,6 @@ final class KafkaLivenessScanner {
                 || chunk.getChunkIndex() < 0
                 || chunk.getChunkIndex() >= chunkCount
                 || chunk.getChunkIndex() != nextChunkIndex
-                || (nextChunkIndex > 0 && offset != lastOffset + 1)
                 || chunks.putIfAbsent(chunk.getChunkIndex(), chunk) != null) {
                 invalid = true;
                 return;

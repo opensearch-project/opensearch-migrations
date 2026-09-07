@@ -29,16 +29,13 @@ idle-only snapshot and finite-window-exhaustion proposals.
 **Tactical alternative:** [replayerSimplifiedLifecycleDesign.md](replayerSimplifiedLifecycleDesign.md)
 — the same invariants achieved by flattening contracts instead of changing the execution model.
 
-**Scaling proposal (sketch, unimplemented):**
+**Scaling proposal (sketch, partially implemented):**
 [proxyHorizontalScalingAndNodeDeath.md](proxyHorizontalScalingAndNodeDeath.md)
 — horizontal proxy scaling via consumer-group membership, plus a per-`(nodeId, partition)`
-declaration that a writer is finished, turning a dead proxy into an observed event instead of the
-retain-and-halt-loudly outcome §10.5 prescribes. (It removes no wall-clock code: §10.5's last row
-and §20 already forbid any.) It revisits how a proxy chooses its partitions (§19.7) and adds one
-declaration record type alongside the snapshots in §10.8. The expiry policy and the omission
-predicate are unchanged; what changes is the admissible-evidence set, plus one new rule that
-discards later records from a writer a *peer* declared finished. See its §2.1 — "the absence proof is unchanged" is
-true of the predicate and misleading about the system.
+declaration that a writer is finished. Exact manifests and interleaved chunk reconstruction are
+implemented here; group assignment and `NoMoreWrites` remain future work. A total fleet loss has no
+automated settlement path: unresolved work is retained, diagnosed, and may either wait indefinitely
+or terminate the replay run. A fresh replacement process cannot speak for an old `nodeId`.
 
 ---
 
@@ -55,10 +52,10 @@ crosswalk — naming drift is listed under the table.
 | §6.4 Completion gates | **Done** | `lifecycle/CompletionGate.java`; gate discipline through actor/session/shutdown paths |
 | §9 Typed identity | **Done** | `lifecycle/ReplayIdentity.java` — all five key records plus work/record ids |
 | §10.2 One consumer, two cursors | **Done** | `TrackingKafkaConsumer.scanAhead` |
-| §10.3 Proof-bearing verdicts | **Done** | `traffic/source/ScanEvidence.java`, `AbsenceProof`, `FollowUpRequirement` |
+| §10.3 Proof-bearing verdicts | **Done** | `traffic/source/ScanEvidence.java`, `AbsenceProof`, `FollowUpRequirement`; one complete exact manifest after the last connection record is sufficient |
 | §10.4 Verdicts via control loop | **Done** | scan-blocker listener in `CapturedTrafficToHttpTransactionAccumulator`; `runLivenessScanIfDue` |
 | §10.5 Expiration policy matrix | **Done** | `lifecycle/ReplayDispositionPolicy.java` |
-| §10.6 Epsilon lookahead | **Done** | `ReplayReadGate`, `ReplayProgressController`, `ReplayEngine` |
+| §10.6 Epsilon lookahead | **Done as an optimization** | `ReplayReadGate`, `ReplayProgressController`, `ReplayEngine`; it is not commit authority and scanner-disabled parity remains a verification target |
 | §10.7 Capture-side duration cap | **Not implemented** — and explicitly optional here | No proxy flag exists. The scaling sketch removes its residual correctness role entirely, so implement it (if ever) as operational policy only |
 | §10.8 Proxy open-connection declarations | **Done** | `ProxyLivenessSnapshotChunk` (proto), `ProxyLivenessRegistry` (exact, synchronized), `CaptureKafkaPublisher` (ordered submission), `PartitionRoutingPlan`, reassembly + validation in `KafkaLivenessScanner` |
 | §11 Connection actor | **Done** | `lifecycle/ConnectionActor.java`, `ActorMailbox`, `NettyEventLoopActorMailbox`; sorter and schedule map **deleted** (acceptance criterion 15) |
@@ -83,11 +80,11 @@ live in the retained current classes (`TrackingKafkaConsumer`/`KafkaTrafficCaptu
 `NettyPacketToHttpConsumer`, the transformation pipeline, and the tuple sink), adapted to the
 contracts here.
 
-**Future work** is concentrated in one place: the scaling sketch
-([proxyHorizontalScalingAndNodeDeath.md](proxyHorizontalScalingAndNodeDeath.md)), none of which is
-implemented. Its §7 delta table is the workplan; until it lands, this document's §10.5
-retain-and-halt row is the dead-proxy behavior and §19.7's hash-based routing is the partition
-scheme.
+**Future work** is concentrated in the remaining scaling protocol
+([proxyHorizontalScalingAndNodeDeath.md](proxyHorizontalScalingAndNodeDeath.md)), hard byte/record
+budgets, and scanner-enabled/disabled disposition-equivalence tests. Until the scaling protocol
+lands, this document's §10.5 retain-and-halt row is the dead-proxy behavior and §19.7's hash-based
+routing is the partition scheme.
 
 ---
 
@@ -214,9 +211,10 @@ Three consequences make this worth doing:
   delivered. Gates await real completions instead of counting or passively waiting for a normal
   callback that cancellation made impossible.
 
-The design also carries the expiration-hardening policy: read-ahead bounded by a small epsilon and
-coupled to replay progress; expiration commits requiring proxy-issued structural proof and never
-elapsed wall-clock time; scanning on the same Kafka consumer and assignment as replay;
+The design also carries the expiration-hardening policy: optional read-ahead bounded by a small
+epsilon and coupled to replay progress; expiration commits requiring proxy-issued structural proof
+and never elapsed wall-clock time; optional metadata scanning on the same Kafka consumer and
+assignment as replay;
 proxy-declared death commits while reassignment, shutdown, and an unfenced silent proxy retain for
 redelivery; a capture-side maximum connection duration that produces ordinary close observations and
 bounds resource use without pretending to fence a stalled producer; and an evidence API that can
@@ -258,10 +256,11 @@ This ambiguity is a real source of bugs, so the design keeps the five lexically 
   - **Proxy omission proof** — an offset-ordered assertion about *what the proxy declared its source
     data contains* (§10.3's `ProxyOmissionProof`). A confirmed-dead discard requires this proof instead
     of replay evidence because it has no replay result to record.
-  The proxy omission proof itself requires two complete omitting snapshots; that is separate from the
-  choice between the two commit-authority alternatives. Confirmed-dead discard does not require a
-  durable discard receipt in the first implementation. Metrics and trace/debug logs record the
-  diagnostic reason; they do not replace the proof.
+  The proxy omission proof requires one complete, exact manifest copied after the connection's last
+  record and omitting that connection; that is separate from the choice between the two
+  commit-authority alternatives. Confirmed-dead discard does not require a durable discard receipt
+  in the first implementation. Metrics and trace/debug logs record the diagnostic reason; they do
+  not replace the proof.
 - **Evidence** — reserved for the normal replay output managed by `EvidenceWriter`. A structural proof
   is commit authority, but is not an `EvidenceWriter` artifact.
 - **Completion gate** — see §6.4. A future for a whole lifecycle operation, with an owner and
@@ -290,7 +289,8 @@ This ambiguity is a real source of bugs, so the design keeps the five lexically 
 - **Confirmed dead** — the owning proxy produced complete, offset-ordered declarations proving that
   it no longer owns the connection. Commit-eligible, because it is structural proof. Silence, elapsed
   time, and scanning to the current end of an unfenced producer's log are not confirmation.
-- **Epsilon** — the small read-ahead margin (~30s) that replaces today's 400s lookahead.
+- **Epsilon** — an optional small read-ahead margin (~30s) that smooths source admission. It is not
+  an expiry trigger, proof source, or hard memory bound.
 - **Settled watermark** — the contiguous point in source time up to which all admitted work has
   settled. The read gate is `settledWatermark + epsilon`.
 
@@ -861,49 +861,31 @@ See §10.8 for both failure modes.
 
 ## 10. Source Intake and Structural Scanning
 
-### 10.1 Why a scanner has to exist at all
+### 10.1 Why metadata lookahead is useful
 
-This is the least obvious part of the design, so here is the full causal chain.
+Expiry must answer a **structural** question: *does a follow-up observation for this connection
+exist, or has its owning proxy produced an authoritative manifest that omits it?* "Has enough time
+passed?" is the wrong question because a legitimately long transaction is indistinguishable from a
+dead one by elapsed time. Committing on elapsed time would skip records on restart.
 
-Today expiry is driven by captured timestamps: a connection becomes eligible when
-`largestObservedSourceTimestamp − connectionTimeout` passes its newest packet. But reads are capped
-at `frontier + lookahead`. So the effective expiry cutoff sits at
-`frontier + (lookahead − connectionTimeout)`. With today's `lookahead = 400s` and
-`connectionTimeout = 360s`, the cutoff runs 40s *ahead* of the frontier, and expiry works.
+The replay cursor will eventually encounter the same traffic and manifests in normal offset order.
+The scan cursor is therefore not required for correctness. It is a metadata-only optimization that
+can reach a distant follow-up or manifest without buffering all intervening payloads. Its job is to
+decouple **proof distance** from **buffered bytes**.
 
-Shrink lookahead to an epsilon of 30s — which is the entire point, since 400s of buffered traffic is
-the memory problem — and the cutoff sits 330s *behind* the frontier. Reads can never reach the point
-where a stalled connection becomes eligible. **Timestamp-driven expiry structurally cannot fire.** A
-zombie connection (no end-of-message, no close) then pins its partition's commit forever.
+Scanner enabled, scanner disabled, and scanner budget exhausted must produce the same eventual
+disposition for the same durable log. They may differ in memory use, latency, and whether a bounded
+run must pause before reaching the evidence. If hard byte, record, or owned-resource budgets prevent
+normal replay from reaching it, the system retains and waits or terminates the run; it does not
+manufacture a different disposition.
 
-So epsilon requires a replacement trigger, and that trigger must answer a **structural** question
-rather than a temporal one: *does a follow-up observation for this connection exist at all?* "Has
-enough time passed?" is the wrong question, because a legitimately long transaction — minutes
-between request and response — is indistinguishable from a dead one by elapsed time. Committing on
-elapsed time is committing on impatience, and committing means skipping on restart, which means
-silent data loss.
-
-Hence: **epsilon, the scanner, and proxy open-connection declarations ship as one unit.** The proxy,
-which holds the actual channels, states what it has open (§10.8); the scanner reaches those
-declarations without buffering the intervening payloads.
-
-The scanner remains necessary even though the proxy now states the answer. At a 30s snapshot interval,
-two declarations may sit up to 60s of source traffic beyond the replay frontier. Raising epsilon to
-reach them would buffer those payloads and recreate the problem at a smaller scale. The scan cursor
-reaches the same offsets carrying metadata only. Its essential job is therefore to decouple **proof
-distance** from **buffered bytes**, not to turn a sufficiently long absence into proof.
-
-That distinction closes a dangerous hole in the earlier design. A dead proxy emits no declaration,
-but a stalled proxy also emits no declaration and may later resume and append buffered records. A
-finite duration cap does not fence its Kafka producer, and scanning to the current end of the log does
-not make future appends impossible. Therefore the first implementation has no automated commit path
-for a silent `nodeId`: it returns `Inconclusive`, retains the records, and halts loudly when that
-blocker prevents progress. A future externally fenced producer epoch could add a proof based on a
-post-fence partition-end scan, but that is a different mechanism and is not implied by a timeout.
-
-So proxy declarations handle *proxy alive, connection gone* exactly; the scanner transports that
-proof and can also find positive follow-up records. *Proxy unavailable* remains fail-closed until a
-real fencing mechanism exists.
+A dead proxy emits no manifest, but a stalled proxy also emits no manifest and may later append
+buffered records. A duration cap, a source timestamp, and reaching the current end of the log do not
+fence that producer. A silent `nodeId` therefore remains `Inconclusive`. The replay run retains the
+blocking records, emits diagnostics and metrics, and may wait indefinitely or terminate. It becomes
+self-healing only if the original process resumes authoritative manifests or a surviving fleet
+member records a future `NoMoreWrites` declaration (§10.8). A fresh replacement `nodeId` cannot
+retroactively speak for the old process.
 
 ### 10.2 One consumer, two logical cursors
 
@@ -921,8 +903,8 @@ A scan cycle:
 4. Poll and decode **only** connection identity, timestamps, observation kinds, and proxy
    open-connection snapshot chunks.
 5. Discard payloads.
-6. Stop early per blocker when a required follow-up is found or two complete consecutive proxy
-   snapshots prove omission (§10.8).
+6. Stop early per blocker when a required follow-up is found or one complete, exact proxy manifest
+   after the connection's last record proves omission (§10.8).
 7. Restore every replay position before returning control.
 8. Discard all scan results if assignment or generation changed during the cycle.
 
@@ -945,12 +927,11 @@ sealed interface ScanEvidence {
 
 /** The only proxy-omission proof available in the first implementation. */
 sealed interface ProxyOmissionProof {
-    /** Two complete declarations from the owning proxy omitted this connection. */
-    record TwoSnapshotOmission(
+    /** One complete declaration from the owning proxy omitted this connection. */
+    record LivenessOmission(
         String nodeId,
         int partition,
-        CompleteSnapshotSpan firstOmittingSnapshot,
-        CompleteSnapshotSpan secondOmittingSnapshot,
+        CompleteSnapshotSpan omittingSnapshot,
         long lastRecordOffsetForConnection
     ) implements ProxyOmissionProof {}
 }
@@ -973,13 +954,15 @@ Only `ConfirmedAbsent` may trigger a commit-eligible expiration, and it must inc
 generation, connection/session identity, required follow-up kind, and a `ProxyOmissionProof` whose
 invariants hold:
 
-* Both snapshot spans are complete: every declared chunk was consumed and validated.
-* `lastRecordOffsetForConnection < firstOmittingSnapshot.firstOffset()`.
-* `firstOmittingSnapshot.lastOffset() < secondOmittingSnapshot.firstOffset()`.
-* Traffic and both snapshots use the same `nodeId`, partition, and immutable routing-plan identity.
-* The partition and routing-plan identity stamped inside every traffic record and snapshot chunk
+* The snapshot span is complete: every index in `0..chunkCount-1` was consumed exactly once and all
+  chunks carry a consistent header.
+* `lastRecordOffsetForConnection < omittingSnapshot.firstOffset()`.
+* Traffic and the snapshot use the same `nodeId`, partition, and immutable routing-plan identity.
+* The partition and routing-plan identity stamped inside every traffic record and manifest chunk
   equal the partition and plan under which they were consumed.
-* Neither reconstructed open-connection set contains the connection.
+* The reconstructed open-connection set does not contain the connection.
+* If multiple complete manifests follow the last record, the latest one controls: later presence
+  prevents expiration, while later omission supersedes earlier presence.
 
 Anything else is `Inconclusive` — **not** confirmed absence. In particular, elapsed time, a configured
 duration cap, reaching a source-time threshold, reaching the current partition end, or observing no
@@ -1013,7 +996,7 @@ ordering point** for five things that would otherwise race:
 | --- | --- | --- | --- |
 | Complete request/response | Captured observations | Yes | Finish transaction and evidence requirements |
 | Captured close with incomplete request | Captured close | Explicit discard policy | Record evidence; do not claim replay success |
-| Proxy-declared dead | Two complete proxy open-connection snapshots omit the connection after its last record | Yes | Settle source side as confirmed dead |
+| Proxy-declared dead | One complete, exact proxy open-connection manifest omits the connection after its last record | Yes | Settle source side as confirmed dead |
 | Follow-up found | Scan metadata, or presence in a proxy open-connection snapshot | No expiration | Leave state alive |
 | Scan inconclusive | Incomplete proof | No | Continue or halt according to resource policy |
 | No proxy snapshots arriving | Silence from an unfenced `nodeId` | **Never** | Retain; halt loudly if it blocks progress |
@@ -1025,13 +1008,11 @@ The last row is a hard rule with a specific reason: if a wall-clock expiry mecha
 the scanner, the two resolve in favor of whichever fires first — and the impatient one always does.
 That would defeat the scanner entirely while leaving it in the codebase looking authoritative.
 
-The "No proxy snapshots arriving" row is the one that costs availability: it is correct, but a proxy
-that dies with connections open halts progress until an operator intervenes. That is the residual
-[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md) §6.2 targets,
-by making non-membership in the capture fleet's consumer group an admissible death signal. Note what
-that does *not* do: it adds an observation, so the row's verdict for genuine silence from a member
-that is still live stays **Never**. Retain-and-halt remains the fallback whenever the group cannot be
-queried.
+The "No proxy snapshots arriving" row is the accepted no-survivor behavior. If a proxy dies with
+connections open and no peer wrote `NoMoreWrites`, the replay run retains them and may wait
+indefinitely or terminate after emitting metrics and diagnostics. A newly started process has a
+different `nodeId` and cannot settle its predecessor. This is an availability loss, not a reason to
+weaken commit safety.
 
 That rule governs Kafka and any other source with durable redelivery or offset obligations. Finite
 legacy sources such as an in-memory array or an input stream have no Kafka commit authority to
@@ -1042,8 +1023,8 @@ outcome, not structural proof, and it must never be constructed for a structural
 
 ### 10.6 Epsilon lookahead
 
-Lookahead becomes a smoothing margin rather than the expiry mechanism. The intended default is
-approximately 30 seconds, subject to measurement.
+Lookahead is an optional smoothing margin rather than the expiry mechanism. The intended default is
+approximately 30 seconds, subject to measurement; disabling it must not change any disposition.
 
 `ReplayProgressController` tracks admitted replay work and advances a contiguous settled source-time
 watermark. Reads are allowed up to:
@@ -1053,13 +1034,16 @@ settledReplayWatermark + epsilon
 ```
 
 When no replay work is outstanding, the watermark may advance toward the replay clock. An unsettled
-target request prevents idle advancement past the relevant work frontier — **this coupling is the
-memory bound.** A partial source request that has never become replay work does not permanently
-freeze the frontier; the scanner is its structural expiry path.
+target request prevents idle advancement past the relevant work frontier. This coupling reduces
+read-ahead, but it is not by itself an exact memory bound: hard byte, record, and owned-resource
+budgets provide that bound. A partial source request that has never become replay work can be
+resolved when normal replay reaches its follow-up or manifest, or sooner through the optional
+metadata scanner.
 
 Removing the existing `isWorkOutstanding()` coupling without an equivalent low-watermark rule is not
-permitted. Read-ahead bounded only by the replay clock is unbounded read-ahead in exactly the
-scenario where bounding it matters most: a stalled target.
+permitted. Read-ahead bounded only by the replay clock is unbounded in exactly the scenario where
+bounding matters most: a stalled target. Scanner budget exhaustion pauses or retains; it never
+changes the eventual disposition.
 
 ### 10.7 Capture-side duration cap
 
@@ -1074,9 +1058,9 @@ verdict. It is **not** an absence proof and is not combined with `connectionTime
 one. A paused event loop may run its timer late, and a stalled producer may append previously captured
 records later; neither fact is changed by configuration arithmetic.
 
-The cap is therefore recommended and operator-configurable, but it is not mandatory for the safety of
-epsilon mode. Its absence affects resource bounds and how often a silent-proxy blocker requires
-operator intervention, not whether `ConfirmedAbsent` is constructable.
+The cap is therefore recommended and operator-configurable, but it is not mandatory for safety. Its
+absence affects ordinary proxy resource bounds and how often a silent-proxy blocker appears, not
+whether `ConfirmedAbsent` is constructable.
 
 ### 10.8 Proxy open-connection declarations
 
@@ -1088,13 +1072,12 @@ The earlier mechanism exploration, sizing work, and rejected alternatives are in
 [`replayer-expiration-hardening.md`](replayer-expiration-hardening.md) §5.4. The contracts below
 supersede that document's idle-only snapshots and finite-window fallback.
 
-Snapshots still cannot say anything about a node that has stopped emitting them, so this section
-leaves two residuals for that case — not a wall-clock backstop, which §10.5 and §20 forbid, but
-retain-and-halt-loudly per §10.5's "No proxy snapshots arriving" row, and a continued dependence on
-the proxy duration cap as the finite window that makes "nothing in the window" mean anything
-(`replayer-expiration-hardening.md` §5.3).
+Manifests still cannot say anything about a node that has stopped emitting them. There is no
+wall-clock backstop and no finite-window inference. In the no-survivor case, unresolved work remains
+retained and the run either waits or terminates with metrics and diagnostics.
 [`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md) proposes closing that
-by adding a positive declaration, `NoMoreWrites{nodeId, partition, declaredBy}` — written either by
+for ordinary observed departures by adding a positive declaration,
+`NoMoreWrites{nodeId, partition, declaredBy}` — written either by
 the node itself as it finishes with a partition, or by a surviving fleet member that observed the
 node depart — so that a finished writer becomes an observed event rather than an inferred silence.
 Note that the declaration is scoped to a single partition, not to the node: a reader settles each
@@ -1133,19 +1116,23 @@ The replayer validates and reconstructs complete snapshots into its `ProxyDeclar
 index is derived replayer state; it is not the proxy registry and does not independently observe
 whether connections are alive.
 
-An empty set still emits one chunk. The scanner may use a snapshot only after receiving every chunk
+An empty set still emits one chunk. The scanner may use a manifest only after receiving every chunk
 exactly once and validating a consistent header. A missing, duplicate, oversized, or contradictory
-chunk makes that snapshot unusable; it can never be interpreted as an empty declaration. Chunking is
+chunk makes that manifest unusable; it can never be interpreted as an empty declaration. Chunking is
 required because inbound frontside connections are not bounded by one host's ephemeral-port range,
 so no fixed connection-count estimate proves that one record fits under Kafka's pre-compression size
 limit. `snapshotSequence` increases monotonically per `(nodeId, partition)`, and `chunkIndex` covers
-exactly `0..chunkCount-1`.
+exactly `0..chunkCount-1`. The publisher allocates one `emittedAtMillis` value for the complete
+manifest, copies it to every chunk, and makes it strictly increase for each subsequent manifest on
+that `(nodeId, partition)`, even if the wall clock stalls or moves backward. Captured observations
+retain their own source timestamps. These strict timestamp rules make diagnostics traceable; they do
+not participate in omission authority, which rests on Kafka offsets.
 
 **The registry is exact, not weakly consistent.** A `ProxyOpenConnectionRegistry` linearizes
 connection registration, removal, and snapshot-copy operations. Registration occurs before the first
-traffic record can be submitted. Removal occurs only through the idempotent close path, after the
-final traffic record has entered the ordered producer-submission lane. Snapshot construction takes
-an immutable copy at one linearization point; it does not assign proof semantics to a
+traffic record can be submitted. Removal occurs only through the idempotent close path, after Kafka
+acknowledges the final traffic record. Snapshot construction takes an immutable copy at one
+linearization point; it does not assign proof semantics to a
 `ConcurrentHashMap` traversal that may miss entries.
 
 **Kafka submission order is part of the proof.** Same-partition routing creates a total order only
@@ -1164,12 +1151,16 @@ submission for both traffic and proxy open-connection snapshots:
 
 With those contracts in place, the rule is offset-ordered rather than time-ordered:
 
-> `C` is confirmed dead when two consecutive, complete snapshots from its `nodeId` for partition `P`
-> both omit it, and `C`'s last record on `P` precedes the first chunk of the first snapshot.
+> `C` is confirmed dead when the latest complete manifest from its `nodeId` for partition `P`
+> after `C`'s last record omits it.
 
-The second snapshot is a deliberate conservative delay and an independent declaration; it is not
-compensation for an inexact registry. `TwoSnapshotOmission` carries snapshot offset spans and no
-timestamps because elapsed time is irrelevant to the proof.
+One complete manifest is sufficient because the exact registry gives a simple ordering proof:
+registration precedes first traffic; while registered, every linearized manifest copy includes the
+connection; removal follows acknowledgement of the final traffic record. Therefore an omitting
+manifest whose first chunk follows the last observed record was copied after final acknowledgement.
+Two omissions would add delay but would not repair an early-removal bug; both could be copied after
+an incorrect removal and before a delayed final record. `LivenessOmission` carries the manifest's
+offset span and no timestamp because elapsed time is irrelevant to the proof.
 
 **Structural requirements this places on the rest of the design.**
 
@@ -1848,12 +1839,16 @@ Use fake clocks, fake event loops, and manually controlled futures to enumerate:
   after every first-generation registry and ownership counter has returned to baseline;
 * duplicate and missing lifecycle events;
 * scanner follow-up, confirmed-absent, inconclusive, and generation-change results;
-* proxy omission cases: one omission only (must not expire), two omissions with an intervening record
-  (must not expire), and two complete omissions with the last record before both (must expire);
+* proxy omission cases: an incomplete manifest never expires; one complete omission after the last
+  record expires; earlier presence followed by omission expires; earlier omission followed by later
+  presence stays live;
 * all-open registry races: connection registration during snapshot construction, close during
-  construction, and an active connection becoming idle between snapshots;
+  construction, final-record acknowledgement versus removal, and a manifest copied on each side of
+  that acknowledgement;
 * chunk handling: missing, duplicate, reordered, oversized, and contradictory chunks all make the
   snapshot unusable rather than empty;
+* manifest timestamps: every chunk shares one value, values strictly increase per proxy/partition
+  even under a stalled or backward wall clock, and timestamps never substitute for offset ordering;
 * publisher ordering and failure: traffic submission before snapshot, final close before removal,
   asynchronous send failure, and a publisher that must stop authoritative declarations;
 * routing mismatches: partition stamp, routing-plan identity, and attempted plan mutation all halt
@@ -1903,6 +1898,12 @@ fired).
   dropping one chunk makes the declaration unusable.
 * Full-set routing by default and a reduced `K` both keep every connection's traffic and declarations
   on the same immutable plan.
+* Scanner enabled and scanner disabled produce identical eventual dispositions for the same durable
+  log; they differ only in latency and resource use.
+* A complete manifest whose chunks have unrelated traffic or another proxy's records between them is
+  reconstructed and used normally.
+* Total proxy-fleet loss leaves unresolved work retained, emits unresolved-head diagnostics, and
+  never settles work solely because a replacement process appears.
 
 ### 18.5 Leak tests
 
@@ -1922,7 +1923,8 @@ The redesigned path is ready to replace the current path when:
 5. Consecutive generation turnovers in one long-lived process return all ownership counters and
    registries to baseline before the next generation is admitted.
 6. No teardown test commits work whose runway was lost before source acceptance.
-7. Epsilon lookahead remains bounded during a stalled target.
+7. Hard byte, record, and owned-resource budgets remain bounded during a stalled target; scanner and
+   epsilon settings affect latency and resource use, not disposition.
 8. Scanner expiry commits only with complete structural proof — every commit-eligible expiration
    carries a well-formed `ProxyOmissionProof`, and no proof is constructable from elapsed time.
 9. Long live connections found by the scanner are not expired.
@@ -1990,9 +1992,10 @@ serve different purposes:
 None fences a stalled producer. A silent `nodeId` therefore retains and halts in the first
 implementation. If a later version adds an external producer fence, it may introduce a new proof type:
 after the fence is acknowledged, snapshot the partition end and scan through it. Until then,
-`TwoSnapshotOmission` is the only constructable `ProxyOmissionProof`.
+`LivenessOmission` is the only constructable `ProxyOmissionProof`.
 
-Epsilon mode requires the scanner and the proxy-declaration-capable traffic format. The duration cap
+Structural expiration requires the proxy-declaration-capable traffic format. The scanner is an
+optional metadata-lookahead optimization; disabling it cannot change a disposition. The duration cap
 is recommended but not required for safety.
 
 ### 19.4 Source-time progress uses the minimum partition watermark

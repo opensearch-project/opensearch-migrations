@@ -51,6 +51,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     private final Clock clock;
     private final ScheduledThreadPoolExecutor executor;
     private final Map<Integer, Long> nextSnapshotSequence = new HashMap<>();
+    private final Map<Integer, Long> lastSnapshotTimestamp = new HashMap<>();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final ScheduledFuture<?> scheduledSnapshots;
@@ -146,9 +147,11 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             var sends = new ArrayList<CompletableFuture<RecordMetadata>>();
             for (var partition : routingPlan.getSelectedPartitions()) {
                 var sequence = nextSnapshotSequence.merge(partition, 1L, Long::sum) - 1;
+                var emittedAtMillis = allocateSnapshotTimestamp(partition);
                 var chunks = buildSnapshotChunks(
                     partition,
                     sequence,
+                    emittedAtMillis,
                     livenessRegistry.snapshot(partition)
                 );
                 for (var chunk : chunks) {
@@ -179,6 +182,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     List<ProxyLivenessSnapshotChunk> buildSnapshotChunks(
         int partition,
         long sequence,
+        long emittedAtMillis,
         List<String> openConnections
     ) {
         var chunkConnections = new ArrayList<List<ByteString>>();
@@ -187,7 +191,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             var encoded = ByteString.copyFromUtf8(connection);
             var candidate = new ArrayList<>(current);
             candidate.add(encoded);
-            if (estimatedChunkSize(partition, sequence, candidate) <= payloadSizeLimit) {
+            if (estimatedChunkSize(partition, sequence, emittedAtMillis, candidate) <= payloadSizeLimit) {
                 current.add(encoded);
             } else {
                 if (current.isEmpty()) {
@@ -207,7 +211,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         int chunkCount = chunkConnections.size();
         var chunks = new ArrayList<ProxyLivenessSnapshotChunk>(chunkCount);
         for (int i = 0; i < chunkCount; ++i) {
-            var chunk = baseSnapshotChunk(partition, sequence)
+            var chunk = baseSnapshotChunk(partition, sequence, emittedAtMillis)
                 .setChunkIndex(i)
                 .setChunkCount(chunkCount)
                 .addAllOpenConnections(chunkConnections.get(i))
@@ -220,8 +224,21 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return List.copyOf(chunks);
     }
 
-    private int estimatedChunkSize(int partition, long sequence, List<ByteString> connections) {
-        return baseSnapshotChunk(partition, sequence)
+    private long allocateSnapshotTimestamp(int partition) {
+        var observed = clock.millis();
+        var previous = lastSnapshotTimestamp.get(partition);
+        var allocated = previous == null || observed > previous ? observed : Math.incrementExact(previous);
+        lastSnapshotTimestamp.put(partition, allocated);
+        return allocated;
+    }
+
+    private int estimatedChunkSize(
+        int partition,
+        long sequence,
+        long emittedAtMillis,
+        List<ByteString> connections
+    ) {
+        return baseSnapshotChunk(partition, sequence, emittedAtMillis)
             .setChunkIndex(Integer.MAX_VALUE)
             .setChunkCount(Integer.MAX_VALUE)
             .addAllOpenConnections(connections)
@@ -229,13 +246,17 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             .getSerializedSize();
     }
 
-    private ProxyLivenessSnapshotChunk.Builder baseSnapshotChunk(int partition, long sequence) {
+    private ProxyLivenessSnapshotChunk.Builder baseSnapshotChunk(
+        int partition,
+        long sequence,
+        long emittedAtMillis
+    ) {
         return ProxyLivenessSnapshotChunk.newBuilder()
             .setNodeId(nodeId)
             .setPartition(partition)
             .setRoutingPlanId(routingPlan.getRoutingPlanId())
             .setSnapshotSequence(sequence)
-            .setEmittedAtMillis(clock.millis());
+            .setEmittedAtMillis(emittedAtMillis);
     }
 
     private CompletableFuture<RecordMetadata> enqueueSend(
