@@ -41,6 +41,7 @@ public class KafkaConsumerContexts {
             public final DoubleHistogram latency;
             public final LongCounter bytesDiscarded;
             public final LongCounter verdictCounter;
+            public final LongCounter supersededTrafficDiscarded;
 
             private MetricInstruments(Meter meter) {
                 super(meter, "livenessScan");
@@ -60,6 +61,9 @@ public class KafkaConsumerContexts {
                 verdictCounter = meter.counterBuilder(
                     IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_VERDICT_COUNT
                 ).setUnit("verdicts").build();
+                supersededTrafficDiscarded = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.SUPERSEDED_TRAFFIC_RECORDS_DISCARDED
+                ).setUnit("records").build();
             }
         }
 
@@ -91,6 +95,11 @@ public class KafkaConsumerContexts {
                 1,
                 Attributes.builder().put(VERDICT_ATTRIBUTE, verdict.metricLabel())
             );
+        }
+
+        @Override
+        public void recordSupersededTrafficDiscarded() {
+            meterIncrementEvent(getMetrics().supersededTrafficDiscarded);
         }
     }
 

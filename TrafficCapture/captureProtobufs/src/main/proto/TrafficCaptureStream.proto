@@ -92,3 +92,10 @@ message ProxyLivenessSnapshotChunk {
   int64 emittedAtMillis = 7; // diagnostic only; never used as absence evidence
   repeated bytes openConnections = 8;
 }
+
+message ProxyNoMoreWrites {
+  string nodeId = 1;
+  int32 partition = 2;
+  string declaredBy = 3;
+  int64 emittedAtMillis = 4; // diagnostic only; Kafka offset defines the declaration boundary
+}

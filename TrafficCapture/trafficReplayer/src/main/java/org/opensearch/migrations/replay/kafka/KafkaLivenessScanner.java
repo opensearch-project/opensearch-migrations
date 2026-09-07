@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ScanEvidence;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -200,6 +201,14 @@ final class KafkaLivenessScanner {
     /** Identity of one snapshot stream: a single proxy's snapshots for a single partition under one plan. */
     private record SnapshotStreamKey(String nodeId, int partition, String routingPlanId) {}
 
+    private record WriterPartitionKey(String nodeId, int partition) {}
+
+    private record NoMoreWritesDeclaration(long offset, String declaredBy) {
+        private boolean peerDeclared(String nodeId) {
+            return !nodeId.equals(declaredBy);
+        }
+    }
+
     /**
      * A connection's traffic scoped to where it was routed.  The partition and routing plan belong in the
      * key: traffic for the same connection under a different plan or partition says nothing about this
@@ -208,6 +217,8 @@ final class KafkaLivenessScanner {
     private record TrafficKey(SourceConnectionKey connection, int partition, String routingPlanId) {}
 
     private final Map<SnapshotStreamKey, SnapshotStream> snapshotStreams = new HashMap<>();
+    private final Map<WriterPartitionKey, java.util.NavigableMap<Long, NoMoreWritesDeclaration>>
+        declarationsByWriter = new HashMap<>();
     private final Map<TrafficKey, Long> latestTrafficOffsetByConnection = new HashMap<>();
     private final Map<Integer, Long> highestIngestedOffsetByPartition = new HashMap<>();
 
@@ -226,6 +237,13 @@ final class KafkaLivenessScanner {
         }
         releaseEvidenceBehindReplay(candidates);
         return List.copyOf(verdicts);
+    }
+
+    List<ScanEvidence> evaluateRetained(Collection<Candidate> candidates) {
+        return evaluate(
+            candidates,
+            new TrackingKafkaConsumer.ScanCycle(List.of(), true, false)
+        );
     }
 
     /**
@@ -249,6 +267,13 @@ final class KafkaLivenessScanner {
                 stream.pruneThroughReplayedOffset(replayedThrough);
             }
         });
+        declarationsByWriter.forEach((key, declarations) -> {
+            var replayedThrough = replayedThroughByPartition.get(key.partition());
+            if (replayedThrough != null) {
+                declarations.headMap(replayedThrough, true).clear();
+            }
+        });
+        declarationsByWriter.values().removeIf(Map::isEmpty);
     }
 
     /**
@@ -267,6 +292,8 @@ final class KafkaLivenessScanner {
         }
         if (isLivenessRecord(kafkaRecord)) {
             addSnapshotRecord(kafkaRecord, alreadySeen);
+        } else if (isNoMoreWritesRecord(kafkaRecord)) {
+            addNoMoreWritesRecord(kafkaRecord, alreadySeen);
         } else {
             addTrafficFollowUp(kafkaRecord, alreadySeen);
         }
@@ -288,6 +315,7 @@ final class KafkaLivenessScanner {
     void forgetPartition(int partition) {
         highestIngestedOffsetByPartition.remove(partition);
         snapshotStreams.keySet().removeIf(key -> key.partition() == partition);
+        declarationsByWriter.keySet().removeIf(key -> key.partition() == partition);
         latestTrafficOffsetByConnection.keySet().removeIf(key -> key.partition() == partition);
     }
 
@@ -308,6 +336,13 @@ final class KafkaLivenessScanner {
             candidate.partition().partition(),
             candidate.routingPlanId()
         ));
+        var declaration = relevantDeclaration(candidate);
+        if (declaration != null
+            && (declaration.peerDeclared(candidate.connection().nodeId())
+                || followUpOffset == null
+                || followUpOffset <= declaration.offset())) {
+            return confirmedByDeclaration(candidate, declaration);
+        }
         if (followUpOffset != null && followUpOffset > candidate.lastReplayedOffset()) {
             return followUpPresent(candidate, followUpOffset);
         }
@@ -333,6 +368,43 @@ final class KafkaLivenessScanner {
             candidate.partition(),
             candidate.connection(),
             "A complete liveness manifest after the connection's last record has not arrived yet"
+        );
+    }
+
+    private NoMoreWritesDeclaration relevantDeclaration(Candidate candidate) {
+        var declarations = declarationsByWriter.get(new WriterPartitionKey(
+            candidate.connection().nodeId(),
+            candidate.partition().partition()
+        ));
+        if (declarations == null) {
+            return null;
+        }
+        var relevant = declarations.tailMap(candidate.lastReplayedOffset(), false);
+        if (relevant.isEmpty()) {
+            return null;
+        }
+        var peerDeclaration = relevant.values()
+            .stream()
+            .filter(declaration -> declaration.peerDeclared(candidate.connection().nodeId()))
+            .findFirst();
+        return peerDeclaration.orElseGet(() -> relevant.lastEntry().getValue());
+    }
+
+    private ScanEvidence.ConfirmedAbsent confirmedByDeclaration(
+        Candidate candidate,
+        NoMoreWritesDeclaration declaration
+    ) {
+        return new ScanEvidence.ConfirmedAbsent(
+            candidate.partition(),
+            candidate.connection(),
+            candidate.requirement(),
+            new AbsenceProof.NoMoreWrites(
+                candidate.connection().nodeId(),
+                candidate.partition().partition(),
+                declaration.declaredBy(),
+                declaration.offset(),
+                candidate.lastReplayedOffset()
+            )
         );
     }
 
@@ -420,6 +492,38 @@ final class KafkaLivenessScanner {
         ).add(kafkaRecord.offset(), key, chunk);
     }
 
+    private void addNoMoreWritesRecord(
+        ConsumerRecord<String, byte[]> kafkaRecord,
+        boolean alreadySeen
+    ) {
+        final ProxyNoMoreWrites declaration;
+        try {
+            declaration = ProxyNoMoreWrites.parseFrom(kafkaRecord.value());
+        } catch (InvalidProtocolBufferException e) {
+            return;
+        }
+        if (declaration.getPartition() != kafkaRecord.partition()) {
+            throw new IllegalStateException(
+                "No-more-writes partition stamp "
+                    + declaration.getPartition()
+                    + " does not match consumed partition "
+                    + kafkaRecord.partition()
+            );
+        }
+        if (declaration.getNodeId().isBlank() || declaration.getDeclaredBy().isBlank()) {
+            throw new IllegalStateException("No-more-writes declaration has a blank identity");
+        }
+        if (alreadySeen) {
+            return;
+        }
+        var key = new WriterPartitionKey(declaration.getNodeId(), declaration.getPartition());
+        declarationsByWriter.computeIfAbsent(key, ignored -> new java.util.TreeMap<>())
+            .put(
+                kafkaRecord.offset(),
+                new NoMoreWritesDeclaration(kafkaRecord.offset(), declaration.getDeclaredBy())
+            );
+    }
+
     static void validateTrafficStamp(ConsumerRecord<String, byte[]> kafkaRecord, TrafficStream stream) {
         if (stream.getPartition() != kafkaRecord.partition()) {
             throw new IllegalStateException(
@@ -435,9 +539,20 @@ final class KafkaLivenessScanner {
     }
 
     static boolean isLivenessRecord(ConsumerRecord<String, byte[]> kafkaRecord) {
+        return isRecordType(kafkaRecord, CaptureRecordTypes.LIVENESS_RECORD_TYPE);
+    }
+
+    static boolean isNoMoreWritesRecord(ConsumerRecord<String, byte[]> kafkaRecord) {
+        return isRecordType(kafkaRecord, CaptureRecordTypes.NO_MORE_WRITES_RECORD_TYPE);
+    }
+
+    private static boolean isRecordType(
+        ConsumerRecord<String, byte[]> kafkaRecord,
+        String recordType
+    ) {
         for (var header : kafkaRecord.headers()) {
             if (CaptureRecordTypes.RECORD_TYPE_HEADER.equals(header.key())
-                && CaptureRecordTypes.LIVENESS_RECORD_TYPE.equals(
+                && recordType.equals(
                     new String(header.value(), StandardCharsets.UTF_8)
                 )) {
                 return true;

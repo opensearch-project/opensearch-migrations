@@ -49,6 +49,8 @@ public interface IKafkaConsumerContexts {
         public static final String LIVENESS_SCAN_LATENCY = "livenessScanLatency";
         public static final String LIVENESS_SCAN_BYTES_DISCARDED = "livenessScanBytesDiscarded";
         public static final String LIVENESS_SCAN_VERDICT_COUNT = "livenessScanVerdictCount";
+        public static final String SUPERSEDED_TRAFFIC_RECORDS_DISCARDED =
+            "supersededTrafficRecordsDiscarded";
     }
 
     interface IAsyncListeningContext extends IInstrumentationAttributes {}
@@ -57,6 +59,8 @@ public interface IKafkaConsumerContexts {
         void recordCycle(int recordsScanned, long bytesDiscarded, Duration latency);
 
         void recordVerdict(LivenessScanVerdict verdict);
+
+        void recordSupersededTrafficDiscarded();
     }
 
     interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {}

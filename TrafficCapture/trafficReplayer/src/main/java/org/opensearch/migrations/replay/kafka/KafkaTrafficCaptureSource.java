@@ -52,6 +52,7 @@ import org.opensearch.migrations.replay.traffic.source.ScanEvidence;
 import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
 import org.opensearch.migrations.replay.traffic.source.SourceInput;
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -113,6 +114,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
     }
 
+    private record WriterPartitionKey(String nodeId, int partition) {}
+
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
     // Match the kafka-clients library default (5 minutes). This is the broker-enforced fence
     // threshold — how long the consumer can go between poll() calls before the group coordinator
@@ -161,6 +164,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final Set<SourceConnectionPartitionGenerationKey> pendingConfirmedDead =
         ConcurrentHashMap.newKeySet();
     private final Queue<SourceControlEvent.ConfirmedDead> sourceControlQueue = new ConcurrentLinkedQueue<>();
+    private final ConcurrentHashMap<WriterPartitionKey, Long> peerNoMoreWritesOffsets =
+        new ConcurrentHashMap<>();
     /** Batches of synthetic close events to drain before returning real Kafka records.
      *  Each entry is one batch from a single partition-revocation event. */
     private final Queue<List<TrafficSourceReaderInterruptedClose>> trafficSourceReaderInterruptedCloseQueue = new ConcurrentLinkedQueue<>();
@@ -564,6 +569,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         try {
             var sourceRecords = trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
                 try {
+                    livenessScanner.ingest(kafkaRecord);
                     if (KafkaLivenessScanner.isLivenessRecord(kafkaRecord)) {
                         var chunk = ProxyLivenessSnapshotChunk.parseFrom(kafkaRecord.value());
                         if (chunk.getPartition() != kafkaRecord.partition()
@@ -592,6 +598,37 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                         var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
                         return (SourceInput) new KafkaLivenessSnapshotRecord(syntheticStream, key, chunk);
                     }
+                    if (KafkaLivenessScanner.isNoMoreWritesRecord(kafkaRecord)) {
+                        var declaration = ProxyNoMoreWrites.parseFrom(kafkaRecord.value());
+                        if (!declaration.getNodeId().equals(declaration.getDeclaredBy())) {
+                            peerNoMoreWritesOffsets.merge(
+                                new WriterPartitionKey(
+                                    declaration.getNodeId(),
+                                    declaration.getPartition()
+                                ),
+                                kafkaRecord.offset(),
+                                Math::min
+                            );
+                        }
+                        var syntheticStream = TrafficStream.newBuilder()
+                            .setNodeId(declaration.getNodeId())
+                            .setConnectionId(
+                                "__proxy_no_more_writes__:"
+                                    + declaration.getPartition()
+                                    + ":"
+                                    + declaration.getDeclaredBy()
+                                    + ":"
+                                    + kafkaRecord.offset()
+                            )
+                            .setNumberOfThisLastChunk(0)
+                            .build();
+                        var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
+                        return (SourceInput) new KafkaNoMoreWritesRecord(
+                            syntheticStream,
+                            key,
+                            declaration
+                        );
+                    }
                     TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
                     if (ts.hasPartition() != ts.hasRoutingPlanId()) {
                         throw new IllegalStateException(
@@ -605,6 +642,39 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     }
                     if (ts.hasPartition()) {
                         KafkaLivenessScanner.validateTrafficStamp(kafkaRecord, ts);
+                    }
+                    var peerDeclarationOffset = peerNoMoreWritesOffsets.get(
+                        new WriterPartitionKey(ts.getNodeId(), kafkaRecord.partition())
+                    );
+                    if (peerDeclarationOffset != null
+                        && kafkaRecord.offset() > peerDeclarationOffset) {
+                        livenessScanContext.recordSupersededTrafficDiscarded();
+                        log.atDebug()
+                            .setMessage(
+                                "Discarding traffic from {} on partition {} at offset {} "
+                                    + "after peer no-more-writes declaration at offset {}"
+                            )
+                            .addArgument(ts::getNodeId)
+                            .addArgument(kafkaRecord::partition)
+                            .addArgument(kafkaRecord::offset)
+                            .addArgument(peerDeclarationOffset)
+                            .log();
+                        var syntheticStream = TrafficStream.newBuilder()
+                            .setNodeId(ts.getNodeId())
+                            .setConnectionId(
+                                "__superseded_traffic__:"
+                                    + kafkaRecord.partition()
+                                    + ":"
+                                    + kafkaRecord.offset()
+                            )
+                            .setNumberOfThisLastChunk(0)
+                            .build();
+                        var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
+                        return (SourceInput) new KafkaSupersededTrafficRecord(
+                            syntheticStream,
+                            key,
+                            peerDeclarationOffset
+                        );
                     }
                     var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
                     log.atTrace().setMessage("Parsed traffic stream #{}: {} {}")

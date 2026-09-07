@@ -31,6 +31,7 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -304,6 +305,85 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
         }
     }
 
+    @Test
+    void replayCursorSettlesNoMoreWritesRecordsWithoutCreatingAccumulations() throws Exception {
+        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        try (var source = source(mockConsumer, clock)) {
+            scheduleFirstPoll(mockConsumer, noMoreWritesRecord(0, NODE));
+            var marker = assertInstanceOf(
+                KafkaNoMoreWritesRecord.class,
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .get(0)
+            );
+            var ignored = new AtomicInteger();
+            var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
+                Duration.ofSeconds(1),
+                null,
+                callbacks(new AtomicReference<>(), new AtomicReference<>(), ignored),
+                true,
+                source::updateScanBlocker
+            );
+
+            accumulator.accept(marker);
+
+            assertEquals(1, ignored.get());
+            assertEquals(0, accumulator.numberOfConnectionsCreated());
+        }
+    }
+
+    @Test
+    void peerDeclarationDiscardsLaterTrafficButStillReturnsACommitBearingRecord() throws Exception {
+        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        try (var source = source(mockConsumer, clock)) {
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(PARTITION));
+                addRecord(mockConsumer, noMoreWritesRecord(0, "survivor"));
+                addRecord(mockConsumer, trafficRecord(1, true));
+                mockConsumer.updateEndOffsets(Map.of(PARTITION, 2L));
+            });
+
+            var records = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS);
+
+            assertEquals(2, records.size());
+            assertInstanceOf(KafkaNoMoreWritesRecord.class, records.get(0));
+            var discarded = assertInstanceOf(KafkaSupersededTrafficRecord.class, records.get(1));
+            assertEquals(0, discarded.getDeclarationOffset());
+            assertFalse(source.partitionToActiveConnections.containsKey(PARTITION.partition()));
+            assertMetricValue(
+                IKafkaConsumerContexts.MetricNames.SUPERSEDED_TRAFFIC_RECORDS_DISCARDED,
+                1
+            );
+        }
+    }
+
+    @Test
+    void selfDeclarationDoesNotDiscardTrafficAfterReassignment() throws Exception {
+        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        try (var source = source(mockConsumer, clock)) {
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(PARTITION));
+                addRecord(mockConsumer, noMoreWritesRecord(0, NODE));
+                addRecord(mockConsumer, trafficRecord(1, true));
+                mockConsumer.updateEndOffsets(Map.of(PARTITION, 2L));
+            });
+
+            var records = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS);
+
+            assertEquals(2, records.size());
+            assertInstanceOf(KafkaNoMoreWritesRecord.class, records.get(0));
+            assertInstanceOf(ITrafficStreamWithKey.class, records.get(1));
+            assertFalse(records.get(1) instanceof KafkaSupersededTrafficRecord);
+            assertTrue(source.partitionToActiveConnections.get(PARTITION.partition())
+                .contains(new ScopedConnectionIdKey(NODE, CONNECTION)));
+        }
+    }
+
     private KafkaTrafficCaptureSource source(MockConsumer<String, byte[]> mockConsumer, Clock clock) {
         mockConsumer.updateBeginningOffsets(Map.of(PARTITION, 0L));
         return new KafkaTrafficCaptureSource(
@@ -355,6 +435,18 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
         assertEquals(2, verdictMetric.getLongSumData().getPoints().size());
         assertVerdictCount(verdictMetric, IKafkaConsumerContexts.LivenessScanVerdict.INCONCLUSIVE, 1);
         assertVerdictCount(verdictMetric, terminalVerdict, 1);
+    }
+
+    private void assertMetricValue(String metricName, long expectedValue) {
+        var metric = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
+            .stream()
+            .filter(candidate -> candidate.getName().equals(metricName))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(
+            expectedValue,
+            metric.getLongSumData().getPoints().stream().findFirst().orElseThrow().getValue()
+        );
     }
 
     private static void assertVerdictCount(
@@ -426,6 +518,30 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
         record.headers().add(
             CaptureRecordTypes.RECORD_TYPE_HEADER,
             CaptureRecordTypes.LIVENESS_RECORD_TYPE.getBytes(StandardCharsets.UTF_8)
+        );
+        return record;
+    }
+
+    private static ConsumerRecord<String, byte[]> noMoreWritesRecord(
+        long offset,
+        String declaredBy
+    ) {
+        var declaration = ProxyNoMoreWrites.newBuilder()
+            .setNodeId(NODE)
+            .setPartition(PARTITION.partition())
+            .setDeclaredBy(declaredBy)
+            .setEmittedAtMillis(1_000)
+            .build();
+        var record = new ConsumerRecord<String, byte[]>(
+            TOPIC,
+            PARTITION.partition(),
+            offset,
+            "no-more-writes",
+            declaration.toByteArray()
+        );
+        record.headers().add(
+            CaptureRecordTypes.RECORD_TYPE_HEADER,
+            CaptureRecordTypes.NO_MORE_WRITES_RECORD_TYPE.getBytes(StandardCharsets.UTF_8)
         );
         return record;
     }

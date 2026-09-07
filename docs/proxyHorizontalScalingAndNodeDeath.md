@@ -1,8 +1,9 @@
 # Proxy Horizontal Scaling and Writer-Completion Declarations
 
 **Status: partially implemented, remaining scaling protocol is a sketch.** Exact full manifests,
-ordered publishing, strict manifest timestamps, and interleaved chunk reconstruction are implemented.
-Consumer-group assignment, `NoMoreWrites`, zombie containment, and their integration tests remain
+ordered publishing, strict control-record timestamps, interleaved chunk reconstruction,
+`NoMoreWrites`, declaration-based settlement, and peer-fence discard are implemented.
+Consumer-group assignment, capture-side zombie containment, and their integration tests remain
 future work.
 
 A note on terminology, since "node death" was the earlier framing and misled: nothing in the
@@ -482,9 +483,9 @@ direction remains "stall or stop," never "commit wrongly."
 | Drop `topicPartitionCount` from the plan digest, or drop `routingPlanId` outright | `PartitionRoutingPlan.makePlanId`. The mapping is fully determined by the stored per-connection partition, so the guard collapses to "a connection's partition stamp never changes", which `KafkaTrafficCaptureSource.java:648` already checks. |
 | Group membership client | new, in the proxy: subscribe, pause, poll on a dedicated thread (§3.1), callbacks, and subscription `userData` carrying `nodeId` |
 | Relieve the proxy duration cap of its correctness role | no code deleted — `replayer-expiration-hardening.md` §5.3/§5.4 and `replayerHardenedArchitectureDesign.md` §10.8 stop citing the cap as the finite window a dead-proxy proof needs. The cap stays as operational policy. **No wall-clock setting is removed, because none exists**: force-expiry was rejected (§7 there) and banned (§10.5 row, §20 non-goal). Verified by grep — nothing clock-driven is reachable from the Kafka commit path. |
-| `NoMoreWrites` record | `TrafficCaptureStream.proto`; emitted by `CaptureKafkaPublisher` |
-| Settle-on-declaration evidence | new `ScanEvidence` variant; `KafkaLivenessScanner` |
-| Discard superseded records + counter | `KafkaTrafficCaptureSource` |
+| `NoMoreWrites` record | **Implemented.** `ProxyNoMoreWrites` is emitted through `CaptureKafkaPublisher`'s ordered lane with an offset-authoritative boundary and a strictly increasing diagnostic timestamp. |
+| Settle-on-declaration evidence | **Implemented.** `AbsenceProof.NoMoreWrites` carries provenance and the declaration offset; `KafkaLivenessScanner` settles only candidates whose last record precedes it. |
+| Discard superseded records + counter | **Implemented.** `KafkaTrafficCaptureSource` acknowledges but does not reconstruct traffic after a peer declaration, and increments `supersededTrafficRecordsDiscarded`. Self declarations do not install the fence. |
 | Latch, staleness gate, failure-mode flag | `CaptureProxy`, `KafkaCaptureFactory` |
 
 ## 8. Out of scope for this round

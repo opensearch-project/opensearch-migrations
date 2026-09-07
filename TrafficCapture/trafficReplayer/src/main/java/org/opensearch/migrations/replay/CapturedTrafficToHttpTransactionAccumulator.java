@@ -12,6 +12,8 @@ import java.util.function.Consumer;
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.kafka.KafkaLivenessSnapshotRecord;
+import org.opensearch.migrations.replay.kafka.KafkaNoMoreWritesRecord;
+import org.opensearch.migrations.replay.kafka.KafkaSupersededTrafficRecord;
 import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
@@ -277,7 +279,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
         var trafficStreamAndKey = (ITrafficStreamWithKey) sourceInput;
         var tsk = trafficStreamAndKey.getKey();
-        if (trafficStreamAndKey instanceof KafkaLivenessSnapshotRecord) {
+        if (trafficStreamAndKey instanceof KafkaLivenessSnapshotRecord
+            || trafficStreamAndKey instanceof KafkaNoMoreWritesRecord
+            || trafficStreamAndKey instanceof KafkaSupersededTrafficRecord) {
             listener.onTrafficStreamIgnored(tsk);
             return;
         }
@@ -390,8 +394,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
             return;
         }
-        var proof = (org.opensearch.migrations.replay.traffic.source.AbsenceProof.LivenessOmission)
-            evidence.proof();
+        var proof = evidence.proof();
         if (accumulation.hasRrPair()) {
             accumulation.getRrPair().structuralProofId = proof.proofId();
         }

@@ -10,6 +10,7 @@ import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ScanEvidence;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.ByteString;
@@ -76,6 +77,60 @@ class KafkaLivenessScannerTest {
         assertInstanceOf(ScanEvidence.FollowUpPresent.class, evaluate(List.of(
             traffic(11, PARTITION, PLAN)
         )));
+    }
+
+    @Test
+    void selfDeclarationSettlesTrafficThatPrecedesIt() {
+        var result = evaluate(List.of(
+            traffic(11, PARTITION, PLAN),
+            noMoreWrites(12, NODE)
+        ));
+
+        var confirmed = assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, result);
+        var proof = assertInstanceOf(AbsenceProof.NoMoreWrites.class, confirmed.proof());
+        assertEquals(12, proof.declarationOffset());
+        assertEquals(NODE, proof.declaredBy());
+        assertEquals(false, proof.peerDeclared());
+    }
+
+    @Test
+    void trafficAfterSelfDeclarationRemainsLive() {
+        assertInstanceOf(ScanEvidence.FollowUpPresent.class, evaluate(List.of(
+            noMoreWrites(11, NODE),
+            traffic(12, PARTITION, PLAN)
+        )));
+    }
+
+    @Test
+    void peerDeclarationIsTerminalEvenWhenZombieTrafficFollows() {
+        var result = evaluate(List.of(
+            noMoreWrites(11, "surviving-node"),
+            traffic(12, PARTITION, PLAN)
+        ));
+
+        var confirmed = assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, result);
+        var proof = assertInstanceOf(AbsenceProof.NoMoreWrites.class, confirmed.proof());
+        assertEquals("surviving-node", proof.declaredBy());
+        assertEquals(true, proof.peerDeclared());
+        assertEquals(11, proof.declarationOffset());
+    }
+
+    @Test
+    void declarationMustFollowTheCandidateRecord() {
+        assertInstanceOf(ScanEvidence.Inconclusive.class, evaluate(List.of(
+            noMoreWrites(10, NODE)
+        )));
+    }
+
+    @Test
+    void retainedDeclarationCanSettleWithoutAnotherLookaheadBatch() {
+        assertInstanceOf(ScanEvidence.ConfirmedAbsent.class, evaluate(List.of(
+            noMoreWrites(11, NODE)
+        )));
+        assertInstanceOf(
+            ScanEvidence.ConfirmedAbsent.class,
+            scanner.evaluateRetained(List.of(candidate())).get(0)
+        );
     }
 
     @Test
@@ -148,6 +203,12 @@ class KafkaLivenessScannerTest {
         )));
         assertThrows(IllegalStateException.class, () -> evaluate(List.of(
             traffic(11, PARTITION, "")
+        )));
+        assertThrows(IllegalStateException.class, () -> evaluate(List.of(
+            noMoreWrites(11, NODE, PARTITION + 1, NODE)
+        )));
+        assertThrows(IllegalStateException.class, () -> evaluate(List.of(
+            noMoreWrites(11, "", PARTITION, NODE)
         )));
     }
 
@@ -240,5 +301,35 @@ class KafkaLivenessScannerTest {
             .setRoutingPlanId(routingPlanId)
             .build();
         return new ConsumerRecord<>(TOPIC, PARTITION, offset, "traffic", stream.toByteArray());
+    }
+
+    private ConsumerRecord<String, byte[]> noMoreWrites(long offset, String declaredBy) {
+        return noMoreWrites(offset, NODE, PARTITION, declaredBy);
+    }
+
+    private ConsumerRecord<String, byte[]> noMoreWrites(
+        long offset,
+        String nodeId,
+        int partitionStamp,
+        String declaredBy
+    ) {
+        var declaration = ProxyNoMoreWrites.newBuilder()
+            .setNodeId(nodeId)
+            .setPartition(partitionStamp)
+            .setDeclaredBy(declaredBy)
+            .setEmittedAtMillis(1_000)
+            .build();
+        var record = new ConsumerRecord<String, byte[]>(
+            TOPIC,
+            PARTITION,
+            offset,
+            "no-more-writes",
+            declaration.toByteArray()
+        );
+        record.headers().add(
+            CaptureRecordTypes.RECORD_TYPE_HEADER,
+            CaptureRecordTypes.NO_MORE_WRITES_RECORD_TYPE.getBytes(StandardCharsets.UTF_8)
+        );
+        return record;
     }
 }

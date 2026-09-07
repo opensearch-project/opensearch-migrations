@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
 import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
 
 import com.google.protobuf.ByteString;
 import lombok.Getter;
@@ -36,6 +37,8 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     public static final String RECORD_TYPE_HEADER = CaptureRecordTypes.RECORD_TYPE_HEADER;
     public static final String TRAFFIC_RECORD_TYPE = CaptureRecordTypes.TRAFFIC_RECORD_TYPE;
     public static final String LIVENESS_RECORD_TYPE = CaptureRecordTypes.LIVENESS_RECORD_TYPE;
+    public static final String NO_MORE_WRITES_RECORD_TYPE =
+        CaptureRecordTypes.NO_MORE_WRITES_RECORD_TYPE;
 
     private static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
 
@@ -51,7 +54,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     private final Clock clock;
     private final ScheduledThreadPoolExecutor executor;
     private final Map<Integer, Long> nextSnapshotSequence = new HashMap<>();
-    private final Map<Integer, Long> lastSnapshotTimestamp = new HashMap<>();
+    private final Map<Integer, Long> lastControlTimestamp = new HashMap<>();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final ScheduledFuture<?> scheduledSnapshots;
@@ -147,7 +150,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             var sends = new ArrayList<CompletableFuture<RecordMetadata>>();
             for (var partition : routingPlan.getSelectedPartitions()) {
                 var sequence = nextSnapshotSequence.merge(partition, 1L, Long::sum) - 1;
-                var emittedAtMillis = allocateSnapshotTimestamp(partition);
+                var emittedAtMillis = allocateControlTimestamp(partition);
                 var chunks = buildSnapshotChunks(
                     partition,
                     sequence,
@@ -171,6 +174,54 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                 .whenComplete((ignored, throwable) -> {
                     if (throwable == null) {
                         result.complete(null);
+                    } else {
+                        result.completeExceptionally(throwable);
+                    }
+                });
+        }, result);
+        return result;
+    }
+
+    public CompletableFuture<RecordMetadata> publishNoMoreWrites(
+        String finishedNodeId,
+        int partition,
+        String declaredBy
+    ) {
+        if (finishedNodeId == null || finishedNodeId.isBlank()) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("finishedNodeId must not be blank")
+            );
+        }
+        if (declaredBy == null || declaredBy.isBlank()) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("declaredBy must not be blank")
+            );
+        }
+        if (partition < 0 || partition >= routingPlan.getTopicPartitionCount()) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("partition is outside the traffic topic")
+            );
+        }
+        var result = new CompletableFuture<RecordMetadata>();
+        executeOnPublisher(() -> {
+            var declaration = ProxyNoMoreWrites.newBuilder()
+                .setNodeId(finishedNodeId)
+                .setPartition(partition)
+                .setDeclaredBy(declaredBy)
+                .setEmittedAtMillis(allocateControlTimestamp(partition))
+                .build();
+            var producerRecord = new ProducerRecord<>(
+                topic,
+                partition,
+                null,
+                finishedNodeId + ":no-more-writes:" + partition,
+                declaration.toByteArray(),
+                recordHeaders(NO_MORE_WRITES_RECORD_TYPE)
+            );
+            sendFromPublisherThread(producerRecord, () -> {})
+                .whenComplete((metadata, throwable) -> {
+                    if (throwable == null) {
+                        result.complete(metadata);
                     } else {
                         result.completeExceptionally(throwable);
                     }
@@ -224,11 +275,11 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return List.copyOf(chunks);
     }
 
-    private long allocateSnapshotTimestamp(int partition) {
+    private long allocateControlTimestamp(int partition) {
         var observed = clock.millis();
-        var previous = lastSnapshotTimestamp.get(partition);
+        var previous = lastControlTimestamp.get(partition);
         var allocated = previous == null || observed > previous ? observed : Math.incrementExact(previous);
-        lastSnapshotTimestamp.put(partition, allocated);
+        lastControlTimestamp.put(partition, allocated);
         return allocated;
     }
 
