@@ -12,6 +12,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -125,6 +126,23 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         Assertions.assertTrue(controlRead.get(5, TimeUnit.SECONDS).isEmpty());
         Assertions.assertEquals(1, source.touchCalls.get());
         Assertions.assertEquals(2, source.readCalls.get());
+        blockingSource.close();
+    }
+
+    @Test
+    void sourceCapacityBlocksReadsUntilTheOwnerSignalsAvailability() throws Exception {
+        var source = new CapacityControlledSource(rootContext);
+        var blockingSource = new BlockingTrafficSource(source, Duration.ofSeconds(1));
+
+        var read = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
+        Thread.sleep(50);
+        Assertions.assertFalse(read.isDone());
+        Assertions.assertEquals(0, source.readCalls.get());
+
+        source.makeCapacityAvailable();
+
+        Assertions.assertTrue(read.get(5, TimeUnit.SECONDS).isEmpty());
+        Assertions.assertEquals(1, source.readCalls.get());
         blockingSource.close();
     }
 
@@ -252,6 +270,40 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         @Override
         public boolean hasPendingSourceControl() {
             return controlPending;
+        }
+    }
+
+    private static final class CapacityControlledSource extends TestTrafficCaptureSource {
+        private final AtomicInteger readCalls = new AtomicInteger();
+        private final AtomicReference<Runnable> capacityListener = new AtomicReference<>(() -> {});
+        private volatile boolean capacityAvailable;
+
+        private CapacityControlledSource(TestContext rootContext) {
+            super(rootContext, 0);
+        }
+
+        @Override
+        public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+        readNextTrafficStreamChunk(
+            Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
+        ) {
+            readCalls.incrementAndGet();
+            return CompletableFuture.completedFuture(List.of());
+        }
+
+        @Override
+        public boolean isReadCapacityAvailable() {
+            return capacityAvailable;
+        }
+
+        @Override
+        public void setReadCapacityAvailableListener(Runnable listener) {
+            capacityListener.set(listener);
+        }
+
+        private void makeCapacityAvailable() {
+            capacityAvailable = true;
+            capacityListener.get().run();
         }
     }
 }

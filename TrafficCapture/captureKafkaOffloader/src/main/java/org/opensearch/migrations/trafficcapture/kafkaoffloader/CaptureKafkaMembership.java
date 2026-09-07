@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -27,11 +28,12 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer;
     private final String topic;
     private final String nodeId;
-    private final CapturePartitionAssignment partitionAssignment;
+    private final CaptureRoutingState routingState;
     private final CaptureKafkaPublisher publisher;
     private final CaptureKafkaWriteGate writeGate;
     private final Runnable initialAssignmentCallback;
     private final Consumer<Throwable> terminalFailureCallback;
+    private final Set<Integer> kafkaAssignment = new HashSet<>();
     private final AtomicReference<Set<String>> observedMembers = new AtomicReference<>();
     private final AtomicBoolean initialAssignmentReported = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -44,7 +46,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
         String topic,
         String nodeId,
-        CapturePartitionAssignment partitionAssignment,
+        CaptureRoutingState routingState,
         CaptureKafkaPublisher publisher,
         CaptureKafkaWriteGate writeGate,
         Runnable initialAssignmentCallback,
@@ -53,7 +55,8 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         this.consumer = Objects.requireNonNull(consumer);
         this.topic = Objects.requireNonNull(topic);
         this.nodeId = Objects.requireNonNull(nodeId);
-        this.partitionAssignment = Objects.requireNonNull(partitionAssignment);
+        this.routingState = Objects.requireNonNull(routingState);
+        kafkaAssignment.addAll(routingState.assignedPartitions());
         this.publisher = Objects.requireNonNull(publisher);
         this.writeGate = Objects.requireNonNull(writeGate);
         this.initialAssignmentCallback = Objects.requireNonNull(initialAssignmentCallback);
@@ -76,7 +79,9 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-        partitionAssignment.revokePartitions(partitionNumbers(partitions));
+        kafkaAssignment.removeAll(partitionNumbers(partitions));
+        routingState.replaceAssignedPartitions(kafkaAssignment)
+            .forEach(this::publishSelfRelease);
     }
 
     @Override
@@ -86,9 +91,11 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         if (writeGate.failureIfNotWritable() != null) {
             return;
         }
-        partitionAssignment.replaceAssignedPartitions(partitionNumbers(partitions));
+        kafkaAssignment.addAll(partitionNumbers(partitions));
+        routingState.replaceAssignedPartitions(kafkaAssignment)
+            .forEach(this::publishSelfRelease);
         consumer.pause(partitions);
-        if (!partitionAssignment.assignedPartitions().isEmpty()
+        if (!routingState.assignedPartitions().isEmpty()
             && initialAssignmentReported.compareAndSet(false, true)) {
             initialAssignmentCallback.run();
         }
@@ -155,7 +162,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     }
 
     private void declarePeerDeparture(String departedNodeId) {
-        for (int partition = 0; partition < partitionAssignment.topicPartitionCount(); ++partition) {
+        for (int partition = 0; partition < routingState.topicPartitionCount(); ++partition) {
             publisher.publishNoMoreWrites(departedNodeId, partition, nodeId)
                 .whenComplete((ignored, failure) -> {
                     if (failure != null) {
@@ -165,9 +172,18 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         }
     }
 
+    private void publishSelfRelease(CaptureRoutingState.SelfRelease release) {
+        publisher.publishSelfNoMoreWrites(release)
+            .whenComplete((ignored, failure) -> {
+                if (failure != null) {
+                    writeGate.trip(failure);
+                }
+            });
+    }
+
     private void handleTerminalFailure(Throwable failure) {
         if (closed.compareAndSet(false, true)) {
-            partitionAssignment.replaceAssignedPartitions(List.of());
+            routingState.replaceAssignedPartitions(List.of());
             publisher.failClosed(failure);
             terminalFailureCallback.accept(failure);
             consumer.wakeup();

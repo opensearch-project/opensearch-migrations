@@ -312,7 +312,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         private final IReplayContexts.ITargetRequestContext requestContext;
         private final ConnectionReplaySession.CancellationSignal cancellationSignal;
         private final CompletableFuture<ChannelFuture> completion;
-        private ConnectionReplaySession.CancellationSignal.Registration cancellationRegistration;
         private ChannelFuture activeChannelFuture;
         private ScheduledFuture<?> retryFuture;
 
@@ -333,7 +332,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         }
 
         private void start(Duration nextRetryDuration) {
-            cancellationRegistration = cancellationSignal.register(this::cancel);
+            var cancellationRegistration = cancellationSignal.register(this::cancel);
             completion.whenComplete((ignored, failure) -> cancellationRegistration.close());
             runOnEventLoop(() -> connect(nextRetryDuration));
         }
@@ -430,11 +429,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             }
 
             try {
-                var initialization = initializeConnectionHandlers(
-                    sslContext,
-                    requestContext.getLogicalEnclosingScope().getChannelKeyContext(),
-                    outboundChannelFuture
-                );
+                var initialization = initializeConnectionHandlers(outboundChannelFuture);
                 initialization.future.whenComplete((channelFuture, initializationFailure) ->
                     runOnEventLoop(() ->
                         onInitializationSettled(
@@ -474,6 +469,32 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 return;
             }
             completion.complete(initializedChannelFuture);
+        }
+
+        /*
+         * TLS handshake failures remain terminal for this attempt rather than entering the
+         * connection-acquisition retry loop.
+         */
+        private TrackedFuture<String, ChannelFuture> initializeConnectionHandlers(
+            ChannelFuture outboundChannelFuture
+        ) {
+            final var channel = outboundChannelFuture.channel();
+            var channelKeyContext = requestContext.getLogicalEnclosingScope().getChannelKeyContext();
+            log.atTrace().setMessage("{} successfully done setting up client channel for {}")
+                .addArgument(channelKeyContext::getChannelKey)
+                .addArgument(channel)
+                .log();
+            var pipeline = channel.pipeline();
+            if (sslContext == null) {
+                return TextTrackedFuture.completedFuture(outboundChannelFuture, () -> "");
+            }
+            var sslEngine = sslContext.newEngine(channel.alloc());
+            sslEngine.setUseClientMode(true);
+            var sslHandler = new SslHandler(sslEngine);
+            addLoggingHandlerLast(pipeline, "A");
+            pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
+            return NettyFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(), () -> "")
+                .thenApply(ignored -> outboundChannelFuture, () -> "");
         }
 
         private void scheduleRetry(Duration retryDelay) {
@@ -552,34 +573,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             } else {
                 eventLoop.execute(command);
             }
-        }
-    }
-
-    /*
-     * Connection handler initialization is kept separate from acquisition retries so TLS
-     * handshake failures remain terminal for the current request, matching prior behavior.
-     */
-    private static TrackedFuture<String, ChannelFuture> initializeConnectionHandlers(
-        SslContext sslContext,
-        IReplayContexts.IChannelKeyContext channelKeyContext,
-        ChannelFuture outboundChannelFuture
-    ) {
-        final var channel = outboundChannelFuture.channel();
-        log.atTrace().setMessage("{} successfully done setting up client channel for {}")
-            .addArgument(channelKeyContext::getChannelKey)
-            .addArgument(channel)
-            .log();
-        var pipeline = channel.pipeline();
-        if (sslContext != null) {
-            var sslEngine = sslContext.newEngine(channel.alloc());
-            sslEngine.setUseClientMode(true);
-            var sslHandler = new SslHandler(sslEngine);
-            addLoggingHandlerLast(pipeline, "A");
-            pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
-            return NettyFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(), () -> "")
-                .thenApply(voidVal2 -> outboundChannelFuture, () -> "");
-        } else {
-            return TextTrackedFuture.completedFuture(outboundChannelFuture, () -> "");
         }
     }
 

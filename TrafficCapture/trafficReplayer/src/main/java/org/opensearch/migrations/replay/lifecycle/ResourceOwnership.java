@@ -65,6 +65,7 @@ public final class ResourceOwnership {
             );
         }
 
+        @SuppressWarnings("java:S1181") // Restore ownership state and report the invariant before rethrowing.
         public boolean close(@NonNull Runnable releaser) {
             if (!state.compareAndSet(State.OPEN, State.CLOSING)) {
                 reportMetric(() -> metrics.duplicateClose(type));
@@ -72,10 +73,10 @@ public final class ResourceOwnership {
             }
             try {
                 releaser.run();
-            } catch (Throwable t) {
+            } catch (RuntimeException | Error e) {
                 state.set(State.OPEN);
                 reportMetric(() -> metrics.invariantFailure(type));
-                throw t;
+                throw e;
             }
             state.set(State.CLOSED);
             if (ownershipRecorded) {
@@ -88,11 +89,12 @@ public final class ResourceOwnership {
             reportMetric(() -> metrics.invariantFailure(type));
         }
 
+        @SuppressWarnings("java:S1181") // Observability callbacks must not perturb resource ownership.
         private static boolean reportMetric(Runnable callback) {
             try {
                 callback.run();
                 return true;
-            } catch (Throwable ignored) {
+            } catch (RuntimeException | Error ignored) {
                 return false;
             }
         }

@@ -296,7 +296,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             trafficSource::acknowledgeSessionTermination,
             topLevelContext.getConnectionActorMetrics(),
             topLevelContext.getTargetExchangeStateMetrics(),
-            topLevelContext.getResourceOwnershipMetrics()
+            topLevelContext.getResourceOwnershipMetrics(),
+            error -> shutdown(error)
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
         var progressController = new ReplayProgressController(intakeMailbox, readGate);
@@ -624,12 +625,9 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
         log.atWarn().setCause(error).setMessage("Shutting down {}").addArgument(this).log();
         shutdownReasonRef.compareAndSet(null, error);
-        if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
-            log.atError().setMessage("Shutdown was already signaled by {}.  Ignoring this shutdown request due to {}.")
-                .addArgument(shutdownReasonRef::get)
-                .addArgument(error)
-                .log();
-            return shutdownFutureRef.get();
+        var existingShutdown = claimShutdown(error);
+        if (existingShutdown != null) {
+            return existingShutdown;
         }
         stopReadingRef.set(true);
         Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f -> f.cancel(true));
@@ -656,30 +654,57 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var actorShutdownFuture = beginReplayShutdownAfterIntakeFence(replayEngine, cancellationCause)
             .copy()
             .orTimeout(ACTOR_TERMINATION_SHUTDOWN_LIMIT.toSeconds(), TimeUnit.SECONDS);
-        var nettyShutdownFuture = actorShutdownFuture
+        completeShutdownFrom(shutdownNettyAfterActors(actorShutdownFuture));
+        signalRemainingWorkShutdown(error);
+        var shutdownFuture = shutdownFutureRef.get();
+        log.atWarn().setMessage("Shutdown setup has been initiated").log();
+        return shutdownFuture;
+    }
+
+    private CompletableFuture<Void> claimShutdown(Error error) {
+        if (shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
+            return null;
+        }
+        log.atError().setMessage("Shutdown was already signaled by {}.  Ignoring this shutdown request due to {}.")
+            .addArgument(shutdownReasonRef::get)
+            .addArgument(error)
+            .log();
+        return shutdownFutureRef.get();
+    }
+
+    private CompletableFuture<Void> shutdownNettyAfterActors(CompletableFuture<Void> actorShutdownFuture) {
+        return actorShutdownFuture
             .handle((ignored, actorFailure) -> actorFailure)
             .thenCompose(actorFailure ->
                 clientConnectionPool.shutdownNow()
-                    .handle((ignored, nettyFailure) -> {
-                        if (actorFailure != null) {
-                            if (nettyFailure != null) {
-                                actorFailure.addSuppressed(nettyFailure);
-                            }
-                            throw new CompletionException(actorFailure);
-                        }
-                        if (nettyFailure != null) {
-                            throw new CompletionException(nettyFailure);
-                        }
-                        return null;
-                    })
+                    .handle((ignored, nettyFailure) -> combineShutdownFailures(actorFailure, nettyFailure))
             );
-        nettyShutdownFuture.whenComplete((v, t) -> {
-            if (t != null) {
-                shutdownFutureRef.get().completeExceptionally(t);
+    }
+
+    private static Void combineShutdownFailures(Throwable actorFailure, Throwable nettyFailure) {
+        if (actorFailure != null) {
+            if (nettyFailure != null) {
+                actorFailure.addSuppressed(nettyFailure);
+            }
+            throw new CompletionException(actorFailure);
+        }
+        if (nettyFailure != null) {
+            throw new CompletionException(nettyFailure);
+        }
+        return null;
+    }
+
+    private void completeShutdownFrom(CompletableFuture<Void> nettyShutdownFuture) {
+        nettyShutdownFuture.whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                shutdownFutureRef.get().completeExceptionally(failure);
             } else {
                 shutdownFutureRef.get().complete(null);
             }
         });
+    }
+
+    private void signalRemainingWorkShutdown(Error error) {
         var shutdownWasSignalledFuture = error == null
             ? TextTrackedFuture.<Void>completedFuture(null, () -> "TrafficReplayer shutdown")
             : TextTrackedFuture.<Void>failedFuture(error, () -> "TrafficReplayer shutdown");
@@ -690,9 +715,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 break;
             }
         }
-        var shutdownFuture = shutdownFutureRef.get();
-        log.atWarn().setMessage("Shutdown setup has been initiated").log();
-        return shutdownFuture;
     }
 
     private CompletableFuture<Void> beginReplayShutdownAfterIntakeFence(

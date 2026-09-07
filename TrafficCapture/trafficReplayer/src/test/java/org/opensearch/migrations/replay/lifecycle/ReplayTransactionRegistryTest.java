@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -101,6 +102,100 @@ class ReplayTransactionRegistryTest {
     }
 
     @Test
+    void lateTypedRegistrationReleasesItsOwnedRecordAndResource() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        registry.beginTermination();
+        mailbox.runUntilIdle();
+        var resource = new CloseWatchingResource();
+        var record = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 26, 1)
+        );
+        var transaction = transaction(mailbox, ledger, resource, record);
+        mailbox.runUntilIdle();
+
+        var registration = registry.register(request(1), transaction).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(registration.isCompletedExceptionally());
+        Assertions.assertTrue(
+            transaction.completion().toCompletableFuture().isCompletedExceptionally(),
+            "a late typed registration must not retain untracked transaction ownership"
+        );
+        Assertions.assertEquals(1, resource.closes.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+        Assertions.assertEquals(0, record.commits.get());
+    }
+
+    @Test
+    void duplicateTypedRegistrationReleasesTheRejectedTransaction() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var existing = new CompletableFuture<Void>();
+        registry.register(request(1), existing);
+        mailbox.runUntilIdle();
+        var resource = new CloseWatchingResource();
+        var record = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 27, 1)
+        );
+        var transaction = transaction(mailbox, ledger, resource, record);
+        mailbox.runUntilIdle();
+
+        var registration = registry.register(request(1), transaction).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(registration.isCompletedExceptionally());
+        Assertions.assertTrue(
+            transaction.completion().toCompletableFuture().isCompletedExceptionally(),
+            "a duplicate typed registration must release the rejected transaction"
+        );
+        Assertions.assertEquals(1, resource.closes.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+        Assertions.assertEquals(0, record.commits.get());
+        existing.complete(null);
+        mailbox.runUntilIdle();
+    }
+
+    @Test
+    void duplicateRegistrationOfTheSameTransactionDoesNotTerminateTheOwnedInstance() {
+        var mailbox = new DeterministicMailbox();
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var transaction = new ReplayTransaction<String>(
+            request(1),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new ReplayOutcomes.EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            new RecordDispositionLedger(Runnable::run),
+            java.util.List.of(),
+            java.util.List.of(),
+            ReplayTransaction.Metrics.NOOP
+        );
+        mailbox.runUntilIdle();
+        registry.register(request(1), transaction);
+        mailbox.runUntilIdle();
+
+        var duplicate = registry.register(request(1), transaction).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        Assertions.assertTrue(duplicate.isCompletedExceptionally());
+        Assertions.assertFalse(
+            transaction.completion().toCompletableFuture().isDone(),
+            "rejecting a duplicate handle must not terminate the transaction already owned by the registry"
+        );
+
+        transaction.settleSource(new ReplayOutcomes.SourceOutcome.Interrupted("shutdown"));
+        transaction.settleTarget(
+            new ReplayOutcomes.TargetOutcome.Cancelled<>(new CancellationException("shutdown"))
+        );
+        mailbox.runUntilIdle();
+        Assertions.assertDoesNotThrow(() -> transaction.completion().toCompletableFuture().join());
+    }
+
+    @Test
     void transactionFailurePropagatesOnlyAfterTheRegistryDrains() {
         var mailbox = new DeterministicMailbox();
         var registry = new ReplayTransactionRegistry(session(), mailbox);
@@ -182,10 +277,196 @@ class ReplayTransactionRegistryTest {
         Assertions.assertTrue(unresolved(registry, mailbox).isEmpty());
     }
 
+    @Test
+    void rejectedRegistrationCancelsTheTrackedTransactionAndRetainsItsRecord() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var resource = new CloseWatchingResource();
+        var record = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 22, 1)
+        );
+        var transaction = transaction(mailbox, ledger, resource, record);
+        mailbox.runUntilIdle();
+        mailbox.rejectNewTasks();
+
+        var registration = registry.register(request(1), transaction).toCompletableFuture();
+
+        Assertions.assertTrue(registration.isCompletedExceptionally());
+        Assertions.assertTrue(
+            transaction.completion().toCompletableFuture().isCompletedExceptionally(),
+            "a rejected registration must not leave the transaction's completion gate unresolved"
+        );
+        Assertions.assertDoesNotThrow(
+            () -> registry.terminateAfterMailboxLoss(new CancellationException("mailbox stopped"))
+                .toCompletableFuture()
+                .join()
+        );
+        Assertions.assertEquals(1, resource.closes.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+        Assertions.assertEquals(0, record.commits.get());
+    }
+
+    @Test
+    void droppedRegistrationIsSweptAndItsAcknowledgementSettles() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var resource = new CloseWatchingResource();
+        var record = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 23, 1)
+        );
+        var transaction = transaction(mailbox, ledger, resource, record);
+        mailbox.runUntilIdle();
+
+        var registration = registry.register(request(1), transaction).toCompletableFuture();
+        mailbox.dropQueuedTasks();
+        registry.terminateAfterMailboxLoss(new CancellationException("mailbox stopped"))
+            .toCompletableFuture()
+            .join();
+
+        Assertions.assertTrue(registration.isCompletedExceptionally());
+        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
+        Assertions.assertEquals(1, resource.closes.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+        Assertions.assertEquals(0, record.commits.get());
+    }
+
+    @Test
+    void droppedTransactionCompletionCallbackStillDrainsEmergencyTermination() {
+        var mailbox = new DeterministicMailbox();
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var transactionCompletion = new CompletableFuture<Void>();
+        registry.register(request(0), transactionCompletion);
+        mailbox.runUntilIdle();
+
+        transactionCompletion.complete(null);
+        Assertions.assertEquals(1, mailbox.queuedTaskCount());
+        mailbox.dropQueuedTasks();
+
+        Assertions.assertDoesNotThrow(
+            () -> registry.terminateAfterMailboxLoss(new CancellationException("mailbox stopped"))
+                .toCompletableFuture()
+                .join()
+        );
+    }
+
+    @Test
+    void rejectedTransactionCompletionCallbackTriggersEmergencyDrain() {
+        var mailbox = new DeterministicMailbox();
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var transactionCompletion = new CompletableFuture<Void>();
+        registry.register(request(0), transactionCompletion);
+        mailbox.runUntilIdle();
+        mailbox.rejectNewTasks();
+
+        transactionCompletion.complete(null);
+
+        Assertions.assertDoesNotThrow(
+            () -> registry.terminateAfterMailboxLoss(new CancellationException("mailbox stopped"))
+                .toCompletableFuture()
+                .join()
+        );
+    }
+
+    @Test
+    void droppedCancellationAndTerminationCommandsAreCompletedByEmergencyTermination() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var resource = new CloseWatchingResource();
+        var record = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 24, 1)
+        );
+        var transaction = transaction(mailbox, ledger, resource, record);
+        mailbox.runUntilIdle();
+        registry.register(request(1), transaction);
+        mailbox.runUntilIdle();
+
+        var cancellation = registry.cancelOutstanding(
+            new CancellationException("session stopping")
+        ).toCompletableFuture();
+        var termination = registry.beginTermination().toCompletableFuture();
+        mailbox.dropQueuedTasks();
+
+        registry.terminateAfterMailboxLoss(new CancellationException("mailbox stopped"))
+            .toCompletableFuture()
+            .join();
+
+        Assertions.assertTrue(cancellation.isDone());
+        Assertions.assertTrue(termination.isDone());
+        Assertions.assertDoesNotThrow(termination::join);
+        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
+        Assertions.assertEquals(1, resource.closes.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+    }
+
+    @Test
+    void rejectedCancellationCommandTriggersEmergencyTermination() {
+        var mailbox = new DeterministicMailbox();
+        var ledger = new RecordDispositionLedger(Runnable::run);
+        var registry = new ReplayTransactionRegistry(session(), mailbox);
+        var resource = new CloseWatchingResource();
+        var record = new RetentionWatchingHandle(
+            new ReplayIdentity.KafkaRecordId("topic", 0, 25, 1)
+        );
+        var transaction = transaction(mailbox, ledger, resource, record);
+        mailbox.runUntilIdle();
+        registry.register(request(1), transaction);
+        mailbox.runUntilIdle();
+        mailbox.rejectNewTasks();
+
+        var cancellation = registry.cancelOutstanding(
+            new CancellationException("session stopping")
+        ).toCompletableFuture();
+
+        Assertions.assertTrue(cancellation.isDone());
+        Assertions.assertDoesNotThrow(
+            () -> registry.terminateAfterMailboxLoss(new CancellationException("mailbox stopped"))
+                .toCompletableFuture()
+                .join()
+        );
+        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
+        Assertions.assertEquals(1, resource.closes.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+    }
+
+    private static ReplayTransaction<String> transaction(
+        ActorMailbox mailbox,
+        RecordDispositionLedger ledger,
+        AutoCloseable resource,
+        RetentionWatchingHandle record
+    ) {
+        var transaction = new ReplayTransaction<String>(
+            request(1),
+            mailbox,
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new ReplayOutcomes.EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            ledger,
+            java.util.List.of(record.id()),
+            java.util.List.of(resource),
+            ReplayTransaction.Metrics.NOOP
+        );
+        ledger.register(record, transaction.ledgerOwner()).toCompletableFuture().join();
+        return transaction;
+    }
+
+    private static final class CloseWatchingResource implements AutoCloseable {
+        private final AtomicInteger closes = new AtomicInteger();
+
+        @Override
+        public void close() {
+            closes.incrementAndGet();
+        }
+    }
+
     private static final class RetentionWatchingHandle implements RecordDispositionLedger.RecordHandle {
         private final ReplayIdentity.KafkaRecordId id;
         private final AtomicInteger commits = new AtomicInteger();
         private final AtomicInteger contextCloses = new AtomicInteger();
+        private final AtomicInteger releasesWithoutCommit = new AtomicInteger();
 
         private RetentionWatchingHandle(ReplayIdentity.KafkaRecordId id) {
             this.id = id;
@@ -208,7 +489,7 @@ class ReplayTransactionRegistryTest {
 
         @Override
         public void releaseWithoutCommit() {
-            // Retention is asserted through the absence of a commit.
+            releasesWithoutCommit.incrementAndGet();
         }
 
         @Override
@@ -238,9 +519,13 @@ class ReplayTransactionRegistryTest {
     private static final class DeterministicMailbox implements ActorMailbox {
         private final Queue<Runnable> commands = new ArrayDeque<>();
         private boolean running;
+        private boolean rejectNewTasks;
 
         @Override
         public void execute(Runnable command) {
+            if (rejectNewTasks) {
+                throw new java.util.concurrent.RejectedExecutionException("mailbox rejected task");
+            }
             commands.add(command);
         }
 
@@ -268,6 +553,18 @@ class ReplayTransactionRegistryTest {
                     running = false;
                 }
             }
+        }
+
+        private void rejectNewTasks() {
+            rejectNewTasks = true;
+        }
+
+        private void dropQueuedTasks() {
+            commands.clear();
+        }
+
+        private int queuedTaskCount() {
+            return commands.size();
         }
     }
 }

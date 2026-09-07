@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
@@ -37,6 +38,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.lifecycle.SourceRunwayLostException;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
@@ -116,6 +118,13 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     private record WriterPartitionKey(String nodeId, int partition) {}
 
+    record SessionTerminationStateSnapshot(
+        int pendingSessionTerminations,
+        int retiringSourcePartitions,
+        int queuedSyntheticCloseBatches,
+        Map<SourcePartitionKey, Long> pendingTerminationsByGeneration
+    ) {}
+
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
     // Match the kafka-clients library default (5 minutes). This is the broker-enforced fence
     // threshold — how long the consumer can go between poll() calls before the group coordinator
@@ -150,7 +159,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final KafkaConsumerContexts.LivenessScanContext livenessScanContext;
     private final AtomicBoolean isClosed;
     private final Clock clock;
+    private final boolean livenessScanAheadEnabled;
     private final KafkaLivenessScanner livenessScanner = new KafkaLivenessScanner();
+    private final AtomicBoolean retainedEvidenceNeedsEvaluation = new AtomicBoolean();
     private final AtomicLong nextLivenessScanAtMillis = new AtomicLong();
     private final ConcurrentHashMap<ITrafficStreamKey, CompletableFuture<Void>> pendingCommitAcknowledgements =
         new ConcurrentHashMap<>();
@@ -163,6 +174,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         new ConcurrentHashMap<>();
     private final Set<SourceConnectionPartitionGenerationKey> pendingConfirmedDead =
         ConcurrentHashMap.newKeySet();
+    private final Set<SourcePartitionKey> retiringSourcePartitions = ConcurrentHashMap.newKeySet();
     private final Queue<SourceControlEvent.ConfirmedDead> sourceControlQueue = new ConcurrentLinkedQueue<>();
     private final ConcurrentHashMap<WriterPartitionKey, Long> peerNoMoreWritesOffsets =
         new ConcurrentHashMap<>();
@@ -196,6 +208,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     final ConcurrentHashMap<SourceConnectionPartitionGenerationKey, SessionTerminationObligation>
         pendingSessionTerminationObligations = new ConcurrentHashMap<>();
+    private volatile SourcePartitionLifecycleListener sourcePartitionLifecycleListener =
+        SourcePartitionLifecycleListener.NO_OP;
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -214,6 +228,53 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         Clock clock,
         @NonNull KafkaBehavioralPolicy behavioralPolicy
     ) {
+        this(
+            globalContext,
+            kafkaConsumer,
+            topic,
+            keepAliveInterval,
+            clock,
+            behavioralPolicy,
+            TrackingKafkaConsumer.UNBOUNDED_OWNED_RECORDS,
+            TrackingKafkaConsumer.UNBOUNDED_OWNED_BYTES,
+            true
+        );
+    }
+
+    public KafkaTrafficCaptureSource(
+        @NonNull RootReplayerContext globalContext,
+        Consumer<String, byte[]> kafkaConsumer,
+        @NonNull String topic,
+        Duration keepAliveInterval,
+        Clock clock,
+        @NonNull KafkaBehavioralPolicy behavioralPolicy,
+        int maximumOwnedRecords,
+        long maximumOwnedBytes
+    ) {
+        this(
+            globalContext,
+            kafkaConsumer,
+            topic,
+            keepAliveInterval,
+            clock,
+            behavioralPolicy,
+            maximumOwnedRecords,
+            maximumOwnedBytes,
+            true
+        );
+    }
+
+    public KafkaTrafficCaptureSource(
+        @NonNull RootReplayerContext globalContext,
+        Consumer<String, byte[]> kafkaConsumer,
+        @NonNull String topic,
+        Duration keepAliveInterval,
+        Clock clock,
+        @NonNull KafkaBehavioralPolicy behavioralPolicy,
+        int maximumOwnedRecords,
+        long maximumOwnedBytes,
+        boolean livenessScanAheadEnabled
+    ) {
         this.channelContextManager = new ChannelContextManager(globalContext);
         this.livenessScanContext = new KafkaConsumerContexts.LivenessScanContext(globalContext);
         trackingKafkaConsumer = new TrackingKafkaConsumer(
@@ -222,11 +283,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             topic,
             keepAliveInterval,
             clock,
-            this::onKeyFinishedCommitting
+            this::onKeyFinishedCommitting,
+            globalContext.getKafkaCommitStateMetrics(),
+            maximumOwnedRecords,
+            maximumOwnedBytes
         );
         trafficStreamsRead = new AtomicLong();
         this.behavioralPolicy = behavioralPolicy;
         this.clock = clock;
+        this.livenessScanAheadEnabled = livenessScanAheadEnabled;
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
@@ -238,6 +303,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         Collection<SourcePartitionKey> lostPartitions
     ) {
         for (var lostPartition : lostPartitions) {
+            retiringSourcePartitions.add(lostPartition);
             failPendingCommitAcknowledgements(lostPartition);
             int partition = lostPartition.partition();
             activeConnectionScanStates.entrySet().removeIf(entry ->
@@ -253,7 +319,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 control.evidence().partition().equals(lostPartition)
             );
             var active = partitionToActiveConnections.get(partition);
-            if (active == null) continue;
+            if (active == null) {
+                retireSourcePartitionIfDrained(lostPartition);
+                continue;
+            }
             var lostConnections = new ArrayList<ScopedConnectionIdKey>();
             for (var connKey : active) {
                 if (activeConnectionSourcePartitions.remove(connKey, lostPartition)) {
@@ -289,6 +358,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             if (!batch.isEmpty()) {
                 trafficSourceReaderInterruptedCloseQueue.add(batch);
             }
+            retireSourcePartitionIfDrained(lostPartition);
         }
     }
 
@@ -339,6 +409,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                         .addArgument(pendingSessionTerminationObligations::size)
                         .log();
                 }
+                matchingObligations.stream()
+                    .map(obligation -> new SourcePartitionKey(
+                        trackingKafkaConsumer.topic,
+                        obligation.partition(),
+                        obligation.sourceGeneration()
+                    ))
+                    .distinct()
+                    .forEach(this::retireSourcePartitionIfDrained);
                 if (matchingObligations.isEmpty()) {
                     log.atTrace()
                         .setMessage("No source termination obligation was registered for {}")
@@ -351,6 +429,50 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             acknowledgement.completeExceptionally(t);
         }
         return acknowledgement.minimalCompletionStage();
+    }
+
+    private void retireSourcePartitionIfDrained(SourcePartitionKey partition) {
+        var hasOutstandingTermination = pendingSessionTerminationObligations.keySet()
+            .stream()
+            .anyMatch(obligation ->
+                obligation.partition() == partition.partition()
+                    && obligation.sourceGeneration() == partition.sourceGeneration()
+            );
+        if (hasOutstandingTermination) {
+            log.atDebug()
+                .setMessage("Source generation retirement is blocked by session termination; partition={}; state={}")
+                .addArgument(partition)
+                .addArgument(this::sessionTerminationStateSnapshot)
+                .log();
+            return;
+        }
+        if (!retiringSourcePartitions.remove(partition)) {
+            return;
+        }
+        log.atInfo()
+            .setMessage("Source generation {} drained after synthetic session termination")
+            .addArgument(partition)
+            .log();
+        sourcePartitionLifecycleListener.onRetired(List.of(partition));
+    }
+
+    SessionTerminationStateSnapshot sessionTerminationStateSnapshot() {
+        var pendingByGeneration = pendingSessionTerminationObligations.keySet()
+            .stream()
+            .collect(Collectors.groupingBy(
+                obligation -> new SourcePartitionKey(
+                    trackingKafkaConsumer.topic,
+                    obligation.partition(),
+                    obligation.sourceGeneration()
+                ),
+                Collectors.counting()
+            ));
+        return new SessionTerminationStateSnapshot(
+            pendingSessionTerminationObligations.size(),
+            retiringSourcePartitions.size(),
+            trafficSourceReaderInterruptedCloseQueue.size(),
+            Map.copyOf(pendingByGeneration)
+        );
     }
 
     private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
@@ -460,7 +582,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         String kafkaPassword,
         String propertyFilePath,
         @NonNull Clock clock,
-        @NonNull KafkaBehavioralPolicy behavioralPolicy
+        @NonNull KafkaBehavioralPolicy behavioralPolicy,
+        int maximumOwnedRecords,
+        long maximumOwnedBytes,
+        boolean livenessScanAheadEnabled
     ) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, authType, kafkaUserName, kafkaPassword, propertyFilePath);
         kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, defaultPollIntervalMs());
@@ -470,7 +595,41 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             topic,
             DEFAULT_KEEP_ALIVE_PERIOD,
             clock,
-            behavioralPolicy
+            behavioralPolicy,
+            maximumOwnedRecords,
+            maximumOwnedBytes,
+            livenessScanAheadEnabled
+        );
+    }
+
+    public static KafkaTrafficCaptureSource buildKafkaSource(
+        @NonNull RootReplayerContext globalContext,
+        @NonNull String brokers,
+        @NonNull String topic,
+        @NonNull String groupId,
+        @NonNull String authType,
+        String kafkaUserName,
+        String kafkaPassword,
+        String propertyFilePath,
+        @NonNull Clock clock,
+        @NonNull KafkaBehavioralPolicy behavioralPolicy,
+        int maximumOwnedRecords,
+        long maximumOwnedBytes
+    ) throws IOException {
+        return buildKafkaSource(
+            globalContext,
+            brokers,
+            topic,
+            groupId,
+            authType,
+            kafkaUserName,
+            kafkaPassword,
+            propertyFilePath,
+            clock,
+            behavioralPolicy,
+            maximumOwnedRecords,
+            maximumOwnedBytes,
+            true
         );
     }
 
@@ -509,7 +668,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
         CompletableFuture.runAsync(() -> {
             trackingKafkaConsumer.touch(context);
-            runLivenessScanIfDue();
+            evaluateRetainedLivenessEvidence();
+            if (sourceControlQueue.isEmpty()) {
+                runLivenessScanIfDue();
+            }
         }, kafkaExecutor).get();
     }
 
@@ -521,7 +683,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public Optional<Instant> getNextRequiredTouch() {
         var kafkaTouch = trackingKafkaConsumer.getNextRequiredTouch();
-        if (activeConnectionScanStates.isEmpty()) {
+        if (!livenessScanAheadEnabled || activeConnectionScanStates.isEmpty()) {
             return kafkaTouch;
         }
         var scanAt = Instant.ofEpochMilli(nextLivenessScanAtMillis.get());
@@ -566,11 +728,29 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
             return Collections.emptyList();
         }
+        evaluateRetainedLivenessEvidence();
+        pendingControls = drainSourceControls();
+        if (!pendingControls.isEmpty()) {
+            return pendingControls;
+        }
+        runLivenessScanIfDue();
+        pendingControls = drainSourceControls();
+        if (!pendingControls.isEmpty()) {
+            return pendingControls;
+        }
+        if (!trackingKafkaConsumer.isReadCapacityAvailable()) {
+            return Collections.emptyList();
+        }
         try {
             var sourceRecords = trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
                 try {
+                    var isLivenessRecord = KafkaLivenessScanner.isLivenessRecord(kafkaRecord);
+                    var isNoMoreWritesRecord = KafkaLivenessScanner.isNoMoreWritesRecord(kafkaRecord);
                     livenessScanner.ingest(kafkaRecord);
-                    if (KafkaLivenessScanner.isLivenessRecord(kafkaRecord)) {
+                    if (isLivenessRecord || isNoMoreWritesRecord) {
+                        retainedEvidenceNeedsEvaluation.set(true);
+                    }
+                    if (isLivenessRecord) {
                         var chunk = ProxyLivenessSnapshotChunk.parseFrom(kafkaRecord.value());
                         if (chunk.getPartition() != kafkaRecord.partition()
                             || chunk.getRoutingPlanId().isBlank()) {
@@ -598,7 +778,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                         var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
                         return (SourceInput) new KafkaLivenessSnapshotRecord(syntheticStream, key, chunk);
                     }
-                    if (KafkaLivenessScanner.isNoMoreWritesRecord(kafkaRecord)) {
+                    if (isNoMoreWritesRecord) {
                         var declaration = ProxyNoMoreWrites.parseFrom(kafkaRecord.value());
                         if (!declaration.getNodeId().equals(declaration.getDeclaredBy())) {
                             peerNoMoreWritesOffsets.merge(
@@ -753,8 +933,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     }
                 }
             }).filter(Objects::nonNull).collect(Collectors.toCollection(ArrayList<SourceInput>::new));
-            runLivenessScanIfDue();
-            sourceRecords.addAll(drainSourceControls());
             return List.copyOf(sourceRecords);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
@@ -779,7 +957,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     private void runLivenessScanIfDue() {
-        if (activeConnectionScanStates.isEmpty()) {
+        if (!livenessScanAheadEnabled || activeConnectionScanStates.isEmpty()) {
             return;
         }
         long now = clock.millis();
@@ -787,16 +965,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         if (now < next || !nextLivenessScanAtMillis.compareAndSet(next, now + LIVENESS_SCAN_INTERVAL.toMillis())) {
             return;
         }
-        var candidates = activeConnectionScanStates.entrySet()
-            .stream()
-            .map(entry -> new KafkaLivenessScanner.Candidate(
-                entry.getValue().partition(),
-                new SourceConnectionKey(entry.getKey().nodeId, entry.getKey().connectionId),
-                entry.getValue().routingPlanId(),
-                entry.getValue().lastReplayedOffset(),
-                entry.getValue().requirement()
-            ))
-            .toList();
+        var candidates = activeLivenessCandidates();
         TrackingKafkaConsumer.ScanCycle cycle;
         List<ScanEvidence> evidenceResults;
         long scanStartNanos = System.nanoTime();
@@ -827,15 +996,48 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             livenessScanContext.addCaughtException(e);
             throw e;
         }
+        handleLivenessEvidence(evidenceResults, true);
+    }
+
+    private List<KafkaLivenessScanner.Candidate> activeLivenessCandidates() {
+        return activeConnectionScanStates.entrySet()
+            .stream()
+            .map(entry -> new KafkaLivenessScanner.Candidate(
+                entry.getValue().partition(),
+                new SourceConnectionKey(entry.getKey().nodeId, entry.getKey().connectionId),
+                entry.getValue().routingPlanId(),
+                entry.getValue().lastReplayedOffset(),
+                entry.getValue().requirement()
+            ))
+            .toList();
+    }
+
+    private void evaluateRetainedLivenessEvidence() {
+        if (!retainedEvidenceNeedsEvaluation.getAndSet(false)
+            || activeConnectionScanStates.isEmpty()) {
+            return;
+        }
+        handleLivenessEvidence(
+            livenessScanner.evaluateRetained(activeLivenessCandidates()),
+            false
+        );
+    }
+
+    private void handleLivenessEvidence(
+        List<ScanEvidence> evidenceResults,
+        boolean recordScanVerdicts
+    ) {
         for (var evidence : evidenceResults) {
-            livenessScanContext.recordVerdict(switch (evidence) {
-                case ScanEvidence.FollowUpPresent ignored ->
-                    IKafkaConsumerContexts.LivenessScanVerdict.FOLLOW_UP_FOUND;
-                case ScanEvidence.ConfirmedAbsent ignored ->
-                    IKafkaConsumerContexts.LivenessScanVerdict.CONFIRMED_ABSENT;
-                case ScanEvidence.Inconclusive ignored ->
-                    IKafkaConsumerContexts.LivenessScanVerdict.INCONCLUSIVE;
-            });
+            if (recordScanVerdicts) {
+                livenessScanContext.recordVerdict(switch (evidence) {
+                    case ScanEvidence.FollowUpPresent ignored ->
+                        IKafkaConsumerContexts.LivenessScanVerdict.FOLLOW_UP_FOUND;
+                    case ScanEvidence.ConfirmedAbsent ignored ->
+                        IKafkaConsumerContexts.LivenessScanVerdict.CONFIRMED_ABSENT;
+                    case ScanEvidence.Inconclusive ignored ->
+                        IKafkaConsumerContexts.LivenessScanVerdict.INCONCLUSIVE;
+                });
+            }
             if (!(evidence instanceof ScanEvidence.ConfirmedAbsent confirmedAbsent)) {
                 continue;
             }
@@ -905,7 +1107,19 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     public boolean hasPendingSourceControl() {
-        return !sourceControlQueue.isEmpty() || !trafficSourceReaderInterruptedCloseQueue.isEmpty();
+        return retainedEvidenceNeedsEvaluation.get()
+            || !sourceControlQueue.isEmpty()
+            || !trafficSourceReaderInterruptedCloseQueue.isEmpty();
+    }
+
+    @Override
+    public boolean isReadCapacityAvailable() {
+        return trackingKafkaConsumer.isReadCapacityAvailable();
+    }
+
+    @Override
+    public void setReadCapacityAvailableListener(Runnable listener) {
+        trackingKafkaConsumer.setReadCapacityAvailableListener(listener);
     }
 
     @Override
@@ -950,7 +1164,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             if (result == CommitResult.IGNORED) {
                 pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
                 acknowledgement.completeExceptionally(
-                    new SourceRunwayLostException(sourcePartitionFor(trafficStreamKey))
+                    new SourceCommitNotAcceptedException(sourcePartitionFor(trafficStreamKey))
                 );
             } else if (result == CommitResult.IMMEDIATE) {
                 pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
@@ -1002,6 +1216,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
+        sourcePartitionLifecycleListener = Objects.requireNonNull(listener);
         trackingKafkaConsumer.setSourcePartitionLifecycleListener(listener);
     }
 
@@ -1038,6 +1253,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 pendingCommitAcknowledgements.clear();
                 pendingSessionTerminationObligations.forEach((key, obligation) -> obligation.fail(cause));
                 pendingSessionTerminationObligations.clear();
+                retiringSourcePartitions.clear();
                 kafkaExecutor.shutdownNow();
             }
         }

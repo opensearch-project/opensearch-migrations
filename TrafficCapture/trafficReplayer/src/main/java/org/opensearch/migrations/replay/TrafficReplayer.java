@@ -70,6 +70,8 @@ public class TrafficReplayer {
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
     static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
+    static final int DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS = 100_000;
+    static final long DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES = 1024L * 1024 * 1024;
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
@@ -253,6 +255,24 @@ public class TrafficReplayer {
             arity = 1,
             description = "Maximum number of requests at a time that can be outstanding")
         int maxConcurrentRequests = 10000;
+        @Parameter(
+            required = false,
+            names = { "--max-owned-kafka-records", "--maxOwnedKafkaRecords" },
+            arity = 1,
+            description = "Hard maximum number of Kafka records owned locally before replay intake pauses.")
+        int maximumOwnedKafkaRecords = DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS;
+        @Parameter(
+            required = false,
+            names = { "--max-owned-kafka-bytes", "--maxOwnedKafkaBytes" },
+            arity = 1,
+            description = "Hard maximum serialized bytes of Kafka records owned locally before replay intake pauses.")
+        long maximumOwnedKafkaBytes = DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES;
+        @Parameter(
+            required = false,
+            names = { "--disable-liveness-scanner", "--disableLivenessScanner" },
+            arity = 0,
+            description = "Disable Kafka metadata lookahead. Structural proof is then discovered by normal replay.")
+        boolean disableLivenessScanner;
         @Parameter(
             required = false,
             names = { "--num-client-threads", "--numClientThreads" },
@@ -441,6 +461,15 @@ public class TrafficReplayer {
             }
         }
 
+        void validateOwnershipLimits() {
+            if (maximumOwnedKafkaRecords <= 0) {
+                throw new ParameterException("--max-owned-kafka-records must be positive");
+            }
+            if (maximumOwnedKafkaBytes <= 0) {
+                throw new ParameterException("--max-owned-kafka-bytes must be positive");
+            }
+        }
+
         boolean isKafkaTrafficEnableMSKAuth() {
             return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
         }
@@ -550,6 +579,7 @@ public class TrafficReplayer {
         try {
             parser.parse(args);
             p.validateKafkaAuthFlags();
+            p.validateOwnershipLimits();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -750,11 +780,16 @@ public class TrafficReplayer {
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
+                    " maxOwnedKafkaRecords={} maxOwnedKafkaBytes={}" +
+                    " livenessScannerEnabled={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
                 .addArgument(params.getEffectiveLookaheadTimeSeconds())
                 .addArgument(params.speedupFactor)
                 .addArgument(params.maxConcurrentRequests)
+                .addArgument(params.maximumOwnedKafkaRecords)
+                .addArgument(params.maximumOwnedKafkaBytes)
+                .addArgument(!params.disableLivenessScanner)
                 .addArgument(params.targetServerResponseTimeoutSeconds)
                 .addArgument(params.observedPacketConnectionTimeout)
                 .addArgument(uri)

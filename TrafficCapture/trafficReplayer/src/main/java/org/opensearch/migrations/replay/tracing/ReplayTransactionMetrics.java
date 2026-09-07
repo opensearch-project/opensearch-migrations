@@ -16,6 +16,7 @@ public final class ReplayTransactionMetrics implements ReplayTransaction.Metrics
     public static final AttributeKey<String> REASON_ATTRIBUTE = AttributeKey.stringKey("reason");
     public static final AttributeKey<String> OUTCOME_ATTRIBUTE = AttributeKey.stringKey("outcome");
     public static final AttributeKey<String> ACTION_ATTRIBUTE = AttributeKey.stringKey("action");
+    private static final String TRANSACTIONS_UNIT = "transactions";
 
     public static final class MetricNames {
         private MetricNames() {}
@@ -35,19 +36,19 @@ public final class ReplayTransactionMetrics implements ReplayTransaction.Metrics
 
     public ReplayTransactionMetrics(@NonNull Meter meter) {
         activePhase = meter.upDownCounterBuilder(MetricNames.ACTIVE_PHASE)
-            .setUnit("transactions")
+            .setUnit(TRANSACTIONS_UNIT)
             .build();
         runwayState = meter.upDownCounterBuilder(MetricNames.RUNWAY_STATE)
-            .setUnit("transactions")
+            .setUnit(TRANSACTIONS_UNIT)
             .build();
         runwayLoss = meter.counterBuilder(MetricNames.RUNWAY_LOSS)
             .setUnit("events")
             .build();
         terminalOutcome = meter.counterBuilder(MetricNames.TERMINAL_OUTCOME)
-            .setUnit("transactions")
+            .setUnit(TRANSACTIONS_UNIT)
             .build();
         disposition = meter.counterBuilder(MetricNames.DISPOSITION)
-            .setUnit("transactions")
+            .setUnit(TRANSACTIONS_UNIT)
             .build();
     }
 

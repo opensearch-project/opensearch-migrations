@@ -66,28 +66,28 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     ) {
         this.context = tupleHandlingContext;
         this.sourcePair = sourcePair;
-        var transformationStatus = transformedTargetRequestAndResponseList == null ? null :
+        var resolvedTransformationStatus = transformedTargetRequestAndResponseList == null ? null :
             transformedTargetRequestAndResponseList.getTransformationStatus();
-        var responseList = transformedTargetRequestAndResponseList == null ? List.<Response>of() :
+        var resolvedResponses = transformedTargetRequestAndResponseList == null ? List.<Response>of() :
             transformedTargetRequestAndResponseList.responses().stream()
             .map(arr -> new Response(arr.packets.stream().map(AbstractMap.SimpleEntry::getValue)
                 .collect(Collectors.toList()), arr.error, arr.duration))
             .collect(Collectors.toList());
-        var targetRequestPayload = transformedTargetRequestAndResponseList == null ? null :
+        var claimedTargetRequestPayload = transformedTargetRequestAndResponseList == null ? null :
             transformedTargetRequestAndResponseList.claimDiagnosticPayload();
-        ByteBufList targetRequestData;
+        ByteBufList resolvedTargetRequestData;
         try {
-            targetRequestData = targetRequestPayload == null ? null : targetRequestPayload.packets();
+            resolvedTargetRequestData = claimedTargetRequestPayload == null ? null : claimedTargetRequestPayload.packets();
         } catch (Throwable t) {
-            if (targetRequestPayload != null) {
-                targetRequestPayload.close();
+            if (claimedTargetRequestPayload != null) {
+                claimedTargetRequestPayload.close();
             }
             throw t;
         }
-        this.targetRequestPayload = targetRequestPayload;
-        this.targetRequestData = targetRequestData;
-        this.transformationStatus = transformationStatus;
-        this.responseList = responseList;
+        this.targetRequestPayload = claimedTargetRequestPayload;
+        this.targetRequestData = resolvedTargetRequestData;
+        this.transformationStatus = resolvedTransformationStatus;
+        this.responseList = resolvedResponses;
         this.topLevelErrorCause = topLevelErrorCause;
     }
 

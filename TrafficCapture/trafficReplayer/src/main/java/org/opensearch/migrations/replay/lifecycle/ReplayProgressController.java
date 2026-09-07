@@ -66,9 +66,12 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         }
     }
 
+    private record PartitionIdentity(@NonNull String sourceId, int partition) {}
+
     private final Executor ownerExecutor;
     private final ReplayReadGate readGate;
     private final Map<SourcePartitionKey, PartitionProgress> partitions = new LinkedHashMap<>();
+    private final Map<PartitionIdentity, Integer> endedGenerationWatermarks = new LinkedHashMap<>();
     private final AtomicInteger outstandingSnapshot = new AtomicInteger();
     private final AtomicReference<CompletionGate<Void>> quiescenceGate =
         new AtomicReference<>(completedGate());
@@ -103,6 +106,11 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
     public void onRevoked(@NonNull Collection<SourcePartitionKey> revoked) {
         ownerExecutor.execute(() -> {
             for (var partition : revoked) {
+                endedGenerationWatermarks.merge(
+                    identity(partition),
+                    partition.sourceGeneration(),
+                    Math::max
+                );
                 var progress = partitions.get(partition);
                 if (progress == null) {
                     continue;
@@ -123,12 +131,22 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
     ) {
         var completion = new CompletableFuture<WorkToken>();
         ownerExecutor.execute(() -> {
-            var progress = partitions.computeIfAbsent(partition, ignored -> new PartitionProgress());
-            if (progress.revoking) {
+            var progress = partitions.get(partition);
+            if (progress != null && progress.revoking) {
                 completion.completeExceptionally(
                     new IllegalStateException("source partition generation is revoking: " + partition)
                 );
                 return;
+            }
+            if (isEnded(partition)) {
+                completion.completeExceptionally(
+                    new IllegalStateException("source partition generation already ended: " + partition)
+                );
+                return;
+            }
+            if (progress == null) {
+                progress = new PartitionProgress();
+                partitions.put(partition, progress);
             }
             progress.admissionWatermark = later(progress.admissionWatermark, sourceTime);
             var entry = new WorkEntry(workId, progress.admissionWatermark);
@@ -141,6 +159,15 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
             publish();
         });
         return completion.minimalCompletionStage();
+    }
+
+    private boolean isEnded(SourcePartitionKey partition) {
+        return endedGenerationWatermarks.getOrDefault(identity(partition), -1)
+            >= partition.sourceGeneration();
+    }
+
+    private static PartitionIdentity identity(SourcePartitionKey partition) {
+        return new PartitionIdentity(partition.sourceId(), partition.partition());
     }
 
     /**
@@ -221,7 +248,12 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         private void settle() {
             var progress = partitions.get(partition);
             if (progress == null) {
-                throw new IllegalStateException("source partition was retired before work settled: " + partition);
+                throw new IllegalStateException(
+                    "source partition was retired before work settled: "
+                        + partition
+                        + "; work="
+                        + entry.workId
+                );
             }
             if (entry.settled) {
                 return;

@@ -86,11 +86,14 @@ public abstract class ByteBufListProducer extends AbstractReferenceCounted
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        var released = false;
         try {
             releasePreparedRequest();
-        } catch (Throwable t) {
-            closed.set(false);
-            throw t;
+            released = true;
+        } finally {
+            if (!released) {
+                closed.set(false);
+            }
         }
     }
 

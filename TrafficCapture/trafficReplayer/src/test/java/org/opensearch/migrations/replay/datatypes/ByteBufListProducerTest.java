@@ -108,6 +108,22 @@ class ByteBufListProducerTest {
     }
 
     @Test
+    void untrackedSharedOwnershipFailureDoesNotPreventALaterSuccessfulClose() {
+        var source = Unpooled.wrappedBuffer("request".getBytes(StandardCharsets.UTF_8));
+        var packets = new ByteBufList(source);
+        source.release();
+        var producer = ByteBufListProducer.of(packets);
+        producer.retain();
+
+        Assertions.assertThrows(IllegalStateException.class, producer::close);
+        producer.release();
+        producer.close();
+
+        Assertions.assertEquals(0, producer.refCnt());
+        Assertions.assertTrue(packets.isClosed());
+    }
+
+    @Test
     void failedReleaseKeepsOwnershipOpenUntilAReleaseSucceeds() {
         var metrics = new RecordingOwnershipMetrics();
         var tracker = new ResourceOwnership.Tracker(

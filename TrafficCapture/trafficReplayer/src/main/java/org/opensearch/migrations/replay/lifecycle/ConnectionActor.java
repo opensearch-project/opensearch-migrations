@@ -3,7 +3,10 @@ package org.opensearch.migrations.replay.lifecycle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -88,6 +91,10 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         void abortDuration(Duration duration);
 
         void pendingAbortChildChanged(AbortChild child, int delta);
+
+        default void fatalEventLoopTermination() {
+            // Optional for non-production actor metrics.
+        }
     }
 
     public interface TargetExchange<P, R> {
@@ -175,7 +182,9 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     private final TargetExchange<P, R> targetExchange;
     private final Metrics metrics;
     private final LongSupplier nanoTime;
+    private final Object lifecycleLock = new Object();
     private final Deque<Command<P, R>> commands = new ArrayDeque<>();
+    private final Set<Command<P, R>> obligations = new LinkedHashSet<>();
     private final CompletionGate<SessionOutcome> termination = new CompletionGate<>();
     private ActorMailbox.ScheduledTask headTimer;
     private RequestCommand<P, R> activeRequest;
@@ -183,8 +192,11 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     private long activeStartedNanos;
     private long abortStartedNanos;
     private boolean orderedCloseActive;
+    private boolean targetAbortPending;
+    private Throwable abortCleanupFailure;
     private State state = State.OPEN;
-    private volatile boolean mailboxAbandoned;
+    private boolean mailboxAbandoned;
+    private CancellationException mailboxAbandonCause;
 
     public ConnectionActor(
         @NonNull ConnectionSessionKey sessionKey,
@@ -217,20 +229,26 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         this.nanoTime = nanoTime;
     }
 
-    /**
-     * The actor's mailbox is the session's event loop, so a pool shut down without first aborting its
-     * actors takes the mailbox with it.  Every transition runs as a posted command, so a dropped post
-     * leaves whoever is waiting on the corresponding gate waiting forever.  Route posts through here so
-     * that a rejected one fences the actor instead of vanishing.
-     */
-    private void post(Runnable command) {
-        if (mailboxAbandoned) {
-            return;
+    private boolean post(Runnable command) {
+        synchronized (lifecycleLock) {
+            if (mailboxAbandoned) {
+                return false;
+            }
+            try {
+                mailbox.execute(() -> runMailboxTransition(command));
+                return true;
+            } catch (RejectedExecutionException e) {
+                abandonOnDeadMailboxLocked(e);
+                return false;
+            }
         }
-        try {
-            mailbox.execute(command);
-        } catch (RejectedExecutionException e) {
-            abandonOnDeadMailbox(e);
+    }
+
+    private void runMailboxTransition(Runnable command) {
+        synchronized (lifecycleLock) {
+            if (!mailboxAbandoned) {
+                command.run();
+            }
         }
     }
 
@@ -243,33 +261,95 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         abandon(cause);
     }
 
-    private void abandonOnDeadMailbox(RejectedExecutionException rejection) {
+    private void abandonOnDeadMailboxLocked(RejectedExecutionException rejection) {
         var cause = new CancellationException(
             "the event loop backing session " + sessionKey + " terminated before the session did"
         );
         cause.initCause(rejection);
-        abandon(cause);
+        abandonLocked(cause);
     }
 
     /**
-     * Settles everything the actor still owes, directly rather than through the mailbox.  Bypassing the
-     * mailbox is what makes this safe to do off-thread: a mailbox that no longer runs commands cannot be
-     * running one now, so there is no concurrent transition to race with.  Every gate involved ignores a
-     * repeated completion, so being called more than once is harmless.
+     * Settles everything the actor still owes without relying on another mailbox delivery.  Mailbox
+     * transitions use the same lock, so direct abandonment cannot race a command that is still running.
      */
     private void abandon(CancellationException cause) {
+        synchronized (lifecycleLock) {
+            abandonLocked(cause);
+        }
+    }
+
+    private void abandonLocked(CancellationException cause) {
         if (mailboxAbandoned) {
             return;
         }
         mailboxAbandoned = true;
-        for (var command : commands) {
+        mailboxAbandonCause = cause;
+        Throwable cleanupFailure = null;
+        try {
+            setHeadWaitReason(null);
+        } catch (Throwable t) {
+            cleanupFailure = combineFailures(cleanupFailure, t);
+        }
+        try {
+            cancelHeadTimer();
+        } catch (Throwable t) {
+            cleanupFailure = combineFailures(cleanupFailure, t);
+        }
+        if (targetAbortPending) {
+            targetAbortPending = false;
+            try {
+                metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
+            } catch (Throwable t) {
+                cleanupFailure = combineFailures(cleanupFailure, t);
+            }
+        }
+        if (activeRequest != null) {
+            try {
+                recordActiveDuration();
+            } catch (Throwable t) {
+                cleanupFailure = combineFailures(cleanupFailure, t);
+            }
+        }
+        if (state == State.ABORTING) {
+            try {
+                metrics.abortDuration(elapsedSince(abortStartedNanos));
+            } catch (Throwable t) {
+                cleanupFailure = combineFailures(cleanupFailure, t);
+            }
+        }
+        for (var command : new ArrayList<>(obligations)) {
             if (command instanceof RequestCommand<P, R> request) {
+                request.settled = true;
+                cleanupFailure = combineFailures(
+                    cleanupFailure,
+                    cancelPreparationFailure(request)
+                );
+                cleanupFailure = combineFailures(
+                    cleanupFailure,
+                    releasePreparedFailure(request)
+                );
                 request.completion.complete(new TargetOutcome.Cancelled<>(cause));
             } else if (command instanceof CloseCommand<P, R> close) {
                 close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
             }
+            try {
+                untrackObligation(command);
+            } catch (Throwable t) {
+                cleanupFailure = combineFailures(cleanupFailure, t);
+            }
         }
-        termination.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
+        cleanupFailure = combineFailures(cleanupFailure, abortCleanupFailure);
+        abortCleanupFailure = null;
+        commands.clear();
+        activeRequest = null;
+        orderedCloseActive = false;
+        state = State.TERMINATED;
+        termination.complete(
+            cleanupFailure == null
+                ? new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause)
+                : new SessionOutcome.Failed(cleanupFailure)
+        );
     }
 
     public CompletionStage<TargetOutcome<R>> admitRequest(
@@ -282,16 +362,21 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         }
         var command = new RequestCommand<P, R>(requestId, scheduledStart);
         command.preparationCompletion = preparation.toCompletableFuture();
-        post(() -> admit(command));
+        var accepted = trackObligation(command);
         preparation.whenComplete((outcome, failure) ->
-            post(() -> onPreparationSettled(command, outcome, failure))
+            stagePreparation(command, outcome, failure)
         );
+        if (accepted) {
+            post(() -> admit(command));
+        }
         return command.completion.stage();
     }
 
     public CompletionStage<SessionOutcome> admitClose(@NonNull Instant scheduledStart) {
         var command = new CloseCommand<P, R>(scheduledStart);
-        post(() -> admit(command));
+        if (trackObligation(command)) {
+            post(() -> admit(command));
+        }
         return command.completion.stage();
     }
 
@@ -307,6 +392,32 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         return termination.stage();
     }
 
+    private boolean trackObligation(Command<P, R> command) {
+        synchronized (lifecycleLock) {
+            if (mailboxAbandoned) {
+                settleAfterAbandonment(command);
+                return false;
+            }
+            obligations.add(command);
+            metrics.queuedCommandsChanged(1);
+            return true;
+        }
+    }
+
+    private void settleAfterAbandonment(Command<P, R> command) {
+        var cause = mailboxAbandonCause == null
+            ? new CancellationException("session mailbox is no longer available: " + sessionKey)
+            : mailboxAbandonCause;
+        if (command instanceof RequestCommand<P, R> request) {
+            request.settled = true;
+            cancelPreparationFailure(request);
+            releasePreparedQuietly(request);
+            request.completion.complete(new TargetOutcome.Cancelled<>(cause));
+        } else if (command instanceof CloseCommand<P, R> close) {
+            close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
+        }
+    }
+
     private void admit(Command<P, R> command) {
         assertInMailbox();
         if (state != State.OPEN && state != State.ACTIVE) {
@@ -317,7 +428,6 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             state = State.ORDERED_CLOSING;
         }
         commands.addLast(command);
-        metrics.queuedCommandsChanged(1);
         if (commands.peekFirst() == command) {
             startHead();
         }
@@ -327,19 +437,20 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         var cause = new CancellationException("session is no longer accepting work: " + sessionKey);
         if (command instanceof RequestCommand<P, R> request) {
             request.settled = true;
-            request.preparationCompletion.cancel(false);
+            cancelPreparationFailure(request);
+            releasePreparedQuietly(request);
             request.completion.complete(new TargetOutcome.Cancelled<>(cause));
         } else if (command instanceof CloseCommand<P, R> close) {
             close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
         }
+        untrackObligation(command);
     }
 
-    private void onPreparationSettled(
+    private void stagePreparation(
         RequestCommand<P, R> command,
         PreparationOutcome<P> outcome,
         Throwable failure
     ) {
-        assertInMailbox();
         var normalized = failure == null
             ? outcome
             : new PreparationOutcome.Failed<P>(unwrap(failure));
@@ -348,12 +459,22 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                 new NullPointerException("preparation completed without an outcome")
             );
         }
-        if (command.settled || state == State.TERMINATED || state == State.ABORTING) {
+        synchronized (lifecycleLock) {
             command.preparation = normalized;
+            if (mailboxAbandoned || command.settled) {
+                releasePreparedQuietly(command);
+                return;
+            }
+        }
+        post(() -> onPreparationSettled(command));
+    }
+
+    private void onPreparationSettled(RequestCommand<P, R> command) {
+        assertInMailbox();
+        if (command.settled || state == State.TERMINATED || state == State.ABORTING) {
             releasePreparedQuietly(command);
             return;
         }
-        command.preparation = normalized;
         if (commands.peekFirst() == command) {
             tryRunHead();
         }
@@ -373,14 +494,21 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             tryRunHead();
         } else {
             setHeadWaitReason(HeadWaitReason.SCHEDULED_START);
-            headTimer = mailbox.schedule(() -> {
-                assertInMailbox();
-                if (commands.peekFirst() == head) {
-                    head.markDue();
-                    headTimer = null;
-                    tryRunHead();
-                }
-            }, delay);
+            try {
+                headTimer = mailbox.schedule(
+                    () -> runMailboxTransition(() -> {
+                        assertInMailbox();
+                        if (commands.peekFirst() == head) {
+                            head.markDue();
+                            headTimer = null;
+                            tryRunHead();
+                        }
+                    }),
+                    delay
+                );
+            } catch (RejectedExecutionException e) {
+                abandonOnDeadMailboxLocked(e);
+            }
         }
     }
 
@@ -510,12 +638,12 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             throw new IllegalStateException("settled request was not the actor head");
         }
         commands.removeFirst();
-        metrics.queuedCommandsChanged(-1);
+        untrackObligation(request);
         if (state == State.ACTIVE) {
             state = State.OPEN;
         }
         startHead();
-        post(() -> request.completion.complete(outcome));
+        request.completion.complete(outcome);
     }
 
     private void runOrderedClose(CloseCommand<P, R> close) {
@@ -539,7 +667,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                     : new SessionOutcome.Failed(unwrap(failure));
                 close.completion.complete(outcome);
                 commands.removeFirst();
-                metrics.queuedCommandsChanged(-1);
+                untrackObligation(close);
                 finishTermination(outcome);
             })
         );
@@ -565,9 +693,10 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                 close.completion.complete(new SessionOutcome.Aborted(reason, cause));
             }
         }
-        var settledQueuedCleanupFailure = queuedCleanupFailure;
+        abortCleanupFailure = combineFailures(abortCleanupFailure, queuedCleanupFailure);
 
         CompletionStage<Void> abortStage;
+        targetAbortPending = true;
         metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, 1);
         try {
             abortStage = targetExchange.abort(cause);
@@ -576,26 +705,38 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         }
         abortStage.whenComplete((ignored, failure) ->
             post(() -> {
-                metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
+                if (targetAbortPending) {
+                    targetAbortPending = false;
+                    metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
+                }
                 orderedCloseActive = false;
                 var terminationFailure = failure == null ? null : unwrap(failure);
                 if (activeRequest != null) {
                     recordActiveDuration();
-                    activeRequest.settled = true;
-                    activeRequest.completion.complete(new TargetOutcome.Cancelled<>(cause));
-                    terminationFailure = combineFailures(
-                        terminationFailure,
-                        releasePreparedFailure(activeRequest)
-                    );
-                    activeRequest = null;
                 }
+                for (var command : new ArrayList<>(obligations)) {
+                    if (command instanceof RequestCommand<P, R> request) {
+                        request.settled = true;
+                        terminationFailure = combineFailures(
+                            terminationFailure,
+                            cancelPreparationFailure(request)
+                        );
+                        terminationFailure = combineFailures(
+                            terminationFailure,
+                            releasePreparedFailure(request)
+                        );
+                        request.completion.complete(new TargetOutcome.Cancelled<>(cause));
+                    } else if (command instanceof CloseCommand<P, R> close) {
+                        close.completion.complete(new SessionOutcome.Aborted(reason, cause));
+                    }
+                    untrackObligation(command);
+                }
+                activeRequest = null;
                 terminationFailure = combineFailures(
                     terminationFailure,
-                    settledQueuedCleanupFailure
+                    abortCleanupFailure
                 );
-                if (!commands.isEmpty()) {
-                    metrics.queuedCommandsChanged(-commands.size());
-                }
+                abortCleanupFailure = null;
                 commands.clear();
                 metrics.abortDuration(elapsedSince(abortStartedNanos));
                 finishTermination(
@@ -612,9 +753,24 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         CancellationException cause
     ) {
         request.settled = true;
-        request.preparationCompletion.cancel(false);
+        var cleanupFailure = cancelPreparationFailure(request);
         request.completion.complete(new TargetOutcome.Cancelled<>(cause));
-        return releasePreparedFailure(request);
+        return combineFailures(cleanupFailure, releasePreparedFailure(request));
+    }
+
+    private Throwable cancelPreparationFailure(RequestCommand<P, R> request) {
+        try {
+            request.preparationCompletion.cancel(false);
+            return null;
+        } catch (Throwable t) {
+            return t;
+        }
+    }
+
+    private void untrackObligation(Command<P, R> command) {
+        if (obligations.remove(command)) {
+            metrics.queuedCommandsChanged(-1);
+        }
     }
 
     private void finishTermination(SessionOutcome outcome) {
@@ -659,8 +815,9 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
     private void cancelHeadTimer() {
         if (headTimer != null) {
-            headTimer.cancel();
+            var timer = headTimer;
             headTimer = null;
+            timer.cancel();
         }
     }
 

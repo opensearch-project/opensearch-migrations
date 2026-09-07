@@ -55,7 +55,10 @@ public class TrafficCaptureSourceFactory {
                 appParams.kafkaTrafficPassword,
                 appParams.kafkaTrafficPropertyFile,
                 Clock.systemUTC(),
-                new KafkaBehavioralPolicy()
+                new KafkaBehavioralPolicy(),
+                appParams.maximumOwnedKafkaRecords,
+                appParams.maximumOwnedKafkaBytes,
+                !appParams.disableLivenessScanner
             );
         } else {
             return new InputStreamOfTraffic(

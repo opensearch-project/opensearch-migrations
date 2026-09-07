@@ -149,6 +149,51 @@ class ConnectionReplaySessionStateTest extends InstrumentationTest {
     }
 
     @Test
+    void channelFactoryErrorSettlesAcquisitionAndAllowsRetry() throws Exception {
+        var metrics = new RecordingMetrics();
+        var transactionContext = rootContext.getTestConnectionRequestContext("factory-error", 0);
+        var targetContext = transactionContext.createTargetRequestContext();
+        var eventLoop = eventLoopGroup.next();
+        var channel = new ControlledChannel(eventLoop);
+        var attempts = new AtomicInteger();
+        var factoryFailure = new AssertionError("channel factory failed");
+        var session = new ConnectionReplaySession(
+            eventLoop,
+            transactionContext.getChannelKeyContext(),
+            (ignoredEventLoop, ignoredContext, ignoredCancellation) -> {
+                if (attempts.getAndIncrement() == 0) {
+                    throw factoryFailure;
+                }
+                return TextTrackedFuture.completedFuture(
+                    channel.connectFuture,
+                    () -> "controlled channel connection"
+                );
+            },
+            0,
+            metrics
+        );
+
+        var failedAcquisition = session.getChannelFutureInActiveState(targetContext);
+        var failure = Assertions.assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> failedAcquisition.get(Duration.ofSeconds(5))
+        );
+        Assertions.assertSame(factoryFailure, failure.getCause());
+        metrics.awaitCount(TargetExchangeState.ChannelState.ABSENT, 1);
+
+        Assertions.assertSame(
+            channel.connectFuture,
+            session.getChannelFutureInActiveState(targetContext).get(Duration.ofSeconds(5))
+        );
+        metrics.awaitCount(TargetExchangeState.ChannelState.ACTIVE, 1);
+
+        session.cancelAndClose(new CancellationException("test complete")).get(Duration.ofSeconds(5));
+        metrics.awaitCount(TargetExchangeState.ChannelState.CLOSED, 1);
+        session.retireMetrics();
+        metrics.awaitAllZero();
+    }
+
+    @Test
     void cancellationRejectsAndClosesAChannelDeliveredAfterAcquisition() throws Exception {
         var metrics = new RecordingMetrics();
         var transactionContext = rootContext.getTestConnectionRequestContext("cancel-acquisition", 0);

@@ -90,4 +90,64 @@ public class TrafficReplayerKafkaParameterTest {
         Assertions.assertTrue(allowlist.isAllowed("VERSION_CONFLICT_ENGINE_EXCEPTION"));
         Assertions.assertFalse(allowlist.isAllowed("illegal_argument_exception"));
     }
+
+    @Test
+    void kafkaOwnershipBudgetsHaveBoundedDefaultsAndNormalizedFlags() throws Exception {
+        var parseArgs = TrafficReplayer.class.getDeclaredMethod("parseArgs", String[].class);
+        parseArgs.setAccessible(true);
+
+        var defaults = new TrafficReplayer.Parameters();
+        Assertions.assertEquals(
+            TrafficReplayer.DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS,
+            defaults.maximumOwnedKafkaRecords
+        );
+        Assertions.assertEquals(
+            TrafficReplayer.DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES,
+            defaults.maximumOwnedKafkaBytes
+        );
+
+        var parameters = (TrafficReplayer.Parameters) parseArgs.invoke(
+            null,
+            (Object) new String[] {
+                "--target-uri", "http://localhost:9200",
+                "--max-owned-kafka-records", "123",
+                "--max-owned-kafka-bytes", "456"
+            }
+        );
+        Assertions.assertEquals(123, parameters.maximumOwnedKafkaRecords);
+        Assertions.assertEquals(456, parameters.maximumOwnedKafkaBytes);
+    }
+
+    @Test
+    void kafkaOwnershipBudgetsMustBePositive() {
+        var parameters = new TrafficReplayer.Parameters();
+        parameters.maximumOwnedKafkaRecords = 0;
+        Assertions.assertThrows(
+            com.beust.jcommander.ParameterException.class,
+            parameters::validateOwnershipLimits
+        );
+        parameters.maximumOwnedKafkaRecords = 1;
+        parameters.maximumOwnedKafkaBytes = 0;
+        Assertions.assertThrows(
+            com.beust.jcommander.ParameterException.class,
+            parameters::validateOwnershipLimits
+        );
+    }
+
+    @Test
+    void kafkaLivenessScannerCanBeDisabled() throws Exception {
+        var parseArgs = TrafficReplayer.class.getDeclaredMethod("parseArgs", String[].class);
+        parseArgs.setAccessible(true);
+
+        Assertions.assertFalse(new TrafficReplayer.Parameters().disableLivenessScanner);
+        var parameters = (TrafficReplayer.Parameters) parseArgs.invoke(
+            null,
+            (Object) new String[] {
+                "--target-uri", "http://localhost:9200",
+                "--disable-liveness-scanner"
+            }
+        );
+
+        Assertions.assertTrue(parameters.disableLivenessScanner);
+    }
 }

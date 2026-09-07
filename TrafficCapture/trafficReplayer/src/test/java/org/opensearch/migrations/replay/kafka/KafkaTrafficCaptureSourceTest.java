@@ -10,13 +10,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
 import org.opensearch.migrations.replay.lifecycle.SourceRunwayLostException;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
@@ -32,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
@@ -43,6 +47,40 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
     private static final Duration TEST_TIMEOUT = Duration.ofSeconds(30);
+
+    private static final class BlockingCommitMockConsumer extends MockConsumer<String, byte[]> {
+        private final CountDownLatch commitStarted = new CountDownLatch(1);
+        private final CountDownLatch allowCommit = new CountDownLatch(1);
+
+        private BlockingCommitMockConsumer() {
+            super(OffsetResetStrategy.EARLIEST);
+        }
+
+        @Override
+        public synchronized void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets) {
+            commitStarted.countDown();
+            try {
+                if (!allowCommit.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to release the blocked Kafka commit");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while blocking the Kafka commit", e);
+            }
+            super.commitSync(offsets);
+        }
+
+        private void awaitCommitStarted() throws InterruptedException {
+            Assertions.assertTrue(
+                commitStarted.await(5, TimeUnit.SECONDS),
+                "Kafka commit did not start"
+            );
+        }
+
+        private void releaseCommit() {
+            allowCommit.countDown();
+        }
+    }
 
     @Test
     public void testRecordToString() {
@@ -152,7 +190,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
 
     @Test
     void asyncCommitFailsWhenItsSourceGenerationIsLost() throws Exception {
-        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var mockConsumer = new BlockingCommitMockConsumer();
         var partition = new TopicPartition(TEST_TOPIC_NAME, 0);
         try (var source = new KafkaTrafficCaptureSource(
             rootContext,
@@ -173,10 +211,45 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
 
             var acknowledgement = source.commitTrafficStreamAsync(key);
             Assertions.assertFalse(acknowledgement.isDone());
+            mockConsumer.awaitCommitStarted();
+
+            try {
+                source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition));
+
+                Assertions.assertThrows(SourceRunwayLostException.class, acknowledgement::join);
+            } finally {
+                mockConsumer.releaseCommit();
+            }
+        }
+    }
+
+    @Test
+    void asyncCommitReportsWhenTheSourceNeverAcceptedIt() throws Exception {
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var partition = new TopicPartition(TEST_TOPIC_NAME, 0);
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(partition));
+                addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
+            });
+            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0);
+            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
+            key.getTrafficStreamsContext().close();
 
             source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition));
 
-            Assertions.assertThrows(SourceRunwayLostException.class, acknowledgement::join);
+            Assertions.assertThrows(
+                SourceCommitNotAcceptedException.class,
+                () -> source.commitTrafficStreamAsync(key).join()
+            );
         }
     }
 

@@ -275,6 +275,34 @@ class ReplayProgressControllerTest {
     }
 
     @Test
+    void revocationWithoutOutstandingWorkStillRejectsLateAdmission() {
+        var fixture = new Fixture(Duration.ZERO);
+        var revokedGeneration = partition(0, 3);
+        fixture.controller.onAssigned(List.of(revokedGeneration));
+        fixture.controller.onRevoked(List.of(revokedGeneration));
+
+        var failure = Assertions.assertThrows(
+            java.util.concurrent.CompletionException.class,
+            () -> fixture.controller.admit(
+                revokedGeneration,
+                request(0),
+                Instant.ofEpochSecond(20)
+            ).toCompletableFuture().join()
+        );
+
+        Assertions.assertTrue(failure.getCause().getMessage().contains("already ended"));
+
+        var replacementGeneration = partition(0, 4);
+        fixture.controller.onAssigned(List.of(replacementGeneration));
+        var replacement = fixture.controller.admit(
+            replacementGeneration,
+            request(1),
+            Instant.ofEpochSecond(30)
+        ).toCompletableFuture().join();
+        replacement.close();
+    }
+
+    @Test
     void aNewGenerationDoesNotInheritTheRetiredGenerationWatermark() {
         var fixture = new Fixture(Duration.ZERO);
         var oldGeneration = partition(0, 1);

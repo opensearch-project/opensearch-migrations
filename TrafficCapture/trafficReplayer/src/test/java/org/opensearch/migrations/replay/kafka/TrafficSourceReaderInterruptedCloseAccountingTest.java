@@ -5,10 +5,16 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -29,6 +35,86 @@ import org.junit.jupiter.api.Test;
 class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
+
+    @Test
+    void revokedGenerationWithoutLiveConnectionsRetiresImmediatelyAfterRevocation() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+        var events = new CopyOnWriteArrayList<String>();
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(recordLifecycleEvents(events));
+            source.trackingKafkaConsumer.onPartitionsAssigned(List.of(tp));
+            var partition = new SourcePartitionKey(TOPIC, 0, 1);
+
+            source.trackingKafkaConsumer.onPartitionsLost(List.of(tp));
+
+            Assertions.assertEquals(
+                List.of("revoked:" + partition, "retired:" + partition),
+                events
+            );
+        }
+    }
+
+    @Test
+    void revokedGenerationRetiresOnlyAfterSyntheticSessionTerminationIsAcknowledged() throws Exception {
+        var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var tp = new TopicPartition(TOPIC, 0);
+        mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
+        var events = new CopyOnWriteArrayList<String>();
+
+        try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(recordLifecycleEvents(events));
+            mc.schedulePollTask(() -> {
+                mc.rebalance(List.of(tp));
+                addRecord(mc, tp, 0);
+            });
+            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0);
+            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
+            var partition = new SourcePartitionKey(TOPIC, 0, key.getSourceGeneration());
+
+            source.trackingKafkaConsumer.onPartitionsLost(List.of(tp));
+
+            Assertions.assertEquals(
+                List.of("revoked:" + partition),
+                events,
+                "retirement must wait for the source-created termination obligation"
+            );
+            var blocked = source.sessionTerminationStateSnapshot();
+            Assertions.assertEquals(1, blocked.pendingSessionTerminations());
+            Assertions.assertEquals(1, blocked.retiringSourcePartitions());
+            Assertions.assertEquals(1, blocked.queuedSyntheticCloseBatches());
+            Assertions.assertEquals(
+                1L,
+                blocked.pendingTerminationsByGeneration().get(partition)
+            );
+            var interruptedClose = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0);
+            Assertions.assertInstanceOf(TrafficSourceReaderInterruptedClose.class, interruptedClose);
+            var closeKey = ((TrafficSourceReaderInterruptedClose) interruptedClose).getKey();
+            closeKey.getTrafficStreamsContext().close();
+
+            source.acknowledgeSessionTermination(
+                session(key.getNodeId(), key.getConnectionId(), 0, key.getSourceGeneration())
+            ).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+            Assertions.assertEquals(
+                List.of("revoked:" + partition, "retired:" + partition),
+                events
+            );
+            var retired = source.sessionTerminationStateSnapshot();
+            Assertions.assertEquals(0, retired.pendingSessionTerminations());
+            Assertions.assertEquals(0, retired.retiringSourcePartitions());
+            Assertions.assertEquals(0, retired.queuedSyntheticCloseBatches());
+            Assertions.assertTrue(retired.pendingTerminationsByGeneration().isEmpty());
+            key.getTrafficStreamsContext().close();
+            source.releaseTrafficStreamWithoutCommit(key);
+        }
+    }
 
     /**
      * The source obligation is keyed by source connection and generation, so the actual session
@@ -208,5 +294,22 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static SourcePartitionLifecycleListener recordLifecycleEvents(List<String> events) {
+        return new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
+                partitions.forEach(partition -> events.add("revoked:" + partition));
+            }
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {
+                partitions.forEach(partition -> events.add("retired:" + partition));
+            }
+        };
     }
 }

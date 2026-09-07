@@ -65,6 +65,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         this.lastTimestampSecondsRef = new AtomicReference<>(Instant.EPOCH);
         this.bufferTimeWindow = bufferTimeWindow;
         this.readGate = new Semaphore(0);
+        underlyingSource.setReadCapacityAvailableListener(this::signalReader);
         this.executorForBlockingActivity = Executors.newSingleThreadExecutor(
             new DefaultThreadFactory(
                 "BlockingTrafficSource-executorForBlockingActivity-" + System.identityHashCode(this)
@@ -86,8 +87,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 .addArgument(prospectiveBarrier)
                 .log();
             // No reason to signal more than one reader. We don't support concurrent reads with the current contract
-            readGate.drainPermits();
-            readGate.release();
+            signalReader();
         } else if (prospectiveBarrier.isBefore(previous)) {
             log.atTrace()
                 .setMessage("Lowered the source read frontier from {} to {} after assignment changed")
@@ -140,7 +140,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * @return
      */
     private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
-        if (stopReadingAtRef.get().equals(Instant.EPOCH)) {
+        if (stopReadingAtRef.get().equals(Instant.EPOCH)
+            && underlyingSource.isReadCapacityAvailable()) {
             return null;
         }
         log.atTrace().setMessage("stopReadingAtRef={} lastTimestampSecondsRef={}")
@@ -148,7 +149,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             .addArgument(lastTimestampSecondsRef)
             .log();
         ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
-        while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())
+        while ((stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())
+            || !underlyingSource.isReadCapacityAvailable())
             && !underlyingSource.hasPendingSourceControl()) {
             if (blockContext == null) {
                 blockContext = readContext.createBackPressureContext();
@@ -207,10 +209,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
         var completion = underlyingSource.acknowledgeSessionTermination(sessionKey);
-        completion.whenComplete((ignored, failure) -> {
-            readGate.drainPermits();
-            readGate.release();
-        });
+        completion.whenComplete((ignored, failure) -> signalReader());
         return completion;
     }
 
@@ -223,8 +222,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
         var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
         if (commitResult == CommitResult.AFTER_NEXT_READ) {
-            readGate.drainPermits();
-            readGate.release();
+            signalReader();
         }
         return commitResult;
     }
@@ -232,8 +230,7 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public CompletionStage<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
         var completion = underlyingSource.commitTrafficStreamAsync(trafficStreamKey);
-        readGate.drainPermits();
-        readGate.release();
+        signalReader();
         return completion;
     }
 
@@ -297,7 +294,13 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         }
         sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(bufferTimeWindow));
         sb.append(" readGatePermits=").append(readGate.availablePermits());
+        sb.append(" sourceCapacityAvailable=").append(underlyingSource.isReadCapacityAvailable());
         heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
+    }
+
+    private void signalReader() {
+        readGate.drainPermits();
+        readGate.release();
     }
 
 

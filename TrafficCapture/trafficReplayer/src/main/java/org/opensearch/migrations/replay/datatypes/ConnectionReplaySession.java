@@ -240,6 +240,8 @@ public class ConnectionReplaySession {
         });
     }
 
+    // An Error must still settle the trigger and reset acquisition state or future callers remain stranded.
+    @SuppressWarnings("java:S1181")
     private void acquireActiveChannel(
         IReplayContexts.ITargetRequestContext context,
         TextTrackedFuture<ChannelFuture> trigger
@@ -267,10 +269,10 @@ public class ConnectionReplaySession {
         TrackedFuture<String, ChannelFuture> acquisition;
         try {
             acquisition = channelFutureFutureFactory.apply(eventLoop, context, cancellationSignal);
-        } catch (Throwable t) {
+        } catch (RuntimeException | Error e) {
             activeAcquisitionResult = null;
             transitionChannelState(TargetExchangeState.ChannelState.ABSENT);
-            trigger.future.completeExceptionally(t);
+            trigger.future.completeExceptionally(e);
             return;
         }
         acquisition.future.whenComplete((channelFuture, failure) ->

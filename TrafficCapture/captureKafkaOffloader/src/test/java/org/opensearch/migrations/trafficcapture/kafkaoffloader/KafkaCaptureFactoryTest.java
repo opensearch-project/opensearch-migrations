@@ -517,12 +517,12 @@ public class KafkaCaptureFactoryTest {
         );
         Assertions.assertEquals(
             record.partition(),
-            factory.getPublisher().getLivenessRegistry().partitionFor(stream.getConnectionId())
+            factory.getPublisher().getRoutingState().partitionFor(stream.getConnectionId())
         );
-        Assertions.assertEquals(1, factory.getPublisher().getLivenessRegistry().size());
+        Assertions.assertEquals(1, factory.getPublisher().getRoutingState().size());
 
         offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
-        Assertions.assertEquals(0, factory.getPublisher().getLivenessRegistry().size());
+        Assertions.assertEquals(0, factory.getPublisher().getRoutingState().size());
         factory.close();
     }
 
@@ -718,10 +718,14 @@ public class KafkaCaptureFactoryTest {
             new PartitionInfo(topic, 2, null, new Node[0], new Node[0])
         ));
         var sentRecord = new CompletableFuture<ProducerRecord<String, byte[]>>();
+        var sentRecords = java.util.Collections.synchronizedList(
+            new ArrayList<ProducerRecord<String, byte[]>>()
+        );
         when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
             ProducerRecord<String, byte[]> record = invocation.getArgument(0);
             Callback callback = invocation.getArgument(1);
             var metadata = generateRecordMetadata(record.topic(), record.partition());
+            sentRecords.add(record);
             sentRecord.complete(record);
             callback.onCompletion(metadata, null);
             return CompletableFuture.completedFuture(metadata);
@@ -748,10 +752,74 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertTrue(List.of(0, 1).contains(record.partition()));
         Assertions.assertEquals(
             List.of(0, 1),
-            factory.getPublisher().getPartitionAssignment().assignedPartitions()
+            factory.getPublisher().getRoutingState().assignedPartitions()
         );
         offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
         factory.close();
+        Assertions.assertTrue(membershipConsumer.closed());
+        var gracefulDeclarations = sentRecords.stream()
+            .filter(recordToCheck -> CaptureKafkaPublisher.isRecordType(
+                recordToCheck.headers(),
+                CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
+            ))
+            .toList();
+        Assertions.assertEquals(
+            List.of(0, 1, 2),
+            gracefulDeclarations.stream().map(ProducerRecord::partition).toList()
+        );
+        for (var declarationRecord : gracefulDeclarations) {
+            var declaration = org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites.parseFrom(
+                declarationRecord.value()
+            );
+            Assertions.assertEquals(TEST_NODE_ID_STRING, declaration.getNodeId());
+            Assertions.assertEquals(TEST_NODE_ID_STRING, declaration.getDeclaredBy());
+        }
+    }
+
+    @Test
+    public void membershipInitializationFailureClosesTheUnpublishedPublisher() throws Exception {
+        var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var closeCalls = new AtomicInteger();
+        var producer = new MockProducer<String, byte[]>(
+            true,
+            null,
+            new StringSerializer(),
+            new ByteArraySerializer()
+        ) {
+            @Override
+            public List<PartitionInfo> partitionsFor(String ignoredTopic) {
+                return List.of(new PartitionInfo(topic, 0, null, new Node[0], new Node[0]));
+            }
+
+            @Override
+            public void close(Duration timeout) {
+                closeCalls.incrementAndGet();
+                super.close(timeout);
+            }
+        };
+        membershipConsumer.schedulePollTask(() -> {
+            throw new IllegalStateException("membership initialization failed");
+        });
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            membershipConsumer,
+            topic,
+            1024 * 1024,
+            null,
+            Duration.ofDays(1)
+        );
+
+        Assertions.assertThrows(
+            ExecutionException.class,
+            () -> factory.publisherReady().get(5, TimeUnit.SECONDS)
+        );
+        Assertions.assertEquals(1, closeCalls.get());
+
+        factory.close();
+
+        Assertions.assertEquals(1, closeCalls.get());
         Assertions.assertTrue(membershipConsumer.closed());
     }
 
@@ -762,7 +830,10 @@ public class KafkaCaptureFactoryTest {
             KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC,
             TEST_NODE_ID_STRING,
             plan,
-            new ProxyLivenessRegistry(),
+            new CaptureRoutingState(
+                plan.getTopicPartitionCount(),
+                plan.getSelectedPartitions()
+            ),
             messageSize,
             Duration.ofDays(1)
         );

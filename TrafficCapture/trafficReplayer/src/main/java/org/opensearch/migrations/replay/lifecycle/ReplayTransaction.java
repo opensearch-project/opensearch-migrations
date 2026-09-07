@@ -6,8 +6,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -145,24 +147,75 @@ public final class ReplayTransaction<R> {
         boolean haltReplay;
     }
 
+    private static final class PendingCommand {
+        private final CompletableFuture<Void> acknowledgement = new CompletableFuture<>();
+        private final Runnable transition;
+
+        private PendingCommand(Runnable transition) {
+            this.transition = transition;
+        }
+    }
+
+    private static final class EvidenceHandoff {
+        private EvidenceOutcome outcome;
+        private Throwable failure;
+        private boolean ready;
+        private boolean claimed;
+    }
+
+    private static final class DispositionWork {
+        private final Decision decision;
+        private final RecordDisposition requestedDisposition;
+        private final List<CompletableFuture<RecordDispositionLedger.DispositionResult>> stages;
+        private final boolean emergencyRetention;
+        private final CompletableFuture<Void> aggregate;
+        private Throwable failure;
+        private boolean ready;
+        private boolean claimed;
+
+        private DispositionWork(
+            Decision decision,
+            RecordDisposition requestedDisposition,
+            List<CompletableFuture<RecordDispositionLedger.DispositionResult>> stages,
+            boolean emergencyRetention
+        ) {
+            this.decision = decision;
+            this.requestedDisposition = requestedDisposition;
+            this.stages = stages;
+            this.emergencyRetention = emergencyRetention;
+            this.aggregate = CompletableFuture.allOf(stages.toArray(CompletableFuture[]::new));
+        }
+    }
+
+    private final Object stateLock = new Object();
     private final ReplayRequestId requestId;
     private final String ledgerOwner;
     private final ActorMailbox mailbox;
     private final EvidenceWriter<R> evidenceWriter;
     private final ReplayDispositionPolicy dispositionPolicy;
     private final RecordDispositionLedger dispositionLedger;
-    private final List<RecordId> recordIds;
+    private final LinkedHashSet<RecordId> recordIds = new LinkedHashSet<>();
     private final Deque<AutoCloseable> ownedResources = new ArrayDeque<>();
     private final Set<AutoCloseable> ownedResourceIdentities =
         Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<PendingCommand> pendingCommands =
+        Collections.newSetFromMap(new IdentityHashMap<>());
     private final CompletionGate<TransactionOutcome> completion = new CompletionGate<>();
+    private final CompletionGate<Void> mailboxLossTermination = new CompletionGate<>();
     private final Metrics metrics;
     private SourceOutcome sourceOutcome;
     private TargetOutcome<R> targetOutcome;
     private EvidenceOutcome evidenceOutcome;
+    private EvidenceHandoff evidenceHandoff;
+    private DispositionWork dispositionWork;
     private Phase phase = Phase.WAITING_FOR_JOIN;
     private RunwayState runwayState = RunwayState.AVAILABLE;
     private Throwable pendingFailure;
+    private CancellationException mailboxLossCause;
+    private boolean sourceSettlementReserved;
+    private boolean targetSettlementReserved;
+    private boolean failureReserved;
+    private boolean mailboxLossStarted;
     private boolean metricsActive;
     private boolean resourcesReleased;
     private boolean terminated;
@@ -188,6 +241,7 @@ public final class ReplayTransaction<R> {
         );
     }
 
+    @SuppressWarnings("java:S1181") // Constructor failure must still release adopted resources.
     public ReplayTransaction(
         @NonNull ReplayRequestId requestId,
         @NonNull ActorMailbox mailbox,
@@ -204,10 +258,28 @@ public final class ReplayTransaction<R> {
         this.evidenceWriter = evidenceWriter;
         this.dispositionPolicy = dispositionPolicy;
         this.dispositionLedger = dispositionLedger;
-        this.recordIds = new ArrayList<>(recordIds);
         this.metrics = metrics;
-        resources.forEach(this::adoptResource);
-        mailbox.execute(this::activateMetrics);
+        try {
+            for (var recordId : recordIds) {
+                if (!this.recordIds.add(recordId)) {
+                    throw new IllegalArgumentException(
+                        "duplicate transaction record for " + requestId + ": " + recordId
+                    );
+                }
+            }
+            resources.forEach(this::adoptResourceLocked);
+            mailbox.execute(this::activateMetricsFromMailbox);
+        } catch (RuntimeException | Error failure) {
+            Throwable cleanupFailure;
+            synchronized (stateLock) {
+                terminated = true;
+                cleanupFailure = releaseResourcesLocked();
+                completion.completeExceptionally(failure);
+                mailboxLossTermination.completeExceptionally(failure);
+            }
+            addSuppressed(failure, cleanupFailure);
+            throw failure;
+        }
     }
 
     public String ledgerOwner() {
@@ -222,85 +294,78 @@ public final class ReplayTransaction<R> {
         @NonNull SourceOutcome outcome,
         @NonNull Collection<? extends RecordId> additionalRecordIds
     ) {
-        var acknowledgement = new CompletableFuture<Void>();
-        mailbox.execute(() -> {
-            if (terminated) {
-                acknowledgement.completeExceptionally(
-                    new IllegalStateException(ALREADY_TERMINATED + requestId)
-                );
-                return;
+        PendingCommand command;
+        synchronized (stateLock) {
+            var unavailable = unavailableFailureLocked();
+            if (unavailable != null) {
+                return failedAcknowledgement(unavailable);
             }
-            if (sourceOutcome != null) {
-                acknowledgement.completeExceptionally(
+            if (sourceSettlementReserved) {
+                return failedAcknowledgement(
                     new IllegalStateException("source outcome already settled for " + requestId)
                 );
-                return;
             }
+            var stagedRecords = new LinkedHashSet<RecordId>();
             for (var recordId : additionalRecordIds) {
-                if (recordIds.contains(recordId)) {
-                    acknowledgement.completeExceptionally(
-                        new IllegalStateException("record already belongs to " + requestId + ": " + recordId)
+                if (!stagedRecords.add(recordId) || recordIds.contains(recordId)) {
+                    return failedAcknowledgement(
+                        new IllegalStateException(
+                            "record already belongs to " + requestId + ": " + recordId
+                        )
                     );
-                    return;
                 }
-                recordIds.add(recordId);
             }
-            sourceOutcome = outcome;
-            acknowledgement.complete(null);
-            tryAdvance();
-        });
-        return acknowledgement.minimalCompletionStage();
+            recordIds.addAll(stagedRecords);
+            sourceSettlementReserved = true;
+            command = reserveCommandLocked(() -> {
+                sourceOutcome = outcome;
+                tryAdvanceLocked();
+            });
+        }
+        return enqueueCommand(command, null);
     }
 
     public CompletionStage<Void> settleTarget(@NonNull TargetOutcome<R> outcome) {
-        var acknowledgement = new CompletableFuture<Void>();
-        mailbox.execute(() -> {
-            if (terminated) {
-                acknowledgement.completeExceptionally(
-                    new IllegalStateException(ALREADY_TERMINATED + requestId)
-                );
-                return;
+        PendingCommand command;
+        synchronized (stateLock) {
+            var unavailable = unavailableFailureLocked();
+            if (unavailable != null) {
+                return failedAcknowledgement(unavailable);
             }
-            if (targetOutcome != null) {
-                acknowledgement.completeExceptionally(
+            if (targetSettlementReserved) {
+                return failedAcknowledgement(
                     new IllegalStateException("target outcome already settled for " + requestId)
                 );
-                return;
             }
-            targetOutcome = outcome;
-            acknowledgement.complete(null);
-            tryAdvance();
-        });
-        return acknowledgement.minimalCompletionStage();
+            targetSettlementReserved = true;
+            command = reserveCommandLocked(() -> {
+                targetOutcome = outcome;
+                tryAdvanceLocked();
+            });
+        }
+        return enqueueCommand(command, null);
     }
 
     public CompletionStage<Void> ownResource(@NonNull AutoCloseable resource) {
-        var acknowledgement = new CompletableFuture<Void>();
-        try {
-            mailbox.execute(() -> {
-                if (terminated) {
-                    var closeFailure = closeResource(resource);
-                    var failure = new IllegalStateException(ALREADY_TERMINATED + requestId);
-                    if (closeFailure != null) {
-                        failure.addSuppressed(closeFailure);
-                    }
-                    acknowledgement.completeExceptionally(failure);
-                    return;
-                }
-                if (!ownedResourceIdentities.add(resource)) {
-                    acknowledgement.completeExceptionally(
-                        new IllegalStateException("transaction already owns resource for " + requestId)
-                    );
-                    return;
-                }
-                ownedResources.addLast(resource);
-                acknowledgement.complete(null);
+        PendingCommand command;
+        synchronized (stateLock) {
+            var unavailable = unavailableFailureLocked();
+            if (unavailable != null) {
+                var closeFailure = closeResource(resource);
+                addSuppressed(unavailable, closeFailure);
+                return failedAcknowledgement(unavailable);
+            }
+            if (!ownedResourceIdentities.add(resource)) {
+                return failedAcknowledgement(
+                    new IllegalStateException("transaction already owns resource for " + requestId)
+                );
+            }
+            ownedResources.addLast(resource);
+            command = reserveCommandLocked(() -> {
+                // Ownership was recorded before admission so mailbox loss can sweep it.
             });
-        } catch (Throwable admissionFailure) {
-            addSuppressed(admissionFailure, closeResource(resource));
-            acknowledgement.completeExceptionally(admissionFailure);
         }
-        return acknowledgement.minimalCompletionStage();
+        return enqueueCommand(command, resource);
     }
 
     public CompletionStage<TransactionOutcome> completion() {
@@ -308,178 +373,398 @@ public final class ReplayTransaction<R> {
     }
 
     public CompletionStage<Void> observeRunwayLost(@NonNull RunwayLossReason reason) {
-        var acknowledgement = new CompletableFuture<Void>();
-        mailbox.execute(() -> {
-            if (!terminated && runwayState == RunwayState.AVAILABLE) {
-                if (metricsActive) {
-                    metrics.runwayStateChanged(runwayState, -1);
-                }
-                runwayState = RunwayState.LOST;
-                if (metricsActive) {
-                    metrics.runwayStateChanged(runwayState, 1);
-                    metrics.runwayLost(reason);
-                }
+        PendingCommand command;
+        synchronized (stateLock) {
+            var unavailable = unavailableFailureLocked();
+            if (unavailable != null) {
+                return failedAcknowledgement(unavailable);
             }
-            acknowledgement.complete(null);
-        });
-        return acknowledgement.minimalCompletionStage();
+            command = reserveCommandLocked(() -> {
+                if (runwayState == RunwayState.AVAILABLE) {
+                    if (metricsActive) {
+                        metrics.runwayStateChanged(runwayState, -1);
+                    }
+                    runwayState = RunwayState.LOST;
+                    if (metricsActive) {
+                        metrics.runwayStateChanged(runwayState, 1);
+                        metrics.runwayLost(reason);
+                    }
+                }
+            });
+        }
+        return enqueueCommand(command, null);
     }
 
     public CompletionStage<Void> fail(@NonNull Throwable cause) {
-        var acknowledgement = new CompletableFuture<Void>();
-        mailbox.execute(() -> {
-            if (terminated) {
-                acknowledgement.completeExceptionally(
-                    new IllegalStateException(ALREADY_TERMINATED + requestId)
-                );
-                return;
+        PendingCommand command;
+        synchronized (stateLock) {
+            var unavailable = unavailableFailureLocked();
+            if (unavailable != null) {
+                return failedAcknowledgement(unavailable);
             }
-            if (pendingFailure != null) {
-                acknowledgement.completeExceptionally(
+            if (failureReserved) {
+                return failedAcknowledgement(
                     new IllegalStateException("transaction failure already recorded for " + requestId)
                 );
-                return;
             }
-            if (phase == Phase.DISPOSING) {
-                pendingFailure = cause;
-            } else if (recordIds.isEmpty()) {
-                completeFailure(cause, null);
-            } else {
-                pendingFailure = cause;
-                beginFailureDisposition();
-            }
-            acknowledgement.complete(null);
-        });
-        return acknowledgement.minimalCompletionStage();
+            failureReserved = true;
+            pendingFailure = cause;
+            command = reserveCommandLocked(() -> {
+                if (phase == Phase.DISPOSING) {
+                    return;
+                }
+                if (recordIds.isEmpty()) {
+                    completeFailureLocked(cause, null);
+                } else {
+                    beginFailureDispositionLocked();
+                }
+            });
+        }
+        return enqueueCommand(command, null);
     }
 
     /**
-     * A failing transaction still owes its record obligations a disposition; skipping the ledger
-     * would leave them unresolved forever, pinning their offsets and holding the quiescence gate
-     * open (the F1 defect class). Failure never carries commit authority, so every owned record
-     * retains.
+     * Fences a transaction after its actor mailbox can no longer execute queued work. The method is
+     * safe from any thread and is one-shot. Work already accepted by the disposition ledger remains
+     * authoritative and is awaited; only records that have not entered disposition are retained.
      */
-    private void beginFailureDisposition() {
-        assertInMailbox();
-        transitionPhase(Phase.DISPOSING);
-        var disposition = new RecordDisposition.Retain("transaction-failed");
-        var dispositionStages = new ArrayList<CompletableFuture<RecordDispositionLedger.DispositionResult>>();
-        for (var recordId : recordIds) {
-            dispositionStages.add(
-                dispositionLedger.dispose(recordId, ledgerOwner, disposition).toCompletableFuture()
+    public CompletionStage<Void> terminateAfterMailboxLoss(@NonNull CancellationException cause) {
+        DispositionWork workToConsume = null;
+        synchronized (stateLock) {
+            if (mailboxLossStarted) {
+                return mailboxLossTermination.stage();
+            }
+            mailboxLossStarted = true;
+            mailboxLossCause = cause;
+            if (terminated) {
+                mailboxLossTermination.complete(null);
+                return mailboxLossTermination.stage();
+            }
+
+            var commandFailure = new CancellationException(
+                "mailbox stopped before transaction command completed for " + requestId
             );
-        }
-        CompletableFuture.allOf(dispositionStages.toArray(CompletableFuture[]::new))
-            .whenComplete((ignored, dispositionFailure) -> mailbox.execute(() -> {
-                if (terminated) {
-                    return;
-                }
-                completeFailure(
-                    pendingFailure,
-                    dispositionFailure == null ? null : unwrap(dispositionFailure)
+            commandFailure.initCause(cause);
+            for (var command : List.copyOf(pendingCommands)) {
+                command.acknowledgement.completeExceptionally(commandFailure);
+            }
+            pendingCommands.clear();
+
+            if (dispositionWork == null) {
+                startDispositionLocked(
+                    null,
+                    new RecordDisposition.Retain("mailbox-lost"),
+                    true
                 );
-            }));
+            }
+            if (dispositionWork.ready) {
+                workToConsume = dispositionWork;
+            }
+        }
+        if (workToConsume != null) {
+            consumeDisposition(workToConsume, true);
+        }
+        return mailboxLossTermination.stage();
     }
 
-    private void tryAdvance() {
+    private PendingCommand reserveCommandLocked(Runnable transition) {
+        var command = new PendingCommand(transition);
+        pendingCommands.add(command);
+        return command;
+    }
+
+    @SuppressWarnings("java:S1181") // Admission failure must trigger mailbox-loss cleanup for Errors too.
+    private CompletionStage<Void> enqueueCommand(
+        PendingCommand command,
+        AutoCloseable resourceToCloseOnRejection
+    ) {
+        try {
+            mailbox.execute(() -> runCommand(command));
+        } catch (RuntimeException | Error admissionFailure) {
+            boolean shouldCloseResource;
+            synchronized (stateLock) {
+                pendingCommands.remove(command);
+                shouldCloseResource = resourceToCloseOnRejection != null
+                    && detachResourceLocked(resourceToCloseOnRejection);
+            }
+            if (shouldCloseResource) {
+                addSuppressed(admissionFailure, closeResource(resourceToCloseOnRejection));
+            }
+            command.acknowledgement.completeExceptionally(admissionFailure);
+            terminateAfterMailboxLoss(mailboxLoss("mailbox rejected transaction command", admissionFailure));
+        }
+        return command.acknowledgement.minimalCompletionStage();
+    }
+
+    @SuppressWarnings("java:S1181") // Transition failure must settle its acknowledgement before teardown.
+    private void runCommand(PendingCommand command) {
+        Throwable transitionFailure = null;
+        synchronized (stateLock) {
+            if (!pendingCommands.remove(command)) {
+                return;
+            }
+            if (terminated || mailboxLossStarted) {
+                command.acknowledgement.completeExceptionally(unavailableFailureLocked());
+                return;
+            }
+            assertInMailbox();
+            try {
+                command.transition.run();
+                command.acknowledgement.complete(null);
+            } catch (RuntimeException | Error failure) {
+                transitionFailure = failure;
+                command.acknowledgement.completeExceptionally(failure);
+            }
+        }
+        if (transitionFailure != null) {
+            terminateAfterMailboxLoss(mailboxLoss("transaction transition failed", transitionFailure));
+        }
+    }
+
+    private void activateMetricsFromMailbox() {
+        synchronized (stateLock) {
+            if (terminated || mailboxLossStarted || metricsActive) {
+                return;
+            }
+            assertInMailbox();
+            metricsActive = true;
+            metrics.phaseChanged(phase, 1);
+            metrics.runwayStateChanged(runwayState, 1);
+        }
+    }
+
+    private void tryAdvanceLocked() {
         assertInMailbox();
         if (phase != Phase.WAITING_FOR_JOIN || sourceOutcome == null || targetOutcome == null) {
             return;
         }
         if (!dispositionPolicy.requiresEvidence(sourceOutcome, targetOutcome)) {
             evidenceOutcome = new EvidenceOutcome.NotRequired("teardown");
-            beginDisposition();
+            beginDispositionLocked();
             return;
         }
 
-        transitionPhase(Phase.WRITING_EVIDENCE);
+        transitionPhaseLocked(Phase.WRITING_EVIDENCE);
+        var handoff = new EvidenceHandoff();
+        evidenceHandoff = handoff;
         CompletionStage<EvidenceOutcome> evidenceStage;
         try {
             evidenceStage = evidenceWriter.write(requestId, sourceOutcome, targetOutcome);
-        } catch (Exception t) {
-            evidenceStage = CompletableFuture.completedFuture(new EvidenceOutcome.Failed(t));
+            if (evidenceStage == null) {
+                evidenceStage = CompletableFuture.completedFuture(
+                    new EvidenceOutcome.Failed(
+                        new NullPointerException("evidence writer returned no completion stage")
+                    )
+                );
+            }
+        } catch (Exception failure) {
+            evidenceStage = CompletableFuture.completedFuture(new EvidenceOutcome.Failed(failure));
         }
         evidenceStage.whenComplete((outcome, failure) ->
-            mailbox.execute(() -> {
-                if (terminated || phase != Phase.WRITING_EVIDENCE) {
-                    return;
-                }
-                evidenceOutcome = failure == null
-                    ? outcome
-                    : new EvidenceOutcome.Failed(unwrap(failure));
-                if (evidenceOutcome == null) {
-                    evidenceOutcome = new EvidenceOutcome.Failed(
-                        new NullPointerException("evidence writer completed without an outcome")
-                    );
-                }
-                beginDisposition();
-            })
+            stageEvidenceCompletion(handoff, outcome, failure)
         );
     }
 
-    private void beginDisposition() {
+    private void stageEvidenceCompletion(
+        EvidenceHandoff handoff,
+        EvidenceOutcome outcome,
+        Throwable failure
+    ) {
+        boolean consumeDirectly;
+        synchronized (stateLock) {
+            if (handoff != evidenceHandoff || handoff.claimed || terminated) {
+                return;
+            }
+            handoff.outcome = outcome;
+            handoff.failure = failure == null ? null : unwrap(failure);
+            handoff.ready = true;
+            consumeDirectly = mailboxLossStarted;
+        }
+        if (consumeDirectly) {
+            return;
+        }
+        postCallback(() -> consumeEvidence(handoff), "evidence completion");
+    }
+
+    private void consumeEvidence(EvidenceHandoff handoff) {
+        synchronized (stateLock) {
+            if (handoff != evidenceHandoff
+                || handoff.claimed
+                || !handoff.ready
+                || terminated
+                || mailboxLossStarted) {
+                return;
+            }
+            assertInMailbox();
+            handoff.claimed = true;
+            evidenceOutcome = handoff.failure == null
+                ? handoff.outcome
+                : new EvidenceOutcome.Failed(handoff.failure);
+            if (evidenceOutcome == null) {
+                evidenceOutcome = new EvidenceOutcome.Failed(
+                    new NullPointerException("evidence writer completed without an outcome")
+                );
+            }
+            beginDispositionLocked();
+        }
+    }
+
+    private void beginDispositionLocked() {
         assertInMailbox();
-        transitionPhase(Phase.DISPOSING);
+        transitionPhaseLocked(Phase.DISPOSING);
         var decision = dispositionPolicy.decide(sourceOutcome, targetOutcome, evidenceOutcome);
-        var dispositionStages = new ArrayList<CompletableFuture<RecordDispositionLedger.DispositionResult>>();
+        startDispositionLocked(decision, decision.disposition(), false);
+    }
+
+    /**
+     * A failing transaction still owes its record obligations a disposition. Failure never carries
+     * commit authority, so every record that has not already entered disposition retains.
+     */
+    private void beginFailureDispositionLocked() {
+        assertInMailbox();
+        transitionPhaseLocked(Phase.DISPOSING);
+        startDispositionLocked(
+            null,
+            new RecordDisposition.Retain("transaction-failed"),
+            false
+        );
+    }
+
+    @SuppressWarnings("java:S1181") // Every record must receive a failed disposition stage, even on Error.
+    private void startDispositionLocked(
+        Decision decision,
+        RecordDisposition requestedDisposition,
+        boolean emergencyRetention
+    ) {
+        var stages = new ArrayList<CompletableFuture<RecordDispositionLedger.DispositionResult>>();
         for (var recordId : recordIds) {
-            dispositionStages.add(
-                dispositionLedger.dispose(recordId, ledgerOwner, decision.disposition()).toCompletableFuture()
+            try {
+                stages.add(
+                    dispositionLedger.dispose(recordId, ledgerOwner, requestedDisposition)
+                        .toCompletableFuture()
+                );
+            } catch (RuntimeException | Error failure) {
+                stages.add(CompletableFuture.failedFuture(failure));
+            }
+        }
+        var work = new DispositionWork(
+            decision,
+            requestedDisposition,
+            stages,
+            emergencyRetention
+        );
+        dispositionWork = work;
+        work.aggregate.whenComplete((ignored, failure) ->
+            stageDispositionCompletion(work, failure)
+        );
+    }
+
+    private void stageDispositionCompletion(DispositionWork work, Throwable failure) {
+        boolean consumeDirectly;
+        synchronized (stateLock) {
+            if (work != dispositionWork || work.claimed || terminated) {
+                return;
+            }
+            work.failure = failure == null ? null : unwrap(failure);
+            work.ready = true;
+            consumeDirectly = mailboxLossStarted;
+        }
+        if (consumeDirectly) {
+            consumeDisposition(work, true);
+        } else {
+            postCallback(
+                () -> consumeDisposition(work, false),
+                "record-disposition completion"
             );
         }
-        CompletableFuture.allOf(dispositionStages.toArray(CompletableFuture[]::new))
-            .whenComplete((ignored, failure) -> mailbox.execute(() -> {
-                var dispositionFailure = failure == null ? null : unwrap(failure);
-                var acceptedDisposition = dispositionFailure == null
-                    ? acceptedDisposition(decision.disposition(), dispositionStages)
-                    : decision.disposition();
-                finish(decision, acceptedDisposition, dispositionFailure);
-            }));
+    }
+
+    private void consumeDisposition(DispositionWork work, boolean afterMailboxLoss) {
+        synchronized (stateLock) {
+            if (work != dispositionWork || work.claimed || !work.ready || terminated) {
+                return;
+            }
+            if (!afterMailboxLoss) {
+                if (mailboxLossStarted) {
+                    return;
+                }
+                assertInMailbox();
+            }
+            work.claimed = true;
+            finishDispositionLocked(work);
+        }
+    }
+
+    @SuppressWarnings("java:S1181") // Metrics failure is aggregated into the transaction result.
+    private void finishDispositionLocked(DispositionWork work) {
+        var acceptedDisposition = work.failure == null
+            ? acceptedDisposition(work.requestedDisposition, work.stages)
+            : work.requestedDisposition;
+        Throwable metricsFailure = null;
+        if (work.failure == null) {
+            try {
+                metrics.disposition(acceptedDisposition);
+            } catch (RuntimeException | Error failure) {
+                metricsFailure = failure;
+            }
+        }
+
+        if (work.emergencyRetention) {
+            var failure = pendingFailure == null ? mailboxLossCause : pendingFailure;
+            addSuppressed(failure, metricsFailure);
+            completeFailureLocked(failure, work.failure);
+            return;
+        }
+        if (pendingFailure != null) {
+            addSuppressed(pendingFailure, metricsFailure);
+            completeFailureLocked(pendingFailure, work.failure);
+            return;
+        }
+        if (work.failure != null) {
+            completeFailureLocked(work.failure, work.failure);
+            return;
+        }
+        if (metricsFailure != null) {
+            completeFailureLocked(metricsFailure, metricsFailure);
+            return;
+        }
+        finishSuccessfullyLocked(work.decision, acceptedDisposition);
     }
 
     private RecordDisposition acceptedDisposition(
         RecordDisposition requestedDisposition,
         List<CompletableFuture<RecordDispositionLedger.DispositionResult>> dispositionStages
     ) {
-        return dispositionStages.stream()
+        var acceptedDispositions = dispositionStages.stream()
             .map(CompletableFuture::join)
             .map(RecordDispositionLedger.DispositionResult::disposition)
-            .filter(RecordDisposition.Retain.class::isInstance)
-            .findFirst()
-            .orElse(requestedDisposition);
+            .toList();
+        for (var disposition : acceptedDispositions) {
+            if (disposition instanceof RecordDisposition.Retain) {
+                return disposition;
+            }
+        }
+        return requestedDisposition;
     }
 
-    private void finish(
+    private void finishSuccessfullyLocked(
         Decision decision,
-        RecordDisposition acceptedDisposition,
-        Throwable dispositionFailure
+        RecordDisposition acceptedDisposition
     ) {
-        assertInMailbox();
-        if (terminated) {
-            return;
-        }
-        if (dispositionFailure == null) {
-            metrics.disposition(acceptedDisposition);
-        }
-        if (pendingFailure != null) {
-            completeFailure(pendingFailure, dispositionFailure);
-            return;
-        }
-        if (dispositionFailure != null) {
-            completeFailure(dispositionFailure, null);
-            return;
-        }
-        Throwable releaseFailure = releaseResources();
+        var releaseFailure = releaseResourcesLocked();
+        var terminalOutcome = terminalOutcomeFor(acceptedDisposition, releaseFailure);
+        var metricsFailure = recordTerminationLocked(terminalOutcome);
+        addSuppressed(releaseFailure, metricsFailure);
         if (releaseFailure != null) {
-            recordTermination(TerminalOutcome.FAILED);
             completion.completeExceptionally(releaseFailure);
+            completeMailboxLossTerminationLocked(releaseFailure);
             return;
         }
-        recordTermination(
-            acceptedDisposition.action() == RecordDisposition.Action.COMMIT
-                ? TerminalOutcome.COMMITTED
-                : TerminalOutcome.RETAINED
-        );
+        if (metricsFailure != null) {
+            completion.completeExceptionally(metricsFailure);
+            completeMailboxLossTerminationLocked(metricsFailure);
+            return;
+        }
         completion.complete(
             new TransactionOutcome(
                 requestId,
@@ -490,33 +775,61 @@ public final class ReplayTransaction<R> {
                 decision.haltReplay()
             )
         );
+        completeMailboxLossTerminationLocked(null);
     }
 
-    private void completeFailure(Throwable failure, Throwable additionalFailure) {
-        assertInMailbox();
-        addSuppressed(failure, additionalFailure);
-        addSuppressed(failure, releaseResources());
-        recordTermination(TerminalOutcome.FAILED);
+    private static TerminalOutcome terminalOutcomeFor(
+        RecordDisposition acceptedDisposition,
+        Throwable releaseFailure
+    ) {
+        if (releaseFailure != null) {
+            return TerminalOutcome.FAILED;
+        }
+        return acceptedDisposition.action() == RecordDisposition.Action.COMMIT
+            ? TerminalOutcome.COMMITTED
+            : TerminalOutcome.RETAINED;
+    }
+
+    private void completeFailureLocked(Throwable failure, Throwable dispositionFailure) {
+        addSuppressed(failure, dispositionFailure);
+        var releaseFailure = releaseResourcesLocked();
+        addSuppressed(failure, releaseFailure);
+        var metricsFailure = recordTerminationLocked(TerminalOutcome.FAILED);
+        addSuppressed(failure, metricsFailure);
+        var operationalFailure = firstNonNull(dispositionFailure, releaseFailure, metricsFailure);
         completion.completeExceptionally(failure);
+        completeMailboxLossTerminationLocked(operationalFailure);
     }
 
-    private static void addSuppressed(Throwable failure, Throwable additionalFailure) {
-        if (additionalFailure != null && additionalFailure != failure) {
-            failure.addSuppressed(additionalFailure);
+    @SuppressWarnings("java:S1181") // All terminal metrics are attempted and their failures aggregated.
+    private Throwable recordTerminationLocked(TerminalOutcome outcome) {
+        if (terminated) {
+            return null;
         }
-    }
-
-    private void activateMetrics() {
-        assertInMailbox();
-        if (terminated || metricsActive) {
-            return;
+        terminated = true;
+        Throwable firstFailure = null;
+        try {
+            metrics.terminalOutcome(outcome);
+        } catch (RuntimeException | Error failure) {
+            firstFailure = failure;
         }
-        metricsActive = true;
-        metrics.phaseChanged(phase, 1);
-        metrics.runwayStateChanged(runwayState, 1);
+        if (metricsActive) {
+            try {
+                metrics.phaseChanged(phase, -1);
+            } catch (RuntimeException | Error failure) {
+                firstFailure = aggregate(firstFailure, failure);
+            }
+            try {
+                metrics.runwayStateChanged(runwayState, -1);
+            } catch (RuntimeException | Error failure) {
+                firstFailure = aggregate(firstFailure, failure);
+            }
+            metricsActive = false;
+        }
+        return firstFailure;
     }
 
-    private void transitionPhase(Phase nextPhase) {
+    private void transitionPhaseLocked(Phase nextPhase) {
         assertInMailbox();
         if (phase == nextPhase) {
             return;
@@ -530,21 +843,27 @@ public final class ReplayTransaction<R> {
         }
     }
 
-    private void recordTermination(TerminalOutcome outcome) {
-        assertInMailbox();
-        if (terminated) {
-            return;
-        }
-        terminated = true;
-        metrics.terminalOutcome(outcome);
-        if (metricsActive) {
-            metrics.phaseChanged(phase, -1);
-            metrics.runwayStateChanged(runwayState, -1);
-            metricsActive = false;
+    @SuppressWarnings("java:S1181") // Callback rejection must enter mailbox-loss cleanup on Error.
+    private void postCallback(Runnable command, String description) {
+        try {
+            mailbox.execute(command);
+        } catch (RuntimeException | Error failure) {
+            terminateAfterMailboxLoss(mailboxLoss("mailbox rejected " + description, failure));
         }
     }
 
-    private Throwable releaseResources() {
+    private void completeMailboxLossTerminationLocked(Throwable operationalFailure) {
+        if (!mailboxLossStarted || mailboxLossTermination.isDone()) {
+            return;
+        }
+        if (operationalFailure == null) {
+            mailboxLossTermination.complete(null);
+        } else {
+            mailboxLossTermination.completeExceptionally(operationalFailure);
+        }
+    }
+
+    private Throwable releaseResourcesLocked() {
         if (resourcesReleased) {
             return null;
         }
@@ -553,31 +872,82 @@ public final class ReplayTransaction<R> {
         while (!ownedResources.isEmpty()) {
             var resource = ownedResources.removeLast();
             ownedResourceIdentities.remove(resource);
-            var closeFailure = closeResource(resource);
-            if (closeFailure != null) {
-                if (firstFailure == null) {
-                    firstFailure = closeFailure;
-                } else {
-                    firstFailure.addSuppressed(closeFailure);
-                }
-            }
+            firstFailure = aggregate(firstFailure, closeResource(resource));
         }
         return firstFailure;
     }
 
-    private void adoptResource(AutoCloseable resource) {
+    private void adoptResourceLocked(AutoCloseable resource) {
         if (!ownedResourceIdentities.add(resource)) {
             throw new IllegalArgumentException("duplicate transaction resource for " + requestId);
         }
         ownedResources.addLast(resource);
     }
 
+    private boolean detachResourceLocked(AutoCloseable resource) {
+        if (!ownedResourceIdentities.remove(resource)) {
+            return false;
+        }
+        var iterator = ownedResources.iterator();
+        while (iterator.hasNext()) {
+            if (iterator.next() == resource) {
+                iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Throwable unavailableFailureLocked() {
+        if (!terminated && !mailboxLossStarted) {
+            return null;
+        }
+        if (mailboxLossCause != null) {
+            return mailboxLossCause;
+        }
+        return new IllegalStateException(ALREADY_TERMINATED + requestId);
+    }
+
+    private static CompletionStage<Void> failedAcknowledgement(Throwable failure) {
+        return CompletableFuture.failedFuture(failure);
+    }
+
+    private static CancellationException mailboxLoss(String message, Throwable failure) {
+        var cancellation = new CancellationException(message);
+        cancellation.initCause(failure);
+        return cancellation;
+    }
+
+    @SuppressWarnings("java:S1181") // Cleanup aggregates Error with other close failures.
     private static Throwable closeResource(AutoCloseable resource) {
         try {
             resource.close();
             return null;
-        } catch (Throwable t) {
-            return t;
+        } catch (Exception | Error failure) {
+            return failure;
+        }
+    }
+
+    private static Throwable aggregate(Throwable firstFailure, Throwable additionalFailure) {
+        if (firstFailure == null) {
+            return additionalFailure;
+        }
+        addSuppressed(firstFailure, additionalFailure);
+        return firstFailure;
+    }
+
+    private static Throwable firstNonNull(Throwable... failures) {
+        for (var failure : failures) {
+            if (failure != null) {
+                return failure;
+            }
+        }
+        return null;
+    }
+
+    private static void addSuppressed(Throwable failure, Throwable additionalFailure) {
+        if (failure != null && additionalFailure != null && additionalFailure != failure) {
+            failure.addSuppressed(additionalFailure);
         }
     }
 

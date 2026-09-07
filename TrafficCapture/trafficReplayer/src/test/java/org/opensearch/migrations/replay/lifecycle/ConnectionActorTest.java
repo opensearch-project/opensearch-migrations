@@ -322,17 +322,24 @@ class ConnectionActorTest extends InstrumentationTest {
     }
 
     private void assertLongSum(String metricName, long expected) {
-        var point = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
+        var metric = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
             .stream()
-            .filter(metric -> metric.getName().equals(metricName))
-            .findFirst()
-            .orElseThrow()
+            .filter(candidate -> candidate.getName().equals(metricName))
+            .findFirst();
+        if (metric.isEmpty()) {
+            Assertions.assertEquals(0, expected, "an absent metric point represents zero");
+            return;
+        }
+        var point = metric.orElseThrow()
             .getLongSumData()
             .getPoints()
             .stream()
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(expected, point.getValue());
+            .findFirst();
+        if (point.isEmpty()) {
+            Assertions.assertEquals(0, expected, "an absent metric point represents zero");
+            return;
+        }
+        Assertions.assertEquals(expected, point.orElseThrow().getValue());
     }
 
     private void assertAttributedLongSum(
@@ -341,18 +348,25 @@ class ConnectionActorTest extends InstrumentationTest {
         String value,
         long expected
     ) {
-        var point = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
+        var metric = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics()
             .stream()
-            .filter(metric -> metric.getName().equals(metricName))
-            .findFirst()
-            .orElseThrow()
+            .filter(candidate -> candidate.getName().equals(metricName))
+            .findFirst();
+        if (metric.isEmpty()) {
+            Assertions.assertEquals(0, expected, "an absent metric point represents zero");
+            return;
+        }
+        var point = metric.orElseThrow()
             .getLongSumData()
             .getPoints()
             .stream()
             .filter(candidate -> value.equals(candidate.getAttributes().get(attribute)))
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(expected, point.getValue());
+            .findFirst();
+        if (point.isEmpty()) {
+            Assertions.assertEquals(0, expected, "an absent metric point represents zero");
+            return;
+        }
+        Assertions.assertEquals(expected, point.orElseThrow().getValue());
     }
 
     private void assertHistogram(String metricName, long expectedCount, double expectedSum) {
@@ -406,6 +420,250 @@ class ConnectionActorTest extends InstrumentationTest {
         var termination = actor.termination().toCompletableFuture();
         Assertions.assertTrue(termination.isDone(), "termination must not wait on a mailbox that is gone");
         Assertions.assertInstanceOf(SessionOutcome.Aborted.class, termination.join());
+    }
+
+    @Test
+    void mailboxRejectionReleasesActiveAndQueuedPreparedResourcesDespiteCleanupFailures() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var activeCleanupFailure = new AssertionError("active cleanup failed");
+        var queuedCleanupFailure = new AssertionError("queued cleanup failed");
+        var activePrepared = new TestPrepared("active", activeCleanupFailure);
+        var queuedPrepared = new TestPrepared("queued", queuedCleanupFailure);
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var active = actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(activePrepared))
+        ).toCompletableFuture();
+        var queued = actor.admitRequest(
+            request(1),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(queuedPrepared))
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        mailbox.rejectFurtherWork();
+        actor.abort(AbortReason.SHUTDOWN, new CancellationException("mailbox stopped"));
+
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, active.join());
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, queued.join());
+        var failed = Assertions.assertInstanceOf(
+            SessionOutcome.Failed.class,
+            actor.termination().toCompletableFuture().join()
+        );
+        Assertions.assertSame(activeCleanupFailure, failed.cause());
+        Assertions.assertArrayEquals(
+            new Throwable[] { queuedCleanupFailure },
+            failed.cause().getSuppressed()
+        );
+        Assertions.assertEquals(1, activePrepared.closeCount);
+        Assertions.assertEquals(1, queuedPrepared.closeCount);
+
+        actor.abandonBecauseMailboxStopped(new CancellationException("duplicate notification"));
+        exchange.completeNext(new TargetOutcome.Succeeded<>("late"));
+        Assertions.assertEquals(1, activePrepared.closeCount);
+        Assertions.assertEquals(1, queuedPrepared.closeCount);
+    }
+
+    @Test
+    void acceptedThenDroppedAdmissionsRemainOwnedUntilMailboxLossFencesThem() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var prepared = new TestPrepared("pre-admission");
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            exchange,
+            rootContext.getConnectionActorMetrics()
+        );
+        var request = actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(prepared))
+        ).toCompletableFuture();
+        var close = actor.admitClose(Instant.EPOCH).toCompletableFuture();
+
+        mailbox.dropAcceptedWork();
+        actor.abandonBecauseMailboxStopped(new CancellationException("accepted work was dropped"));
+
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, request.join());
+        Assertions.assertInstanceOf(SessionOutcome.Aborted.class, close.join());
+        Assertions.assertInstanceOf(
+            SessionOutcome.Aborted.class,
+            actor.termination().toCompletableFuture().join()
+        );
+        Assertions.assertEquals(1, prepared.closeCount);
+        assertLongSum(ConnectionActorMetrics.MetricNames.QUEUED_COMMANDS, 0);
+        for (var reason : ConnectionActor.HeadWaitReason.values()) {
+            assertHeadWait(reason, 0);
+        }
+        assertPendingAbortChild(0);
+    }
+
+    @Test
+    void preparationArrivingAfterAbandonmentIsReleasedExactlyOnce() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var preparation = new NonCancellableFuture<PreparationOutcome<TestPrepared>>();
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            exchange,
+            rootContext.getConnectionActorMetrics()
+        );
+        var request = actor.admitRequest(request(0), Instant.EPOCH, preparation).toCompletableFuture();
+        mailbox.runUntilIdle();
+        assertHeadWait(ConnectionActor.HeadWaitReason.PREPARATION, 1);
+
+        actor.abandonBecauseMailboxStopped(new CancellationException("mailbox stopped"));
+        var prepared = new TestPrepared("late preparation");
+        Assertions.assertTrue(preparation.complete(new PreparationOutcome.Prepared<>(prepared)));
+
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, request.join());
+        Assertions.assertEquals(1, prepared.closeCount);
+        actor.abandonBecauseMailboxStopped(new CancellationException("duplicate notification"));
+        Assertions.assertEquals(1, prepared.closeCount);
+        assertLongSum(ConnectionActorMetrics.MetricNames.QUEUED_COMMANDS, 0);
+        assertHeadWait(ConnectionActor.HeadWaitReason.PREPARATION, 0);
+    }
+
+    @Test
+    void acceptedThenDroppedExchangeCallbackDoesNotStrandPreparedResources() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var activePrepared = new TestPrepared("active");
+        var queuedPrepared = new TestPrepared("queued");
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var active = actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(activePrepared))
+        ).toCompletableFuture();
+        var queued = actor.admitRequest(
+            request(1),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(queuedPrepared))
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        exchange.completeNext(new TargetOutcome.Succeeded<>("response"));
+        mailbox.dropAcceptedWork();
+        actor.abandonBecauseMailboxStopped(new CancellationException("exchange callback was dropped"));
+
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, active.join());
+        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, queued.join());
+        Assertions.assertEquals(1, activePrepared.closeCount);
+        Assertions.assertEquals(1, queuedPrepared.closeCount);
+    }
+
+    @Test
+    void settledRequestDoesNotDependOnASecondMailboxDelivery() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var prepared = new TestPrepared("request");
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        var request = actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(prepared))
+        ).toCompletableFuture();
+        mailbox.runUntilIdle();
+
+        exchange.completeNext(new TargetOutcome.Succeeded<>("response"));
+        mailbox.runNext();
+        mailbox.dropAcceptedWork();
+
+        Assertions.assertInstanceOf(TargetOutcome.Succeeded.class, request.join());
+        Assertions.assertEquals(1, prepared.closeCount);
+    }
+
+    @Test
+    void acceptedThenDroppedAbortCallbackClearsAllActorGauges() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var activePrepared = new TestPrepared("active");
+        var queuedPrepared = new TestPrepared("queued");
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            exchange,
+            rootContext.getConnectionActorMetrics()
+        );
+        actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(activePrepared))
+        );
+        actor.admitRequest(
+            request(1),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(queuedPrepared))
+        );
+        mailbox.runUntilIdle();
+
+        actor.abort(AbortReason.SHUTDOWN, new CancellationException("shutdown"));
+        mailbox.runUntilIdle();
+        assertPendingAbortChild(1);
+
+        exchange.abortCompletion.complete(null);
+        mailbox.dropAcceptedWork();
+        actor.abandonBecauseMailboxStopped(new CancellationException("abort callback was dropped"));
+
+        Assertions.assertEquals(1, activePrepared.closeCount);
+        Assertions.assertEquals(1, queuedPrepared.closeCount);
+        assertLongSum(ConnectionActorMetrics.MetricNames.QUEUED_COMMANDS, 0);
+        for (var reason : ConnectionActor.HeadWaitReason.values()) {
+            assertHeadWait(reason, 0);
+        }
+        assertPendingAbortChild(0);
+    }
+
+    @Test
+    void droppedAbortCallbackPreservesCleanupFailuresAlreadyObservedDuringDrain() {
+        var mailbox = new DeterministicMailbox();
+        var exchange = new TestExchange();
+        var activeCleanupFailure = new AssertionError("active cleanup failed");
+        var queuedCleanupFailure = new AssertionError("queued cleanup failed");
+        var activePrepared = new TestPrepared("active", activeCleanupFailure);
+        var queuedPrepared = new TestPrepared("queued", queuedCleanupFailure);
+        var actor = new ConnectionActor<>(session(), mailbox, exchange);
+        actor.admitRequest(
+            request(0),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(activePrepared))
+        );
+        actor.admitRequest(
+            request(1),
+            Instant.EPOCH,
+            CompletableFuture.completedFuture(new PreparationOutcome.Prepared<>(queuedPrepared))
+        );
+        mailbox.runUntilIdle();
+
+        actor.abort(AbortReason.SHUTDOWN, new CancellationException("shutdown"));
+        mailbox.runUntilIdle();
+        exchange.abortCompletion.complete(null);
+        mailbox.dropAcceptedWork();
+        actor.abandonBecauseMailboxStopped(new CancellationException("abort callback was dropped"));
+
+        var failed = Assertions.assertInstanceOf(
+            SessionOutcome.Failed.class,
+            actor.termination().toCompletableFuture().join()
+        );
+        Assertions.assertSame(activeCleanupFailure, failed.cause());
+        Assertions.assertArrayEquals(
+            new Throwable[] { queuedCleanupFailure },
+            failed.cause().getSuppressed()
+        );
+        Assertions.assertEquals(1, activePrepared.closeCount);
+        Assertions.assertEquals(1, queuedPrepared.closeCount);
+    }
+
+    private static final class NonCancellableFuture<T> extends CompletableFuture<T> {
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            return false;
+        }
     }
 
     private static final class TestPrepared implements AutoCloseable {
@@ -488,6 +746,13 @@ class ConnectionActorTest extends InstrumentationTest {
         void rejectFurtherWork() {
             rejecting = true;
             immediate.clear();
+            timers.clear();
+        }
+
+        /** Mimics an event loop that accepted tasks before termination but never ran them. */
+        void dropAcceptedWork() {
+            immediate.clear();
+            timers.clear();
         }
 
         @Override
@@ -509,12 +774,16 @@ class ConnectionActorTest extends InstrumentationTest {
 
         void runUntilIdle() {
             while (!immediate.isEmpty()) {
-                running = true;
-                try {
-                    immediate.remove().run();
-                } finally {
-                    running = false;
-                }
+                runNext();
+            }
+        }
+
+        void runNext() {
+            running = true;
+            try {
+                immediate.remove().run();
+            } finally {
+                running = false;
             }
         }
 

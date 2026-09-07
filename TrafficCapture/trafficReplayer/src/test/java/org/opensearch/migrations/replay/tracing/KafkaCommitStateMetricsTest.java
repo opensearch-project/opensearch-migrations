@@ -27,6 +27,9 @@ class KafkaCommitStateMetricsTest extends InstrumentationTest {
         metrics.pendingAcknowledgementsChanged(7, -1);
         metrics.commitAcknowledged(7, Duration.ofMillis(25));
         metrics.commitHeadObserved(3, 7, Duration.ofSeconds(5));
+        metrics.ownedRecordCapacityChanged(3, 128);
+        metrics.ownedRecordCapacityChanged(-1, -32);
+        metrics.ownedRecordBudgetSaturated();
 
         var recorded = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         Assertions.assertEquals(
@@ -64,6 +67,22 @@ class KafkaCommitStateMetricsTest extends InstrumentationTest {
             ),
             1,
             5_000
+        );
+        Assertions.assertEquals(
+            2,
+            sumPoint(recorded, KafkaCommitStateMetrics.MetricNames.OWNED_RECORDS, Attributes.empty())
+        );
+        Assertions.assertEquals(
+            96,
+            sumPoint(recorded, KafkaCommitStateMetrics.MetricNames.OWNED_RECORD_BYTES, Attributes.empty())
+        );
+        Assertions.assertEquals(
+            1,
+            sumPoint(
+                recorded,
+                KafkaCommitStateMetrics.MetricNames.OWNERSHIP_BUDGET_SATURATION,
+                Attributes.empty()
+            )
         );
     }
 

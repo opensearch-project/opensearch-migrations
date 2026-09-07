@@ -2,11 +2,14 @@ package org.opensearch.migrations.replay;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,8 +26,10 @@ import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
 import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
@@ -324,6 +329,48 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
         await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
         Assertions.assertTrue(request.future.isCompletedExceptionally());
+    }
+
+    @Test
+    void terminalResultTransfersOwnershipBeforePublishingSuccess() throws Exception {
+        var retryStarted = new CompletableFuture<Void>();
+        var retryDecision =
+            new CompletableFuture<RequestSenderOrchestrator.DeterminedTransformedResponse<String>>();
+        var releasedResults = new AtomicInteger();
+        var permits = new AsyncPermitPool(1, Runnable::run);
+        var context = rootContext.getTestConnectionRequestContext("terminal-result-handoff", 0);
+        var now = Instant.now();
+        var request = orchestrator.scheduleRequestLifecycle(
+            context.getReplayerRequestKey(),
+            context,
+            now.minusSeconds(1),
+            now.minusMillis(1),
+            now,
+            permits,
+            () -> TextTrackedFuture.completedFuture(transformedRequest(), () -> "prepared request"),
+            transformed -> (requestBytes, response, failure) -> {
+                retryStarted.complete(null);
+                return new TextTrackedFuture<>(retryDecision, "controlled terminal retry decision");
+            },
+            status -> status.getClass().getSimpleName()
+        );
+
+        retryStarted.get(5, TimeUnit.SECONDS);
+        var terminalResult = new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+            RequestSenderOrchestrator.RetryDirective.DONE,
+            "sent",
+            ignored -> releasedResults.incrementAndGet()
+        );
+        request.future.whenComplete((value, failure) -> terminalResult.close());
+        retryDecision.complete(terminalResult);
+
+        Assertions.assertEquals("sent", request.get(Duration.ofSeconds(5)));
+        Assertions.assertEquals(
+            0,
+            releasedResults.get(),
+            "the producer must relinquish ownership before publishing the result"
+        );
+        closeActor(context);
     }
 
     @Test
@@ -918,6 +965,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("pool-yanked", 0);
         var neverCompletes = new CompletableFuture<Void>();
+        var fatalFailure = new CompletableFuture<Error>();
         var writesStarted = new AtomicInteger();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
@@ -935,7 +983,11 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                     return new TextTrackedFuture<>(new CompletableFuture<>(), "never-completing response");
                 }
             },
-            sessionKey -> sessionAcknowledger.get().apply(sessionKey)
+            sessionKey -> sessionAcknowledger.get().apply(sessionKey),
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ResourceOwnership.Metrics.NOOP,
+            fatalFailure::complete
         );
 
         var request = schedule(context, permits, CompletableFuture.completedFuture(transformedRequest()));
@@ -946,11 +998,64 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         connectionPool.shutdownNow().get(30, TimeUnit.SECONDS);
 
+        var reportedFatal = fatalFailure.get(5, TimeUnit.SECONDS);
+        Assertions.assertTrue(reportedFatal.getMessage().contains("event loop"));
         Assertions.assertThrows(
             java.util.concurrent.ExecutionException.class,
             () -> request.future.get(30, TimeUnit.SECONDS),
             "the request must settle once its event loop is gone"
         );
+    }
+
+    @Test
+    void eventLoopLossRetainsTransactionsBeforeRetiringTheRuntime() throws Exception {
+        var context = rootContext.getTestConnectionRequestContext("transaction-pool-yanked", 0);
+        var runtime = orchestrator.transactionRuntime(
+            context.getReplayerRequestKey(),
+            context.getChannelKeyContext()
+        );
+        var ledgerExecutor = new PausingExecutor();
+        var ledger = new RecordDispositionLedger(ledgerExecutor);
+        var record = new RetentionWatchingRecord(
+            new KafkaRecordId("topic", 0, 41, runtime.requestId().session().sourceGeneration())
+        );
+        var resourceCloses = new AtomicInteger();
+        var transaction = new ReplayTransaction<String>(
+            runtime.requestId(),
+            runtime.mailbox(),
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome.Durable("unused")
+            ),
+            new ReplayDispositionPolicy(),
+            ledger,
+            List.of(record.id()),
+            List.of(resourceCloses::incrementAndGet),
+            ReplayTransaction.Metrics.NOOP
+        );
+        ledger.register(record, transaction.ledgerOwner()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        ledgerExecutor.pause();
+
+        connectionPool.shutdownNow().get(5, TimeUnit.SECONDS);
+        await(() -> ledgerExecutor.queuedTaskCount() == 1);
+
+        Assertions.assertFalse(
+            transaction.completion().toCompletableFuture().isDone(),
+            "the transaction must wait for the ledger's retained disposition"
+        );
+        Assertions.assertFalse(
+            orchestrator.describeUnterminatedSessions().isEmpty(),
+            "the runtime must remain visible while emergency disposition is unresolved"
+        );
+
+        ledgerExecutor.runUntilIdle();
+
+        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
+        Assertions.assertEquals(1, record.contextCloses.get());
+        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
+        Assertions.assertEquals(0, record.commits.get());
+        Assertions.assertEquals(1, resourceCloses.get());
+        await(() -> orchestrator.describeUnterminatedSessions().isEmpty());
     }
 
     private TrackedFuture<String, String> schedule(
@@ -1016,6 +1121,81 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             Thread.sleep(1);
         }
         Assertions.assertTrue(condition.getAsBoolean(), "condition did not become true before timeout");
+    }
+
+    private static final class PausingExecutor implements Executor {
+        private final Queue<Runnable> tasks = new ArrayDeque<>();
+        private boolean paused;
+
+        @Override
+        public void execute(Runnable command) {
+            synchronized (this) {
+                if (paused) {
+                    tasks.add(command);
+                    return;
+                }
+            }
+            command.run();
+        }
+
+        private synchronized void pause() {
+            paused = true;
+        }
+
+        private synchronized int queuedTaskCount() {
+            return tasks.size();
+        }
+
+        private void runUntilIdle() {
+            while (true) {
+                final Runnable task;
+                synchronized (this) {
+                    task = tasks.poll();
+                    if (task == null) {
+                        paused = false;
+                        return;
+                    }
+                }
+                task.run();
+            }
+        }
+    }
+
+    private static final class RetentionWatchingRecord implements RecordDispositionLedger.RecordHandle {
+        private final KafkaRecordId id;
+        private final AtomicInteger contextCloses = new AtomicInteger();
+        private final AtomicInteger releasesWithoutCommit = new AtomicInteger();
+        private final AtomicInteger commits = new AtomicInteger();
+
+        private RetentionWatchingRecord(KafkaRecordId id) {
+            this.id = id;
+        }
+
+        @Override
+        public KafkaRecordId id() {
+            return id;
+        }
+
+        @Override
+        public SourcePartitionKey sourcePartition() {
+            return new SourcePartitionKey(id.topic(), id.partition(), id.sourceGeneration());
+        }
+
+        @Override
+        public void closeContext() {
+            contextCloses.incrementAndGet();
+        }
+
+        @Override
+        public void releaseWithoutCommit() {
+            releasesWithoutCommit.incrementAndGet();
+        }
+
+        @Override
+        public CompletableFuture<Void> commit() {
+            commits.incrementAndGet();
+            return CompletableFuture.completedFuture(null);
+        }
     }
 
     private static final class RecordingTargetExchangeMetrics implements TargetExchangeState.Metrics {

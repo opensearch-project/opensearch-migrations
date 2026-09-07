@@ -60,7 +60,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         .build();
 
     public static final int PRODUCER_SLEEP_INTERVAL_MS = 100;
-    public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofMillis(PRODUCER_SLEEP_INTERVAL_MS * 2);
+    public static final Duration MAX_WAIT_TIME_FOR_TOPIC = Duration.ofSeconds(30);
     public static final long DEFAULT_POLL_INTERVAL_MS = 5000;
 
     @Container
@@ -205,20 +205,21 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
 
     private void loadStreamsToKafka(KafkaConsumer<String, byte[]> kafkaConsumer, Stream<TrafficStream> streams)
         throws Exception {
-        var kafkaProducer = buildKafkaProducer();
-        var counter = new AtomicInteger();
-        loadStreamsAsynchronouslyWithCloseableResource(
-            kafkaConsumer,
-            streams,
-            s -> s.forEach(
-                trafficStream -> KafkaTestUtils.writeTrafficStreamRecord(
-                    kafkaProducer,
-                    trafficStream,
-                    TEST_TOPIC_NAME,
-                    "KEY_" + counter.incrementAndGet()
+        try (var kafkaProducer = buildKafkaProducer()) {
+            var counter = new AtomicInteger();
+            loadStreamsAsynchronouslyWithCloseableResource(
+                kafkaConsumer,
+                streams,
+                s -> s.forEach(
+                    trafficStream -> KafkaTestUtils.writeTrafficStreamRecord(
+                        kafkaProducer,
+                        trafficStream,
+                        TEST_TOPIC_NAME,
+                        "KEY_" + counter.incrementAndGet()
+                    )
                 )
-            )
-        );
+            );
+        }
         Thread.sleep(PRODUCER_SLEEP_INTERVAL_MS);
     }
 
@@ -227,17 +228,33 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         R closeableResource,
         Consumer<R> loader
     ) throws Exception {
+        var loaderCompletion = new java.util.concurrent.CompletableFuture<Void>();
+        var loaderThread = new Thread(() -> {
+            try {
+                loader.accept(closeableResource);
+                loaderCompletion.complete(null);
+            } catch (Throwable t) {
+                loaderCompletion.completeExceptionally(t);
+            }
+        }, "kafka-restarting-replayer-test-loader");
         try {
-            new Thread(() -> loader.accept(closeableResource)).start();
+            loaderThread.start();
             var startTime = Instant.now();
-            while (!kafkaConsumer.listTopics().isEmpty()) {
+            while (kafkaConsumer.listTopics().isEmpty() && !loaderCompletion.isDone()) {
                 Thread.sleep(10);
                 Assertions.assertTrue(
-                    Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0
+                    Duration.between(startTime, Instant.now()).compareTo(MAX_WAIT_TIME_FOR_TOPIC) < 0,
+                    "Kafka topic was not created before the timeout"
                 );
             }
+            loaderCompletion.get(MAX_WAIT_TIME_FOR_TOPIC.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
         } finally {
             closeableResource.close();
+            loaderThread.join(MAX_WAIT_TIME_FOR_TOPIC.toMillis());
+            if (loaderThread.isAlive()) {
+                loaderThread.interrupt();
+                Assertions.fail("Kafka test loader did not terminate");
+            }
         }
     }
 

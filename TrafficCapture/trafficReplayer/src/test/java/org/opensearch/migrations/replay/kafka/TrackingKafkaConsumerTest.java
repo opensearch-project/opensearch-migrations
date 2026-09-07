@@ -71,6 +71,9 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         final Map<Integer, Integer> pendingAcknowledgements = new HashMap<>();
         final List<Duration> commitLatencies = new ArrayList<>();
         final List<String> observedHeads = new ArrayList<>();
+        int ownedRecords;
+        long ownedBytes;
+        int budgetSaturations;
 
         @Override
         public void unresolvedObligationsChanged(int delta) {
@@ -95,6 +98,17 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         @Override
         public void commitHeadObserved(int partition, int generation, Duration age) {
             observedHeads.add(partition + ":" + generation + ":" + age.toMillis());
+        }
+
+        @Override
+        public void ownedRecordCapacityChanged(int recordDelta, long byteDelta) {
+            ownedRecords += recordDelta;
+            ownedBytes += byteDelta;
+        }
+
+        @Override
+        public void ownedRecordBudgetSaturated() {
+            budgetSaturations++;
         }
     }
 
@@ -251,6 +265,173 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
         Assertions.assertTrue(consumer.partitionToOffsetLifecycleTrackerMap.isEmpty());
         Assertions.assertTrue(consumer.nextSetOfCommitsMap.isEmpty());
         Assertions.assertTrue(consumer.nextSetOfKeysContextsBeingCommitted.isEmpty());
+    }
+
+    @Test
+    void ownershipBudgetRewindsTheRejectedSuffixAndReleasesOnlyAfterBrokerAcknowledgement() {
+        var mockConsumer = buildMockConsumer();
+        var metrics = new RecordingCommitMetrics();
+        var committedKeys = new ArrayList<ITrafficStreamKey>();
+        var consumer = new TrackingKafkaConsumer(
+            rootContext,
+            mockConsumer,
+            TOPIC,
+            Duration.ofSeconds(30),
+            Clock.systemUTC(),
+            committedKeys::add,
+            metrics,
+            2,
+            1_000
+        );
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 1, null, new byte[] { 1 }));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 2, null, new byte[] { 2 }));
+
+        List<KafkaCommitOffsetData> accepted;
+        try (var context = rootContext.createReadChunkContext()) {
+            accepted = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+
+        Assertions.assertEquals(List.of(0L, 1L), accepted.stream().map(KafkaCommitOffsetData::getOffset).toList());
+        Assertions.assertEquals(2, mockConsumer.position(partition));
+        Assertions.assertFalse(consumer.isReadCapacityAvailable());
+        Assertions.assertEquals(2, metrics.ownedRecords);
+        Assertions.assertEquals(2, metrics.ownedBytes);
+        Assertions.assertEquals(1, metrics.budgetSaturations);
+
+        var firstKey = Mockito.mock(ITrafficStreamKey.class);
+        var secondKey = Mockito.mock(ITrafficStreamKey.class);
+        consumer.commitKafkaKey(secondKey, accepted.get(1));
+        consumer.commitKafkaKey(firstKey, accepted.get(0));
+
+        Assertions.assertEquals(2, metrics.ownedRecords);
+        Assertions.assertFalse(consumer.isReadCapacityAvailable());
+
+        consumer.commitStagedOffsets();
+
+        Assertions.assertEquals(List.of(firstKey, secondKey), committedKeys);
+        Assertions.assertEquals(0, metrics.ownedRecords);
+        Assertions.assertEquals(0, metrics.ownedBytes);
+        Assertions.assertTrue(consumer.isReadCapacityAvailable());
+    }
+
+    @Test
+    void saturatedOwnershipBudgetRewindsEveryRejectedPartition() {
+        var partition0 = new TopicPartition(TOPIC, 0);
+        var partition1 = new TopicPartition(TOPIC, 1);
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        mockConsumer.assign(List.of(partition0, partition1));
+        mockConsumer.updateBeginningOffsets(Map.of(partition0, 0L, partition1, 0L));
+        var consumer = new TrackingKafkaConsumer(
+            rootContext,
+            mockConsumer,
+            TOPIC,
+            Duration.ofSeconds(30),
+            Clock.systemUTC(),
+            ignored -> {},
+            TrackingKafkaConsumer.Metrics.NO_OP,
+            1,
+            1_000
+        );
+        consumer.onPartitionsAssigned(List.of(partition0, partition1));
+
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
+        try (var context = rootContext.createReadChunkContext()) {
+            var accepted = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+            Assertions.assertEquals(1, accepted.size());
+            Assertions.assertEquals(0L, accepted.get(0).getOffset());
+        }
+
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 1, null, new byte[] { 1 }));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 1, 0, null, new byte[] { 2 }));
+        try (var context = rootContext.createReadChunkContext()) {
+            Assertions.assertTrue(
+                consumer.getNextBatchOfRecords(context, (offset, record) -> offset).findAny().isEmpty()
+            );
+        }
+
+        Assertions.assertEquals(1L, mockConsumer.position(partition0));
+        Assertions.assertEquals(0L, mockConsumer.position(partition1));
+        Assertions.assertEquals(1, consumer.ownershipBudgetSnapshot().records());
+    }
+
+    @Test
+    void recordConstructionFailureReleasesItsOwnershipReservation() {
+        var mockConsumer = buildMockConsumer();
+        var metrics = new RecordingCommitMetrics();
+        var consumer = new TrackingKafkaConsumer(
+            rootContext,
+            mockConsumer,
+            TOPIC,
+            Duration.ofSeconds(30),
+            Clock.systemUTC(),
+            ignored -> {},
+            metrics,
+            1,
+            1_000
+        );
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
+
+        try (var context = rootContext.createReadChunkContext()) {
+            Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> consumer.getNextBatchOfRecords(
+                    context,
+                    (offset, record) -> {
+                        throw new IllegalStateException("construction failed");
+                    }
+                )
+            );
+        }
+
+        Assertions.assertTrue(consumer.isReadCapacityAvailable());
+        Assertions.assertEquals(0, consumer.ownershipBudgetSnapshot().records());
+        Assertions.assertEquals(0, metrics.ownedRecords);
+        Assertions.assertEquals(0, metrics.unresolvedObligations);
+        Assertions.assertTrue(consumer.partitionToOffsetLifecycleTrackerMap.get(0).isEmpty());
+    }
+
+    @Test
+    void retainedHeadAndCommitBlockedSuccessorHoldTheBudgetUntilGenerationLoss() {
+        var mockConsumer = buildMockConsumer();
+        var metrics = new RecordingCommitMetrics();
+        var consumer = new TrackingKafkaConsumer(
+            rootContext,
+            mockConsumer,
+            TOPIC,
+            Duration.ofSeconds(30),
+            Clock.systemUTC(),
+            ignored -> {},
+            metrics,
+            2,
+            1_000
+        );
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.onPartitionsAssigned(List.of(partition));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
+        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 1, null, new byte[] { 1 }));
+        List<KafkaCommitOffsetData> accepted;
+        try (var context = rootContext.createReadChunkContext()) {
+            accepted = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+        }
+
+        Assertions.assertEquals(
+            ITrafficCaptureSource.CommitResult.BLOCKED_BY_OTHER_COMMITS,
+            consumer.commitKafkaKey(Mockito.mock(ITrafficStreamKey.class), accepted.get(1))
+        );
+        Assertions.assertFalse(consumer.isReadCapacityAvailable());
+        Assertions.assertEquals(2, consumer.ownershipBudgetSnapshot().records());
+
+        consumer.onPartitionsLost(List.of(partition));
+
+        Assertions.assertTrue(consumer.isReadCapacityAvailable());
+        Assertions.assertEquals(0, consumer.ownershipBudgetSnapshot().records());
+        Assertions.assertEquals(0, metrics.ownedRecords);
+        Assertions.assertEquals(0, metrics.ownedBytes);
     }
 
     // -------------------------------------------------------------------------
@@ -449,7 +630,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
     }
 
     @Test
-    void backwardOffsetFencesTheOldGenerationBeforeRedelivery() {
+    void backwardOffsetFailsClosedWithoutCreatingAnotherGeneration() {
         var mockConsumer = buildMockConsumer();
         var consumer = buildConsumer(mockConsumer);
         var partition = new TopicPartition(TOPIC, 0);
@@ -481,30 +662,17 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
 
         mockConsumer.seek(partition, 0);
         mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "new", new byte[] { 0 }));
-        List<KafkaCommitOffsetData> resetBatch;
         try (var context = rootContext.createReadChunkContext()) {
-            resetBatch = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
+            Assertions.assertThrows(
+                TrackingKafkaConsumer.UnexpectedOffsetRewindException.class,
+                () -> consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList()
+            );
         }
 
-        Assertions.assertTrue(resetBatch.isEmpty());
-        Assertions.assertEquals(List.of(new SourcePartitionKey(TOPIC, 0, 1)), revoked);
-        Assertions.assertEquals(revoked, trulyLost);
-        Assertions.assertEquals(
-            List.of(
-                new SourcePartitionKey(TOPIC, 0, 1),
-                new SourcePartitionKey(TOPIC, 0, 2)
-            ),
-            assigned
-        );
-        Assertions.assertEquals(0, mockConsumer.position(partition));
-
-        mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "new", new byte[] { 0 }));
-        List<KafkaCommitOffsetData> newRecords;
-        try (var context = rootContext.createReadChunkContext()) {
-            newRecords = consumer.getNextBatchOfRecords(context, (offset, record) -> offset).toList();
-        }
-        Assertions.assertEquals(1, newRecords.size());
-        Assertions.assertEquals(2, newRecords.get(0).getGeneration());
+        Assertions.assertTrue(revoked.isEmpty());
+        Assertions.assertTrue(trulyLost.isEmpty());
+        Assertions.assertEquals(List.of(new SourcePartitionKey(TOPIC, 0, 1)), assigned);
+        Assertions.assertEquals(1, consumer.getConsumerConnectionGeneration());
     }
 
     @Test

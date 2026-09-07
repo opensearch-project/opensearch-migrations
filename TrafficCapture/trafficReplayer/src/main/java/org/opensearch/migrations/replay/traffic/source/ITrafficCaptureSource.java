@@ -79,6 +79,12 @@ public interface ITrafficCaptureSource extends AutoCloseable {
         return false;
     }
 
+    default boolean isReadCapacityAvailable() {
+        return true;
+    }
+
+    default void setReadCapacityAvailableListener(Runnable listener) {}
+
     /**
      * Called by the accumulator when a connection's lifecycle is complete — either because a
      * source close observation was processed, the accumulation expired, or a synthetic
