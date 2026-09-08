@@ -829,10 +829,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     if (peerDeclarationOffset != null
                         && kafkaRecord.offset() > peerDeclarationOffset) {
                         livenessScanContext.recordSupersededTrafficDiscarded();
-                        log.atDebug()
+                        log.atError()
                             .setMessage(
                                 "Discarding traffic from {} on partition {} at offset {} "
-                                    + "after peer no-more-writes declaration at offset {}"
+                                    + "after authoritative peer NoMoreWrites cutoff at offset {}"
                             )
                             .addArgument(ts::getNodeId)
                             .addArgument(kafkaRecord::partition)
