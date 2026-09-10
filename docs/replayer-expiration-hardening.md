@@ -1,6 +1,29 @@
 # Hardening Replayer Expirations
 
-**Status:** Design — Phase 0 shipped (PR #3225), Phases 1 & 2 awaiting review
+**Status:** historical policy exploration — Phase 0 shipped; the current Phase 1 contract is in
+[`replayerHardenedArchitectureDesign.md`](replayerHardenedArchitectureDesign.md) §10 and
+[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md)
+
+**Supersession note (2026-09-10).** Sections 5–8 preserve the reasoning path that led to the current
+design; they are not the implementation contract. In particular, the current design:
+
+- emits exact manifests containing **all** open connections rather than idle-only snapshots;
+- needs one complete offset-ordered omission for prompt structural settlement, not two omissions;
+- uses acknowledged empty manifests for temporary drain and terminal self-emitted
+  `NoMoreWrites` only for permanent writer-partition retirement; peers never complete another
+  writer;
+- permits configured Kafka broker-time expiration of **incomplete** reconstruction state after
+  both traffic and positive manifest liveness are absent through `--packet-timeout-seconds`;
+- requires `message.timestamp.type=LogAppendTime` and excludes producer, payload, proxy-local, and
+  replayer-wall-clock timestamps from liveness arithmetic;
+- defines `lastPositiveLivenessBrokerTime` and `scannedThroughBrokerTime` only from records actually
+  observed in that Kafka broker-time domain, so a quiet partition does not advance expiration;
+- relies on strict capture-before-forward and the proxy's acknowledged-manifest freshness gate to
+  make that fallback safe; and
+- continues to reject a watchdog based only on how long the replayer process has waited.
+
+The old `connectionTimeout + maxConnectionDuration` “proof” formula and idle-only snapshot schema
+below are superseded. They remain here to explain earlier tradeoffs and PR history.
 
 ---
 
@@ -535,10 +558,11 @@ the connections of the process that emitted it. The nodeId *is* the fencing toke
 The framing that makes this obvious: when a proxy restarts, every connection it held has already been
 severed. For every purpose that matters here, the new process is a new host.
 
-**The consequence, stated plainly.** A dead proxy's connections can never be expired by liveness,
-because no successor is authorized to speak for them and the dead process emits nothing further. That
-residue belongs to the scanner's window-exhausted verdict (§5.2, condition 2), which is the other
-reason both mechanisms ship.
+**Historical consequence, superseded by the current contract.** Under this proposal, a dead
+proxy's connections could not be expired by liveness because no successor was authorized to speak
+for them and the dead process emitted nothing further. The proposal sent that residue to the
+scanner's window-exhausted verdict. The current design instead records a distinct
+`ConfiguredExpired` outcome backed by exact positive manifests and capture-before-forward.
 
 ### 5.5 Metrics
 
@@ -651,12 +675,14 @@ these are the integration points to revisit — recorded here so the shift is a 
 
 ## 7. Rejected Approaches
 
-### Time-based force-commit (PR #3207's approach)
+### Replayer-wall-clock force-commit (PR #3207's approach)
 
 Three mechanisms: flip `CLOSED_PREMATURELY` to commit; a wall-clock expiry watchdog on a 30s
 timer; a stale-head reaper with a 5-minute threshold in `OffsetLifecycleTracker`.
 
-**Why rejected:**
+**Why rejected:** This section rejects a watchdog based on elapsed replayer-process time. It does
+not reject the current Kafka broker-time `ConfiguredExpired` outcome described in the supersession
+note.
 
 - Commits on **impatience** (elapsed time), not **evidence** (structural confirmation that no
   follow-up exists). Under a slow target, `speedup < 1`, or ordinary replay lag, legitimately

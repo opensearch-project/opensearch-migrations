@@ -3,7 +3,7 @@
 **Status:** Draft for discussion — tactical alternative to
 [replayerHardenedArchitectureDesign.md](replayerHardenedArchitectureDesign.md)
 
-**Date:** 2026-09-03
+**Date:** 2026-09-10
 
 **Companion delta:** [replayerSimplifiedLifecycleDelta.md](replayerSimplifiedLifecycleDelta.md)
 
@@ -50,9 +50,10 @@ Six rules govern the whole design:
    an explicit "there was nothing to close" completion. Gates await `allOf(obligations)`.
 5. **Barriers, not fire-and-forget.** Every close, cancel, and shutdown operation returns a
    future that completes only when the operation's entire effect has settled.
-6. **Evidence, not impatience.** Offsets commit only on structural evidence that a record is
-   finished (completed replay, captured close, scanner-confirmed absence, or an explicit
-   operator-classified discard). Elapsed wall-clock time never commits anything.
+6. **Evidence and explicit policy, not impatience.** Offsets commit on completed replay, captured
+   close, scanner-confirmed absence, configured incomplete-state expiration under the proxy
+   contract, or an explicit operator-classified discard. Replayer wall-clock age never commits
+   anything.
 
 ## 2. Roles and Threads
 
@@ -119,11 +120,19 @@ sealed interface SourceEvent {
                             List<HeldRecordKey> heldKeys) implements SourceEvent {}
 }
 
-enum SourceEndCause { RESPONSE_COMPLETE, CAPTURED_CLOSE, CONFIRMED_DEAD, READER_INTERRUPTED, SHUTDOWN }
+enum SourceEndCause {
+    RESPONSE_COMPLETE,
+    CAPTURED_CLOSE,
+    CONFIRMED_DEAD,
+    CONFIGURED_EXPIRED,
+    READER_INTERRUPTED,
+    SHUTDOWN
+}
 
 sealed interface ConnectionEndCause {
     record CapturedClose(...) implements ConnectionEndCause {}
     record ConfirmedDead(ScanProof proof) implements ConnectionEndCause {}
+    record ConfiguredExpired(ExpirationPolicyEvidence evidence) implements ConnectionEndCause {}
     record ReaderInterrupted(int partition) implements ConnectionEndCause {}
     record Shutdown() implements ConnectionEndCause {}
 }
@@ -144,9 +153,9 @@ Properties this flattening buys:
   intake, so the accumulator's single-threaded contract holds and no second thread ever mutates
   accumulation state.
 * **Expiry causes are explicit.** There is no single overloaded "expired" status. A source side
-  can end as `CONFIRMED_DEAD` (evidence, commit-eligible) or `READER_INTERRUPTED`/`SHUTDOWN`
-  (out of runway, never commit). The cause travels with the event, so downstream policy never
-  infers it.
+  can end as `CONFIRMED_DEAD` (structural proof), `CONFIGURED_EXPIRED` (policy evidence under the
+  proxy contract), or `READER_INTERRUPTED`/`SHUTDOWN` (out of runway, never commit). The cause
+  travels with the event, so downstream policy never infers it.
 
 Control events flowing the other direction (from the Kafka layer into the intake) use the same
 shape: a reader-interrupted close and a scanner verdict are values queued ahead of real records,
@@ -183,6 +192,7 @@ One function makes every record's terminal decision:
 void disposeRecords(
     RequestOrConnectionTag tag,
     SourceOutcome source,        // completed / captured-close / confirmed-dead(proof) /
+                                 // configured-expired(policy evidence) /
                                  // reader-interrupted / shutdown
     TargetOutcome target,        // succeeded / failed(classification) / cancelled(reason) /
                                  // filtered / not-attempted
@@ -214,7 +224,8 @@ Rules:
 | --- | --- | --- | --- |
 | Completed | Succeeded | Durable | Commit |
 | Captured close (request never completed) | Not attempted | Durable discard evidence | Commit as deliberate discard (explicit policy) |
-| Confirmed dead (scanner proof) | Succeeded or not attempted | Durable | Commit |
+| Confirmed dead before complete request | Not attempted | Not required; structural proof present | Commit as confirmed-dead discard |
+| Configured expired before complete request | Not attempted | Not required; capture contract active | Commit as configured-expired discard |
 | Deliberate discard (dropped/ignored) | Not attempted | Durable discard evidence | Commit |
 | Any | Failed: deterministic (classified) | Durable skip evidence | Commit only when the operator classifier is configured |
 | Any | Failed: transient, retries exhausted | Any | Retain; halt loudly |
@@ -279,7 +290,7 @@ Reference-counted request payloads get an explicit contract:
   and registry entries. Leak detection (Netty leak detector plus owner counters) is part of the
   standing test suite: every test ends with all registries empty and all counters at zero.
 
-## 9. Expiration Policy: Epsilon, Scanner, Proxy Cap
+## 9. Expiration Policy: Epsilon, Scanner, Exact Manifests, and Capture Gating
 
 These ship together, as specified in the expiration-hardening design; the contracts above are
 what make them safe to wire in.
@@ -292,50 +303,75 @@ completed work**: while replay work is outstanding, the settled time advances wi
 not with the wall clock. This coupling is the memory bound; removing it without an equivalent
 low-watermark controller is prohibited.
 
+`settledReplayTime` is captured source time used only for replay pacing. It never participates in
+connection liveness or configured-expiration arithmetic.
+
 ### 9.2 Scanner
 
-Because epsilon reads can never reach the point where timestamp-driven expiry would fire, a
-blocked commit head needs a structural verdict instead:
+Because epsilon reads may not reach a follow-up, manifest, or timeout horizon promptly, the same
+consumer runs a metadata-only scan cursor:
 
-* The **same consumer** runs a metadata-only scan cursor: after a poll, seek ahead within the
-  scan window, decode only connection identity/timestamps/observation kinds, discard payloads,
-  seek back. Same consumer ⇒ same partition assignment ⇒ verdicts are always about partitions
-  this process actually replays.
-* Verdicts: **follow-up present** (leave alive), **confirmed absent** (emit
-  `ConnectionEndCause.ConfirmedDead(proof)` as a control event into the serialized intake), or
-  **inconclusive** (never commit-eligible).
-* `ScanProof` carries partition, generation, the scanned offset/time bounds, the follow-up kind
-  that was required, and the configured connection-duration cap — enough to audit later why a
-  commit was justified. If the assignment or generation changed mid-cycle, the cycle's results
-  are discarded.
-* Scanning is continuous, not stall-triggered, so load is steady and dead state is expired
-  promptly.
+* after a poll, snapshot positions and generation, seek ahead within an operational budget, decode
+  only identity, Kafka `LogAppendTime`, observation kinds, and manifest chunks, discard payloads,
+  and seek back;
+* emit **follow-up present**, **confirmed absent** with one complete exact omission,
+  **configured expired** after the complete Kafka broker-time horizon, or **inconclusive**;
+* carry partition, generation, connection identity, required follow-up,
+  `lastPositiveLivenessBrokerTime`, `scannedThroughBrokerTime`, timeout, and structural proof when
+  one exists; and
+* discard the cycle if assignment or generation changed.
 
-### 9.3 Capture-proxy duration cap
+Scanning is continuous so load is steady and dead state is released promptly.
 
-The capture proxy optionally enforces a maximum connection duration and writes a **real close
-observation** before closing. The scan window is `connectionTimeout + maxConnectionDuration`;
-the two values are a matched pair. Without a finite cap the scanner can only ever return
-inconclusive, because "no follow-up within the window" proves nothing about an unbounded
-connection.
+### 9.3 Exact manifests and capture-before-forward
+
+The capture proxy emits a complete, chunked manifest of **all** open connections every
+`manifestInterval`. A listing manifest refreshes an idle connection. One complete offset-ordered
+omission provides structural settlement.
+
+Temporary partition drain ends with an acknowledged empty manifest and permits later reacquisition.
+Permanent writer-partition retirement emits terminal self `NoMoreWrites` only after admission is
+revoked, every related Netty connection and teardown future has settled, the registry is empty, and
+all publisher work is acknowledged. Later traffic from that retired identity is a protocol
+violation, as is a later manifest; duplicate self completion is idempotent.
+
+For mutating requests, strict mode acknowledges the complete replay representation to Kafka before
+submitting execution-enabling source bytes. Immediately before source submission, it requires a
+recent acknowledged manifest. This makes it safe for the replayer to mark only incomplete state
+`ConfiguredExpired` after both traffic and listing manifests are absent through
+`--packet-timeout-seconds`, measured exclusively in Kafka broker time.
+
+The traffic topic must use `message.timestamp.type=LogAppendTime`. Every replayer liveness value is
+a monotonically clamped per-partition broker timestamp. Captured observation time, manifest
+`emittedAtMillis`, proxy-local monotonic time, and replayer wall time are excluded from expiration
+arithmetic.
+
+`lastPositiveLivenessBrokerTime` is the broker append time of the latest traffic record or complete
+listing manifest for the connection. `scannedThroughBrokerTime` is the greatest broker append time
+among partition records actually covered by replay or scanning. A quiet partition does not advance
+that horizon, so expiration waits for later durable partition activity rather than substituting a
+process clock.
+
+An optional maximum connection duration still creates a real close and bounds proxy resources. It
+is not part of the expiration proof.
 
 ### 9.4 What may never expire anything
 
-Wall-clock age. Heartbeats and monitors are read-only diagnostics; they may report a suspicious
-blocker (with its backside ceiling — the last observed source timestamp — not its insertion
-wall time), but they may not mutate accumulator state or trigger commits. Two expiry mechanisms
-racing always resolve in favor of the impatient one, so the impatient one must not exist.
+Replayer wall-clock age. Diagnostic heartbeats and monitors may report a suspicious blocker, but
+they may not mutate accumulator state or trigger commits. Configured expiration advances from
+Kafka broker append times on partition observations, not from how long this replayer process has
+waited.
 
 ## 10. Observability
 
 | Area | Signals |
 | --- | --- |
 | Read gate | settled replay time, epsilon utilization, records buffered |
-| Scanner | scan distance and latency, verdict counts (present/absent/inconclusive), bytes discarded |
+| Scanner | scan distance and latency, verdict counts (present/absent/configured-expired/inconclusive), bytes discarded |
 | Transactions | registry size by phase, terminal outcome counts, disposition reason counts |
 | Commits | worst commit head across partitions (identity + age), unresolved obligations, staged commit latency |
 | Resources | owned payload count/bytes, duplicate-close attempts, permits held/queued |
-| Proxy | connections closed by the duration cap |
+| Proxy | acknowledged-manifest age, capture-gate state, capture abandonment, gap alarms, duration-cap closes |
 
 Every disposition row increments a reason-labeled counter, so "why did/didn't this commit"
 is answerable from metrics without log archaeology.
@@ -352,11 +388,11 @@ is answerable from metrics without log archaeology.
 * **Obligation tests:** synthetic closes for connections with and without sessions; the gate
   reopens on real acknowledgements only, and never via timeout.
 * **Scanner tests:** follow-up present (survives), confirmed absent (commits with proof),
-  inconclusive (retains), generation change mid-scan (discarded), live long connection under
-  epsilon (not expired).
+  configured expired (commits with policy evidence), inconclusive (retains), generation change
+  mid-scan (discarded), live long connection refreshed by manifests (not expired).
 * **Leak tests:** Netty leak detection on; all owner counters zero at test end.
-* **Restart tests:** at-least-once redelivery after retain paths; committed confirmed-dead
-  records are not re-read.
+* **Restart tests:** at-least-once redelivery after retain paths; committed confirmed-dead and
+  configured-expired records are not re-read.
 
 ## 12. Non-Goals
 

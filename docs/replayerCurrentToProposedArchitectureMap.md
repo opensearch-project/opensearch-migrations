@@ -2,11 +2,12 @@
 
 **Status:** Draft migration crosswalk. **Stale as a status ledger** — the "Current state" columns
 describe the code as of 2026-09-04, before the branch implemented most of the target design (the
-scanner, liveness snapshots, actor/transaction/ledger lifecycle, and routing plan all exist now).
+scanner, manifest foundations, actor/transaction/ledger lifecycle, and legacy routing plan all
+exist now).
 For what is actually done versus future, see the hardened design's Implementation Status section.
 The name mappings here remain accurate and useful.
 
-**Date:** 2026-09-04
+**Date:** 2026-09-10
 
 **Target design:** [replayerHardenedArchitectureDesign.md](replayerHardenedArchitectureDesign.md)
 
@@ -205,7 +206,7 @@ post-transformation sorter handoffs disappear.
 | --- | --- | --- |
 | Captured normal close | Accumulator callback commits held keys, schedules close through sorter | Admit ordered close command; source outcome and record obligations finalize explicitly |
 | Data-driven source expiry | Accumulator directly calls expiry callbacks with commit-eligible status | Emit typed source expiry outcome; transaction/disposition policy decides |
-| Scanner-confirmed dead | Not implemented; design proposed synthetic expiry | Kafka source emits proof-bearing control event to serialized assembler |
+| Scanner settlement | Not implemented; design proposed synthetic expiry | Kafka source emits structural or configured-expiration control events to serialized assembler |
 | Wall-clock heartbeat expiry | PR proposal mutates accumulator from heartbeat thread and commits | Rejected; heartbeat only reports |
 | Partition reassignment | Synthetic close, counter/map, cancel path, channel callback | Source emits interruption; abort matching actors; await typed completion gates; retain records |
 | No replay session on synthetic close | Required acknowledgement can disappear | Actor registry returns explicit `AlreadyAbsent` termination result |
@@ -220,15 +221,18 @@ post-transformation sorter handoffs disappear.
 | Continuous scanner | Not implemented | Same-consumer scan cursor in `KafkaSourceActor` |
 | Metadata-only scan | Not implemented | Decode identity/timestamp/observation type; discard payload |
 | Partition affinity | Replay consumer owns assignment | Scanner uses same consumer and generation snapshot |
-| Scan window | Conceptual timeout plus proxy cap | Required proof bound carried in `ScanEvidence` |
-| Proxy liveness snapshots | Not implemented | Per-`(nodeId, partition)` idle-connection declarations; `LivenessIndex` in `KafkaSourceActor` |
-| Offset-ordered absence proof | Not implemented; absence inferred from an empty window | `AbsenceProof.LivenessOmission` — two omissions with the last record preceding both |
-| Node-sharded partitions | Traffic keyed by bare `connectionId`; partition chosen by key hash | Explicit partition from `S(nodeId)`; traffic and snapshots share the shard set |
-| Per-process `nodeId` | `UUID.randomUUID()` per start (incidental) | Same value, now load-bearing as a fencing token |
+| Scan horizon | Conceptual timeout plus proxy cap | Operational scan budget plus `scannedThroughBrokerTime`, derived only from monotonically clamped Kafka `LogAppendTime` values on records actually covered |
+| Exact proxy manifests | Not implemented | Per-`(nodeId, partition)` all-open declarations; `ProxyManifestIndex` in `KafkaSourceActor` |
+| Offset-ordered absence proof | Not implemented; absence inferred from an empty window | `AbsenceProof.LivenessOmission` — one complete omission after the last record |
+| Configured incomplete-state expiration | Existing broad source-timestamp expiry | Explicit `ConfiguredExpired(lastPositiveLivenessBrokerTime, scannedThroughBrokerTime, timeout)`; both timestamps are broker time and no other clock enters the calculation |
+| Group-assigned partitions | Traffic keyed by bare `connectionId`; partition chosen by key hash | New admission follows group assignment; each connection stores one immutable partition used by traffic and manifests |
+| Per-process `nodeId` | `UUID.randomUUID()` per start (incidental) | Same value remains load-bearing for manifest provenance; it is not a producer fence |
 | Confirmed dead commits | Current `EXPIRED_PREMATURELY` broadly commits | Explicit `SourceOutcome.ConfirmedDead` plus proof |
 | Out of runway does not commit | `TRAFFIC_SOURCE_READER_INTERRUPTED` suppresses commit | Explicit interruption outcome maps to `Retain` |
 | Wall-clock expiry rejected | Proposed by PR #3231 | No state mutation from heartbeat |
-| Proxy max connection duration | Not implemented | Capture proxy emits real close; scanner validation requires finite cap for proof |
+| Proxy max connection duration | Not implemented | Optional resource cap that emits a real close; not part of expiration proof |
+| Capture-before-forward | Capture ordering exists but is not modeled here | Complete Kafka acknowledgement and acknowledged-manifest freshness gate before strict source execution |
+| Writer completion | Foundations exist | Empty manifest for temporary drain; terminal self `NoMoreWrites` only after permanent retirement and full Netty/publisher drain; later records halt |
 | Worst commit-head metrics | Partially present | Scanner selects blockers from authoritative per-partition metadata |
 | Part-level tuple API | Whole-tuple sink | `EvidenceWriter` parts with whole-tuple adapter |
 | Response recreation | Not implemented | Durable request lookup avoids resend for response-only redelivery |
@@ -326,26 +330,28 @@ cannot reorder sends, and the sorter is unused by the new path.
 Exit gate: rebalance and shutdown tests prove no early successful completion, orphaned child
 work, or teardown commit.
 
-### Slice 5: scanner, epsilon, liveness, and proxy cap
+### Slice 5: scanner, epsilon, exact manifests, and capture gating
 
 These ship together:
 
 * same-consumer scan cursor,
-* proof-bearing scanner control events,
+* structural and configured-expiration scanner control events,
 * epsilon lookahead,
 * settled-work progress ledger,
-* capture proxy maximum duration,
-* capture proxy liveness snapshots and node-sharded partition selection,
-* replayer-side `LivenessIndex` and the offset-ordered omission verdict,
-* scanner/proxy/liveness metrics.
+* exact all-open proxy manifests and group-assigned immutable routing,
+* capture-before-forward and acknowledged-manifest freshness gate,
+* empty-manifest temporary drain and terminal self-only writer completion,
+* replayer-side `ProxyManifestIndex`, offset-ordered omission, and configured expiration,
+* scanner/proxy/manifest metrics.
 
-The proxy-side work (duration cap, snapshots, shard selection) is independently landable *before* the
-replayer consumes any of it — snapshots that nobody reads are inert, so this half can ship and be
-measured for cost and record size on its own. The replayer half is what must not precede it.
+The proxy-side exact-manifest work is independently landable before the replayer consumes it;
+unread manifests are inert and can be measured for cost and record size. Configured Kafka
+expiration must not be enabled until capture-before-forward and the stale-manifest gate are active.
 
-Exit gate: dead blockers clear (by omission when the proxy is alive, by window scan when it is not),
-live long connections survive, silent nodes cause no expiration, and target stalls do not create
-unbounded read-ahead.
+Exit gate: dead blockers clear by omission or configured expiration, listing manifests preserve
+live long connections, complete requests are never discarded by connection expiration, strict
+suspension recovery cannot execute an uncaptured request, and target stalls do not create unbounded
+read-ahead.
 
 ### Slice 6: part-level evidence and response recreation
 
@@ -367,11 +373,12 @@ Exit gate: no production reference remains to old orchestration.
 
 1. Do not run both old and new target-send paths for the same request.
 2. A record obligation belongs to exactly one finalization implementation.
-3. Do not enable epsilon until scanner and finite proxy bound are active.
-4. Do not allow scanner and wall-clock expiry to coexist.
+3. Do not enable configured Kafka expiration until exact manifests, capture-before-forward, and the
+   acknowledged-manifest freshness gate are active.
+4. Do not allow scanner policy and replayer wall-clock expiry to coexist.
    - Do not derive a proxy `nodeId` from anything host-stable; a successor process must never be able
      to make liveness claims about its predecessor's connections.
-   - Do not accept a liveness snapshot whose stamped partition disagrees with the partition it was
+   - Do not accept a manifest whose stamped partition disagrees with the partition it was
      read from; halt instead.
 5. Do not remove replay-progress coupling unless a stronger low-watermark controller replaces it.
 6. Do not switch rebalance handling until actor abort stages satisfy the completion-gate
@@ -391,7 +398,7 @@ Exit gate: no production reference remains to old orchestration.
 | Kafka commits | Normal successful runs produce equivalent committed offsets |
 | Failure | New path intentionally differs by retaining on cancellation and unknown failure |
 | Rebalance | Old generation fully terminates before new generation replay |
-| Expiry | Scanner evidence replaces dependence on large lookahead |
+| Expiry | Scanner structural proof or configured policy replaces dependence on large lookahead |
 | Memory | Epsilon bounds read-ahead; owned-resource counters return to zero |
 | Shutdown | Every child future and actor reaches a terminal state |
 | Threading | No new thread pool; actor and transaction affinity assertions never fail |

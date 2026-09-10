@@ -2,7 +2,7 @@
 
 **Status:** Draft for discussion
 
-**Date:** 2026-09-03
+**Date:** 2026-09-10
 
 **Baseline:** branch `integrating3231` (current architecture as described in
 [replayerArchitecture.md](replayerArchitecture.md); gaps as inventoried in
@@ -103,9 +103,9 @@ C2).
   generation). Active-connection deregistration keys off the tag, never off surviving keys.
 * `ReconstructionStatus` is replaced in the event payload by `ConnectionEndCause` /
   `SourceEndCause`, which split today's overloaded `EXPIRED_PREMATURELY` into
-  `ConfirmedDead(proof)` (commit-eligible) vs. runway causes (never commit). This is the status
-  split that the expiration design (§5.2) and the #3231 review (§5, open question) both flag as
-  mandatory before any scanner-driven expiry can exist.
+  `ConfirmedDead(proof)`, `ConfiguredExpired(policyEvidence)`, and runway causes (never commit).
+  Structural proof and configured policy remain distinct commit reasons. This split is mandatory
+  before any scanner-driven expiry can exist.
 * Accumulator internals (state machine, rotation, F1/F2 handling) are untouched; only its
   outbound edge changes.
 
@@ -182,7 +182,7 @@ packaging is reached (audit Finding 8).
 * Add refcount instrumentation tests for trivial + signing producers across success,
   pre-send cancellation, mid-send cancellation, and multi-retry paths.
 
-### D6 — Epsilon + scanner + liveness + proxy cap (implements expiration-hardening Phase 1; rejects #3231 changes 2 and 5)
+### D6 — Epsilon + scanner + exact manifests + configured incomplete-state expiration
 
 **Today:** expiry is purely timestamp-driven off `ExpiringTrafficStreamMap`, which requires
 `lookahead(400s) > connectionTimeout(360s)` and therefore ~400s of buffered traffic; the CLI
@@ -191,49 +191,50 @@ enforces that coupling with `exit(4)`.
 **Change (ships as one unit, and only after D1–D3 are in):**
 
 * **Scanner:** `TrackingKafkaConsumer` gains a scan cursor on the same consumer — after a poll
-  batch: snapshot positions/generation, seek ahead within `scanWindow = connectionTimeout +
-  maxConnectionDuration`, poll metadata only (connectionId, timestamps, observation kinds;
-  payloads discarded), seek back, discard results if the assignment changed. Verdicts about the
-  commit-head blocker (from `OffsetLifecycleTracker.peekHeadMetadata`, which must carry a
-  `ConnectionTag`) are emitted as control events into the same pre-poll queue that
-  `TrafficSourceReaderInterruptedClose` already uses — the intake path exists today; the
-  scanner is a second producer, not a new mechanism. The accumulator handles a
-  `ConfirmedDead(proof)` event on the intake thread by firing the normal
-  close/expire machinery with the new cause (D2), which commits via D1's confirmed-dead row.
+  batch: snapshot positions/generation, seek ahead within its operational budget, poll metadata
+  only, seek back, and discard results if the assignment changed. Verdicts about the commit-head
+  blocker are emitted as ordered control events. The accumulator handles either
+  `ConfirmedDead(proof)` from one complete exact omission or
+  `ConfiguredExpired(lastPositiveLivenessBrokerTime, scannedThroughBrokerTime, timeout)` after the
+  configured Kafka broker-time horizon.
 * **Epsilon:** `--lookahead-time-window` default drops to ~30s; the `lookahead > timeout`
-  validation is replaced by "epsilon mode requires scanner enabled + finite proxy cap
-  configured." The `isWorkOutstanding()` guard in
+  validation is removed. The `isWorkOutstanding()` guard in
   `ReplayEngine.updateContentTimeControllerWhenIdling` **stays** (rejecting #3231 change 2):
   it is the memory bound that makes epsilon meaningful. D4's honest cancel/close barriers
   remove the orphaned-future scenario that motivated deleting it.
-* **Wall-clock expiry:** rejected (#3231 change 5). Heartbeats report; they never call
-  `fireAccumulationsCallbacksAndClose`. If the rename `logHeartbeat →
-  heartbeatAndExpireStaleConnections` came in with it, revert the rename too.
+* **Replayer wall-clock expiry:** rejected (#3231 change 5). Diagnostic heartbeats never call
+  `fireAccumulationsCallbacksAndClose`. Configured expiration advances only from Kafka
+  `LogAppendTime` observations, not from how long this replayer process has waited.
 * **Proxy cap:** `CaptureProxy` gains `--maxConnectionDuration`; a Netty `ScheduledFuture`
   armed on `channelActive` writes a real `addCloseEvent(Instant.now())` to the offloader
   before closing. Capped connections then commit through the ordinary captured-close path with
-  no scanner involvement. Document the cap and the scan window as a matched pair.
-* **Proxy liveness snapshots** (expiration-hardening §5.4): `CaptureProxy` maintains a two-level
-  `ConcurrentHashMap` of partition → open connectionIds and, every `--livenessSnapshotInterval`
-  (default 30s), emits one record per partition in its shard set listing that partition's **idle**
-  connections — empty snapshots included, since "nothing idle here" is a positive claim. Partition
-  selection moves to the explicit four-argument `ProducerRecord` constructor over a shard set
-  `S(nodeId)` of `K` partitions, used for traffic *and* snapshots, which is the whole basis of the
-  proof. `getNodeId()` stays `UUID.randomUUID()` per process — it is the fencing token that keeps a
-  successor from speaking for a predecessor's connections (§5.4.5). No per-connection timers and no
-  per-connection heartbeat observations: the offloader's flush is buffer-driven, so a heartbeat
-  written into an idle connection's stream never leaves its buffer.
-* **Liveness on the replayer side:** `TrackingKafkaConsumer` records snapshots into a
-  `(nodeId, partition)` index keyed by offset, asserting the stamped partition matches the source
-  partition (mismatch ⇒ halt, never expire). The scanner gains a second, cheaper verdict:
-  two consecutive omissions with the blocker's last record preceding both ⇒ `ConfirmedDead`. These
-  records bypass the accumulator, the obligation model, and `OffsetLifecycleTracker` entirely — they
-  must never be able to pin the commit head they exist to unblock. Silence from a nodeId is a
-  diagnostic, never a verdict.
+  no scanner involvement. It is an operational resource bound, not part of the expiration proof.
+* **Exact proxy manifests:** `CaptureProxy` maintains an exact partition-to-open-connections
+  registry and emits complete, chunked manifests every `manifestInterval` (default 30s). Manifests
+  include active and idle connections. Registration precedes first traffic; removal follows final
+  Kafka acknowledgement; manifests and traffic share one ordered publisher lane.
+* **Capture-before-forward gate:** a mutating request's complete Kafka representation is
+  acknowledged before execution-enabling source bytes are sent. Immediately before source
+  submission, strict mode requires a recent acknowledged manifest. Staleness permanently closes the
+  local capture gate; strict mode exits and pass-through permanently abandons capture and alarms.
+* **Liveness on the replayer side:** one complete offset-ordered omission yields
+  `ConfirmedDead`. A listing manifest refreshes connection liveness. If neither traffic nor a
+  listing manifest appears through `--packet-timeout-seconds`, incomplete state becomes
+  `ConfiguredExpired`. The traffic topic must use `message.timestamp.type=LogAppendTime`, and all
+  liveness values and intermediate expiration timestamps are explicitly broker-time values
+  monotonically clamped per partition. `lastPositiveLivenessBrokerTime` and
+  `scannedThroughBrokerTime` are derived only from records actually covered; a quiet partition
+  cannot advance the horizon. Complete requests are never discarded by connection expiration.
+* **Writer completion:** temporary assignment drain ends with an acknowledged empty manifest.
+  Only permanent writer-partition retirement emits terminal `NoMoreWrites`, after admission and
+  capture submission are permanently revoked, every related Netty connection is disconnected, the
+  registry is empty, and all publisher work is acknowledged. Peer completion is rejected; later
+  traffic or manifests from the retired identity halt and alarm; duplicate self completion is
+  idempotent.
 * **Metrics:** absorb #3231's worst-commit-head heartbeat (change 7); make `commitTail`
-  consistent with it; add scanner distance/latency/verdict counters and a proxy
-  cap-close counter. Do not present `peekHeadMetadata().addedAt` (wall clock at insertion) as
-  the backside ceiling.
+  consistent with it; add scanner distance/latency/verdict counters, acknowledged-manifest age,
+  capture-gate state, configured-expiration reasons, and a proxy cap-close counter. Do not present
+  `peekHeadMetadata().addedAt` as the Kafka broker-time horizon.
 
 ### D7 — Kafka record contexts on non-commit paths (closes C13)
 
@@ -295,29 +296,30 @@ All 10 `Missing` rows and every `Partial` row in the audit are owned by exactly 
 4. **D5** — payload ownership. Exit gate: refcount tests at zero across all terminal paths.
 5. **D7** — non-commit record-context owner. Exit gate: context-closure counters exact across
    commit, retain, and revocation paths.
-6. **D6** — epsilon + scanner + liveness + proxy cap, only now. The proxy half (cap, snapshots, shard
-   selection) can land first and be measured on its own; unread snapshots are inert. Exit gate: dead
-   blocker at the commit head clears with proof — by omission while the proxy is alive, by window scan
-   after it is killed; live long connection survives; an idle keep-alive connection is not expired
-   across many intervals; a silent nodeId never expires anything; stalled target does not grow
-   read-ahead; epsilon refused at startup without scanner + finite cap.
+6. **D6** — epsilon + scanner + exact manifests + capture gating, only now. Exit gate: one exact
+   omission promptly clears incomplete state; configured Kafka broker-time expiration clears a hard
+   crash; listing manifests preserve an idle keep-alive connection across many intervals; complete
+   requests remain replayable; strict stale-manifest recovery cannot execute an uncaptured request;
+   temporary drain permits reacquisition through a new initial manifest; terminal completion
+   forbids later records; and a stalled target does not grow read-ahead.
 
 Each step keeps the existing tests green (or replaces them with an explicitly approved policy
 change — the intentional differences are: teardown paths now retain instead of
-committing-or-orphaning, and expiry now needs evidence).
+committing-or-orphaning, and expiry now requires either structural proof or explicit configured
+policy evidence).
 
 ## 6. Open Questions
 
 1. Exact operator interface for the deterministic-poison classifier (flag name, matching
    semantics) — reuse the RFS `BulkItemErrorClassifier` shape.
-2. Whether confirmed-dead discards of never-completed requests require durable discard evidence
-   from day one, or a metric+log suffices initially (D1 matrix row).
+2. Whether confirmed-dead and configured-expired discards of never-completed requests require
+   durable discard evidence from day one, or distinct metrics and logs suffice initially.
 3. Scan-cursor cadence and budget per poll cycle (fraction of `keepAliveInterval`), and whether
    scanning pauses while the commit head is not blocked.
-4. Liveness shard width `K` and snapshot interval — configured or derived, and their startup
-   validation against the topic's partition count. Tuning only: the offset-ordered proof is correct
-   for any self-consistent shard set, so a wrong value costs overhead and expiry latency, not
-   correctness.
+4. The required duration margin between `proxyManifestStaleTimeout` and
+   `--packet-timeout-seconds`, including publication, acknowledgement, scanner delay, and permitted
+   inter-broker forward clock skew. Timestamp values themselves never cross the proxy-local
+   monotonic and Kafka broker-time domains.
 5. Whether `SourcePairSettled` should also carry partial-response bytes for evidence on
    confirmed-dead connections, or only the settled cause.
 6. Migration of `sessionNumber` into `ConnectionTag` for keep-alive reuse: populate from
