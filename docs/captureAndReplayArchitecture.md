@@ -86,9 +86,9 @@ members. Kafka does not provide ordering across partitions.
 ### 2.1 Identities
 
 `captureActivationId` identifies one capture-authoritative lifetime of a proxy process.
-`assignmentSequence` is a process-local, strictly increasing value. The proxy increments it for
-every new Kafka group assignment before accepting any connection under that assignment. The writer
-identity used for newly opened connections is:
+`assignmentSequence` is a process-local, strictly increasing value. The proxy increments it when
+Kafka supplies a replacement group assignment, before accepting any connection under that
+assignment. The writer identity used for newly opened connections is:
 
 ```text
 writerNodeId = captureActivationId + ":" + assignmentSequence
@@ -196,36 +196,48 @@ evidence merely because the file ended.
 
 ## 3. Proxy group membership and connection routing
 
-Kafka consumer-group membership is used by proxies only to coordinate which proxy may accept newly
-opened source connections for each Kafka partition.
+Kafka consumer-group membership is used only to load-balance newly opened source connections across
+Kafka partitions. Membership state is not capture-health evidence and has no replay meaning.
 
-Group departure has exactly one meaning: Kafka starts a rebalance for the remaining group members.
-Departure is not proof that the departed proxy stopped running, stopped forwarding source traffic,
-or finished publishing Kafka records. It provides no replay completion evidence.
+Before a proxy has received its first usable assignment, it has no partition on which it can publish
+a new connection. The proxy completes its Kafka capability probes before joining the group. It may
+begin accepting source connections only after:
 
-A group assignment may permit a proxy to use a partition for new connections only when:
+- it has received its first assignment;
+- the initial startup group size satisfies `minimumActiveProxyCount`, including the local proxy;
+- it has proved that it can publish acknowledged records to Kafka; and
+- the initial exact manifest required by §5 has been acknowledged for every partition it may use.
 
-- the group contains at least `minimumActiveProxyCount` members, including the local proxy;
-- the proxy has proved that it can publish acknowledged records to Kafka; and
-- the initial exact manifest required by §5 has been acknowledged for that partition.
+If startup fails before any assignment is received, or a source connection arrives while no first
+usable assignment exists, the proxy follows the process-wide `--capture-failure-policy` defined in
+§12.4. It does not later resume capture in that process after applying either terminal policy.
+
+After the first usable assignment is installed, the proxy retains it until Kafka supplies a
+replacement assignment. Revocation, partition-loss callbacks, failed or stale membership polling,
+empty polls, delayed heartbeats, coordinator outages, and group departure do not close a capture or
+connection-acceptance gate. The proxy continues assigning new connections with its last usable
+assignment. Kafka may temporarily assign the same partition to another proxy after considering the
+old member gone. That overlap affects load distribution only: each proxy uses a distinct
+`writerNodeId`, so captured records remain unambiguous.
+
+When Kafka supplies a replacement assignment, the proxy:
+
+1. increments `assignmentSequence` and creates the replacement assignment's `writerNodeId`;
+2. publishes and receives acknowledgement for that identity's initial complete manifests on every
+   partition it may use;
+3. begins assigning new source connections with the replacement assignment only after those
+   acknowledgements; and
+4. continues manifests and connection retirement independently for every older writer identity
+   that still has connections.
+
+Connections accepted before the replacement retain their original proxy, writer identity, and
+Kafka partition. There is no membership-health deadline and no application retry or failure policy
+driven by membership after startup.
 
 The initial manifest establishes the new assignment-scoped writer identity's broker-time baseline
 before that identity accepts a source connection. An empty manifest for a current identity is an
 ordinary heartbeat and updates that same continuous baseline when timely; it never resets the
 baseline.
-
-A process completes its Kafka capability probes before joining the group. A completed cooperative
-assignment may make partitions eligible for new connections after the initial manifests are
-acknowledged and the member-count gate is satisfied. Existing connections remain on their original
-proxy, writer identity, and Kafka partition during scale-up, scale-down, and rebalance.
-
-After receiving a new assignment, the proxy:
-
-1. increments `assignmentSequence` and creates the assignment's `writerNodeId`;
-2. publishes and receives acknowledgement for that identity's initial complete manifests on every
-   partition it may use;
-3. only then accepts new source connections under that identity; and
-4. continues manifests and connection retirement independently for every older draining identity.
 
 After an older identity's connections on a partition drain, it publishes a final empty manifest
 and self `NoMoreWrites`, permanently retiring that identity and partition.
@@ -288,10 +300,9 @@ For every Critical Mutation Traffic request, the proxy enforces the guarantee in
 
 The comparison and forwarding decision share a one-way local state transition. Once the proxy is
 compromised, no request may newly pass this check and forward Critical Mutation Traffic as captured.
-The proxy stops accepting new source connections. A fleet-managed proxy drains existing work when
-that is supported and then exits so it can be replaced. A deployment explicitly configured for
-permanent pass-through may instead make a one-way transition to pass-through, but the process may
-never resume capture-authoritative operation.
+The proxy immediately applies `--capture-failure-policy`: `fail-closed` terminates without orderly
+retirement, while `fail-open` switches existing and new TCP connections to uncaptured forwarding.
+Neither policy permits capture-authoritative operation to resume in that process.
 
 This proof assumes that the source cannot mutate state before receiving the complete request.
 Deployments whose source handlers apply mutations while an incomplete request body is still
@@ -312,10 +323,10 @@ At minimum, the proxy enforces:
   by later progress; and
 - bounded request and header bytes while the request remains incomplete.
 
-The proxy also enforces a separately configurable maximum lifetime for the client connection. This
-limit bounds how long one connection can delay a planned proxy connection-set drain even when its
-requests individually remain within the request-assembly limits. A deployment may explicitly
-configure a long connection lifetime when required, but the ordinary default is finite.
+The proxy also enforces a separately configurable maximum lifetime for the client connection,
+defaulting to 60 minutes. This limit bounds how long one connection can delay a planned proxy
+connection-set drain even when its requests individually remain within the request-assembly limits.
+A deployment may explicitly configure a different lifetime when required.
 
 The two time limits are independent:
 
@@ -845,32 +856,41 @@ Normal shutdown is ordered:
 
 Cancellation never causes a Kafka commit.
 
-### 12.3 Proxy failure modes
+### 12.3 Orderly proxy shutdown
 
-An unexpected proxy event-loop death always terminates the process.
+An orderly shutdown is a planned operation performed while capture and Kafka publication remain
+trustworthy, such as `SIGTERM`, a planned rollout, fleet-directed replacement, or another deliberate
+administrative shutdown. It follows the connection and writer-retirement ordering in §§6–7. The
+default bound for completing that orderly retirement is five minutes.
 
-Other capture failures close the proxy's one-way capture state. A strict deployment blocks further
-Critical Mutation Traffic, stops accepting new connections, safely retires existing captured
-connections when possible, and then exits. A deployment explicitly configured for permanent
-pass-through may instead make a one-way transition and continue forwarding uncaptured source
-traffic, but it:
+The orderly-retirement bound is not a general failure response. Capture-compromise and unstable
+process failures follow §12.4 instead.
 
-- permanently stops capture in that process;
-- emits a persistent high-severity capture-gap alarm;
-- never returns to capture in that process state; and
-- requires a fresh capture and replay run before complete coverage can be claimed again.
+### 12.4 Proxy capture failure modes
 
-A draining proxy that cannot close its existing connections within its configured shutdown limit
-enters the applicable failure mode above. A suspended proxy that resumes after its acknowledged
-manifest has become stale cannot forward new Critical Mutation Traffic as captured; the
-capture-health check in §4 closes capture before those source bytes are submitted.
+An unexpected proxy event-loop death, an out-of-memory-like failure, or corrupted internal
+ownership always terminates the process immediately.
 
-Loss of valid Kafka group membership immediately closes the new-connection gate but does not by
-itself stop capture for connections that the proxy already accepted. A clearly transient membership
-failure that has not compromised capture may retry. A permanent or ambiguous membership failure
-uses the strict or pass-through behavior above. After a recoverable interruption, Kafka's next
-completed group assignment is the assignment decision; the proxy applies the member-count and
-initial-manifest gates before accepting new connections.
+Failure to publish a Kafka record required for authoritative capture, a manifest lapse, an
+ambiguous producer outcome, or another failure that compromises capture closes the proxy's one-way
+capture state and applies `--capture-failure-policy` to the whole process:
+
+- `fail-closed` emits high-severity diagnostics and terminates immediately. It does not attempt
+  connection or writer retirement because Kafka acknowledgements are no longer trustworthy.
+- `fail-open` makes a one-way transition to process-wide pass-through. Existing TCP connections
+  remain open and continue forwarding without capture; new TCP connections also forward without
+  capture. The process permanently stops authoritative capture, emits a persistent high-severity
+  capture-gap alarm, and never returns to capture.
+
+The previous per-request behavior in which one request could forward after a capture failure and
+the process could then resume authoritative capture is not permitted.
+
+A definite transient failure proven not to have compromised capture may retry normally. Membership
+polling and rebalance events are not capture failures after startup and never invoke this policy.
+
+A suspended proxy that resumes after its acknowledged manifest has become stale cannot forward new
+Critical Mutation Traffic as captured; the capture-health check in §4 applies the configured
+process-wide policy before those source bytes are submitted.
 
 ## 13. Protocol violations
 
@@ -989,9 +1009,9 @@ real-Kafka tests.
 | Guarantee | Deterministic tests | Real-system tests |
 |---|---|---|
 | Capability probe is inert | `writerNodeId = captureActivationId + ":PROBE"` never creates writer, manifest, baseline, connection, or replay state | Testcontainers probes before first group generation |
-| Group membership routes only new connections | `assignmentSequence` increments for every assignment; existing connections keep their identity; concurrent draining assignments | Testcontainers rapid cooperative rebalances; live proxy scale-up and scale-down |
+| Group membership only load-balances new connections | Startup requires a first usable assignment; the last usable assignment remains active through revocation, loss, and polling failure; replacement assignments create new writer identities; existing connections keep their identity | Testcontainers coordinator outage, revocation/loss callbacks, overlapping stale and replacement assignments, and live proxy scale-up and scale-down |
 | Capture-before-forward | Initial manifest baseline; max chunk `LogAppendTime`; observation threshold; irreversible compromise | Kafka delay, timestamp, and failure injection; live source verification |
-| Incomplete-request denial-of-service limits | Absolute duration is not reset by progress; request/header limits close the connection | Slow one-byte-at-a-time request and oversized-header tests |
+| Incomplete-request denial-of-service limits | Absolute duration is not reset by progress; request/header limits close the connection; whole connections default to a 60-minute maximum lifetime | Slow one-byte-at-a-time request, oversized-header, and maximum-connection-lifetime tests |
 | Connection-local ordering | Sequence assignment and publication remain ordered while other connections run concurrently | Testcontainers interleaving across connections without replayer reordering |
 | Exact manifest semantics | Add, retire, copy, cycle, chunk, and ordering models | Testcontainers observation/manifest order inversions |
 | Clean connection retirement | Terminal observation is last; removal waits for acknowledgements | Producer retry and ambiguous-send tests |
@@ -1000,6 +1020,7 @@ real-Kafka tests.
 | `NoMoreWrites` | Final empty manifest and prior sends acknowledged first; duplicates and records with missing or malformed writer headers are inert | Testcontainers terminal ordering, duplicate delivery, and header validation |
 | Replayer reassignment | Cancel and clean one partition generation before processing its successor; unrelated partitions proceed | Testcontainers partition transfer during target and tuple operations |
 | Event-loop death | Fatal signal and no ownership transfer | Process-level fault injection; live container restart |
+| Process-wide capture failure policy | Required Kafka publication failure or capture compromise causes immediate `fail-closed` termination or irreversible `fail-open` pass-through for existing and new TCP connections; membership events do neither after startup | Producer failure and ambiguous-outcome fault injection in both modes |
 | Protocol violations | Immediate `Retain`, intake pause, bounded drain of admitted target/tuple work, and process termination | Corrupt and out-of-order Kafka records with in-flight target and tuple work; redelivery after exit |
 | Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, `E`, `S`, checksums, and timestamp mode | Export/import round trip with chunked manifests, `NoMoreWrites` headers, mixed-cycle records, multiple partitions, corruption, and missing-record injection |
 
@@ -1007,7 +1028,7 @@ The full acceptance suite must also prove:
 
 - a connection may remain idle across many manifests without expiration;
 - a proxy may stop using a partition for a long time and later place a newly opened connection on
-  it under the then-current assignment's new `writerNodeId`;
+  it under the last usable assignment's `writerNodeId`;
 - a partial manifest's chunks may commit without applying a partial connection list, and a later
   complete cycle restores manifest interpretation after restart;
 - manifest-cycle flushing and mixed-cycle batching produce the same observable processing;

@@ -13,6 +13,9 @@ This addendum extends those rules for a controller-managed Kubernetes fleet:
 - `captureActivationId` identifies one capture-authoritative process lifetime, while every new
   Kafka group assignment increments `assignmentSequence` and creates the `writerNodeId` used by
   newly opened connections;
+- Kafka membership only load-balances new connections; after the first usable assignment, the
+  proxy retains its last usable assignment through revocation, partition loss, coordinator outage,
+  and membership-poll failure until Kafka supplies a replacement;
 - existing connections retain their original `writerNodeId`; old writer identities continue
   manifests while draining and finish with a final empty manifest plus self `NoMoreWrites`;
 - `NoMoreWrites` is partition-scoped, self-emitted after the connection registry for that
@@ -34,18 +37,25 @@ This addendum extends those rules for a controller-managed Kubernetes fleet:
   `max.in.flight.requests.per.connection`; deployment configuration cannot weaken those settings;
 - only exact-registry add, remove, and manifest copy-and-increment use the standalone design's
   narrow partition-local lifecycle boundary; ordinary packet capture remains concurrent;
-- pass-through permanently abandons capture and raises a persistent gap alarm;
+- `--capture-failure-policy=fail-closed` terminates immediately after Kafka publication or capture
+  is compromised, without attempting orderly retirement;
+- `--capture-failure-policy=fail-open` permanently abandons capture for the whole process, keeps
+  existing TCP connections open, accepts new TCP connections without capture, and raises a
+  persistent gap alarm;
 - fatal replayer termination is alarmed from Kubernetes-observed container state and the
   reason-specific halt code; the replayer's final in-process OpenTelemetry metric remains
   best-effort; and
 - an uncaptured source interval starts a new capture and replay run with a fresh source snapshot.
 
-For the current round, any terminal capture failure after bounded retry terminates the entire
-capture workflow. The controller durably marks the resource incomplete and terminal before
-authorizing pass-through, never grants capture again under that resource UID, and never returns its
-coverage condition to true. Recovery means starting a fresh capture, snapshot, and replay workflow
-from an explicit isolated run boundary. The controller may keep failed-run pass-through capacity
-alive for availability, but that capacity cannot participate in the replacement capture run.
+For the current round, any terminal capture failure after a permitted retry terminates the entire
+capture workflow. A `fail-closed` proxy terminates immediately. A `fail-open` proxy immediately
+makes its irreversible whole-process transition to uncaptured forwarding; it does not wait for
+controller authorization. The controller durably marks the resource incomplete and terminal as
+soon as it observes either outcome, never grants capture again under that resource UID, and never
+returns its coverage condition to true. Recovery means starting a fresh capture, snapshot, and
+replay workflow from an explicit isolated run boundary. The controller may keep failed-run
+pass-through capacity alive for availability, but that capacity cannot participate in the
+replacement capture run.
 
 Automatic return to complete fleet coverage is future work. Session identity, a trusted replay plan,
 and session-aware checkpoints are current requirements for every managed fresh run; per-partition
@@ -320,23 +330,24 @@ Controller-managed processes use:
 ```
 suppressCaptureByDefault = true
 captureFailureRetryTimeout
-captureFailureDisposition = CONTROLLER_AUTHORIZED_PASS_THROUGH
-controllerAuthorizationTimeoutAction = CONTINUE_BLOCKING | EXIT
-controllerPassThroughHandoff = SAME_PROCESS | REPLACEMENT_PROCESS
-nonCapturingConnectionDrainTimeout
+--capture-failure-policy = fail-closed | fail-open
 ```
 
 `suppressCaptureByDefault=true` is stable deployment configuration. The controller does not toggle
 it during each incident. Every replacement therefore boots suppressed even if it missed prior
 commands.
 
+The maximum whole-connection lifetime defaults to 60 minutes. Planned retirement performed while
+capture and Kafka publication remain trustworthy has a five-minute default completion bound.
+
 The proxy may retry Kafka while in `CAPTURE_RETRYING` only for a definite transient failure known
 not to have compromised capture. All affected source forwarding remains capture-before-forward
 during that interval. The proxy may return to `CAPTURE_AUTHORITATIVE` only after the base capability
 probe succeeds again and every capture and publisher-health invariant is revalidated.
 
-A manifest lapse, ambiguous producer outcome, or any other compromise closes the capture activation
-immediately and enters `CAPTURE_FAILURE_PENDING`; that process may never return to
+A manifest lapse, ambiguous producer outcome, inability to publish a record required for capture,
+or any other compromise closes the capture activation immediately and applies the configured
+process-wide capture failure policy. That process may never return to
 `CAPTURE_AUTHORITATIVE`. Recovery requires a fresh process and fresh `captureActivationId`. Retry
 exhaustion likewise permanently closes the activation.
 
@@ -350,9 +361,8 @@ SUPPRESSED
   -> CAPTURE_AUTHORITATIVE
   -> CAPTURE_RETRYING
        -> CAPTURE_AUTHORITATIVE          // only a definite uncompromised transient failure recovered
-       -> CAPTURE_FAILURE_PENDING        // capture activation permanently closed
-            -> PASS_THROUGH_COMPROMISED  // only after controller authorization
-            -> process exit
+       -> process exit                   // fail-closed after capture compromise
+       -> PASS_THROUGH_COMPROMISED       // fail-open after capture compromise
 ```
 
 A healthy controller-requested suppression has a separate path:
@@ -362,13 +372,15 @@ CAPTURE_AUTHORITATIVE -> SUPPRESSING -> CAPTURE_SUPPRESSED_AND_QUIESCENT
 ```
 
 `CAPTURE_AUTHORITATIVE` is a local process state, not Kafka group subscription metadata. After
-capability probing succeeds, the process joins the group and uses Kafka's completed cooperative
-assignment as the assignment decision.
+capability probing succeeds, the process joins the group and uses its first completed assignment.
+After that, revocation, partition-loss callbacks, empty polls, coordinator outages, delayed
+heartbeats, and polling failures do not change capture state or stop connection acceptance. The
+proxy retains its last usable assignment until Kafka supplies a replacement.
 
 Only the healthy suppression path may later create a fresh capture activation in the same process.
-A process that entered `CAPTURE_FAILURE_PENDING` or `PASS_THROUGH_COMPROMISED` because of manifest
-lapse, ambiguous producer outcome, or another compromise never captures again. It must terminate
-before recovery can become complete.
+A process that entered `PASS_THROUGH_COMPROMISED` because of manifest lapse, ambiguous producer
+outcome, or another compromise never captures again. It must terminate before recovery can become
+complete.
 
 ### 4.3 Status and control interface
 
@@ -378,7 +390,7 @@ Every proxy exposes a port that is not used for source forwarding. Read-only sta
 processId
 captureActivationId, if capture authority has been created
 assignmentSequence, if an assignment has been received
-currentWriterNodeId, if the current assignment may accept connections
+currentWriterNodeId, if the last usable assignment may accept connections
 drainingWriterNodeIds
 podUid
 captureReplayResourceUid
@@ -394,7 +406,6 @@ captureActivationNumber
 captureOperatingState
 captureCapability and latestProbeResult
 captureFailureCause and captureFailureRetryAge
-controllerAuthorizationWaitAge
 forwardingReady
 sourceListenerAccepting
 captureReady
@@ -411,7 +422,6 @@ Authenticated, authorized, idempotent mutation endpoints include:
 
 ```
 suppressCapture(recoveryId)
-authorizeCompromisedPassThrough(recoveryId)
 grantInitialCapture(recoveryId, captureActivationNumber)
 forceCloseNonCapturingConnections(recoveryId)
 ```
@@ -740,37 +750,30 @@ If the status update fails or is ambiguous, pass-through is not routed.
 
 ### 7.2 Active proxy capture failure
 
-Terminal capture failure includes retry exhaustion, an ambiguous producer outcome, or unexpected
-loss of an `ACTIVE` capture process. If the failed process cannot report its own transition, the
-controller durably marks the resource incomplete and terminal from its workload and grant-ledger
-evidence. It does not infer that capture remained complete merely because the process disappeared.
+Terminal capture failure includes retry exhaustion, inability to publish a Kafka record required
+for capture, an ambiguous producer outcome, or another failure that compromises capture. Membership
+revocation, partition loss, coordinator outage, delayed heartbeats, empty polls, and membership-poll
+failure after the first usable assignment are not terminal capture failures.
 
-After `captureFailureRetryTimeout`, an otherwise-healthy proxy reports
-`CAPTURE_FAILURE_PENDING` and keeps uncaptured forwarding blocked. The controller chooses:
+The proxy applies `--capture-failure-policy` immediately:
 
-**Same-process handoff**
+- `fail-closed` emits high-severity diagnostics and terminates without attempting connection or
+  writer retirement, because Kafka acknowledgements are not trustworthy enough to complete that
+  protocol.
+- `fail-open` permanently closes the capture activation and immediately converts existing and new
+  TCP connections to uncaptured forwarding. It does not wait for controller authorization and can
+  never return to capture in that process.
 
-1. Durably set the incomplete and terminal conditions and recovery id.
-2. Send `authorizeCompromisedPassThrough(recoveryId)`.
-3. The proxy validates the id, closes the capture activation permanently, leaves membership,
-   converts existing connections to non-capturing, and opens the pass-through gate.
-4. The process remains forwarding-only and must later terminate.
+If the failed process cannot report its own transition, the controller durably marks the resource
+incomplete and terminal from workload and grant-ledger evidence. If it can report, the controller
+records the transition as soon as it observes it. In neither case does the controller infer that
+capture remained complete merely because the process disappeared or remained available in
+pass-through.
 
-**Replacement-process handoff**
-
-1. Durably set the incomplete and terminal conditions and recovery id.
-2. Start or select a process that booted suppressed.
-3. Admit that process as pass-through.
-4. Remove and terminate the failed proxy process.
-
-Updating the resource to incomplete and then failing to route to pass-through is conservative. Opening
-pass-through before the durable update is forbidden. If controller authorization times out, the
-proxy remains blocked or exits according to configuration.
-
-For the current round, either handoff makes the capture resource terminal. It may continue reporting
-and controlling failed-run pass-through capacity, but it cannot issue another capture grant, emit a
-fleet reset, establish coverage, or authorize a source snapshot. A fresh workflow uses a new
-resource UID and new run identity.
+For the current round, either terminal policy makes the capture resource terminal. It may continue
+reporting and controlling failed-run pass-through capacity, but it cannot issue another capture
+grant, emit a fleet reset, establish coverage, or authorize a source snapshot. A fresh workflow uses
+a new resource UID and new run identity.
 
 The fresh workflow cannot declare capture ready while a failed-run pass-through workload can still
 receive or forward source traffic. Each such workload's proxy connection set must become empty, or
@@ -833,7 +836,7 @@ A proxy may acknowledge `CAPTURE_SUPPRESSED_AND_QUIESCENT` only when:
    `(writerNodeId, partition)`;
 8. every publisher lane has entered `RETIRED`;
 9. the producer is closed; and
-10. the activation has left membership and none of its writer identities can be used again.
+10. none of the activation's writer identities can be used again.
 
 This is a strong local proof and may allow a healthy process to receive a later capture grant with
 a fresh `captureActivationId` and capture session. The next `writerNodeId` is created by
@@ -842,6 +845,10 @@ exactly the base
 protocol above. The source-side in-flight-request barrier and Kubernetes workload traffic
 retirement remain separate fleet-level obligations in §§8.3–8.4; neither is part of one
 connection's retirement lifecycle.
+
+Healthy suppression and other planned administrative shutdowns use a five-minute default bound for
+this orderly retirement. Capture compromise, event-loop death, out-of-memory-like failure, and
+corrupted internal ownership do not use this retirement path.
 
 ### 8.2 Failed or ambiguous producer
 
@@ -852,14 +859,12 @@ For fleet reset, the controller may treat the old capture activation as capture-
 
 - the one-way capture-activation latch is irreversibly closed;
 - no new capture submission can enter locally;
-- the capture activation left membership;
 - the grant ledger forbids another grant to that process activation; and
 - every later old-session Kafka record will be rejected by the session gate.
 
-An otherwise-healthy process may remain alive as authorized pass-through while coverage is
-incomplete. If the process cannot reliably report or enforce the closed latch, the controller
-terminates the actual process, container, or host and confirms termination rather than merely
-observing API-object deletion.
+A `fail-open` process may remain alive in pass-through while coverage is incomplete. If the process
+cannot reliably report or enforce the closed latch, the controller terminates the actual process,
+container, or host and confirms termination rather than merely observing API-object deletion.
 
 Process death proves that no new application sends originate afterward. It does not retract an old
 Kafka request already outside the process. `producerMaxBlockTime`, `producerDeliveryTimeout`, and a
@@ -892,7 +897,7 @@ The controller may mark one workload traffic-retired only after recording one of
 1. **Trusted local quiescence after healthy suppression:** the authenticated process with the exact
    Pod UID, `processId`, resource UID, recovery, session, and activation reports its one-way
    old capture-activation latch closed, source listener closed, no source-affecting connections or queued
-   submissions, publisher quiescent, and old membership left. The controller binds that report to
+   submissions, and publisher quiescent. The controller binds that report to
    the container ID and node UID already recorded in the grant ledger. The process may remain alive
    and later receive a fresh activation as permitted by §4.2.
 2. **Runtime-confirmed termination:** fresh evidence from the kubelet or container runtime for the
@@ -901,10 +906,10 @@ The controller may mark one workload traffic-retired only after recording one of
    or fenced by a mechanism that terminates existing connectivity and prevents the old process from
    reaching either Kafka or the source.
 
-A process that entered `CAPTURE_FAILURE_PENDING` or `PASS_THROUGH_COMPROMISED` cannot use local
-quiescence to become eligible for capture again. Under §4.2 it must have runtime-confirmed
-termination or infrastructure fencing before a fresh workflow can declare capture ready. Future
-same-resource recovery would require the same proof before returning coverage to true.
+A process that entered `PASS_THROUGH_COMPROMISED` cannot use local quiescence to become eligible for
+capture again. Under §4.2 it must have runtime-confirmed termination or infrastructure fencing
+before a fresh workflow can declare capture ready. Future same-resource recovery would require the
+same proof before returning coverage to true.
 
 Pod-name reuse, ReplicaSet convergence, load-balancer removal, graceful-deletion timeout, and
 controller observation timeout satisfy none of these cases. If the node or runtime is unreachable,
@@ -994,7 +999,7 @@ reset records by arrival time alone.
 A delayed record from an abandoned nonmatching session that lands after the reset is discarded and alarmed. This
 applies even if the old `writerNodeId` had never appeared on that partition.
 
-Authorized pass-through processes and their existing connections may still be forwarding while the
+Pass-through processes and their existing connections may still be forwarding while the
 condition is false. They do not block reset once their old capture activation is permanently
 closed, because every one of their source mutations remains part of the incomplete interval. They
 do block coverage establishment and the next source snapshot.
@@ -1167,31 +1172,31 @@ failure rules must be added before this workflow is implementable.
 For an incident that actually forwarded uncaptured traffic:
 
 1. A proxy enters `CAPTURE_RETRYING`; forwarding remains strict and blocked as needed.
-2. Retry is exhausted; the proxy enters `CAPTURE_FAILURE_PENDING`.
-3. The controller allocates recovery R and durably sets coverage false.
-4. The controller authorizes same-process or replacement-process pass-through if availability
-   policy requires it.
-5. Strict replacement capacity is started and probed.
-6. Every previous capture activation is retired by healthy suppression or the permanent
+2. Retry is exhausted or capture is otherwise compromised; the configured policy is `fail-open`,
+   so the proxy immediately enters `PASS_THROUGH_COMPROMISED` and converts existing and new TCP
+   connections to uncaptured forwarding.
+3. The controller observes the transition, allocates recovery R, and durably sets coverage false.
+4. Strict replacement capacity is started and probed.
+5. Every previous capture activation is retired by healthy suppression or the permanent
    failed-activation rules under §8.1 and §8.2.
-7. The controller creates session S and chooses the trusted Kafka input branch:
+6. The controller creates session S and chooses the trusted Kafka input branch:
    - **same topic:** persist one immutable reset intent, fan its exact
      `FleetCaptureReset{D,R,S,I}` payload to every partition, await every acknowledgement, and
      record start offset `resetOffset+1`; or
    - **distinct immutable topic:** create and verify the new topic namespace, complete inert setup
      probes, record the pre-grant broker end offset for every partition, and emit no fleet reset.
-8. After the selected branch's complete boundary plan is durable, the controller grants S to
+7. After the selected branch's complete boundary plan is durable, the controller grants S to
    eligible proxies.
-9. Proxies become `CAPTURE_AUTHORITATIVE` after the base capability probe, normal group assignment,
+8. Proxies become `CAPTURE_AUTHORITATIVE` after the base capability probe, normal group assignment,
    and initial-manifest acknowledgement.
-10. Remaining pass-through processes and off-load-balancer connections become traffic-retired
+9. Remaining pass-through processes and off-load-balancer connections become traffic-retired
     under §8.3.
-11. Source-side in-flight retirement is established under §8.4.
-12. The controller persists an immutable coverage intent and fans its exact
+10. Source-side in-flight retirement is established under §8.4.
+11. The controller persists an immutable coverage intent and fans its exact
     `CaptureCoverageEstablished{D,R,S,I}` payload to every partition.
-13. After all acknowledgements and revalidation, the resource becomes complete.
-14. A new source snapshot is taken and bound to S.
-15. A new replayer run starts from that snapshot's trusted replay plan.
+12. After all acknowledgements and revalidation, the resource becomes complete.
+13. A new source snapshot is taken and bound to S.
+14. A new replayer run starts from that snapshot's trusted replay plan.
 
 At every stage, failure leaves the condition false or unknown. No timeout skips a proof.
 
@@ -1205,7 +1210,7 @@ replacement-snapshot automation remain future deltas.
 
 | Change | Scope | Required behavior |
 |---|---|---|
-| Managed configuration | Current | Add `suppressCaptureByDefault`, controller-authorized fallback, retry, authorization, proxy connection-set-drain, and handoff settings. |
+| Managed configuration | Current | Add `suppressCaptureByDefault`, the process-wide `--capture-failure-policy`, definite-uncompromised retry configuration, a 60-minute default maximum connection lifetime, and a five-minute default orderly-retirement bound. |
 | Separate status/control interface | Current | Expose local state and authenticated idempotent commands without sharing the source listener. |
 | Capture Replay status | Current | Add complete/false/unknown coverage, immutable terminal-workflow status, recovery identity, and transition timestamps. |
 | Durable grant ledger | Current | Persist every process, capture activation, assignment-scoped writer identity, grant, and retirement state across controller failover. |
@@ -1215,7 +1220,7 @@ replacement-snapshot automation remain future deltas.
 | Kubernetes fencing | Current | Prove traffic retirement through trusted healthy quiescence, runtime-confirmed termination, or infrastructure fencing that cuts existing connectivity; force deletion and node timeout are insufficient. |
 | Controller command fence | Current | Allocate a domain fence token, persist immutable command intents, target immutable Pod and process identity, and reject stale same-recovery commands independently of leader election. |
 | Record schema | Current | Carry `captureSessionId` on every managed traffic, manifest, and proxy-completion record; carry `manifestCycle` per `TrafficObservation`; use the Kafka record header as the authoritative `writerNodeId` for `NoMoreWrites`; permit mixed-cycle parents with one child obligation per observation and parent commit only after every child is terminal `Satisfied`. Valid control records and record-level session rejection use one control child. If a fresh run reuses the same Kafka topic, add per-partition reset records now; add coverage-establishment records for future automatic recovery. |
-| Proxy state machine | Current | Implement retry only for definite uncompromised transient failures, pending authorization, same-process pass-through, healthy suppression, permanent failed-activation rules, and concurrent draining of assignment-scoped writer identities. |
+| Proxy state machine | Current | Implement retry only for definite uncompromised transient failures, immediate `fail-closed` termination, irreversible whole-process `fail-open`, healthy suppression, permanent failed-activation rules, last-usable-assignment routing, and concurrent draining of assignment-scoped writer identities. |
 | Session-aware replayer | Current | Enforce the expected session, reject nonmatching-session records, persist bootstrap, and invalidate a run on a superseding reset when reset records exist. |
 | Snapshot replay plan | Current | Persist the capture domain, accepted session, domain sequence, immutable Kafka IDs, and partition start offsets; include reset offsets when reusing a topic. |
 | Capability probe | Current | Implement the base acknowledged per-leader capability probe using `writerNodeId = captureActivationId + ":PROBE"` and the assignment-scoped initial-manifest gate rather than metadata connectivity. |
@@ -1231,10 +1236,12 @@ The terminal resource, Kubernetes identity, and stale-command boundaries below a
 session and replay-plan boundaries also apply to every managed fresh run. Reset boundaries apply
 now when a topic is reused. Coverage-establishment boundaries remain future automatic recovery.
 
-- Controller unavailability never authorizes pass-through or capture grants.
+- Controller unavailability does not prevent a configured `fail-open` proxy from making its local
+  irreversible transition after capture compromise. It still prevents new capture grants and
+  planned controller-directed pass-through routing.
 - Existing strict proxies may continue their already granted session while the controller is down.
 - New processes remain suppressed without a grant.
-- Unexpected loss of any `ACTIVE` capture process terminally fails the current workflow even when no
+- Unexpected loss of any `CAPTURE_AUTHORITATIVE` process terminally fails the current workflow even when no
   uncaptured forwarding has yet been observed.
 - A stale command with a lower domain recovery sequence, lower domain fence token, unvalidated
   command intent, or nonmatching session cannot reactivate a superseded workflow.
@@ -1309,16 +1316,19 @@ Current round:
   sequence, immutable Kafka identities, and replay-plan identity;
 - a fresh snapshot remaining unauthorized until the source-specific in-flight retirement barrier
   succeeds;
-- same-process and replacement-process pass-through only after durable incomplete and terminal
+- a configured `fail-open` process transitioning immediately to whole-process pass-through after
+  capture compromise, with the controller durably recording incomplete and terminal status when it
+  observes the transition;
+- planned controller-directed pass-through routing only after durable incomplete and terminal
   status;
-- controller timeout causing block or exit, never autonomous degradation;
 - healthy suppression acknowledgement only after every closed connection completes the base
   connection-retirement order, every retiring `(writerNodeId, partition)` registry is empty, and
   every producer future succeeds;
 - capability probes use `writerNodeId = captureActivationId + ":PROBE"` and create no replayer writer baseline,
   manifest registry, or connection state;
-- every new assignment increments `assignmentSequence` and creates a new `writerNodeId` for new
-  connections while existing connections retain their original identity;
+- the first assignment and every replacement assignment increment `assignmentSequence` and create
+  a new `writerNodeId` for new connections while existing connections retain their original
+  identity;
 - rapid rebalances leave several writer identities draining independently, each keyed by
   `(writerNodeId, partition)`;
 - an active identity's empty manifest remains a heartbeat and never resets its accepted broker-time
@@ -1400,9 +1410,11 @@ Current round:
 - controlled strict-proxy replacement with sufficient remaining capacity and no terminal capture
   failure;
 - AZ capacity falling below policy and controller-authorized routing to pass-through capacity;
-- same-process pass-through preserving existing connections;
+- `fail-open` pass-through preserving existing connections and accepting new connections without
+  capture;
 - replacement-process handoff requiring client reconnect;
-- an off-load-balancer hour-long connection blocking recovery until forced close;
+- a connection remaining open until the 60-minute default maximum lifetime and blocking recovery
+  until it closes or is force-closed;
 - Pod deletion without actual process death;
 - force deletion leaving the old process running;
 - a node partition leaving the Pod and existing connections alive;

@@ -10,15 +10,16 @@ behavior and fresh-run recovery are specified separately in
 
 The design deliberately separates three concerns:
 
-1. Kafka group membership assigns partitions for new connections.
+1. Kafka group membership load-balances partitions for new connections.
 2. Exact open-connection manifests establish cycle boundaries for resetting incomplete
    per-connection HTTP accumulation.
 3. The capture-before-forward contract prevents a strict-mode proxy from completing a source
    request that Kafka cannot later replay.
 
-Group departure causes a rebalance among the remaining members. That is the complete role of
-departure in this protocol. It is not replay evidence and does not authorize another proxy to
-declare the departed proxy instance finished.
+Group departure causes a rebalance among the remaining members. The proxy that Kafka considers
+departed continues using its last usable assignment until it receives a replacement. Departure is
+not capture-health or replay evidence and does not authorize another proxy to declare the departed
+proxy instance finished.
 
 ---
 
@@ -158,6 +159,8 @@ Every accepted connection has a `connectionId` that is unique within its immutab
 ```
 
 Both the writer identity and partition mapping are immutable for the life of the connection.
+The maximum whole-connection lifetime defaults to 60 minutes and is independently configurable
+from incomplete-request duration and byte limits.
 
 This document reserves **drain** for two aggregate operations:
 
@@ -171,52 +174,70 @@ The `DRAINING` process state and “still-draining proxy” wording below mean t
 connection set is undergoing the second aggregate operation; they do not name a third kind of
 drain.
 
-### 2.4 Capture modes
+### 2.4 Capture failure policy
 
-- **`FAIL_AND_EXIT`** is strict capture. A capture-liveness failure prevents further source
-  execution and causes the process to close connections and exit.
-- **`AUTONOMOUS_PASS_THROUGH`** permits source forwarding after capture is abandoned. The process
-  remains available, alarms continuously, and never resumes capture.
+`--capture-failure-policy` is process-wide:
+
+- **`fail-closed`** terminates the process immediately when required Kafka publication fails or
+  capture is otherwise compromised.
+- **`fail-open`** permanently abandons capture for the process. Existing and new TCP connections
+  continue forwarding without capture, the process alarms continuously, and capture never resumes.
+
+A definite transient failure proven not to have compromised capture may retry without invoking
+either terminal policy.
 
 ---
 
 ## 3. Kafka membership and horizontal scaling
 
-### 3.1 Membership is routing authority only
+### 3.1 Membership is load balancing only
 
-The proxy group assigns every traffic partition to one member for accepting **new captured client
-connections**. This document avoids the overloaded word “admission” for that decision. Membership
-does not prove that a departed proxy has stopped all execution, and it does not
+The proxy group distributes Kafka partitions for newly opened source connections. Membership does
+not prove capture health, producer health, proxy death, or writer completion, and it does not
 authorize peer `NoMoreWrites` records.
 
 Each member publishes enough assignment metadata for every member to compute the same routing
 table. The leader uses a custom cooperative assignor so partitions can move gradually.
 
-Every member completes the Kafka capability probe before it joins the group. The implementation
-retains the minimum-capacity gate:
+Every member completes the Kafka capability probe before it joins the group. Before the first
+usable assignment, the startup gate also requires:
 
 ```text
 current group member count >= minimumActiveProxyCount
 ```
 
-When the gate is not satisfied, no member accepts new captured connections.
+The configured threshold is a startup barrier only. After the first usable assignment, later group
+size or membership health does not close a capture or connection-acceptance gate.
 
-### 3.2 Assignment and the new-connection gate
+### 3.2 Assignment and connection routing
 
-After a process completes §3.3, it joins the group. Each completed assignment creates the next
-assignment-scoped writer identity. The proxy may accept a new captured client connection only
-after:
+After a process completes §3.3, it joins the group. Before it has ever received a usable
+assignment, it cannot accept a captured source connection because it has no Kafka partition for
+that connection. A startup failure or attempted source connection before the first usable
+assignment invokes the process-wide `--capture-failure-policy`. After either terminal policy is
+applied, that process does not later resume capture when membership supplies an assignment.
+
+The first assignment becomes usable only after:
 
 1. the assignment is installed;
-2. the group-member count satisfies `minimumActiveProxyCount`;
+2. the startup group-member count satisfies `minimumActiveProxyCount`;
 3. the proxy's capture-authoritative mode remains valid; and
 4. the initial complete manifests for that assignment's writer identity and usable partitions are
    acknowledged.
 
-The previous owner retains a partition until cooperative revocation. The new owner waits for the
-initial-manifest acknowledgement before accepting a connection. This may create a short
-new-connection capacity pause for the transferred partition, but never overlapping new-connection
-ownership or uncaptured forwarding.
+Afterward, the proxy retains the last usable assignment until Kafka supplies a replacement.
+Revocation, partition-loss callbacks, stale or failed polling, empty polls, delayed heartbeats,
+coordinator outages, and group departure do not invalidate it. The proxy continues assigning new
+connections with the last usable assignment.
+
+Kafka may temporarily give another proxy the same partition after considering the stale member
+gone. This affects load distribution only. The proxies have distinct writer identities, so capture
+and replay remain unambiguous.
+
+When a replacement assignment arrives, the proxy creates its next assignment-scoped writer
+identity and acknowledges that identity's initial manifests before using the replacement for new
+connections. Connections opened earlier retain their original writer identity and partition.
+There is no membership-health deadline.
 
 ### 3.3 Startup capability probing
 
@@ -247,9 +268,9 @@ When member B joins:
 2. The cooperative assignment transfers new-connection ownership.
 3. Every member increments its `assignmentSequence` and creates the new assignment's
    `writerNodeId`.
-4. Existing member A stops opening connections under its preceding writer identity when the new
-   assignment takes effect. Existing connections keep that preceding identity and their original
-   partitions.
+4. Existing member A stops opening connections under its preceding writer identity when the
+   replacement assignment becomes usable. Existing connections keep that preceding identity and
+   their original partitions.
 5. Each member acknowledges an initial complete manifest for its new writer identity on every
    partition that the assignment permits it to use before accepting a connection there.
 6. A continues traffic and periodic manifests for every older writer identity that still has
@@ -269,16 +290,17 @@ A planned process retirement first becomes `DRAINING`:
 4. the proxy continues traffic and manifest publication for every draining writer identity;
 5. after each `(writerNodeId, partition)` connection set is empty, it follows §4.3 and emits
    terminal self `NoMoreWrites` for that identity and partition; and
-6. it leaves the group and exits after those records are acknowledged, or after the operator's
-   proxy connection-set-drain deadline expires.
+6. it leaves the group and exits after those records are acknowledged.
 
-If the deadline expires, the process applies the configured strict or pass-through behavior in §7.
+This orderly retirement is performed only while capture and Kafka publication remain trustworthy.
+Its default completion bound is five minutes. The bound is not used for capture-compromise or
+unstable-process failures described in §7.
 
 ### 3.6 Later use of a partition
 
 A live proxy process may become eligible to accept new connections on a partition that it used in
-an earlier assignment. Those new connections use the current assignment's new `writerNodeId`. The
-current identity acknowledges its own initial complete manifest before
+an earlier assignment. Those new connections use the last usable assignment's `writerNodeId`. A
+replacement identity acknowledges its own initial complete manifest before
 accepting its first connection on that partition.
 
 The earlier writer identity never resumes. Empty manifests for an active identity remain ordinary
@@ -287,14 +309,14 @@ connections drain, its final empty manifest and self `NoMoreWrites` permanently 
 `(writerNodeId, partition)`.
 
 Rapid rebalances may leave several writer identities draining on the same Kafka partition while the
-current assignment's identity accepts new connections there. Every connection registry, manifest
+last usable assignment's identity accepts new connections there. Every connection registry, manifest
 cycle, publisher lane, broker-time baseline, and retirement state is therefore keyed by
 `(writerNodeId, partition)`, not by one process-global current identity.
 
 ### 3.7 Kafka 4 and assignment-protocol rollout
 
 The initial implementation uses Kafka's Classic group protocol because the required custom
-cooperative assignment metadata and phase transitions are under application control.
+cooperative assignment metadata is under application control.
 
 If a future group protocol cannot interoperate with the deployed assignor or subscription metadata,
 the fleet must not perform an in-place mixed-protocol rollout. The rollout creates a capture
@@ -647,10 +669,10 @@ protocol violation, not pre-completion traffic.
 
 ### 5.3 Initial manifest
 
-After every new assignment, before accepting the first captured client connection for a partition
-permitted by that assignment, the proxy must increment `assignmentSequence`, create the
-assignment's `writerNodeId`, and acknowledge an initial complete manifest for that identity and
-partition. This establishes that
+For the first assignment and each replacement assignment, before accepting the first captured
+client connection for a partition permitted by that assignment, the proxy must increment
+`assignmentSequence`, create the assignment's `writerNodeId`, and acknowledge an initial complete
+manifest for that identity and partition. This establishes that
 `(writerNodeId, partition)`'s cycle baseline and first accepted broker-time baseline. It does not
 require later packet capture to share a publisher lock with the manifest.
 
@@ -686,10 +708,9 @@ manifestLogAppendTime - lastAcceptedManifestLogAppendTime < E
 ```
 
 A failed, incomplete, or late manifest does not update the value. When the difference is greater
-than or equal to `E`, the proxy irreversibly enters its compromised state. It stops accepting new
-connections and follows §7. A fleet-managed proxy drains existing work when supported and exits so
-it can be replaced. Configured pass-through may instead make its one-way transition, but that
-process never becomes capture-authoritative again.
+than or equal to `E`, the proxy irreversibly enters its compromised state and immediately follows
+the process-wide `--capture-failure-policy` in §7. That process never becomes
+capture-authoritative again.
 
 This conclusion is enforced at the proxy rather than reconstructed downstream. Manifest
 publication is serialized as specified in §5.2: the next manifest is not prepared or submitted
@@ -891,40 +912,32 @@ The process emits a high-severity alarm containing at least:
 - producer error or stale-gate reason; and
 - whether source forwarding continued.
 
-### 7.2 Strict mode: `FAIL_AND_EXIT`
+### 7.2 `fail-closed`
 
-After the gate closes:
+After capture is compromised:
 
 - the request currently waiting at the pre-forward check is not sent to the source;
-- no later request is allowed to execute at the source;
-- acceptance of new captured client connections stops;
-- the proxy safely retires existing captured connections when their capture state remains
-  trustworthy, including acknowledgement of their terminal and preceding observations;
-- connections whose capture state cannot be trusted are closed without claiming successful
-  retirement;
-- after that bounded retirement attempt, the process exits so that it can be replaced;
-- previously accepted Kafka sends are awaited only while their outcome remains trustworthy; and
-- terminal self `NoMoreWrites` is attempted only after every related Netty connection is
-  disconnected and the §4.3 barrier succeeds.
+- the process emits high-severity diagnostics; and
+- the process terminates immediately with a distinct nonzero capture-failure exit status.
 
-Failure to emit self `NoMoreWrites` does not delay exit. The process crash is handled as a crash;
-the replayer must not fabricate completion.
+It does not attempt connection retirement, writer retirement, a final empty manifest, or
+`NoMoreWrites`. Those operations require trustworthy Kafka acknowledgements. The replayer handles
+the termination as a crash and does not fabricate completion.
 
-### 7.3 Pass-through mode: `AUTONOMOUS_PASS_THROUGH`
+### 7.3 `fail-open`
 
 After the gate closes:
 
-- acceptance of captured client connections and Kafka traffic submission remain permanently
-  closed;
-- existing and new source connections may continue without capture;
-- connections do not need to be broken merely because replay cannot reconstruct them;
+- Kafka capture submission remains permanently closed;
+- existing TCP connections remain open and switch to uncaptured forwarding;
+- new TCP connections use uncaptured forwarding;
 - the process emits a loud, persistent capture-gap alarm; and
-- it does not emit terminal `NoMoreWrites` while any retained pass-through connection could still
-  contain capture-side work from the retired proxy activation.
+- it does not claim orderly connection or writer retirement for the compromised capture
+  activation.
 
-The process must not rejoin capture, resume manifests, or generate captured traffic under the same
-or a new `writerNodeId`. Recovery requires retiring the process and starting a fresh strict-mode
-process.
+The process must not resume manifests or generate captured traffic under the same or a new
+`writerNodeId`, even if Kafka later recovers. Recovery requires retiring the process and starting a
+fresh capture-authoritative process.
 
 ### 7.4 Process suspension
 
@@ -944,21 +957,14 @@ A missing group member, failed health check, or control-plane declaration of nod
 alarm operators and may trigger process replacement. It does not cause replay settlement and does
 not cause another proxy to write completion on behalf of the missing proxy activation.
 
-While the proxy cannot confirm valid group membership, it closes the new-connection gate. Existing
-captured connections retain their immutable writer identities and continue capture and forwarding
-under the capture-before-forward rules.
+After the first usable assignment, membership polling and callbacks do not control capture or
+connection acceptance. The proxy continues using its last usable assignment until Kafka supplies a
+replacement. A replacement assignment creates a new writer identity for subsequently opened
+connections after its initial manifests are acknowledged. Existing connections remain unchanged.
 
-A clearly transient membership failure that has not compromised capture may retry. A permanent or
-ambiguous membership failure follows the configured mode:
-
-- strict mode safely retires existing captured connections when possible and then exits for
-  replacement; or
-- pass-through mode makes a one-way transition to pass-through and never resumes authoritative
-  capture in that process.
-
-After a recoverable interruption, Kafka's next completed group assignment is the assignment
-decision. The proxy applies the member-count and initial-manifest gates before accepting new
-connections.
+Membership recovery does not restore capture because membership loss never removed capture
+authority. Conversely, membership recovery cannot restore a process that entered `fail-open` or
+avoid termination after a capture-compromising failure.
 
 ---
 
@@ -992,9 +998,9 @@ regrant, and coverage restoration remain future work.
 
 | Area | Required change |
 |---|---|
-| Group assignor | Use cooperative ownership for accepting new captured client connections and publish enough assignment metadata to apply the configured member-count gate consistently. |
+| Group assignor | Distribute partitions for new connections, retain the last usable assignment until a replacement is installed, and publish the assignment metadata needed for consistent routing. |
 | Startup | Add out-of-group capability probes using `writerNodeId = captureActivationId + ":PROBE"` before joining the group; probes remain inert to replay. |
-| Routing | Increment `assignmentSequence` and create a new assignment-scoped `writerNodeId` after every new assignment; persist each connection's immutable writer identity and partition; move only eligibility to accept new captured client connections during rebalance. |
+| Routing | Keep the last usable assignment until a replacement is initialized; increment `assignmentSequence` and create a new assignment-scoped `writerNodeId` for that replacement; persist each connection's immutable writer identity and partition. |
 | Registry | Maintain exact all-open connection sets and one atomic `manifestCycle` per `(writerNodeId, partition)`; retain older registries while their connections drain; remove a closed connection only after its terminal and all earlier observations are acknowledged. |
 | Publisher | Stamp every `TrafficObservation` with its current `manifestCycle`; permit mixed-cycle records; compute each complete manifest's timestamp as the maximum chunk `LogAppendTime`; preserve connection-local acknowledgement and terminal self-`NoMoreWrites` ordering without globally serializing packet capture. Keep one producer and serialized lane owner per writer and partition; drain all submissions and callbacks before handoff. |
 | Source forwarding | Establish an acknowledged initial manifest baseline; reject late manifests; compare acknowledged observation `LogAppendTime` against `lastAcceptedManifestLogAppendTime`; make compromise irreversible. |
@@ -1009,7 +1015,8 @@ Each proxy should expose:
 
 - process identity, `captureActivationId`, current `assignmentSequence`, current
   `writerNodeId`, and every older writer identity still draining;
-- current group membership, member-count threshold, and new-connection assignment;
+- whether the first usable assignment has been received, the startup member-count threshold, the
+  last usable assignment, and any replacement assignment being initialized;
 - capture mode and whether the capture gate is open;
 - current connections by `(writerNodeId, partition)`;
 - pending connection retirements and the oldest unacknowledged terminal-or-earlier observation;
@@ -1280,8 +1287,12 @@ orchestration around:
 - Rapid rebalances may leave several writer identities draining concurrently without sharing
   registries, cycles, publisher lanes, or broker-time baselines.
 - An empty manifest for an active identity is an ordinary heartbeat and never resets its baseline.
-- The new-connection gate closes when current group membership falls below
-  `minimumActiveProxyCount`.
+- `minimumActiveProxyCount` is enforced only before the first usable assignment.
+- Revocation, partition loss, empty polls, coordinator outage, and failed membership polling leave
+  the last usable assignment available for new connections until a replacement assignment is
+  installed.
+- A stale proxy and its replacement may temporarily assign new connections to the same partition;
+  their distinct writer identities keep capture unambiguous.
 - Mixed incompatible group protocols are rejected as an in-place rollout.
 
 ### 11.4 Failure tests
@@ -1295,7 +1306,12 @@ orchestration around:
   captured.
 - Fail Kafka during manifest publication in strict and pass-through modes.
 - Create an ambiguous producer send and verify the capture gate closes.
-- Enter pass-through, recover Kafka, and verify that the process still does not resume capture.
+- In `fail-closed`, verify that Kafka or capture compromise terminates immediately without orderly
+  retirement.
+- In `fail-open`, verify that existing and new TCP connections forward without capture and that
+  Kafka recovery does not resume capture.
+- Verify that orderly trustworthy shutdown uses the five-minute default retirement bound, while
+  capture-compromise and unstable-process failures do not enter retirement.
 
 ### 11.5 Acceptance criteria
 
@@ -1322,8 +1338,9 @@ The design is complete when:
 
 ## 12. Decisions
 
-- Kafka membership assigns new connections; group departure simply triggers rebalance and does not
-  prove proxy death.
+- Kafka membership only load-balances new connections. Before the first assignment it is a startup
+  prerequisite; afterward the proxy retains its last usable assignment through membership loss,
+  revocation, and polling failure until a replacement assignment is installed.
 - Manifests list all open connections and close a precisely defined `manifestCycle`.
 - Only connection add, connection remove, and manifest copy-and-increment are linearized; ordinary
   packet capture remains concurrent.
@@ -1352,7 +1369,7 @@ The design is complete when:
   weakened by deployment configuration.
 - Every new assignment increments `assignmentSequence` and creates an assignment-scoped
   `writerNodeId`; existing connections retain their original identity, and new connections use the
-  current assignment's identity.
+  last usable assignment's identity until the replacement becomes usable.
 - Empty manifests remain ordinary heartbeats for an active identity and never reset its continuous
   broker-time baseline.
 - After an old writer identity's connections drain, a final empty manifest and self
@@ -1364,9 +1381,14 @@ The design is complete when:
   initialized state, but only a new assignment-scoped writer identity may legitimately accept a
   new connection after rebalance.
 - Long inactivity is safe because manifests continue to list the connection.
-- Strict mode blocks source execution and exits after capture loss.
-- Pass-through mode may continue connections uncaptured, alarms loudly, and never rejoins capture.
+- `--capture-failure-policy=fail-closed` terminates immediately after capture compromise and does
+  not attempt orderly retirement.
+- `--capture-failure-policy=fail-open` switches the whole process, including existing and new TCP
+  connections, to uncaptured forwarding, alarms loudly, and never resumes capture.
 - Peer departure only causes group rebalance; it has no replay meaning.
+- The maximum whole-connection lifetime defaults to 60 minutes.
+- Orderly shutdown while capture and Kafka remain trustworthy uses a five-minute default retirement
+  bound; capture-compromise and unstable-process failures do not use that retirement path.
 - Recovery after a capture gap starts a new capture and replay run.
 - In the current managed Kubernetes round, a terminal capture failure terminally fails the whole
   capture workflow; same-resource reset, regrant, and replacement-snapshot automation are deferred.

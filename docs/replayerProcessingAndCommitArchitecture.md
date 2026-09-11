@@ -173,8 +173,8 @@ The design also carries the expiration-hardening policy: optional read-ahead bou
 epsilon and coupled to replay progress; exact manifest-cycle reset for incomplete per-connection
 HTTP accumulation; optional metadata scanning on the same Kafka consumer and assignment as replay;
 reassignment and shutdown retaining for redelivery; a capture-side maximum connection duration
-that produces ordinary close observations and bounds resource use; and an evidence API that can
-evolve toward independent tuple parts.
+that defaults to 60 minutes, produces ordinary close observations, and bounds resource use; and an
+evidence API that can evolve toward independent tuple parts.
 
 ---
 
@@ -940,8 +940,8 @@ commit from a previous assignment structurally impossible rather than defensivel
 
 **Writer identity is assignment-scoped, and that is load-bearing.** The proxy creates one fresh
 `captureActivationId` for a capture-authoritative process lifetime. It increments a process-local,
-strictly increasing `assignmentSequence` for every new Kafka group assignment before accepting a
-connection under that assignment. Newly opened connections use:
+strictly increasing `assignmentSequence` when Kafka supplies a replacement group assignment, before
+accepting a connection under that assignment. Newly opened connections use:
 
 ```text
 writerNodeId = captureActivationId + ":" + assignmentSequence
@@ -951,6 +951,12 @@ Existing connections permanently retain the writer identity under which they ope
 therefore keys connection state, complete manifests, broker-time baselines, and `NoMoreWrites`
 cutoffs by `(writerNodeId, partition)`. Rapid rebalances may leave records from several draining
 writer identities on the same Kafka partition.
+
+Before the first usable assignment, the proxy cannot accept captured connections. After that first
+assignment, membership is only a load-balancing input: the proxy retains its last usable assignment
+through revocation, partition loss, coordinator outage, delayed heartbeats, empty polls, and polling
+failure until Kafka supplies a replacement. Temporary overlap between a stale assignment and a
+replacement affects load distribution only because each proxy uses a distinct writer identity.
 
 An empty manifest for an active writer identity is an ordinary heartbeat and may advance that
 identity's continuous accepted-manifest baseline. It never resets the baseline. If a manifest is
@@ -1291,11 +1297,13 @@ needs an explicit logical boundary that says which connection lifecycle interval
 manifest covers. Kafka offsets alone cannot supply that boundary.
 
 The authoritative proxy contract is
-[`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). Membership assigns
-partitions for new captured client connections. Group departure triggers rebalance and has no replay
-meaning. Exact manifests resolve `manifestCycle` boundaries. A listing preserves continuity across
-the boundary; an applicable omission settles the covered incomplete per-connection accumulation
-and retires that connection identity.
+[`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). Membership only load-balances partitions for
+new captured client connections. Before the first usable assignment it is a startup prerequisite;
+afterward the proxy retains its last usable assignment until Kafka supplies a replacement. Group
+departure, revocation, partition loss, and membership-poll failure have no replay meaning and do not
+change capture correctness. Exact manifests resolve `manifestCycle` boundaries. A listing preserves
+continuity across the boundary; an applicable omission settles the covered incomplete
+per-connection accumulation and retires that connection identity.
 
 The Kafka record header for `NoMoreWrites` carries the authoritative `writerNodeId`. The proxy
 publishes the record only after the routing and acceptance gate stops new connections, every
@@ -1315,6 +1323,11 @@ connections use the new assignment-scoped `writerNodeId`. Existing connections r
 preceding identities. Each old
 `(writerNodeId, partition)` continues periodic manifests while its connections drain; after its
 connection set becomes empty, it publishes a final empty manifest and valid `NoMoreWrites`.
+
+That writer-retirement sequence is used for orderly shutdown while capture and Kafka publication
+remain trustworthy, with a five-minute default completion bound. A capture-compromising Kafka
+publication failure does not use it: `--capture-failure-policy=fail-closed` terminates immediately,
+while `fail-open` irreversibly switches existing and new TCP connections to uncaptured forwarding.
 
 An empty manifest for an active writer identity is an ordinary heartbeat. It does not end or reset
 that identity's timestamp baseline. A late manifest irreversibly compromises the proxy before a
@@ -1521,19 +1534,22 @@ the group. The proxy writes semantically inert capability probes using
 `writerNodeId = captureActivationId + ":PROBE"` to one representative traffic partition per current leader
 broker, waits for acknowledgement, refreshes metadata, and then joins the group. A completed
 cooperative assignment may permit new captured connections after the assignment's initial
-manifests are acknowledged and the configured group-member threshold is satisfied. A probe creates no
+manifests are acknowledged and the startup group-member threshold is satisfied. A probe creates no
 reconstruction, target-replay, writer-baseline, manifest, connection, or expiration state. If the
 replay cursor encounters the record, it performs no replay action; ordinary whole-record accounting
 allows the record to become commit-eligible.
 
-After every new assignment, the proxy increments `assignmentSequence`, creates that assignment's
-`writerNodeId`, and acknowledges its initial complete manifests before accepting new connections.
-For each newly
-accepted connection, the current group assignment chooses one traffic partition. The proxy stores
-both the writer identity and partition and uses them for every traffic record and manifest entry for
-the life of the connection. Later rebalances move only eligibility to accept new captured client
-connections. Existing connections retain their preceding writer identities and partitions until
-they close.
+After the first usable assignment, the proxy keeps using it for new connections until a replacement
+assignment is initialized. Revocation, partition-loss callbacks, coordinator outage, empty polls,
+delayed heartbeats, and failed membership polling do not close a capture or connection-acceptance
+gate. When Kafka supplies a replacement, the proxy increments `assignmentSequence`, creates that
+assignment's `writerNodeId`, and acknowledges its initial complete manifests before using it for new
+connections.
+
+For each newly accepted connection, the last usable group assignment chooses one traffic partition.
+The proxy stores both the writer identity and partition and uses them for every traffic record and
+manifest entry for the life of the connection. Existing connections retain their preceding writer
+identities and partitions until they close.
 
 Each older `(writerNodeId, partition)` continues periodic manifests while its connections drain,
 then publishes a final empty manifest and valid `NoMoreWrites`. Rapid rebalances may therefore
@@ -2433,7 +2449,7 @@ callbacks: the commit policy must stay with the disposition owner.
 | Permits | available, queued, held duration, cancellation count |
 | Evidence | tuple-write latency, failures, retries, durable receipts |
 | Kafka | unresolved parent records, observation/control children, and WorkClaims; generation ledger-settlement gate age; commit head identity/age; staged commits; pending commit acknowledgements by generation; commit latency |
-| Capture proxy | group member count and configured threshold, current and draining writer identities, capture-gate state, open connections, pending connection retirements and oldest acknowledgement wait, accepted manifest broker time by `(writerNodeId, partition)`, manifest cycle, manifest chunks/bytes, incomplete manifests, broker-time expirations, post-applicable-omission violations, publisher failures, capture-abandoned transitions, pass-through gap alarms |
+| Capture proxy | whether a first usable assignment exists, startup group-member threshold, last usable and replacement assignments, current and draining writer identities, capture-gate state, open connections, pending connection retirements and oldest acknowledgement wait, accepted manifest broker time by `(writerNodeId, partition)`, manifest cycle, manifest chunks/bytes, incomplete manifests, broker-time expirations, post-applicable-omission violations, publisher failures, capture-abandoned transitions, pass-through gap alarms |
 | Resources | owned buffer counts/bytes, duplicate-close attempts, leaked-owner assertions |
 
 Here, **monitoring** means code that reports health without owning lifecycle decisions: OTel metric
@@ -2559,14 +2575,16 @@ the production interface rather than adding callback configuration to the test.
   later authoritative manifests or terminal self completion;
 * proxy membership: startup capability probing with
   `writerNodeId = captureActivationId + ":PROBE"`,
-  one cooperative assignment step, group-member-count capacity boundaries, cooperative scale-up,
-  leader replacement, and cold-start configurations that cannot satisfy their new-connection
-  eligibility predicate; probe records create no replay writer or manifest state;
-* immutable routing and identity: every new assignment increments `assignmentSequence` and creates
-  a new `writerNodeId` for new connections, while existing connections retain their stored writer
-  identity and partition;
+  a startup group-member-count boundary, retention of the last usable assignment through revocation,
+  partition loss, coordinator outage, and failed polling, replacement-assignment initialization,
+  cooperative scale-up, leader replacement, and cold-start configurations that cannot obtain a
+  usable assignment; probe records create no replay writer or manifest state;
+* immutable routing and identity: the first assignment and every replacement assignment increment
+  `assignmentSequence` and create a new `writerNodeId` for new connections, while existing
+  connections retain their stored writer identity and partition;
   rapid rebalances may leave several old identities draining concurrently;
-* proxy completion: permanent new-connection revocation, complete acknowledged connection
+* proxy completion: permanent closure of new connections for the retiring writer identity,
+  complete acknowledged connection
   retirement, an empty registry, transition to `RETIRING`, manifest-publisher quiescence, and every
   remaining accepted send precede the final empty manifest and terminal self `NoMoreWrites`; a
   periodic callback racing `RETIRING` either settles as earlier accepted work or exits without
@@ -2661,6 +2679,8 @@ fired).
   source-response outcome, and commit only after tuple durability.
 * Proxy incomplete-request duration and byte limits producing exactly one terminal
   `TrafficObservation` through ordinary channel teardown.
+* The proxy's 60-minute default maximum whole-connection lifetime closing a connection through
+  ordinary channel teardown.
 * Open keep-alive connection retained across many manifest intervals, then closed — its incomplete
   remainder resets on the applicable omission, not before.
 * Every new proxy-group assignment increments `assignmentSequence` and creates a new
@@ -2675,6 +2695,12 @@ fired).
   broker-time baseline.
 * A late acknowledged manifest closes the proxy's capture gate before any later manifest can be
   prepared or submitted; the replayer has no sticky-lapse state.
+* A required Kafka publication failure causing immediate process termination under
+  `--capture-failure-policy=fail-closed`, without orderly retirement.
+* The same capture compromise under `fail-open` switching existing and new TCP connections to
+  uncaptured forwarding and never resuming capture after Kafka recovery.
+* Planned trustworthy shutdown using the five-minute default retirement bound, while
+  capture-compromise and unstable-process failures do not enter retirement.
 * Proxy, replayer, and broker skew monitor receive identical `E` and `S` parameters in the test
   deployment.
 * Bring-your-own `preserve` import round-trips partition ranges, binary keys and values, duplicate
@@ -2852,25 +2878,26 @@ its actor command stays at the head of the FIFO. The transaction receives one te
 `TargetOutcome`; a retry is not re-admitted as a new actor command or Kafka obligation. This
 preserves per-connection ordering without redefining retry policy.
 
-### 19.7 Proxy traffic assignments and manifests follow group membership
+### 19.7 Proxy traffic assignments use the last usable group assignment
 
 The accepted routing design is
 [`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). A custom
-cooperative assignor assigns partitions for accepting new captured client connections. The group
-uses Kafka's completed cooperative assignment as the assignment decision. New connections choose
-once from the current assignment after its initial manifests are acknowledged
-and the group-member threshold is satisfied. They store both the assignment-scoped `writerNodeId`
-and partition immutably. Existing connections retain that identity through later assignment
-changes.
+cooperative assignor load-balances partitions for new connections. Before the first assignment, the
+proxy cannot accept captured connections. The first assignment becomes usable after its initial
+manifests are acknowledged and the startup group-member threshold is satisfied.
+
+Afterward, revocation, partition loss, coordinator outage, empty polls, delayed heartbeats, and
+membership-poll failure do not invalidate the assignment. New connections continue choosing from
+the last usable assignment until Kafka supplies a replacement. Temporary overlap with another proxy
+affects load distribution only; distinct writer identities preserve capture correctness. Each
+connection stores its assignment-scoped `writerNodeId` and partition immutably.
 
 Every new assignment increments `assignmentSequence` and creates a new `writerNodeId` for
-connections opened afterward. The new identity acknowledges its initial complete manifests before
-accepting connections. Older
+connections opened after the replacement becomes usable. The new identity acknowledges its initial
+complete manifests before the proxy uses that replacement assignment. Older
 writer identities continue periodic manifests until their connection sets drain, then publish a
 final empty manifest and valid `NoMoreWrites`. Empty manifests during an identity's active lifetime
 remain heartbeats and never reset its accepted broker-time baseline.
-
-New-connection routing comes only from the current cooperative group assignment.
 
 The manifest interval defaults to 30 seconds and must be positive. A complete listing manifest
 resolves continuity across its cycle; an applicable omission settles the covered incomplete
