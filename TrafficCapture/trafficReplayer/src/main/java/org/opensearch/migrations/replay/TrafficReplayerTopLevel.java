@@ -643,7 +643,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         // Reaching this bound is always a bug, and the shutdown watchdog above names the stuck session.
         //
         // Timing out here and shutting the pool down anyway is safe only because of the four event-loop
-        // death gates documented in docs/replayerHardenedArchitectureDesign.md, section 16.3.  A session's
+        // death gates documented in docs/replayerProcessingAndCommitArchitecture.md, section 16.3.  A session's
         // event loop is both its channel's I/O thread and its actor's mailbox, so once this pool goes away
         // nothing can advance a session that is still live: work parked on the network has no thread left
         // to complete it, and posted commands are dropped.  Those gates turn that into prompt cancellation

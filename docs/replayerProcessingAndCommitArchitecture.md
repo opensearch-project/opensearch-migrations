@@ -1,4 +1,4 @@
-# Hardened Traffic Replayer Architecture
+# Replayer Processing and Commit Architecture
 
 **Status:** detailed replayer design contract
 
@@ -12,10 +12,10 @@ reassignment, and process-fatal failure behavior.
 
 The proxy companions define the records consumed here:
 
-- [proxyHorizontalScalingAndNodeDeath.md](proxyHorizontalScalingAndNodeDeath.md) defines
+- [proxyCaptureProtocol.md](proxyCaptureProtocol.md) defines
   assignment-scoped writer identities, exact manifests, capture-before-forward, broker-time
   expiration, and clean writer-partition retirement.
-- [proxyManagedFleetCaptureRecovery.md](proxyManagedFleetCaptureRecovery.md) adds managed session
+- [managedFleetCaptureRecovery.md](managedFleetCaptureRecovery.md) adds managed session
   fencing and the clock-skew operational requirement.
 
 The replayer relies on these settled facts:
@@ -1301,7 +1301,7 @@ needs an explicit logical boundary that says which connection lifecycle interval
 manifest covers. Kafka offsets alone cannot supply that boundary.
 
 The authoritative proxy contract is
-[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md). Membership assigns
+[`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). Membership assigns
 partitions for new captured client connections. Group departure triggers rebalance and has no replay
 meaning. Exact manifests resolve `manifestCycle` boundaries. A listing preserves continuity across
 the boundary; an applicable omission settles the covered incomplete per-connection accumulation
@@ -2831,7 +2831,7 @@ without another actor transition.
 ### 19.7 Proxy traffic assignments and manifests follow group membership
 
 The accepted routing design is
-[`proxyHorizontalScalingAndNodeDeath.md`](proxyHorizontalScalingAndNodeDeath.md). A custom
+[`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). A custom
 cooperative assignor moves members through `PROBATIONARY` and `ACTIVE`; PROBATIONARY members
 receive no traffic assignments. New connections choose once from the ACTIVE member's traffic
 assignments and store both the current assignment-scoped `writerNodeId` and partition immutably.

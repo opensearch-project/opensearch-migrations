@@ -951,18 +951,17 @@ The full acceptance suite must also prove:
 
 ## 16. Companion document boundaries
 
-The final design set should contain this document and four progressively detailed children:
+The final design set contains this document and three progressively detailed companions:
 
-1. **Proxy protocol and implementation:** group assignment, capability checks, manifest generation,
-   connection retirement, publication ordering, failure handling, and proxy tests.
-2. **Replayer behavior:** handling each protobuf record, HTTP request and source-response assembly,
-   target replay, tuple output, expiration, rebalance, shutdown, and violations.
-3. **Replayer asynchronous ownership and work tracking:** which component exclusively owns each
-   mutable state, messages between those components, per-record and per-observation tracking,
-   cancellation, cleanup, resource ownership, commit attempts, and checks that state is accessed
-   only by its owner.
-4. **Managed-fleet capture recovery:** controller responsibilities, durable state, snapshot
-   boundaries, and explicitly unresolved recovery mechanisms.
+1. [**Proxy Capture Protocol**](proxyCaptureProtocol.md): group assignment, capability checks,
+   manifest generation, connection retirement, publication ordering, failure handling, and proxy
+   tests.
+2. [**Replayer Processing and Commit Architecture**](replayerProcessingAndCommitArchitecture.md):
+   record handling, HTTP assembly, target replay, tuple output, expiration, commit accounting,
+   rebalance, shutdown, asynchronous ownership, cancellation, cleanup, and owner-affinity checks.
+3. [**Managed Fleet Capture Recovery**](managedFleetCaptureRecovery.md): controller
+   responsibilities, durable state, snapshot boundaries, and explicitly unresolved recovery
+   mechanisms.
 
 Child documents may add implementation detail but may not weaken or redefine this document's
 observable guarantees.

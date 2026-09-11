@@ -1,4 +1,4 @@
-# Proxy Horizontal Scaling, Capture Liveness, and Proxy Completion
+# Proxy Capture Protocol
 
 **Status:** standalone design contract
 **Last revised:** 2026-09-11
@@ -6,7 +6,7 @@
 This document defines horizontal scaling and failure behavior for capture proxies that write traffic
 to Kafka for later replay. It covers the controller-less deployment. Managed-fleet terminal-failure
 behavior and fresh-run recovery are specified separately in
-[`proxyManagedFleetCaptureRecovery.md`](proxyManagedFleetCaptureRecovery.md).
+[`managedFleetCaptureRecovery.md`](managedFleetCaptureRecovery.md).
 
 The design deliberately separates three concerns:
 
@@ -685,7 +685,7 @@ later assignments do not reset it.
 Let `E` be the configured manifest expiration interval. The proxy and replayer must receive the
 same `E` and `S` values for one capture-and-replay run; the managed orchestration requirement is
 defined in
-[Managed Fleet Capture Awareness and Future Recovery](proxyManagedFleetCaptureRecovery.md).
+[Managed Fleet Capture Recovery](managedFleetCaptureRecovery.md).
 Unmanaged deployment configuration must preserve the same agreement.
 
 A later complete manifest updates the value only when:

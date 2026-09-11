@@ -1,8 +1,8 @@
-# Managed Fleet Capture Awareness and Future Recovery
+# Managed Fleet Capture Recovery
 
 **Status: current terminal-failure contract plus future recovery design (2026-09-11).** The
 standalone contract is
-[Proxy Horizontal Scaling, Capture Liveness, and Proxy Completion](proxyHorizontalScalingAndNodeDeath.md).
+[Proxy Capture Protocol](proxyCaptureProtocol.md).
 That contract now uses exact manifest-cycle boundaries, terminal self-only `NoMoreWrites` for
 permanent `(writerNodeId, partition)` retirement, explicit retention when neither fact exists, and an
 irreversible local capture gate. It has no designated witnesses, peer completion, peer terminal

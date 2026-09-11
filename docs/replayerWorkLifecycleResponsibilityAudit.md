@@ -1,5 +1,11 @@
 # Replayer Work Lifecycle Responsibility Audit
 
+**Status:** Temporary current-implementation audit, not a protocol or architecture authority.
+Retain it while reconciling the current code with
+[replayerProcessingAndCommitArchitecture.md](replayerProcessingAndCommitArchitecture.md), then
+remove it after every responsibility and regression test has a verified owner in the replacement
+implementation.
+
 Date: 2026-09-03
 
 Branch baseline: `integrating3231` at `bf696819d058c1c091f4cdcbeece478b01ffba0f`

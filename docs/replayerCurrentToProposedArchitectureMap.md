@@ -1,19 +1,16 @@
 # Current-to-Proposed Replayer Architecture Map
 
-**Status:** Draft migration crosswalk. **Stale as a status ledger** — the "Current state" columns
-describe the code as of 2026-09-04, before the branch implemented most of the target design (the
-scanner, manifest foundations, actor/transaction/ledger lifecycle, and legacy routing plan all
-exist now).
-For what is actually done versus future, see the hardened design's Implementation Status section.
-The name mappings here remain accurate and useful.
+**Status:** Temporary implementation crosswalk, not a protocol or architecture authority. It maps
+the current code to the target design and records migration sequencing. Remove this document after
+the implementation and its verification tests have replaced the current path.
 
-**Date:** 2026-09-10
+**Date:** 2026-09-11
 
-**Target design:** [replayerHardenedArchitectureDesign.md](replayerHardenedArchitectureDesign.md)
+**Target design:** [replayerProcessingAndCommitArchitecture.md](replayerProcessingAndCommitArchitecture.md)
 
 **Current architecture:** [replayerArchitecture.md](replayerArchitecture.md)
 
-**Policy input:** [replayer-expiration-hardening.md](replayer-expiration-hardening.md)
+**End-to-end constraints:** [captureAndReplayArchitecture.md](captureAndReplayArchitecture.md)
 
 **Lifecycle audit:** [replayerWorkLifecycleResponsibilityAudit.md](replayerWorkLifecycleResponsibilityAudit.md)
 
@@ -411,5 +408,4 @@ When a design decision changes:
 2. Update the corresponding row in this crosswalk.
 3. Update the responsibility audit classification.
 4. Record which migration slice and tests change.
-5. Reconcile the expiration-hardening policy if scanner, lookahead, proxy cap, or part-level
-   evidence semantics are affected.
+5. Update every affected canonical protocol document and verification requirement.
