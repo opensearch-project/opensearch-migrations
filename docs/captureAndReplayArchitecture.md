@@ -49,6 +49,14 @@ same-resource recovery remain unresolved. The managed-fleet companion document m
 possible mechanisms, but no implementation may depend on them as settled protocol or contradict
 the requirements above.
 
+Five minutes is the default operational target for orderly shutdown, not permission to stop
+retirement. After that target the proxy continues trying to acknowledge terminal observations,
+final empty manifests, and `NoMoreWrites`. Periodic manifests continue while existing connections
+retire. After the connection registry is empty, the proxy quiesces periodic manifests and keeps
+trying to publish the final empty manifest and `NoMoreWrites` until the most recently acknowledged
+complete manifest reaches the configured manifest expiration interval `E`. An acknowledged final
+empty manifest becomes that most recent manifest before the proxy attempts `NoMoreWrites`.
+
 ## 2. System model
 
 ```mermaid
@@ -861,9 +869,12 @@ Cancellation never causes a Kafka commit.
 An orderly shutdown is a planned operation performed while capture and Kafka publication remain
 trustworthy, such as `SIGTERM`, a planned rollout, fleet-directed replacement, or another deliberate
 administrative shutdown. It follows the connection and writer-retirement ordering in §§6–7. The
-default bound for completing that orderly retirement is five minutes.
+default target for completing that orderly retirement is five minutes. Missing the target emits a
+high-severity diagnostic but does not stop retirement or skip `NoMoreWrites`. The proxy gives up
+only when the most recently acknowledged complete manifest reaches the configured manifest
+expiration interval `E`.
 
-The orderly-retirement bound is not a general failure response. Capture-compromise and unstable
+The orderly-retirement timing policy is not a general failure response. Capture-compromise and unstable
 process failures follow §12.4 instead.
 
 ### 12.4 Proxy capture failure modes

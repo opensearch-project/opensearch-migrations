@@ -57,13 +57,15 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
                         "closing outbound channel because WRITE future was not successful due to: ",
                         future.cause()
                     );
-                    future.channel().close(); // close the backside
+                    closeAndFlush(future.channel());
+                    closeAndFlush(ctx.channel());
                 }
             });
             outboundChannel.config().setAutoRead(true);
-        } else { // if the outbound channel has died, so be it... let this frontside finish with its call naturally
+        } else {
             log.warn("Output channel (" + outboundChannel + ") is NOT active");
             ReferenceCountUtil.release(msg);
+            closeAndFlush(ctx.channel());
         }
     }
 
@@ -96,6 +98,8 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
     static void closeAndFlush(Channel ch) {
         if (ch.isActive()) {
             ch.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        } else if (ch.isOpen()) {
+            ch.close();
         }
     }
 }

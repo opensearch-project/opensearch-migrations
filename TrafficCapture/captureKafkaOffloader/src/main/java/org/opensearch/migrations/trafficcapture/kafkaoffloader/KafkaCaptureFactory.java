@@ -15,6 +15,7 @@ import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IOrderlyRetirableCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
@@ -30,7 +31,10 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
 @Slf4j
-public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMetadata>, AutoCloseable {
+public class KafkaCaptureFactory implements
+    IConnectionCaptureFactory<RecordMetadata>,
+    IOrderlyRetirableCaptureFactory,
+    AutoCloseable {
 
     public static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     public static final Duration DEFAULT_LIVENESS_SNAPSHOT_INTERVAL = Duration.ofSeconds(30);
@@ -52,12 +56,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private final Duration livenessSnapshotInterval;
     private final Duration topicMetadataDiscoveryRetryDelay;
     private final java.util.function.Consumer<Throwable> captureFailureCallback;
+    private final java.util.function.Consumer<Throwable> unstableProcessFailureCallback;
     private final ScheduledThreadPoolExecutor initializer;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean untransferredKafkaResourcesClosed = new AtomicBoolean();
+    private final AtomicBoolean unstableFailureReported = new AtomicBoolean();
     private volatile CaptureKafkaPublisher publisher;
     private volatile CaptureKafkaPublisher initializingPublisher;
     private volatile CaptureKafkaMembership membership;
+    private volatile CompletableFuture<Void> orderlyRetirement;
     private volatile boolean producerLifecycleTransferredToPublisher;
     private final AtomicReference<CaptureKafkaWriteGate> writeGate = new AtomicReference<>();
     private final AtomicReference<Throwable> initializationFailure = new AtomicReference<>();
@@ -72,34 +79,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         int minimumActiveProxyCount,
         String topicNameForTraffic,
         int messageSize,
-        Duration livenessSnapshotInterval
-    ) {
-        this(
-            rootScope,
-            captureActivationId,
-            producer,
-            membershipConsumer,
-            assignmentTracker,
-            minimumActiveProxyCount,
-            topicNameForTraffic,
-            messageSize,
-            livenessSnapshotInterval,
-            DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
-            ignored -> {}
-        );
-    }
-
-    public KafkaCaptureFactory(
-        IRootKafkaOffloaderContext rootScope,
-        String captureActivationId,
-        Producer<String, byte[]> producer,
-        Consumer<String, byte[]> membershipConsumer,
-        CaptureMembershipAssignmentTracker assignmentTracker,
-        int minimumActiveProxyCount,
-        String topicNameForTraffic,
-        int messageSize,
         Duration livenessSnapshotInterval,
-        java.util.function.Consumer<Throwable> captureFailureCallback
+        java.util.function.Consumer<Throwable> captureFailureCallback,
+        java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this(
             rootScope,
@@ -112,7 +94,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             messageSize,
             livenessSnapshotInterval,
             DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
-            captureFailureCallback
+            captureFailureCallback,
+            unstableProcessFailureCallback
         );
     }
 
@@ -127,7 +110,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         int messageSize,
         Duration livenessSnapshotInterval,
         Duration topicMetadataDiscoveryRetryDelay,
-        java.util.function.Consumer<Throwable> captureFailureCallback
+        java.util.function.Consumer<Throwable> captureFailureCallback,
+        java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this.rootScope = Objects.requireNonNull(rootScope);
         this.captureActivationId = Objects.requireNonNull(captureActivationId);
@@ -145,6 +129,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             "topicMetadataDiscoveryRetryDelay"
         );
         this.captureFailureCallback = Objects.requireNonNull(captureFailureCallback);
+        this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
         this.bufferSize = checkedPayloadSize(messageSize);
         this.publisherFuture = new CompletableFuture<>();
         this.initializer = new ScheduledThreadPoolExecutor(1, runnable -> {
@@ -171,10 +156,14 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             "connectionId must not be null - partition locality requires a stable key"
         );
         CaptureKafkaPublisher readyPublisher;
+        CaptureRoutingState.ConnectionRoute route = null;
         IllegalStateException unavailableBeforeAssignment = null;
         synchronized (initializationLock) {
             if (closed.get()) {
                 throw new IllegalStateException("Kafka capture factory is closed");
+            }
+            if (orderlyRetirement != null) {
+                throw new IllegalStateException("Kafka capture factory is retiring for orderly shutdown");
             }
             var terminalFailure = initializationFailure.get();
             if (terminalFailure != null) {
@@ -185,37 +174,42 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 unavailableBeforeAssignment = new IllegalStateException(
                     "Kafka capture is not accepting new connections before its first group assignment"
                 );
+            } else {
+                route = readyPublisher.getRoutingState().admitConnection(connectionId);
             }
         }
         if (unavailableBeforeAssignment != null) {
             failCapture(unavailableBeforeAssignment);
             throw unavailableBeforeAssignment;
         }
-        return createRoutedOffloader(ctx, connectionId, readyPublisher);
+        return createRoutedOffloader(ctx, Objects.requireNonNull(route), readyPublisher);
     }
 
     private IChannelConnectionCaptureSerializer<RecordMetadata> createRoutedOffloader(
         IConnectionContext ctx,
-        String connectionId,
+        CaptureRoutingState.ConnectionRoute route,
         CaptureKafkaPublisher readyPublisher
     ) {
-        var route = readyPublisher.getRoutingState().admitConnection(connectionId);
         try {
             return new StreamChannelConnectionCaptureSerializer<>(
                 route.writerNodeId(),
-                connectionId,
+                route.connectionId(),
                 route.partition(),
                 route::manifestCycle,
                 new StreamManager(ctx, route)
             );
-        } catch (RuntimeException | Error t) {
-            readyPublisher.removeConnectionRegistration(route);
+        } catch (Error t) {
+            readyPublisher.abandonUnpublishedConnection(route);
+            failUnstable(t);
+            throw t;
+        } catch (RuntimeException t) {
+            readyPublisher.abandonUnpublishedConnection(route);
             throw t;
         }
     }
 
     private void discoverTopicMetadata() {
-        if (closed.get()) {
+        if (closed.get() || orderlyRetirement != null) {
             return;
         }
         try {
@@ -225,6 +219,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             failCapture(e);
         } catch (RuntimeException e) {
             retryTopicMetadataDiscovery(e, this::discoverTopicMetadata);
+        } catch (Error e) {
+            failUnstable(e);
         }
     }
 
@@ -235,25 +231,25 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             captureActivationId,
             topicMetadata.getRepresentativePartitionsByLeader()
         ).whenComplete((ignored, failure) -> {
-            if (closed.get()) {
+            if (closed.get() || orderlyRetirement != null) {
                 return;
             }
             if (failure != null) {
-                failCapture(unwrapCompletionFailure(failure));
+                handleKafkaFailure(unwrapCompletionFailure(failure));
                 return;
             }
             try {
                 initializer.execute(this::refreshTopicMetadataAfterProbe);
             } catch (RejectedExecutionException e) {
-                if (!closed.get() && initializationFailure.get() == null) {
-                    failCapture(e);
+                if (!closed.get() && orderlyRetirement == null && initializationFailure.get() == null) {
+                    failUnstable(e);
                 }
             }
         });
     }
 
     private void refreshTopicMetadataAfterProbe() {
-        if (closed.get()) {
+        if (closed.get() || orderlyRetirement != null) {
             return;
         }
         try {
@@ -264,13 +260,15 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             failCapture(e);
         } catch (RuntimeException e) {
             retryTopicMetadataDiscovery(e, this::refreshTopicMetadataAfterProbe);
+        } catch (Error e) {
+            failUnstable(e);
         }
     }
 
     private void startMembershipInitialization(TrafficTopicMetadata topicMetadata) {
         CaptureKafkaMembership initializedMembership;
         synchronized (initializationLock) {
-            if (closed.get() || initializationFailure.get() != null) {
+            if (closed.get() || orderlyRetirement != null || initializationFailure.get() != null) {
                 return;
             }
             var routingState = new CaptureRoutingState(
@@ -285,12 +283,13 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 bufferSize + KAFKA_MESSAGE_OVERHEAD_BYTES,
                 livenessSnapshotInterval,
                 java.time.Clock.systemUTC(),
-                createdWriteGate
+                createdWriteGate,
+                this::failUnstable
             );
             writeGate.set(createdWriteGate);
             initializingPublisher = createdPublisher;
             producerLifecycleTransferredToPublisher = true;
-            createdWriteGate.addTerminalFailureListener(this::failCapture);
+            createdWriteGate.addTerminalFailureListener(this::handleKafkaFailure);
             initializedMembership = new CaptureKafkaMembership(
                 membershipConsumer,
                 topicNameForTraffic,
@@ -299,7 +298,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 assignmentTracker,
                 minimumActiveProxyCount,
                 this::finishMembershipInitialization,
-                this::failCapture
+                this::failCapture,
+                this::failUnstable
             );
             membership = initializedMembership;
         }
@@ -319,7 +319,10 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 return;
             }
             synchronized (initializationLock) {
-                if (closed.get() || initializationFailure.get() != null || publisher != null) {
+                if (closed.get()
+                    || orderlyRetirement != null
+                    || initializationFailure.get() != null
+                    || publisher != null) {
                     return;
                 }
                 initializedPublisher = Objects.requireNonNull(initializingPublisher);
@@ -333,11 +336,13 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 .log();
         } catch (RuntimeException e) {
             failCapture(e);
+        } catch (Error e) {
+            failUnstable(e);
         }
     }
 
     private void retryTopicMetadataDiscovery(RuntimeException failure, Runnable retryAction) {
-        if (closed.get()) {
+        if (closed.get() || orderlyRetirement != null) {
             return;
         }
         topicMetadataDiscoveryFailures++;
@@ -361,11 +366,76 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                     TimeUnit.MILLISECONDS
                 );
             } catch (RejectedExecutionException e) {
-                if (!closed.get() && initializationFailure.get() == null) {
-                    throw e;
+                if (!closed.get() && orderlyRetirement == null && initializationFailure.get() == null) {
+                    failUnstable(e);
                 }
             }
         }
+    }
+
+    /**
+     * Stops assignment changes and waits until all captured connections and assignment-scoped
+     * writers have completed the orderly retirement protocol. The caller remains responsible for
+     * process-level warning and termination deadlines and for subsequently calling {@link #close()}.
+     */
+    @Override
+    public CompletableFuture<Void> retireForOrderlyShutdown() {
+        final CompletableFuture<Void> result;
+        final CaptureKafkaMembership membershipToClose;
+        final CaptureKafkaPublisher publisherToRetire;
+        synchronized (initializationLock) {
+            if (orderlyRetirement != null) {
+                return orderlyRetirement;
+            }
+            if (closed.get()) {
+                return CompletableFuture.failedFuture(
+                    new IllegalStateException("Kafka capture factory is already closed")
+                );
+            }
+            var terminalFailure = initializationFailure.get();
+            if (terminalFailure != null) {
+                return CompletableFuture.failedFuture(terminalFailure);
+            }
+            result = new CompletableFuture<>();
+            orderlyRetirement = result;
+            membershipToClose = membership;
+            publisherToRetire = publisher == null ? initializingPublisher : publisher;
+        }
+
+        initializer.shutdownNow();
+        var membershipStopped = membershipToClose == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : membershipToClose.closeAsync();
+        var membershipCallbacksStopped = membershipStopped.handle((ignored, failure) -> {
+            if (failure != null) {
+                log.atWarn()
+                    .setCause(unwrapCompletionFailure(failure))
+                    .setMessage(
+                        "Kafka membership did not close cleanly during orderly shutdown; "
+                            + "continuing capture retirement after membership callbacks stopped"
+                    )
+                    .log();
+            }
+            return null;
+        });
+
+        if (publisherToRetire == null) {
+            membershipCallbacksStopped.whenComplete((ignored, failure) -> result.complete(null));
+            return result;
+        }
+        CompletableFuture.allOf(
+            membershipCallbacksStopped,
+            publisherToRetire.getRoutingState().whenNoConnections()
+        )
+            .thenCompose(ignored -> publisherToRetire.retireAllWriters())
+            .whenComplete((ignored, failure) -> {
+                if (failure == null) {
+                    result.complete(null);
+                } else {
+                    result.completeExceptionally(unwrapCompletionFailure(failure));
+                }
+            });
+        return result;
     }
 
     private static Throwable unwrapCompletionFailure(Throwable failure) {
@@ -375,7 +445,30 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         return failure;
     }
 
+    private void handleKafkaFailure(Throwable failure) {
+        if (failure instanceof Error) {
+            failUnstable(failure);
+        } else {
+            failCapture(failure);
+        }
+    }
+
     private void failCapture(Throwable failure) {
+        failAndCloseCapture(failure, true);
+    }
+
+    private void failUnstable(Throwable failure) {
+        if (unstableFailureReported.compareAndSet(false, true)) {
+            log.atError()
+                .setCause(failure)
+                .setMessage("Kafka capture process ownership is unstable; terminating the process")
+                .log();
+            unstableProcessFailureCallback.accept(failure);
+        }
+        failAndCloseCapture(failure, false);
+    }
+
+    private void failAndCloseCapture(Throwable failure, boolean notifyCaptureFailurePolicy) {
         CaptureKafkaPublisher publisherToFail;
         CaptureKafkaMembership membershipToClose;
         synchronized (initializationLock) {
@@ -398,7 +491,9 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             .setCause(failure)
             .setMessage("Kafka capture is permanently unavailable in this process")
             .log();
-        captureFailureCallback.accept(failure);
+        if (notifyCaptureFailurePolicy) {
+            captureFailureCallback.accept(failure);
+        }
         if (publisherToFail != null || membershipToClose != null) {
             var closeThread = new Thread(
                 () -> closeFailedCaptureResources(membershipToClose, publisherToFail),
@@ -468,8 +563,23 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         return Arrays.copyOfRange(osh.byteBuffer.array(), 0, osh.byteBuffer.position());
     }
 
-    private static boolean isFinalRecord(byte[] payload) throws InvalidProtocolBufferException {
-        return TrafficRecord.parseFrom(payload).hasNumberOfThisLastChunk();
+    private boolean isTerminalRecord(byte[] payload) throws InvalidProtocolBufferException {
+        var record = TrafficRecord.parseFrom(payload);
+        var finalChunk = record.hasNumberOfThisLastChunk();
+        var closeCount = record.getObservationsList()
+            .stream()
+            .filter(observation -> observation.hasClose())
+            .count();
+        var closeIsLast = closeCount == 1
+            && record.getObservations(record.getObservationsCount() - 1).hasClose();
+        if (finalChunk != closeIsLast) {
+            var failure = new IllegalStateException(
+                "A connection's final Kafka record must contain exactly one terminal CloseObservation as its last observation"
+            );
+            failUnstable(failure);
+            throw failure;
+        }
+        return finalChunk;
     }
 
     private CompletableFuture<RecordMetadata> publishPayload(
@@ -536,7 +646,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                     telemetryContext,
                     route,
                     recordPayload,
-                    isFinalRecord(recordPayload),
+                    isTerminalRecord(recordPayload),
                     index,
                     publisher
                 );

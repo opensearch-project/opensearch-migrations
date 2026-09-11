@@ -20,12 +20,21 @@ public final class CaptureProcessState {
     }
 
     private final CaptureFailurePolicy failurePolicy;
+    private final Consumer<State> transitionListener;
     private final List<Consumer<Throwable>> terminationListeners = new ArrayList<>();
     private State state = State.CAPTURE;
     private Throwable captureFailure;
 
     public CaptureProcessState(CaptureFailurePolicy failurePolicy) {
+        this(failurePolicy, ignored -> {});
+    }
+
+    public CaptureProcessState(
+        CaptureFailurePolicy failurePolicy,
+        Consumer<State> transitionListener
+    ) {
         this.failurePolicy = Objects.requireNonNull(failurePolicy);
+        this.transitionListener = Objects.requireNonNull(transitionListener);
     }
 
     public synchronized State state() {
@@ -105,6 +114,9 @@ public final class CaptureProcessState {
                 .setCause(failure)
                 .setMessage("Required capture failed; this process will terminate")
                 .log();
+        }
+        notifyTransition(resultingState);
+        if (resultingState == State.TERMINATING) {
             listeners.forEach(listener -> listener.accept(failure));
         }
         return resultingState;
@@ -130,7 +142,20 @@ public final class CaptureProcessState {
             .setCause(failure)
             .setMessage("Proxy process execution is unstable; terminating immediately")
             .log();
+        notifyTransition(State.TERMINATING);
         listeners.forEach(listener -> listener.accept(failure));
         return State.TERMINATING;
+    }
+
+    private void notifyTransition(State resultingState) {
+        try {
+            transitionListener.accept(resultingState);
+        } catch (RuntimeException e) {
+            log.atError()
+                .setCause(e)
+                .setMessage("Unable to record the proxy capture-process state transition to {}")
+                .addArgument(resultingState)
+                .log();
+        }
     }
 }

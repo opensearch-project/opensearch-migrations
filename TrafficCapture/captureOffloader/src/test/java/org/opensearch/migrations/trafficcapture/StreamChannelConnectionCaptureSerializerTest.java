@@ -560,6 +560,12 @@ class StreamChannelConnectionCaptureSerializerTest {
             }
         }
         Assertions.assertEquals(1, foundEndOfSegments);
+        for (int i = 0; i < observations.size(); ++i) {
+            Assertions.assertEquals(
+                i + 1,
+                observations.get(i).getConnectionObservationSequence()
+            );
+        }
     }
 
     @Test

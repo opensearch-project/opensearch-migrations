@@ -1,5 +1,6 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -10,6 +11,25 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class CaptureProcessStateTest {
+    @Test
+    void reportsEachIrreversibleProcessTransitionExactlyOnce() {
+        var transitions = new ArrayList<CaptureProcessState.State>();
+        var state = new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN, transitions::add);
+
+        state.requiredCaptureFailed(new IllegalStateException("capture unavailable"));
+        state.requiredCaptureFailed(new IllegalStateException("duplicate"));
+        state.unstableProcessFailed(new IllegalStateException("process unstable"));
+        state.unstableProcessFailed(new IllegalStateException("duplicate"));
+
+        Assertions.assertEquals(
+            java.util.List.of(
+                CaptureProcessState.State.PASS_THROUGH,
+                CaptureProcessState.State.TERMINATING
+            ),
+            transitions
+        );
+    }
+
     @Test
     void failOpenMakesOneIrreversibleProcessWidePassThroughTransition() {
         var state = new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN);

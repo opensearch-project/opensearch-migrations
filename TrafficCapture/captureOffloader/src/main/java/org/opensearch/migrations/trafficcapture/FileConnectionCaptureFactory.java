@@ -16,8 +16,8 @@ import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Reference implementation of a TrafficStream protobuf-encoded sink.
- * TrafficStreams are dumped to individual files that are named according to the TrafficStream id.
+ * Reference implementation of a TrafficRecord protobuf-encoded sink.
+ * Captured records are dumped to individual files named according to the connection id.
  *
  * <b>WARNING:</b> This class is NOT intended to be used for production.
  */

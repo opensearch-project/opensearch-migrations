@@ -51,6 +51,7 @@ public class BacksideHandler extends ChannelInboundHandlerAdapter {
         log.atError().setCause(cause).setMessage("Caught error for channel: {}")
             .addArgument(() -> ctx.channel().id().asLongText())
             .log();
+        FrontsideHandler.closeAndFlush(writeBackChannel);
         FrontsideHandler.closeAndFlush(ctx.channel());
     }
 }

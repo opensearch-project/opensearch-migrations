@@ -488,8 +488,11 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             addSubstreamMessage(captureFieldNumber, dataFieldNumber, 0, 0, timestamp, bufToRead, ordering);
             observationSizeSanityCheck(minExpectedSpaceAfterObservation, captureFieldNumber);
         } else {
+            var firstSegment = true;
             while (bufToRead.readableBytes() > 0) {
-                ordering = nextObservationOrdering();
+                if (!firstSegment) {
+                    ordering = nextObservationOrdering();
+                }
                 messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(
                     timestamp,
                     segmentFieldNumber,
@@ -519,6 +522,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                     bufSliceToRead,
                     ordering
                 );
+                firstSegment = false;
             }
             writeEndOfSegmentMessage(timestamp);
         }

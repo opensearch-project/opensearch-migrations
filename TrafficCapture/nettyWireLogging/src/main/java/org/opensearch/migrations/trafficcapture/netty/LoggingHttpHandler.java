@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -273,14 +274,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         try {
             getConnectionContext().onUnregistered();
         } finally {
-            closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
-                if (throwable != null) {
-                    log.atWarn()
-                        .setCause(throwable)
-                        .setMessage("Unable to finalize capture during channel teardown")
-                        .log();
-                }
-            });
+            closeCaptureOnce(Instant.now());
             super.channelUnregistered(ctx);
         }
     }
@@ -293,14 +287,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             }
             closeContextsOnce();
         } finally {
-            closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
-                if (throwable != null) {
-                    log.atWarn()
-                        .setCause(throwable)
-                        .setMessage("Unable to finalize capture during handler removal")
-                        .log();
-                }
-            });
+            closeCaptureOnce(Instant.now());
             super.handlerRemoved(ctx);
         }
     }
@@ -321,7 +308,30 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         } catch (Throwable t) {
             captureCloseFuture = CompletableFuture.failedFuture(t);
         }
+        captureCloseFuture.whenComplete((result, failure) -> {
+            if (failure != null) {
+                reportCaptureFinalizationFailure(failure);
+            }
+        });
         return captureCloseFuture;
+    }
+
+    private void reportCaptureFinalizationFailure(Throwable failure) {
+        var cause = failure;
+        while (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        log.atError()
+            .setCause(cause)
+            .setMessage(
+                "Unable to publish the terminal CloseObservation; required capture is compromised"
+            )
+            .log();
+        if (cause instanceof Error) {
+            captureProcessState.unstableProcessFailed(cause);
+        } else {
+            captureProcessState.requiredCaptureFailed(cause);
+        }
     }
 
     private void cancelConnectionDeadline() {

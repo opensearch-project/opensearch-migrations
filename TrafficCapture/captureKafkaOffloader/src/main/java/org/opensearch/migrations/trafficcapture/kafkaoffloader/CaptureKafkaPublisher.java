@@ -20,9 +20,11 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
 import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.NoMoreWrites;
 
 import com.google.protobuf.ByteString;
 import lombok.Getter;
@@ -37,10 +39,13 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
  * Owns the ordered Kafka submission lane for traffic and exact connection manifests.
  */
 @Slf4j
-public class CaptureKafkaPublisher implements AutoCloseable {
+public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCloseable {
     public static final String RECORD_TYPE_HEADER = CaptureRecordTypes.RECORD_TYPE_HEADER;
+    public static final String WRITER_NODE_ID_HEADER = CaptureRecordTypes.WRITER_NODE_ID_HEADER;
     public static final String TRAFFIC_RECORD_TYPE = CaptureRecordTypes.TRAFFIC_RECORD_TYPE;
     public static final String LIVENESS_RECORD_TYPE = CaptureRecordTypes.LIVENESS_RECORD_TYPE;
+    public static final String NO_MORE_WRITES_RECORD_TYPE =
+        CaptureRecordTypes.NO_MORE_WRITES_RECORD_TYPE;
 
     static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
 
@@ -48,6 +53,8 @@ public class CaptureKafkaPublisher implements AutoCloseable {
 
     private record ManifestRequest(
         CaptureRoutingState.PendingAssignment pendingAssignment,
+        CaptureRoutingState.PreparedManifest retirementManifest,
+        boolean orderlyRetirement,
         CompletableFuture<?> result
     ) {}
 
@@ -56,12 +63,16 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     @Getter
     private final CaptureRoutingState routingState;
     private final CaptureKafkaWriteGate writeGate;
+    private final Consumer<Throwable> unstableProcessFailureCallback;
     private final int payloadSizeLimit;
     private final Clock clock;
     private final ScheduledThreadPoolExecutor executor;
     private final Map<WriterPartitionKey, Long> lastControlTimestamp = new HashMap<>();
+    private final Map<WriterPartitionKey, CompletableFuture<Void>> writerRetirementResults =
+        new HashMap<>();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean unstableProcessFailureReported = new AtomicBoolean();
     private final Object inFlightLock = new Object();
     private final Set<CompletableFuture<RecordMetadata>> inFlightSends =
         Collections.newSetFromMap(new IdentityHashMap<>());
@@ -75,7 +86,8 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         String topic,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
-        Duration snapshotInterval
+        Duration snapshotInterval,
+        Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this(
             producer,
@@ -84,26 +96,8 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             maximumKafkaMessageSize,
             snapshotInterval,
             Clock.systemUTC(),
-            CaptureKafkaWriteGate.unrestricted()
-        );
-    }
-
-    CaptureKafkaPublisher(
-        Producer<String, byte[]> producer,
-        String topic,
-        CaptureRoutingState routingState,
-        int maximumKafkaMessageSize,
-        Duration snapshotInterval,
-        Clock clock
-    ) {
-        this(
-            producer,
-            topic,
-            routingState,
-            maximumKafkaMessageSize,
-            snapshotInterval,
-            clock,
-            CaptureKafkaWriteGate.unrestricted()
+            CaptureKafkaWriteGate.unrestricted(),
+            unstableProcessFailureCallback
         );
     }
 
@@ -114,13 +108,36 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         int maximumKafkaMessageSize,
         Duration snapshotInterval,
         Clock clock,
-        CaptureKafkaWriteGate writeGate
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        this(
+            producer,
+            topic,
+            routingState,
+            maximumKafkaMessageSize,
+            snapshotInterval,
+            clock,
+            CaptureKafkaWriteGate.unrestricted(),
+            unstableProcessFailureCallback
+        );
+    }
+
+    CaptureKafkaPublisher(
+        Producer<String, byte[]> producer,
+        String topic,
+        CaptureRoutingState routingState,
+        int maximumKafkaMessageSize,
+        Duration snapshotInterval,
+        Clock clock,
+        CaptureKafkaWriteGate writeGate,
+        Consumer<Throwable> unstableProcessFailureCallback
     ) {
         this.producer = Objects.requireNonNull(producer);
         this.topic = Objects.requireNonNull(topic);
         this.routingState = Objects.requireNonNull(routingState);
         this.clock = Objects.requireNonNull(clock);
         this.writeGate = Objects.requireNonNull(writeGate);
+        this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
         if (maximumKafkaMessageSize <= KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES) {
             throw new IllegalArgumentException("maximumKafkaMessageSize is too small for Kafka record overhead");
         }
@@ -143,11 +160,12 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         writeGate.addTerminalFailureListener(this::failPublisher);
     }
 
-    CompletableFuture<String> installAssignment(Collection<Integer> partitions) {
+    @Override
+    public CompletableFuture<String> installAssignment(Collection<Integer> partitions) {
         var result = new CompletableFuture<String>();
         executeOnPublisher(() -> {
             var pendingAssignment = routingState.prepareAssignment(partitions);
-            manifestRequests.addLast(new ManifestRequest(pendingAssignment, result));
+            manifestRequests.addLast(new ManifestRequest(pendingAssignment, null, false, result));
             startNextManifestRequest();
         }, result);
         return result;
@@ -168,23 +186,39 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             payload.clone(),
             recordHeaders(TRAFFIC_RECORD_TYPE)
         );
-        return enqueueSend(
+        return enqueueTrafficSend(
+            route,
             producerRecord,
-            finalRecord ? () -> routingState.remove(route) : () -> {}
+            finalRecord,
+            finalRecord
+                ? () -> {
+                    routingState.removeAfterTerminalAcknowledgement(route);
+                    enqueueDrainedWriterRetirements();
+                }
+                : () -> {}
         );
     }
 
     public CompletableFuture<Void> publishLivenessSnapshotNow() {
         var result = new CompletableFuture<Void>();
         executeOnPublisher(() -> {
-            manifestRequests.addLast(new ManifestRequest(null, result));
+            manifestRequests.addLast(new ManifestRequest(null, null, false, result));
             startNextManifestRequest();
         }, result);
         return result;
     }
 
-    void removeConnectionRegistration(CaptureRoutingState.ConnectionRoute route) {
-        routingState.remove(route);
+    CompletableFuture<Void> retireAllWriters() {
+        var result = new CompletableFuture<Void>();
+        executeOnPublisher(() -> {
+            manifestRequests.addLast(new ManifestRequest(null, null, true, result));
+            startNextManifestRequest();
+        }, result);
+        return result;
+    }
+
+    void abandonUnpublishedConnection(CaptureRoutingState.ConnectionRoute route) {
+        routingState.abandonUnpublishedConnection(route);
     }
 
     private void startNextManifestRequest() {
@@ -208,9 +242,15 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         manifestPublicationActive = true;
         final List<CaptureRoutingState.PreparedManifest> manifests;
         try {
-            manifests = request.pendingAssignment() == null
-                ? routingState.preparePeriodicManifests()
-                : routingState.prepareInitialManifests(request.pendingAssignment());
+            if (request.orderlyRetirement()) {
+                manifests = List.of();
+            } else if (request.retirementManifest() != null) {
+                manifests = List.of(request.retirementManifest());
+            } else if (request.pendingAssignment() != null) {
+                manifests = routingState.prepareInitialManifests(request.pendingAssignment());
+            } else {
+                manifests = routingState.preparePeriodicManifests();
+            }
         } catch (Throwable t) {
             finishManifestRequest(request, t);
             return;
@@ -255,6 +295,9 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             executor.execute(() -> finishManifestRequest(request, failure));
         } catch (RejectedExecutionException e) {
             request.result().completeExceptionally(failure == null ? e : failure);
+            if (!closed.get()) {
+                failUnstableProcess(e);
+            }
         }
     }
 
@@ -262,11 +305,18 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     private void finishManifestRequest(ManifestRequest request, Throwable requestFailure) {
         if (requestFailure == null) {
             try {
-                if (request.pendingAssignment() != null) {
+                if (request.orderlyRetirement()) {
+                    beginOrderlyWriterRetirement(request);
+                    return;
+                } else if (request.retirementManifest() != null) {
+                    publishNoMoreWrites(request);
+                    return;
+                } else if (request.pendingAssignment() != null) {
                     routingState.activateAssignment(request.pendingAssignment());
                     ((CompletableFuture<String>) request.result()).complete(
                         request.pendingAssignment().writerNodeId()
                     );
+                    enqueueDrainedWriterRetirements();
                 } else {
                     ((CompletableFuture<Void>) request.result()).complete(null);
                 }
@@ -276,9 +326,112 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         }
         if (requestFailure != null) {
             request.result().completeExceptionally(requestFailure);
-            failPublisher(requestFailure);
+            failForThrowable(requestFailure);
         }
         manifestPublicationActive = false;
+        startNextManifestRequest();
+    }
+
+    private void beginOrderlyWriterRetirement(ManifestRequest request) {
+        scheduledSnapshots.cancel(false);
+        routingState.beginOrderlyRetirement();
+        enqueueDrainedWriterRetirements();
+        var retirements = List.copyOf(writerRetirementResults.values());
+        manifestPublicationActive = false;
+        startNextManifestRequest();
+        CompletableFuture.allOf(retirements.toArray(CompletableFuture[]::new))
+            .whenComplete((ignored, failure) ->
+                finishOrderlyWriterRetirement(request, failure)
+            );
+    }
+
+    @SuppressWarnings("unchecked")
+    private void finishOrderlyWriterRetirement(
+        ManifestRequest request,
+        Throwable requestFailure
+    ) {
+        if (requestFailure != null) {
+            request.result().completeExceptionally(requestFailure);
+            return;
+        }
+        if (!routingState.allWriterPartitionsRetired()) {
+            var failure = new IllegalStateException(
+                "Orderly proxy retirement completed without retiring every writer partition"
+            );
+            request.result().completeExceptionally(failure);
+            failUnstableProcess(failure);
+            return;
+        }
+        ((CompletableFuture<Void>) request.result()).complete(null);
+    }
+
+    private void publishNoMoreWrites(ManifestRequest request) {
+        var manifest = request.retirementManifest();
+        var producerRecord = new ProducerRecord<>(
+            topic,
+            manifest.partition(),
+            null,
+            manifest.writerNodeId() + ":no-more-writes:" + manifest.partition(),
+            NoMoreWrites.newBuilder().setPartition(manifest.partition()).build().toByteArray(),
+            writerRecordHeaders(NO_MORE_WRITES_RECORD_TYPE, manifest.writerNodeId())
+        );
+        sendFromPublisherThread(
+            producerRecord,
+            () -> routingState.completeWriterRetirement(manifest)
+        ).whenComplete((ignored, throwable) ->
+            finishWriterRetirementOnPublisherThread(request, throwable)
+        );
+    }
+
+    private void finishWriterRetirementOnPublisherThread(
+        ManifestRequest request,
+        Throwable failure
+    ) {
+        try {
+            executor.execute(() -> finishWriterRetirement(request, failure));
+        } catch (RejectedExecutionException e) {
+            request.result().completeExceptionally(failure == null ? e : failure);
+            if (!closed.get()) {
+                failUnstableProcess(e);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void finishWriterRetirement(ManifestRequest request, Throwable requestFailure) {
+        if (requestFailure == null) {
+            ((CompletableFuture<Void>) request.result()).complete(null);
+        } else {
+            request.result().completeExceptionally(requestFailure);
+            failForThrowable(requestFailure);
+        }
+        manifestPublicationActive = false;
+        startNextManifestRequest();
+    }
+
+    private void enqueueDrainedWriterRetirements() {
+        for (var manifest : routingState.prepareDrainedWriterRetirements()) {
+            var result = new CompletableFuture<Void>();
+            var key = new WriterPartitionKey(manifest.writerNodeId(), manifest.partition());
+            if (writerRetirementResults.putIfAbsent(key, result) != null) {
+                throw new IllegalStateException(
+                    "Writer retirement was already queued for "
+                        + manifest.writerNodeId()
+                        + "/"
+                        + manifest.partition()
+                );
+            }
+            result.whenComplete((ignored, throwable) -> {
+                if (throwable == null) {
+                    log.atInfo()
+                        .setMessage("Retired proxy writer {} for partition {}")
+                        .addArgument(manifest.writerNodeId())
+                        .addArgument(manifest.partition())
+                        .log();
+                }
+            });
+            manifestRequests.addLast(new ManifestRequest(null, manifest, false, result));
+        }
         startNextManifestRequest();
     }
 
@@ -358,16 +511,24 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return allocated;
     }
 
-    private CompletableFuture<RecordMetadata> enqueueSend(
+    private CompletableFuture<RecordMetadata> enqueueTrafficSend(
+        CaptureRoutingState.ConnectionRoute route,
         ProducerRecord<String, byte[]> producerRecord,
+        boolean finalRecord,
         Runnable acknowledgedAction
     ) {
         var result = new CompletableFuture<RecordMetadata>();
-        executeOnPublisher(() ->
+        executeOnPublisher(() -> {
+            try {
+                routingState.acceptTrafficSubmission(route, finalRecord);
+            } catch (RuntimeException e) {
+                result.completeExceptionally(e);
+                failUnstableProcess(e);
+                return;
+            }
             sendFromPublisherThread(producerRecord, acknowledgedAction)
-                .whenComplete((metadata, throwable) -> completeFrom(metadata, throwable, result)),
-            result
-        );
+                .whenComplete((metadata, throwable) -> completeFrom(metadata, throwable, result));
+        }, result);
         return result;
     }
 
@@ -392,15 +553,15 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                         completeSend(result, metadata, exception, acknowledgedAction)
                 );
             });
-        } catch (Exception t) {
+        } catch (Throwable t) {
             removeInFlight(result);
-            failPublisher(t);
+            failForThrowable(t);
             result.completeExceptionally(t);
             return result;
         }
         var rejection = gateRejection == null ? publisherRejection.get() : gateRejection;
         if (rejection != null) {
-            failPublisher(rejection);
+            failForThrowable(rejection);
             result.completeExceptionally(rejection);
         }
         return result;
@@ -428,15 +589,18 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                     acknowledgedAction.run();
                     removeInFlight(result);
                     result.complete(metadata);
-                } catch (Exception t) {
+                } catch (Throwable t) {
                     removeInFlight(result);
-                    failPublisher(t);
+                    failForThrowable(t);
                     result.completeExceptionally(t);
                 }
             });
         } catch (RejectedExecutionException e) {
             removeInFlight(result);
             result.completeExceptionally(e);
+            if (!closed.get()) {
+                failUnstableProcess(e);
+            }
         }
     }
 
@@ -458,7 +622,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             currentFailure = writeGate.failureIfNotWritable();
         }
         if (currentFailure != null) {
-            failPublisher(currentFailure);
+            failForThrowable(currentFailure);
             result.completeExceptionally(currentFailure);
             return;
         }
@@ -473,19 +637,22 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                     taskFailure = writeGate.failureIfNotWritable();
                 }
                 if (taskFailure != null) {
-                    failPublisher(taskFailure);
+                    failForThrowable(taskFailure);
                     result.completeExceptionally(taskFailure);
                 } else {
                     try {
                         action.run();
-                    } catch (Exception t) {
-                        failPublisher(t);
+                    } catch (Throwable t) {
+                        failForThrowable(t);
                         result.completeExceptionally(t);
                     }
                 }
             });
         } catch (RejectedExecutionException e) {
             result.completeExceptionally(e);
+            if (!closed.get()) {
+                failUnstableProcess(e);
+            }
         }
     }
 
@@ -493,15 +660,20 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         if (!scheduledManifestPending.compareAndSet(false, true)) {
             return;
         }
-        publishLivenessSnapshotNow().whenComplete((ignored, throwable) -> {
+        try {
+            publishLivenessSnapshotNow().whenComplete((ignored, throwable) -> {
+                scheduledManifestPending.set(false);
+                if (throwable != null) {
+                    log.atError()
+                        .setCause(throwable)
+                        .setMessage("Authoritative proxy liveness publishing has stopped")
+                        .log();
+                }
+            });
+        } catch (Throwable t) {
             scheduledManifestPending.set(false);
-            if (throwable != null) {
-                log.atError()
-                    .setCause(throwable)
-                    .setMessage("Authoritative proxy liveness publishing has stopped")
-                    .log();
-            }
-        });
+            failForThrowable(t);
+        }
     }
 
     private void failPublisher(Throwable throwable) {
@@ -523,6 +695,9 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                 .setCause(e)
                 .setMessage("Publisher executor stopped before queued manifest requests were failed")
                 .log();
+            if (!closed.get()) {
+                failUnstableProcess(e);
+            }
         }
         log.atError()
             .setCause(throwable)
@@ -530,8 +705,24 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             .log();
     }
 
-    void failClosed(Throwable throwable) {
+    @Override
+    public void failClosed(Throwable throwable) {
         failPublisher(Objects.requireNonNull(throwable));
+    }
+
+    private void failForThrowable(Throwable throwable) {
+        if (throwable instanceof Error) {
+            failUnstableProcess(throwable);
+        } else {
+            failPublisher(throwable);
+        }
+    }
+
+    private void failUnstableProcess(Throwable throwable) {
+        if (unstableProcessFailureReported.compareAndSet(false, true)) {
+            unstableProcessFailureCallback.accept(throwable);
+        }
+        failPublisher(throwable);
     }
 
     private static RecordHeaders recordHeaders(String recordType) {
@@ -539,6 +730,16 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             RECORD_TYPE_HEADER,
             recordType.getBytes(StandardCharsets.UTF_8)
         )));
+    }
+
+    private static RecordHeaders writerRecordHeaders(String recordType, String writerNodeId) {
+        return new RecordHeaders(List.of(
+            new RecordHeader(RECORD_TYPE_HEADER, recordType.getBytes(StandardCharsets.UTF_8)),
+            new RecordHeader(
+                WRITER_NODE_ID_HEADER,
+                writerNodeId.getBytes(StandardCharsets.UTF_8)
+            )
+        ));
     }
 
     public static boolean isRecordType(

@@ -8,8 +8,11 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
+import org.opensearch.migrations.trafficcapture.protos.NoMoreWrites;
 
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -157,6 +160,212 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
+    void drainedOldWriterPublishesFinalEmptyManifestBeforeSelfNoMoreWrites() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+
+        var replacement = publisher.installAssignment(List.of(0));
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.completeNext());
+        assertEquals("activation:2", replacement.get(1, TimeUnit.SECONDS));
+
+        awaitHistorySize(producer, 3);
+        var finalManifestRecord = producer.history().get(2);
+        var finalManifest = snapshotChunk(finalManifestRecord);
+        assertEquals("activation:1", finalManifest.getWriterNodeId());
+        assertEquals(0, finalManifest.getConnectionIdsCount());
+        assertTrue(CaptureKafkaPublisher.isRecordType(
+            finalManifestRecord.headers(),
+            CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
+        ));
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 4);
+        var noMoreWritesRecord = producer.history().get(3);
+        assertTrue(CaptureKafkaPublisher.isRecordType(
+            noMoreWritesRecord.headers(),
+            CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
+        ));
+        assertEquals(
+            "activation:1",
+            headerValue(noMoreWritesRecord, CaptureKafkaPublisher.WRITER_NODE_ID_HEADER)
+        );
+        assertEquals(0, NoMoreWrites.parseFrom(noMoreWritesRecord.value()).getPartition());
+
+        assertTrue(producer.completeNext());
+        awaitWriterStatus(
+            routingState,
+            "activation:1",
+            CaptureRoutingState.WriterStatus.RETIRED
+        );
+        publisher.close();
+    }
+
+    @Test
+    void drainingWriterWaitsForItsTerminalTrafficAcknowledgementBeforeRetirement()
+        throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+        var oldRoute = routingState.admitConnection("old");
+
+        var replacement = publisher.installAssignment(List.of(0));
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.completeNext());
+        assertEquals("activation:2", replacement.get(1, TimeUnit.SECONDS));
+        assertEquals(2, producer.history().size());
+
+        var terminalTraffic = publisher.publishTraffic(oldRoute, new byte[] { 1 }, true);
+        awaitHistorySize(producer, 3);
+        assertEquals(
+            CaptureRoutingState.WriterStatus.DRAINING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        assertEquals(List.of("old"), routingState.snapshot("activation:1", 0));
+
+        assertTrue(producer.completeNext());
+        terminalTraffic.get(1, TimeUnit.SECONDS);
+        awaitHistorySize(producer, 4);
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        assertEquals(0, snapshotChunk(producer.history().get(3)).getConnectionIdsCount());
+        publisher.close();
+    }
+
+    @Test
+    void orderlyRetirementPublishesFinalManifestAndNoMoreWritesForCurrentWriter()
+        throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+
+        var retirement = publisher.retireAllWriters();
+        awaitHistorySize(producer, 2);
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        assertEquals(0, snapshotChunk(producer.history().get(1)).getConnectionIdsCount());
+        assertFalse(retirement.isDone());
+
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 3);
+        assertTrue(CaptureKafkaPublisher.isRecordType(
+            producer.history().get(2).headers(),
+            CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
+        ));
+        assertFalse(retirement.isDone());
+
+        assertTrue(producer.completeNext());
+        retirement.get(1, TimeUnit.SECONDS);
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRED,
+            routingState.writerStatus("activation:1", 0)
+        );
+        publisher.close();
+    }
+
+    @Test
+    void orderlyRetirementCoversEveryPartitionOfTheCurrentWriter() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 3);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0, 2));
+
+        var retirement = publisher.retireAllWriters();
+        awaitHistorySize(producer, 3);
+        assertFalse(retirement.isDone());
+
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 4);
+        assertFalse(retirement.isDone());
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 5);
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 6);
+        assertTrue(producer.completeNext());
+        retirement.get(1, TimeUnit.SECONDS);
+
+        var retirementRecords = producer.history().subList(2, 6);
+        assertEquals(List.of(0, 0, 2, 2), retirementRecords.stream()
+            .map(ProducerRecord::partition)
+            .toList());
+        for (int i = 0; i < retirementRecords.size(); i += 2) {
+            var finalManifest = retirementRecords.get(i);
+            var noMoreWrites = retirementRecords.get(i + 1);
+            assertTrue(CaptureKafkaPublisher.isRecordType(
+                finalManifest.headers(),
+                CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
+            ));
+            assertEquals(0, snapshotChunk(finalManifest).getConnectionIdsCount());
+            assertTrue(CaptureKafkaPublisher.isRecordType(
+                noMoreWrites.headers(),
+                CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
+            ));
+        }
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRED,
+            routingState.writerStatus("activation:1", 0)
+        );
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRED,
+            routingState.writerStatus("activation:1", 2)
+        );
+        publisher.close();
+    }
+
+    @Test
+    void failedFinalManifestPreventsNoMoreWritesAndFailsOrderlyRetirement() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+
+        var retirement = publisher.retireAllWriters();
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.errorNext(new IllegalStateException("final manifest failed")));
+
+        assertThrows(ExecutionException.class, () -> retirement.get(1, TimeUnit.SECONDS));
+        assertEquals(2, producer.history().size());
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        publisher.close();
+    }
+
+    @Test
+    void failedNoMoreWritesLeavesWriterUnretiredAndFailsOrderlyRetirement() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+
+        var retirement = publisher.retireAllWriters();
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 3);
+        assertTrue(producer.errorNext(new IllegalStateException("NoMoreWrites failed")));
+
+        assertThrows(ExecutionException.class, () -> retirement.get(1, TimeUnit.SECONDS));
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        publisher.close();
+    }
+
+    @Test
     void snapshotChunksUseStableProtocolFieldsAndStayWithinThePayloadLimit() throws Exception {
         var producer = producer(true);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
@@ -222,6 +431,29 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
+    void trafficAfterAnAcceptedTerminalRecordIsAnUnstableProcessFailure() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var unstableFailure = new AtomicReference<Throwable>();
+        var publisher = publisher(producer, routingState, unstableFailure::set);
+        installAndAcknowledge(producer, publisher, List.of(0));
+        var route = routingState.admitConnection("connection");
+
+        publisher.publishTraffic(route, new byte[] { 1 }, true);
+        awaitHistorySize(producer, 2);
+        var invalid = publisher.publishTraffic(route, new byte[] { 2 }, false);
+
+        var failure = assertThrows(
+            ExecutionException.class,
+            () -> invalid.get(1, TimeUnit.SECONDS)
+        ).getCause();
+        assertTrue(failure.getMessage().contains("followed the terminal record"));
+        assertEquals(failure, unstableFailure.get());
+        assertEquals(2, producer.history().size());
+        publisher.close();
+    }
+
+    @Test
     void diagnosticManifestTimestampsIncreaseWhenClockMovesBackward() throws Exception {
         var producer = producer(true);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
@@ -270,13 +502,36 @@ class CaptureKafkaPublisherTest {
         CaptureRoutingState routingState,
         Clock clock
     ) {
+        return publisher(producer, routingState, clock, ignored -> {});
+    }
+
+    private static CaptureKafkaPublisher publisher(
+        MockProducer<String, byte[]> producer,
+        CaptureRoutingState routingState,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        return publisher(
+            producer,
+            routingState,
+            Clock.fixed(Instant.ofEpochMilli(1234), ZoneOffset.UTC),
+            unstableProcessFailureCallback
+        );
+    }
+
+    private static CaptureKafkaPublisher publisher(
+        MockProducer<String, byte[]> producer,
+        CaptureRoutingState routingState,
+        Clock clock,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
         return new CaptureKafkaPublisher(
             producer,
             TOPIC,
             routingState,
             MESSAGE_SIZE,
             Duration.ofDays(1),
-            clock
+            clock,
+            unstableProcessFailureCallback
         );
     }
 
@@ -302,6 +557,11 @@ class CaptureKafkaPublisherTest {
         return LivenessSnapshotChunk.parseFrom(record.value());
     }
 
+    private static String headerValue(ProducerRecord<String, byte[]> record, String name) {
+        var header = record.headers().lastHeader(name);
+        return header == null ? null : new String(header.value(), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     private static void awaitHistorySize(MockProducer<String, byte[]> producer, int expected)
         throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
@@ -309,6 +569,18 @@ class CaptureKafkaPublisherTest {
             Thread.sleep(1);
         }
         assertEquals(expected, producer.history().size());
+    }
+
+    private static void awaitWriterStatus(
+        CaptureRoutingState state,
+        String writerNodeId,
+        CaptureRoutingState.WriterStatus expected
+    ) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (state.writerStatus(writerNodeId, 0) != expected && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+        assertEquals(expected, state.writerStatus(writerNodeId, 0));
     }
 
     private static final class SequenceClock extends Clock {

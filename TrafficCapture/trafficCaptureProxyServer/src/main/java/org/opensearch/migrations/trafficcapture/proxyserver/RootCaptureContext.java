@@ -13,6 +13,7 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
     public static final String SCOPE_NAME = "captureProxy";
     @Getter
     public final KafkaRecordContext.MetricInstruments kafkaOffloadingInstruments;
+    final CaptureProcessMetrics captureProcessMetrics;
 
     public RootCaptureContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
         this(openTelemetry, contextTracker, SCOPE_NAME);
@@ -22,5 +23,6 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
         super(openTelemetry, contextTracker, scopeName);
         var meter = this.getMeterProvider().get(scopeName);
         kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);
+        captureProcessMetrics = new CaptureProcessMetrics(meter);
     }
 }

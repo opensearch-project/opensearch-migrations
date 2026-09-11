@@ -21,6 +21,14 @@ departed continues using its last usable assignment until it receives a replacem
 not capture-health or replay evidence and does not authorize another proxy to declare the departed
 proxy instance finished.
 
+Five minutes is the default operational target for orderly retirement, not permission to terminate
+without attempting terminal self `NoMoreWrites`. Retirement continues after that target. Periodic
+manifests continue while existing connections retire. After the connection registry is empty, the
+proxy quiesces periodic manifests and keeps trying to publish the final empty manifest and
+`NoMoreWrites` until the most recently acknowledged complete manifest reaches the configured
+manifest expiration interval `E`. An acknowledged final empty manifest becomes that most recent
+manifest before the proxy attempts `NoMoreWrites`.
+
 ---
 
 ## 1. Goals and accepted boundaries
@@ -293,8 +301,11 @@ A planned process retirement first becomes `DRAINING`:
 6. it leaves the group and exits after those records are acknowledged.
 
 This orderly retirement is performed only while capture and Kafka publication remain trustworthy.
-Its default completion bound is five minutes. The bound is not used for capture-compromise or
-unstable-process failures described in §7.
+Its default completion target is five minutes. Missing the target emits a high-severity diagnostic
+and retirement continues through final empty manifests and `NoMoreWrites`. The proxy gives up only
+when the most recently acknowledged complete manifest reaches the configured manifest expiration
+interval `E`. This timing policy is not used for capture-compromise or unstable-process failures
+described in §7.
 
 ### 3.6 Later use of a partition
 
@@ -1109,11 +1120,11 @@ record, apply the `E + S` inequality, and verify that the fleet's skew-bound att
 healthy. It expires only already-known incomplete accumulators. It does not retire the writer or
 partition, and a future first observation initializes fresh state.
 
-### 10.5 Existing proxy-completion schema and consumers
+### 10.5 Proxy-completion schema
 
-Existing code may use a writer identity claimed inside the `NoMoreWrites` protobuf body. That value
-must not be authoritative. The Kafka record header supplies the writer identity; a missing or
-malformed header makes the record inert and cannot settle state.
+The `NoMoreWrites` protobuf body contains the partition only. The Kafka record header supplies the
+authoritative `writerNodeId`. A missing or malformed writer header makes the record inert and cannot
+settle state.
 
 ### 10.6 Managed-fleet addendum
 
@@ -1309,8 +1320,10 @@ orchestration around:
   retirement.
 - In `fail-open`, verify that existing and new TCP connections forward without capture and that
   Kafka recovery does not resume capture.
-- Verify that orderly trustworthy shutdown uses the five-minute default retirement bound, while
-  capture-compromise and unstable-process failures do not enter retirement.
+- Verify that orderly trustworthy shutdown emits a high-severity diagnostic after its five-minute
+  target, continues trying to publish the final empty manifest and `NoMoreWrites`, and gives up only
+  when the most recently acknowledged complete manifest reaches `E`. Capture-compromise and
+  unstable-process failures do not enter retirement.
 
 ### 11.5 Acceptance criteria
 

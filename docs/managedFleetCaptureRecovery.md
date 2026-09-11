@@ -338,7 +338,11 @@ it during each incident. Every replacement therefore boots suppressed even if it
 commands.
 
 The maximum whole-connection lifetime defaults to 60 minutes. Planned retirement performed while
-capture and Kafka publication remain trustworthy has a five-minute default completion bound.
+capture and Kafka publication remain trustworthy has a five-minute default completion target.
+Missing that target alarms but does not stop retirement or skip `NoMoreWrites`. The proxy continues
+trying to publish the final empty manifest and `NoMoreWrites` until the most recently acknowledged
+complete manifest reaches the configured manifest expiration interval `E`. An acknowledged final
+empty manifest becomes that most recent manifest before the proxy attempts `NoMoreWrites`.
 
 The proxy may retry Kafka while in `CAPTURE_RETRYING` only for a definite transient failure known
 not to have compromised capture. All affected source forwarding remains capture-before-forward
@@ -531,8 +535,7 @@ CaptureCapabilityProbe {
 ```
 
 The Kafka record header for `NoMoreWrites` carries its authoritative assignment-scoped
-`writerNodeId`. A missing or malformed header makes the record inert; a compatibility field in the
-protobuf body cannot override it.
+`writerNodeId`. A missing or malformed header makes the record inert.
 
 The session field is optional only for unmanaged legacy mode. A controller-managed process fails
 startup if the configured wire version cannot carry it. `manifestCycle` keeps the exact meaning
@@ -1057,10 +1060,9 @@ capture-activation-scoped record:
 
 The replayer does not parse writer node ids or compare numeric epochs.
 
-Session mismatch is a consumer decision about an ordinary traffic or manifest record, not a new
-wire record type. Do not introduce vague wrapper names such as
-`KafkaPostDeclarationTrafficRecord` or `KafkaSupersededTrafficRecord`. Use an explicit
-`SessionMismatch` disposition/metric with the expected and observed session identities.
+Session mismatch is a consumer disposition for an ordinary traffic or manifest record, not a
+separate wire record type. The disposition and metric record the expected and observed session
+identities.
 
 ### 10.2 Reset encountered by an existing replay run
 

@@ -66,9 +66,35 @@ class CaptureRoutingStateTest {
         assertEquals(List.of("connection"), state.snapshot(oldRoute.writerNodeId(), 0));
         assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
 
-        state.remove(oldRoute);
+        state.acceptTrafficSubmission(oldRoute, true);
+        state.removeAfterTerminalAcknowledgement(oldRoute);
         assertEquals(List.of(), state.snapshot(oldRoute.writerNodeId(), 0));
         assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
+    }
+
+    @Test
+    void aDrainedOldWriterPreparesOneFinalEmptyManifestAndThenRetires() {
+        var state = activeState(1, List.of(0));
+        var oldWriter = state.currentWriterNodeId();
+
+        var replacement = state.prepareAssignment(List.of(0));
+        state.prepareInitialManifests(replacement);
+        state.activateAssignment(replacement);
+
+        var retirement = only(state.prepareDrainedWriterRetirements());
+        assertEquals(oldWriter, retirement.writerNodeId());
+        assertEquals(0, retirement.partition());
+        assertEquals(List.of(), retirement.connectionIds());
+        assertEquals(CaptureRoutingState.WriterStatus.RETIRING, state.writerStatus(oldWriter, 0));
+        assertEquals(List.of(), state.prepareDrainedWriterRetirements());
+
+        state.completeWriterRetirement(retirement);
+        assertEquals(CaptureRoutingState.WriterStatus.RETIRED, state.writerStatus(oldWriter, 0));
+        assertEquals(false, state.allWriterPartitionsRetired());
+        assertEquals(List.of(), state.preparePeriodicManifests()
+            .stream()
+            .filter(manifest -> manifest.writerNodeId().equals(oldWriter))
+            .toList());
     }
 
     @Test
@@ -94,10 +120,45 @@ class CaptureRoutingStateTest {
         var state = activeState(1, List.of(0));
         var route = state.admitConnection("connection");
 
-        state.remove(route);
+        state.acceptTrafficSubmission(route, true);
+        state.removeAfterTerminalAcknowledgement(route);
 
         assertEquals(0, state.size());
-        assertThrows(IllegalStateException.class, () -> state.remove(route));
+        assertThrows(
+            IllegalStateException.class,
+            () -> state.removeAfterTerminalAcknowledgement(route)
+        );
+    }
+
+    @Test
+    void terminalSubmissionRejectsEveryLaterTrafficSubmission() {
+        var state = activeState(1, List.of(0));
+        var route = state.admitConnection("connection");
+
+        state.acceptTrafficSubmission(route, false);
+        state.acceptTrafficSubmission(route, true);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> state.acceptTrafficSubmission(route, false)
+        );
+        assertEquals(List.of("connection"), state.snapshot(route.writerNodeId(), route.partition()));
+        state.removeAfterTerminalAcknowledgement(route);
+    }
+
+    @Test
+    void onlyAnUnpublishedConnectionMayBeAbandoned() {
+        var state = activeState(1, List.of(0));
+        var unpublished = state.admitConnection("unpublished");
+        state.abandonUnpublishedConnection(unpublished);
+
+        var published = state.admitConnection("published");
+        state.acceptTrafficSubmission(published, false);
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> state.abandonUnpublishedConnection(published)
+        );
     }
 
     @Test
@@ -106,6 +167,28 @@ class CaptureRoutingStateTest {
         state.beginShutdown();
 
         assertEquals(List.of(), state.assignedPartitions());
+        assertThrows(IllegalStateException.class, () -> state.admitConnection("new"));
+    }
+
+    @Test
+    void orderlyRetirementWaitsForConnectionsAndMakesCurrentWritersDraining() {
+        var state = activeState(1, List.of(0));
+        var route = state.admitConnection("connection");
+        var noConnections = state.whenNoConnections();
+
+        assertThrows(IllegalStateException.class, state::beginOrderlyRetirement);
+        assertEquals(false, noConnections.isDone());
+
+        state.acceptTrafficSubmission(route, true);
+        state.removeAfterTerminalAcknowledgement(route);
+        assertTrue(noConnections.isDone());
+
+        state.beginOrderlyRetirement();
+        assertEquals(List.of(), state.assignedPartitions());
+        assertEquals(
+            CaptureRoutingState.WriterStatus.DRAINING,
+            state.writerStatus(route.writerNodeId(), route.partition())
+        );
         assertThrows(IllegalStateException.class, () -> state.admitConnection("new"));
     }
 

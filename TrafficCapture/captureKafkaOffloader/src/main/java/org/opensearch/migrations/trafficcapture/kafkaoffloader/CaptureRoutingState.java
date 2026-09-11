@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.kafka.common.utils.Utils;
@@ -23,7 +24,9 @@ public final class CaptureRoutingState {
     enum WriterStatus {
         INITIALIZING,
         CURRENT,
-        DRAINING
+        DRAINING,
+        RETIRING,
+        RETIRED
     }
 
     static final class ConnectionRoute {
@@ -31,6 +34,8 @@ public final class CaptureRoutingState {
         private final String connectionId;
         private final int partition;
         private final AtomicLong manifestCycle;
+        private boolean trafficSubmissionAccepted;
+        private boolean terminalSubmissionAccepted;
 
         private ConnectionRoute(
             String writerNodeId,
@@ -162,6 +167,7 @@ public final class CaptureRoutingState {
     private final int topicPartitionCount;
     private final Map<WriterPartitionKey, WriterPartitionState> writerPartitions = new HashMap<>();
     private final Map<ConnectionKey, ConnectionRoute> connectionRoutes = new HashMap<>();
+    private CompletableFuture<Void> noConnections = CompletableFuture.completedFuture(null);
     private CurrentAssignment currentAssignment;
     private long assignmentSequence;
     private boolean shuttingDown;
@@ -253,8 +259,11 @@ public final class CaptureRoutingState {
                     + " is already present for writer "
                     + state.writerNodeId
                     + " and partition "
-                    + partition
+                + partition
             );
+        }
+        if (connectionRoutes.isEmpty()) {
+            noConnections = new CompletableFuture<>();
         }
         var route = new ConnectionRoute(
             state.writerNodeId,
@@ -266,13 +275,50 @@ public final class CaptureRoutingState {
         return route;
     }
 
-    synchronized void remove(ConnectionRoute route) {
+    synchronized void acceptTrafficSubmission(ConnectionRoute route, boolean terminal) {
         Objects.requireNonNull(route);
+        var key = new ConnectionKey(route.writerNodeId(), route.connectionId());
+        if (connectionRoutes.get(key) != route) {
+            throw new IllegalStateException("Connection route is not active: " + route);
+        }
+        if (route.terminalSubmissionAccepted) {
+            throw new IllegalStateException(
+                "Traffic submission followed the terminal record for " + route
+            );
+        }
+        route.trafficSubmissionAccepted = true;
+        route.terminalSubmissionAccepted = terminal;
+    }
+
+    synchronized void removeAfterTerminalAcknowledgement(ConnectionRoute route) {
+        Objects.requireNonNull(route);
+        if (!route.terminalSubmissionAccepted) {
+            throw new IllegalStateException(
+                "Connection route has no accepted terminal record: " + route
+            );
+        }
+        removeRegisteredRoute(route);
+    }
+
+    synchronized void abandonUnpublishedConnection(ConnectionRoute route) {
+        Objects.requireNonNull(route);
+        if (route.trafficSubmissionAccepted) {
+            throw new IllegalStateException(
+                "Cannot abandon a connection after accepting traffic publication: " + route
+            );
+        }
+        removeRegisteredRoute(route);
+    }
+
+    private void removeRegisteredRoute(ConnectionRoute route) {
         var key = new ConnectionKey(route.writerNodeId(), route.connectionId());
         if (connectionRoutes.remove(key, route)) {
             var state = requireWriterPartition(route.writerNodeId(), route.partition());
             if (!state.connectionIds.remove(route.connectionId())) {
                 throw new IllegalStateException("Connection registry is inconsistent for " + route);
+            }
+            if (connectionRoutes.isEmpty()) {
+                noConnections.complete(null);
             }
             return;
         }
@@ -297,12 +343,55 @@ public final class CaptureRoutingState {
     synchronized List<PreparedManifest> preparePeriodicManifests() {
         var states = writerPartitions.values()
             .stream()
-            .filter(state -> state.status != WriterStatus.INITIALIZING)
+            .filter(state ->
+                state.status == WriterStatus.CURRENT || state.status == WriterStatus.DRAINING
+            )
             .sorted(WRITER_PARTITION_ORDER)
             .toList();
         var manifests = new ArrayList<PreparedManifest>(states.size());
         states.forEach(state -> manifests.add(prepareManifest(state)));
         return List.copyOf(manifests);
+    }
+
+    synchronized List<PreparedManifest> prepareDrainedWriterRetirements() {
+        var states = writerPartitions.values()
+            .stream()
+            .filter(state ->
+                state.status == WriterStatus.DRAINING && state.connectionIds.isEmpty()
+            )
+            .sorted(WRITER_PARTITION_ORDER)
+            .toList();
+        var manifests = new ArrayList<PreparedManifest>(states.size());
+        for (var state : states) {
+            state.status = WriterStatus.RETIRING;
+            manifests.add(prepareManifest(state));
+        }
+        return List.copyOf(manifests);
+    }
+
+    synchronized void completeWriterRetirement(PreparedManifest finalManifest) {
+        Objects.requireNonNull(finalManifest);
+        var state = requireWriterPartition(
+            finalManifest.writerNodeId(),
+            finalManifest.partition()
+        );
+        if (state.status != WriterStatus.RETIRING) {
+            throw new IllegalStateException(
+                "Writer partition is not retiring: "
+                    + finalManifest.writerNodeId()
+                    + "/"
+                    + finalManifest.partition()
+            );
+        }
+        if (!state.connectionIds.isEmpty()) {
+            throw new IllegalStateException(
+                "Writer partition still has connections: "
+                    + finalManifest.writerNodeId()
+                    + "/"
+                    + finalManifest.partition()
+            );
+        }
+        state.status = WriterStatus.RETIRED;
     }
 
     synchronized int size() {
@@ -326,6 +415,44 @@ public final class CaptureRoutingState {
 
     synchronized List<String> snapshot(String writerNodeId, int partition) {
         return sortedConnections(requireWriterPartition(writerNodeId, partition));
+    }
+
+    synchronized WriterStatus writerStatus(String writerNodeId, int partition) {
+        return requireWriterPartition(writerNodeId, partition).status;
+    }
+
+    synchronized CompletableFuture<Void> whenNoConnections() {
+        return noConnections;
+    }
+
+    synchronized void beginOrderlyRetirement() {
+        if (!connectionRoutes.isEmpty()) {
+            throw new IllegalStateException(
+                "Cannot retire proxy writers while captured connections remain"
+            );
+        }
+        shuttingDown = true;
+        if (currentAssignment != null) {
+            for (var partition : currentAssignment.partitions()) {
+                var state = requireWriterPartition(currentAssignment.writerNodeId(), partition);
+                if (state.status != WriterStatus.CURRENT) {
+                    throw new IllegalStateException(
+                        "Current writer partition is not current: "
+                            + currentAssignment.writerNodeId()
+                            + "/"
+                            + partition
+                    );
+                }
+                state.status = WriterStatus.DRAINING;
+            }
+            currentAssignment = null;
+        }
+    }
+
+    synchronized boolean allWriterPartitionsRetired() {
+        return writerPartitions.values()
+            .stream()
+            .allMatch(state -> state.status == WriterStatus.RETIRED);
     }
 
     synchronized void beginShutdown() {

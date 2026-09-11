@@ -87,6 +87,7 @@ final class CaptureFailureTerminator implements Consumer<Throwable> {
                 "Interrupted while flushing logs after capture failure; terminating now"
             );
         } finally {
+            System.err.flush();
             haltProcess.accept(exitCode);
         }
     }
