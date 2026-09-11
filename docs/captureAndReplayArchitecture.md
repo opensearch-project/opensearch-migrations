@@ -203,31 +203,22 @@ Group departure has exactly one meaning: Kafka starts a rebalance for the remain
 Departure is not proof that the departed proxy stopped running, stopped forwarding source traffic,
 or finished publishing Kafka records. It provides no replay completion evidence.
 
-A proxy progresses through these externally meaningful states:
-
-- `PROBATIONARY`: the proxy has joined the group but may not accept new source connections.
-- `ACTIVE`: the proxy may begin accepting new source connections and publishing their observations
-  to Kafka on the partitions assigned to it for new-connection placement. An earlier proxy may
-  continue publishing observations for existing connections on the same partition.
-- `DRAINING`: the proxy accepts no new source connections but continues serving and capturing its
-  existing connections.
-- `CAPTURE_ABANDONED`: the proxy process will never capture traffic again.
-
 A group assignment may permit a proxy to use a partition for new connections only when:
 
-- the proxy is `ACTIVE`;
-- the group contains at least `minimumActiveProxyCount` active proxies, including the local proxy;
+- the group contains at least `minimumActiveProxyCount` members, including the local proxy;
 - the proxy has proved that it can publish acknowledged records to Kafka; and
 - the initial exact manifest required by §5 has been acknowledged for that partition.
 
 The initial manifest establishes the new assignment-scoped writer identity's broker-time baseline
-before that identity accepts a source connection. An empty manifest for an active identity is an
+before that identity accepts a source connection. An empty manifest for a current identity is an
 ordinary heartbeat and updates that same continuous baseline when timely; it never resets the
 baseline.
 
-Newly joined proxies do not receive new-connection traffic while `PROBATIONARY`, so their startup
-does not reduce the existing fleet's usable capacity. Existing connections remain on their
-original proxy, writer identity, and Kafka partition during scale-up, scale-down, and rebalance.
+The group has no application-defined member phase and requires no second rebalance before use. A
+process completes its Kafka capability probes before joining. Its first completed cooperative
+assignment may make partitions eligible for new connections after the initial manifests are
+acknowledged and the member-count gate is satisfied. Existing connections remain on their original
+proxy, writer identity, and Kafka partition during scale-up, scale-down, and rebalance.
 
 After receiving a new assignment, the proxy:
 
@@ -321,6 +312,18 @@ At minimum, the proxy enforces:
 - an absolute maximum request-assembly duration measured from the first request byte and never reset
   by later progress; and
 - bounded request and header bytes while the request remains incomplete.
+
+The proxy also enforces a separately configurable maximum lifetime for the client connection. This
+limit bounds how long one connection can delay a planned proxy connection-set drain even when its
+requests individually remain within the request-assembly limits. A deployment may explicitly
+configure a long connection lifetime when required, but the ordinary default is finite.
+
+The two time limits are independent:
+
+- the connection-lifetime timer starts when Netty accepts the connection and closes the connection
+  when that lifetime expires; and
+- the request-assembly timer starts with the first byte of each request and protects incomplete
+  HTTP assembly.
 
 When either bound is exceeded, the proxy stops forwarding that request, closes the affected
 connection, and publishes the terminal connection `TrafficObservation` after all earlier
@@ -848,8 +851,10 @@ Cancellation never causes a Kafka commit.
 An unexpected proxy event-loop death always terminates the process.
 
 Other capture failures close the proxy's one-way capture state. A strict deployment blocks further
-Critical Mutation Traffic and exits. A deployment explicitly configured for permanent pass-through
-may continue forwarding uncaptured source traffic, but it:
+Critical Mutation Traffic, stops accepting new connections, safely retires existing captured
+connections when possible, and then exits. A deployment explicitly configured for permanent
+pass-through may instead make a one-way transition and continue forwarding uncaptured source
+traffic, but it:
 
 - permanently stops capture in that process;
 - emits a persistent high-severity capture-gap alarm;
@@ -860,6 +865,12 @@ A draining proxy that cannot close its existing connections within its configure
 enters the applicable failure mode above. A suspended proxy that resumes after its acknowledged
 manifest has become stale cannot forward new Critical Mutation Traffic as captured; the
 capture-health check in §4 closes capture before those source bytes are submitted.
+
+Loss of valid Kafka group membership immediately closes the new-connection gate but does not by
+itself stop capture for connections that the proxy already accepted. A clearly transient membership
+failure that has not compromised capture may retry. A permanent or ambiguous membership failure
+uses the strict or pass-through behavior above. Membership recovery does not use a second
+activation rebalance, debounce, jitter, or application-defined group member state.
 
 ## 13. Protocol violations
 

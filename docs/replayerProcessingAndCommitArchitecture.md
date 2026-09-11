@@ -1519,8 +1519,10 @@ is not valid.
 Kafka metadata discovery and producer qualification happen in `PROBING` before the process joins
 the group. The proxy writes semantically inert capability probes using
 `writerNodeId = captureActivationId + ":PROBE"` to one representative traffic partition per current leader
-broker, waits for acknowledgement, refreshes metadata, and then joins as `PROBATIONARY`. It accepts
-no captured connections until an assignment promotes it to `ACTIVE`. A probe creates no
+broker, waits for acknowledgement, refreshes metadata, and then joins the group. The group has no
+application-defined member phase and requires no second rebalance before use. The first completed
+cooperative assignment may permit new captured connections after the assignment's initial
+manifests are acknowledged and the configured group-member threshold is satisfied. A probe creates no
 reconstruction, target-replay, writer-baseline, manifest, connection, or expiration state. If the
 replay cursor encounters the record, it performs no replay action; ordinary whole-record accounting
 allows the record to become commit-eligible.
@@ -2432,7 +2434,7 @@ callbacks: the commit policy must stay with the disposition owner.
 | Permits | available, queued, held duration, cancellation count |
 | Evidence | tuple-write latency, failures, retries, durable receipts |
 | Kafka | unresolved parent records, observation/control children, and WorkClaims; generation ledger-settlement gate age; commit head identity/age; staged commits; pending commit acknowledgements by generation; commit latency |
-| Capture proxy | membership phase, active member count, current and draining writer identities, capture-gate state, open connections, pending connection retirements and oldest acknowledgement wait, accepted manifest broker time by `(writerNodeId, partition)`, manifest cycle, manifest chunks/bytes, incomplete manifests, broker-time expirations, post-applicable-omission violations, publisher failures, capture-abandoned transitions, pass-through gap alarms |
+| Capture proxy | group member count and configured threshold, current and draining writer identities, capture-gate state, open connections, pending connection retirements and oldest acknowledgement wait, accepted manifest broker time by `(writerNodeId, partition)`, manifest cycle, manifest chunks/bytes, incomplete manifests, broker-time expirations, post-applicable-omission violations, publisher failures, capture-abandoned transitions, pass-through gap alarms |
 | Resources | owned buffer counts/bytes, duplicate-close attempts, leaked-owner assertions |
 
 Here, **monitoring** means code that reports health without owning lifecycle decisions: OTel metric
@@ -2558,9 +2560,9 @@ the production interface rather than adding callback configuration to the test.
   later authoritative manifests or terminal self completion;
 * proxy membership: startup capability probing with
   `writerNodeId = captureActivationId + ":PROBE"`,
-  `PROBATIONARY` receiving no new traffic, active capacity boundaries, cooperative scale-up, leader
-  replacement, and cold-start configurations that cannot satisfy their new-connection eligibility
-  predicate; probe records create no replay writer or manifest state;
+  one cooperative assignment step, group-member-count capacity boundaries, cooperative scale-up,
+  leader replacement, and cold-start configurations that cannot satisfy their new-connection
+  eligibility predicate; probe records create no replay writer or manifest state;
 * immutable routing and identity: every new assignment increments `assignmentSequence` and creates
   a new `writerNodeId` for new connections, while existing connections retain their stored writer
   identity and partition;
@@ -2855,10 +2857,12 @@ preserves per-connection ordering without redefining retry policy.
 
 The accepted routing design is
 [`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). A custom
-cooperative assignor moves members through `PROBATIONARY` and `ACTIVE`; PROBATIONARY members
-receive no traffic assignments. New connections choose once from the ACTIVE member's traffic
-assignments and store both the current assignment-scoped `writerNodeId` and partition immutably.
-Existing connections retain that identity through later assignment changes.
+cooperative assignor assigns partitions for accepting new captured client connections. The group
+has no application-defined member phase and requires no second rebalance before use. New
+connections choose once from the current assignment after its initial manifests are acknowledged
+and the group-member threshold is satisfied. They store both the assignment-scoped `writerNodeId`
+and partition immutably. Existing connections retain that identity through later assignment
+changes.
 
 Every new assignment increments `assignmentSequence` and creates a new `writerNodeId` for
 connections opened afterward. The new identity acknowledges its initial complete manifests before

@@ -332,13 +332,13 @@ commands.
 
 The proxy may retry Kafka while in `CAPTURE_RETRYING` only for a definite transient failure known
 not to have compromised capture. All affected source forwarding remains capture-before-forward
-during that interval. The proxy may return to `ACTIVE` only after the base capability probe
-succeeds again and every capture and publisher-health invariant is revalidated.
+during that interval. The proxy may return to `CAPTURE_AUTHORITATIVE` only after the base capability
+probe succeeds again and every capture and publisher-health invariant is revalidated.
 
 A manifest lapse, ambiguous producer outcome, or any other compromise closes the capture activation
-immediately and enters `CAPTURE_FAILURE_PENDING`; that process may never return to `ACTIVE`.
-Recovery requires a fresh process and fresh `captureActivationId`. Retry exhaustion likewise
-permanently closes the activation.
+immediately and enters `CAPTURE_FAILURE_PENDING`; that process may never return to
+`CAPTURE_AUTHORITATIVE`. Recovery requires a fresh process and fresh `captureActivationId`. Retry
+exhaustion likewise permanently closes the activation.
 
 ### 4.2 Local states
 
@@ -347,10 +347,9 @@ The managed outer lifecycle is:
 ```
 SUPPRESSED
   -> PROBING
-  -> PROBATIONARY
-  -> ACTIVE
+  -> CAPTURE_AUTHORITATIVE
   -> CAPTURE_RETRYING
-       -> ACTIVE                         // only a definite uncompromised transient failure recovered
+       -> CAPTURE_AUTHORITATIVE          // only a definite uncompromised transient failure recovered
        -> CAPTURE_FAILURE_PENDING        // capture activation permanently closed
             -> PASS_THROUGH_COMPROMISED  // only after controller authorization
             -> process exit
@@ -359,8 +358,11 @@ SUPPRESSED
 A healthy controller-requested suppression has a separate path:
 
 ```
-ACTIVE -> SUPPRESSING -> CAPTURE_SUPPRESSED_AND_QUIESCENT
+CAPTURE_AUTHORITATIVE -> SUPPRESSING -> CAPTURE_SUPPRESSED_AND_QUIESCENT
 ```
+
+`CAPTURE_AUTHORITATIVE` is a local process state, not Kafka group subscription metadata. The group
+has no `PROBATIONARY` or `ACTIVE` member phase and performs no activation rebalance.
 
 Only the healthy suppression path may later create a fresh capture activation in the same process.
 A process that entered `CAPTURE_FAILURE_PENDING` or `PASS_THROUGH_COMPROMISED` because of manifest
@@ -392,7 +394,6 @@ captureOperatingState
 captureCapability and latestProbeResult
 captureFailureCause and captureFailureRetryAge
 controllerAuthorizationWaitAge
-membershipPhase
 forwardingReady
 sourceListenerAccepting
 captureReady
@@ -1002,9 +1003,10 @@ do block coverage establishment and the next source snapshot.
 After reset fan-out completes and the replay-boundary plan is durable, the controller binds eligible
 processes to the new session and plan id and authorizes only session-fenced capability probing.
 Each process creates a fresh `captureActivationId`, emits probes using
-`writerNodeId = captureActivationId + ":PROBE"` and carrying that `captureSessionId`, and joins as
-`PROBATIONARY` only after every probe is acknowledged and its producer configuration is validated.
-After the process receives an assignment, it increments `assignmentSequence`, creates
+`writerNodeId = captureActivationId + ":PROBE"` and carrying that `captureSessionId`, and joins the
+group only after every probe is acknowledged and its producer configuration is validated. There is
+no application-defined group member phase and no second rebalance before use. After the process
+receives an assignment, it increments `assignmentSequence`, creates
 `captureActivationId + ":" + assignmentSequence`, acknowledges that identity's initial
 complete manifests for its permitted partitions, and only then accepts new captured client
 connections.
@@ -1179,7 +1181,8 @@ For an incident that actually forwarded uncaptured traffic:
      probes, record the pre-grant broker end offset for every partition, and emit no fleet reset.
 8. After the selected branch's complete boundary plan is durable, the controller grants S to
    eligible proxies.
-9. Proxies become `ACTIVE` under the base capability and group-assignment protocol.
+9. Proxies become `CAPTURE_AUTHORITATIVE` after the base capability probe, normal group assignment,
+   and initial-manifest acknowledgement.
 10. Remaining pass-through processes and off-load-balancer connections become traffic-retired
     under §8.3.
 11. Source-side in-flight retirement is established under §8.4.
@@ -1288,8 +1291,8 @@ Current round:
 - Pod IP reuse receiving a delayed command addressed to the previous Pod UID and process id;
 - controller failure after certificate persistence but before the status compare-and-swap;
 - failover observing a true condition whose referenced certificate is missing or invalid;
-- retry success returning to ACTIVE before the failure decision;
-- ambiguous producer outcome never returning to `ACTIVE`;
+- retry success returning to `CAPTURE_AUTHORITATIVE` before the failure decision;
+- ambiguous producer outcome never returning to `CAPTURE_AUTHORITATIVE`;
 - permanent capture-activation closure after retry exhaustion;
 - unexpected active-Pod loss terminally failing the workflow;
 - terminal status remaining immutable after retry exhaustion;

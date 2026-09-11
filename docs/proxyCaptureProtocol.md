@@ -192,39 +192,32 @@ authorize peer `NoMoreWrites` records.
 Each member publishes enough assignment metadata for every member to compute the same routing
 table. The leader uses a custom cooperative assignor so partitions can move gradually.
 
-The implementation must retain the existing minimum-capacity gate:
+Every member completes the Kafka capability probe before it joins the group. The implementation
+retains the minimum-capacity gate:
 
 ```text
-ACTIVE member count >= minimumActiveProxyCount
+current group member count >= minimumActiveProxyCount
 ```
 
 When the gate is not satisfied, no member accepts new captured connections.
 
-### 3.2 Member phases
+### 3.2 Assignment and the new-connection gate
 
-Each process has one membership phase:
+The group has no application-defined member phase and requires no second rebalance before use.
+After a process completes §3.3, it joins the group normally. Each completed assignment creates the
+next assignment-scoped writer identity. The proxy may accept a new captured client connection only
+after:
 
-- **`PROBING`** — outside the consumer group while Kafka capability is tested;
-- **`PROBATIONARY`** — in the group but not eligible to accept new captured client connections;
-- **`ACTIVE`** — eligible to accept group-assigned new captured client connections;
-- **`DRAINING`** — accepts no new connections and finishes existing connections in place; or
-- **`CAPTURE_ABANDONED`** — permanently outside capture participation for this process.
+1. the assignment is installed;
+2. the group-member count satisfies `minimumActiveProxyCount`;
+3. the proxy's capture-authoritative mode remains valid; and
+4. the initial complete manifests for that assignment's writer identity and usable partitions are
+   acknowledged.
 
-`PROBATIONARY` members receive no new captured client connections. They become eligible only after
-an assignment containing them as `ACTIVE` has completed. The transition is explicit:
-
-1. the member joins with subscription metadata `PROBATIONARY` after §3.3 succeeds;
-2. its first completed group assignment gives it no new-connection traffic ownership;
-3. after processing that assignment and rechecking that its local capture gate remains open, the
-   member advertises `ACTIVE` in its next subscription and requests one debounced, jittered
-   rebalance if no other rebalance is already pending; and
-4. only a later completed cooperative assignment may move partitions to it.
-
-The previous owner retains a partition until cooperative revocation. The new owner waits for §5.3's
+The previous owner retains a partition until cooperative revocation. The new owner waits for the
 initial-manifest acknowledgement before accepting a connection. This may create a short
-new-connection capacity pause for the transferred partition, but never overlapping ownership or
-uncaptured forwarding. The phase transition is a capacity gate, not a death-detection or
-replay-settlement protocol.
+new-connection capacity pause for the transferred partition, but never overlapping new-connection
+ownership or uncaptured forwarding.
 
 ### 3.3 Startup capability probing
 
@@ -238,7 +231,7 @@ While in `PROBING`, it:
 3. emits a semantically inert `CaptureCapabilityProbe` carrying
    `writerNodeId = captureActivationId + ":PROBE"` to each representative partition;
 4. waits for all probe acknowledgements; and
-5. refreshes metadata again before joining the group as `PROBATIONARY`.
+5. refreshes metadata again before joining the group.
 
 `CaptureCapabilityProbe` is not replay input. If the replayer later encounters the Kafka record, it
 performs no replay action and allows the record to become commit-eligible through ordinary
@@ -251,19 +244,18 @@ Normal runtime failures are handled by §5 and §7.
 
 When member B joins:
 
-1. B completes §3.3 and joins as `PROBATIONARY`.
-2. B completes the no-traffic probationary assignment and advertises `ACTIVE` as specified in §3.2.
-3. A later cooperative assignment transfers new-connection ownership.
-4. Every member increments its `assignmentSequence` and creates the new assignment's
+1. B completes §3.3 and joins the group.
+2. The cooperative assignment transfers new-connection ownership.
+3. Every member increments its `assignmentSequence` and creates the new assignment's
    `writerNodeId`.
-5. Existing member A stops opening connections under its preceding writer identity when the new
+4. Existing member A stops opening connections under its preceding writer identity when the new
    assignment takes effect. Existing connections keep that preceding identity and their original
    partitions.
-6. Each member acknowledges an initial complete manifest for its new writer identity on every
+5. Each member acknowledges an initial complete manifest for its new writer identity on every
    partition that the assignment permits it to use before accepting a connection there.
-7. A continues traffic and periodic manifests for every older writer identity that still has
+6. A continues traffic and periodic manifests for every older writer identity that still has
    connections.
-8. After an older `(writerNodeId, partition)` has no connections, A acknowledges its final empty
+7. After an older `(writerNodeId, partition)` has no connections, A acknowledges its final empty
    manifest and self `NoMoreWrites`, permanently retiring that identity on that partition.
 
 Existing connections never migrate between processes or partitions.
@@ -431,8 +423,8 @@ max.in.flight.requests.per.connection <= 5
 ```
 
 These are correctness settings, not tuning defaults. User configuration must not weaken them, and
-startup must validate the effective producer configuration before the process enters `ACTIVE`.
-Failure to establish ordering-preserving settings fails capture closed.
+startup must validate the effective producer configuration before the process becomes
+capture-authoritative. Failure to establish ordering-preserving settings fails capture closed.
 
 The current single producer and serialized publisher lane are sufficient. If publication is later
 scaled across multiple producers, then for each `(writerNodeId, partition)`:
@@ -885,7 +877,8 @@ Capture never resumes within the same compromised process. A new assignment cann
 capture authority to that process by creating another `writerNodeId`.
 
 A definite transient failure known not to have compromised capture may use a bounded retry path and
-return to `ACTIVE` after producer reachability and every capture invariant are revalidated.
+return to capture-authoritative operation after producer reachability and every capture invariant
+are revalidated.
 Manifest lapse, ambiguous producer outcome, or any other compromise never uses that path; recovery
 requires a fresh process and fresh `captureActivationId`.
 
@@ -906,8 +899,11 @@ After the gate closes:
 - the request currently waiting at the pre-forward check is not sent to the source;
 - no later request is allowed to execute at the source;
 - acceptance of new captured client connections stops;
-- existing connections are closed or terminated;
-- the process begins immediate exit or restart;
+- the proxy safely retires existing captured connections when their capture state remains
+  trustworthy, including acknowledgement of their terminal and preceding observations;
+- connections whose capture state cannot be trusted are closed without claiming successful
+  retirement;
+- after that bounded retirement attempt, the process exits so that it can be replaced;
 - previously accepted Kafka sends are awaited only while their outcome remains trustworthy; and
 - terminal self `NoMoreWrites` is attempted only after every related Netty connection is
   disconnected and the §4.3 barrier succeeds.
@@ -949,6 +945,21 @@ A missing group member, failed health check, or control-plane declaration of nod
 alarm operators and may trigger process replacement. It does not cause replay settlement and does
 not cause another proxy to write completion on behalf of the missing proxy activation.
 
+While the proxy cannot confirm valid group membership, it closes the new-connection gate. Existing
+captured connections retain their immutable writer identities and continue capture and forwarding
+under the capture-before-forward rules.
+
+A clearly transient membership failure that has not compromised capture may retry. A permanent or
+ambiguous membership failure follows the configured mode:
+
+- strict mode safely retires existing captured connections when possible and then exits for
+  replacement; or
+- pass-through mode makes a one-way transition to pass-through and never resumes authoritative
+  capture in that process.
+
+Membership recovery requires no second activation rebalance, debounce, jitter, or application-level
+group member state. A normal successful group assignment is the only assignment step.
+
 ---
 
 ## 8. Recovery after a capture gap
@@ -981,8 +992,8 @@ regrant, and coverage restoration remain future work.
 
 | Area | Required change |
 |---|---|
-| Group assignor | Remove designated-witness graphs, peer visibility, and partition-footprint dissemination. Retain cooperative ownership for accepting new captured client connections and the member phases. |
-| Startup | Add out-of-group capability probes using `writerNodeId = captureActivationId + ":PROBE"` before joining as `PROBATIONARY`; probes remain inert to replay. |
+| Group assignor | Remove designated-witness graphs, peer visibility, partition-footprint dissemination, and group member phases. Retain cooperative ownership for accepting new captured client connections and publish enough assignment metadata to apply the configured member-count gate consistently. |
+| Startup | Add out-of-group capability probes using `writerNodeId = captureActivationId + ":PROBE"` before joining the group; probes remain inert to replay. |
 | Routing | Increment `assignmentSequence` and create a new assignment-scoped `writerNodeId` after every new assignment; persist each connection's immutable writer identity and partition; move only eligibility to accept new captured client connections during rebalance. |
 | Registry | Maintain exact all-open connection sets and one atomic `manifestCycle` per `(writerNodeId, partition)`; retain older registries while their connections drain; remove a closed connection only after its terminal and all earlier observations are acknowledged. |
 | Publisher | Stamp every `TrafficObservation` with its current `manifestCycle`; permit mixed-cycle records; compute each complete manifest's timestamp as the maximum chunk `LogAppendTime`; preserve connection-local acknowledgement and terminal self-`NoMoreWrites` ordering without globally serializing packet capture. Keep one producer and serialized lane owner per writer and partition; drain all submissions and callbacks before handoff. |
@@ -1011,7 +1022,7 @@ Each proxy should expose:
 
 - process identity, `captureActivationId`, current `assignmentSequence`, current
   `writerNodeId`, and every older writer identity still draining;
-- membership phase and current new-connection assignment;
+- current group membership, member-count threshold, and new-connection assignment;
 - capture mode and whether the capture gate is open;
 - current connections by `(writerNodeId, partition)`;
 - pending connection retirements and the oldest unacknowledged terminal-or-earlier observation;
@@ -1268,8 +1279,9 @@ orchestration around:
 - A process completes leader-broker probes before joining.
 - Every capability probe uses `writerNodeId = captureActivationId + ":PROBE"` and creates no writer baseline,
   manifest state, or connection state in the replayer.
-- `PROBATIONARY` members receive no new traffic.
-- Scale-up moves eligibility to accept new captured client connections while the existing proxy
+- A process joins the group only after its capability probes are acknowledged.
+- Scale-up moves eligibility to accept new captured client connections in one cooperative
+  assignment while the existing proxy
   connection set drains in place.
 - Every new assignment increments `assignmentSequence` and creates a new `writerNodeId` for new
   connections.
@@ -1281,7 +1293,8 @@ orchestration around:
 - Rapid rebalances may leave several writer identities draining concurrently without sharing
   registries, cycles, publisher lanes, or broker-time baselines.
 - An empty manifest for an active identity is an ordinary heartbeat and never resets its baseline.
-- The active-capacity gate closes below `minimumActiveProxyCount`.
+- The new-connection gate closes when current group membership falls below
+  `minimumActiveProxyCount`.
 - Mixed incompatible group protocols are rejected as an in-place rollout.
 
 ### 11.4 Failure tests
