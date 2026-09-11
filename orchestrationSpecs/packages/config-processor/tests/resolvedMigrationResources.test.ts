@@ -112,6 +112,13 @@ describe("resolved migration resources", () => {
         expect(resolvedMigrationResources.resources.every(resource =>
             resource.parameterPolicies === undefined
         )).toBe(true);
+        expect(
+            resolvedMigrationResources.resources.find(resource =>
+                resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic"
+            )?.parameters.topicConfig
+        ).toEqual(expect.objectContaining({
+            "message.timestamp.type": "LogAppendTime",
+        }));
     });
 
     it("makes source, target, and Kafka identity checksum changes visible in resolved CR specs", async () => {

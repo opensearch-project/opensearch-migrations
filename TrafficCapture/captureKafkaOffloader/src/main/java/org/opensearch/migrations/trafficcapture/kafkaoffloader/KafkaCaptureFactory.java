@@ -38,6 +38,7 @@ public class KafkaCaptureFactory implements
 
     public static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     public static final Duration DEFAULT_LIVENESS_SNAPSHOT_INTERVAL = Duration.ofSeconds(30);
+    public static final Duration DEFAULT_MANIFEST_EXPIRATION_INTERVAL = Duration.ofSeconds(60);
     static final Duration DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY = Duration.ofSeconds(1);
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes
     // and
@@ -54,6 +55,7 @@ public class KafkaCaptureFactory implements
     private final CaptureMembershipAssignmentTracker assignmentTracker;
     private final int minimumActiveProxyCount;
     private final Duration livenessSnapshotInterval;
+    private final Duration manifestExpirationInterval;
     private final Duration topicMetadataDiscoveryRetryDelay;
     private final java.util.function.Consumer<Throwable> captureFailureCallback;
     private final java.util.function.Consumer<Throwable> unstableProcessFailureCallback;
@@ -93,6 +95,38 @@ public class KafkaCaptureFactory implements
             topicNameForTraffic,
             messageSize,
             livenessSnapshotInterval,
+            DEFAULT_MANIFEST_EXPIRATION_INTERVAL,
+            DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
+            captureFailureCallback,
+            unstableProcessFailureCallback
+        );
+    }
+
+    public KafkaCaptureFactory(
+        IRootKafkaOffloaderContext rootScope,
+        String captureActivationId,
+        Producer<String, byte[]> producer,
+        Consumer<String, byte[]> membershipConsumer,
+        CaptureMembershipAssignmentTracker assignmentTracker,
+        int minimumActiveProxyCount,
+        String topicNameForTraffic,
+        int messageSize,
+        Duration livenessSnapshotInterval,
+        Duration manifestExpirationInterval,
+        java.util.function.Consumer<Throwable> captureFailureCallback,
+        java.util.function.Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        this(
+            rootScope,
+            captureActivationId,
+            producer,
+            membershipConsumer,
+            assignmentTracker,
+            minimumActiveProxyCount,
+            topicNameForTraffic,
+            messageSize,
+            livenessSnapshotInterval,
+            manifestExpirationInterval,
             DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
             captureFailureCallback,
             unstableProcessFailureCallback
@@ -109,6 +143,7 @@ public class KafkaCaptureFactory implements
         String topicNameForTraffic,
         int messageSize,
         Duration livenessSnapshotInterval,
+        Duration manifestExpirationInterval,
         Duration topicMetadataDiscoveryRetryDelay,
         java.util.function.Consumer<Throwable> captureFailureCallback,
         java.util.function.Consumer<Throwable> unstableProcessFailureCallback
@@ -124,6 +159,15 @@ public class KafkaCaptureFactory implements
         this.minimumActiveProxyCount = minimumActiveProxyCount;
         this.topicNameForTraffic = Objects.requireNonNull(topicNameForTraffic);
         this.livenessSnapshotInterval = requirePositive(livenessSnapshotInterval, "livenessSnapshotInterval");
+        this.manifestExpirationInterval = requirePositive(
+            manifestExpirationInterval,
+            "manifestExpirationInterval"
+        );
+        if (livenessSnapshotInterval.compareTo(manifestExpirationInterval) >= 0) {
+            throw new IllegalArgumentException(
+                "livenessSnapshotInterval must be lower than manifestExpirationInterval"
+            );
+        }
         this.topicMetadataDiscoveryRetryDelay = requirePositive(
             topicMetadataDiscoveryRetryDelay,
             "topicMetadataDiscoveryRetryDelay"
@@ -175,7 +219,12 @@ public class KafkaCaptureFactory implements
                     "Kafka capture is not accepting new connections before its first group assignment"
                 );
             } else {
-                route = readyPublisher.getRoutingState().admitConnection(connectionId);
+                try {
+                    route = readyPublisher.getRoutingState().admitConnection(connectionId);
+                } catch (CorruptedCaptureStateException e) {
+                    failUnstable(e);
+                    throw e;
+                }
             }
         }
         if (unavailableBeforeAssignment != null) {
@@ -239,7 +288,7 @@ public class KafkaCaptureFactory implements
                 return;
             }
             try {
-                initializer.execute(this::refreshTopicMetadataAfterProbe);
+                initializer.execute(() -> refreshTopicMetadataAfterProbe(topicMetadata));
             } catch (RejectedExecutionException e) {
                 if (!closed.get() && orderlyRetirement == null && initializationFailure.get() == null) {
                     failUnstable(e);
@@ -248,18 +297,27 @@ public class KafkaCaptureFactory implements
         });
     }
 
-    private void refreshTopicMetadataAfterProbe() {
+    private void refreshTopicMetadataAfterProbe(TrafficTopicMetadata probedMetadata) {
         if (closed.get() || orderlyRetirement != null) {
             return;
         }
         try {
-            startMembershipInitialization(
-                TrafficTopicMetadata.discover(producer, topicNameForTraffic)
-            );
+            var refreshedMetadata = TrafficTopicMetadata.discover(producer, topicNameForTraffic);
+            if (probedMetadata.getLeaderIds().containsAll(refreshedMetadata.getLeaderIds())) {
+                startMembershipInitialization(refreshedMetadata);
+            } else {
+                log.atInfo()
+                    .setMessage(
+                        "Kafka traffic-topic leadership changed during startup probing; "
+                            + "probing the newly current leaders before joining the capture group"
+                    )
+                    .log();
+                publishStartupCapabilityProbes(refreshedMetadata);
+            }
         } catch (IllegalArgumentException e) {
             failCapture(e);
         } catch (RuntimeException e) {
-            retryTopicMetadataDiscovery(e, this::refreshTopicMetadataAfterProbe);
+            retryTopicMetadataDiscovery(e, () -> refreshTopicMetadataAfterProbe(probedMetadata));
         } catch (Error e) {
             failUnstable(e);
         }
@@ -282,6 +340,7 @@ public class KafkaCaptureFactory implements
                 routingState,
                 bufferSize + KAFKA_MESSAGE_OVERHEAD_BYTES,
                 livenessSnapshotInterval,
+                manifestExpirationInterval,
                 java.time.Clock.systemUTC(),
                 createdWriteGate,
                 this::failUnstable

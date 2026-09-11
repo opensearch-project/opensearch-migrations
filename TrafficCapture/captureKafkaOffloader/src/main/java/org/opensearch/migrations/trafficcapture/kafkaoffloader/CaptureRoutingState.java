@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -150,6 +151,7 @@ public final class CaptureRoutingState {
         private final AtomicLong manifestCycle = new AtomicLong();
         private final Set<String> connectionIds = new HashSet<>();
         private WriterStatus status = WriterStatus.INITIALIZING;
+        private Long lastAcceptedManifestLogAppendTime;
 
         private WriterPartitionState(String writerNodeId, int partition) {
             this.writerNodeId = writerNodeId;
@@ -197,7 +199,7 @@ public final class CaptureRoutingState {
                 new WriterPartitionState(writerNodeId, partition)
             );
             if (previous != null) {
-                throw new IllegalStateException("Writer partition was already prepared: " + key);
+                throw new CorruptedCaptureStateException("Writer partition was already prepared: " + key);
             }
         }
         return new PendingAssignment(assignmentSequence, writerNodeId, validatedPartitions);
@@ -211,7 +213,7 @@ public final class CaptureRoutingState {
         for (var partition : assignment.partitions()) {
             var state = requireWriterPartition(assignment.writerNodeId(), partition);
             if (state.status != WriterStatus.INITIALIZING) {
-                throw new IllegalStateException(
+                throw new CorruptedCaptureStateException(
                     "Writer partition is not initializing: "
                         + assignment.writerNodeId()
                         + "/"
@@ -245,7 +247,7 @@ public final class CaptureRoutingState {
         var state = requireWriterPartition(currentAssignment.writerNodeId(), partition);
         var key = new ConnectionKey(currentAssignment.writerNodeId(), connectionId);
         if (connectionRoutes.containsKey(key)) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Connection "
                     + connectionId
                     + " is already registered for writer "
@@ -253,7 +255,7 @@ public final class CaptureRoutingState {
             );
         }
         if (!state.connectionIds.add(connectionId)) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Connection "
                     + connectionId
                     + " is already present for writer "
@@ -279,10 +281,10 @@ public final class CaptureRoutingState {
         Objects.requireNonNull(route);
         var key = new ConnectionKey(route.writerNodeId(), route.connectionId());
         if (connectionRoutes.get(key) != route) {
-            throw new IllegalStateException("Connection route is not active: " + route);
+            throw new CorruptedCaptureStateException("Connection route is not active: " + route);
         }
         if (route.terminalSubmissionAccepted) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Traffic submission followed the terminal record for " + route
             );
         }
@@ -293,7 +295,7 @@ public final class CaptureRoutingState {
     synchronized void removeAfterTerminalAcknowledgement(ConnectionRoute route) {
         Objects.requireNonNull(route);
         if (!route.terminalSubmissionAccepted) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Connection route has no accepted terminal record: " + route
             );
         }
@@ -303,7 +305,7 @@ public final class CaptureRoutingState {
     synchronized void abandonUnpublishedConnection(ConnectionRoute route) {
         Objects.requireNonNull(route);
         if (route.trafficSubmissionAccepted) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Cannot abandon a connection after accepting traffic publication: " + route
             );
         }
@@ -315,14 +317,14 @@ public final class CaptureRoutingState {
         if (connectionRoutes.remove(key, route)) {
             var state = requireWriterPartition(route.writerNodeId(), route.partition());
             if (!state.connectionIds.remove(route.connectionId())) {
-                throw new IllegalStateException("Connection registry is inconsistent for " + route);
+                throw new CorruptedCaptureStateException("Connection registry is inconsistent for " + route);
             }
             if (connectionRoutes.isEmpty()) {
                 noConnections.complete(null);
             }
             return;
         }
-        throw new IllegalStateException("Connection route was not registered: " + route);
+        throw new CorruptedCaptureStateException("Connection route was not registered: " + route);
     }
 
     synchronized List<PreparedManifest> prepareInitialManifests(PendingAssignment assignment) {
@@ -331,7 +333,7 @@ public final class CaptureRoutingState {
         for (var partition : assignment.partitions()) {
             var state = requireWriterPartition(assignment.writerNodeId(), partition);
             if (state.status != WriterStatus.INITIALIZING) {
-                throw new IllegalStateException(
+                throw new CorruptedCaptureStateException(
                     "Initial manifest requested for a writer partition that is not initializing"
                 );
             }
@@ -376,7 +378,7 @@ public final class CaptureRoutingState {
             finalManifest.partition()
         );
         if (state.status != WriterStatus.RETIRING) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Writer partition is not retiring: "
                     + finalManifest.writerNodeId()
                     + "/"
@@ -384,7 +386,7 @@ public final class CaptureRoutingState {
             );
         }
         if (!state.connectionIds.isEmpty()) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Writer partition still has connections: "
                     + finalManifest.writerNodeId()
                     + "/"
@@ -421,13 +423,59 @@ public final class CaptureRoutingState {
         return requireWriterPartition(writerNodeId, partition).status;
     }
 
+    synchronized void acceptManifestLogAppendTime(
+        PreparedManifest manifest,
+        long manifestLogAppendTime,
+        Duration expirationInterval
+    ) {
+        Objects.requireNonNull(manifest);
+        Objects.requireNonNull(expirationInterval);
+        if (expirationInterval.isZero() || expirationInterval.isNegative()) {
+            throw new IllegalArgumentException("expirationInterval must be positive");
+        }
+        if (manifestLogAppendTime <= 0) {
+            throw new IllegalStateException(
+                "Kafka did not assign a positive LogAppendTime to manifest "
+                    + manifest.writerNodeId()
+                    + "/"
+                    + manifest.partition()
+                    + "/"
+                    + manifest.manifestCycle()
+            );
+        }
+        var state = requireWriterPartition(manifest.writerNodeId(), manifest.partition());
+        var previous = state.lastAcceptedManifestLogAppendTime;
+        if (previous != null) {
+            var elapsed = Math.subtractExact(manifestLogAppendTime, previous);
+            if (elapsed >= expirationInterval.toMillis()) {
+                throw new IllegalStateException(
+                    "Manifest broker time exceeded the configured expiration interval for "
+                        + manifest.writerNodeId()
+                        + "/"
+                        + manifest.partition()
+                        + ": previous="
+                        + previous
+                        + ", candidate="
+                        + manifestLogAppendTime
+                        + ", expirationMillis="
+                        + expirationInterval.toMillis()
+                );
+            }
+        }
+        state.lastAcceptedManifestLogAppendTime = manifestLogAppendTime;
+    }
+
+    synchronized Long lastAcceptedManifestLogAppendTime(String writerNodeId, int partition) {
+        return requireWriterPartition(writerNodeId, partition).lastAcceptedManifestLogAppendTime;
+    }
+
     synchronized CompletableFuture<Void> whenNoConnections() {
         return noConnections;
     }
 
     synchronized void beginOrderlyRetirement() {
         if (!connectionRoutes.isEmpty()) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Cannot retire proxy writers while captured connections remain"
             );
         }
@@ -436,7 +484,7 @@ public final class CaptureRoutingState {
             for (var partition : currentAssignment.partitions()) {
                 var state = requireWriterPartition(currentAssignment.writerNodeId(), partition);
                 if (state.status != WriterStatus.CURRENT) {
-                    throw new IllegalStateException(
+                    throw new CorruptedCaptureStateException(
                         "Current writer partition is not current: "
                             + currentAssignment.writerNodeId()
                             + "/"
@@ -484,7 +532,7 @@ public final class CaptureRoutingState {
         validatePartition(partition);
         var state = writerPartitions.get(new WriterPartitionKey(writerNodeId, partition));
         if (state == null) {
-            throw new IllegalStateException(
+            throw new CorruptedCaptureStateException(
                 "Unknown writer partition " + writerNodeId + "/" + partition
             );
         }

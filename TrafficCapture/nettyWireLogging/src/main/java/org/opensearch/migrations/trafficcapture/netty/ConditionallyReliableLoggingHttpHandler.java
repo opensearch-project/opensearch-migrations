@@ -146,7 +146,9 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
     ) {
         if (failure != null) {
             messageContext.addCaughtException(failure);
-            var resultingState = captureProcessState.requiredCaptureFailed(failure);
+            var resultingState = failure instanceof Error
+                ? captureProcessState.unstableProcessFailed(failure)
+                : captureProcessState.requiredCaptureFailed(failure);
             if (resultingState == CaptureProcessState.State.TERMINATING) {
                 log.atError()
                     .setCause(failure)
@@ -163,6 +165,10 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         }
         try {
             super.channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
+        } catch (Error e) {
+            captureProcessState.unstableProcessFailed(e);
+            ReferenceCountUtil.release(msg);
+            ctx.close();
         } catch (Exception e) {
             ReferenceCountUtil.release(msg);
             ctx.fireExceptionCaught(e);

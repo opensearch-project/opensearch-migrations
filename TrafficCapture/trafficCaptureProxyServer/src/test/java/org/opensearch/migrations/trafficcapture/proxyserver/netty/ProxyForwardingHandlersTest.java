@@ -1,8 +1,23 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.channels.ClosedChannelException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.opensearch.migrations.tracing.IContextTracker;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
+import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
+import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
+import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
+import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
+import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
+import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.proxyserver.RootCaptureContext;
 
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
@@ -12,14 +27,17 @@ import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.ReferenceCountUtil;
+import io.opentelemetry.api.OpenTelemetry;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ProxyForwardingHandlersTest {
 
     @Test
-    void frontsideForwardingExceptionClosesTheClientChannel() {
+    void frontsideForwardingExceptionClosesTheClientChannelWithTerminalCapture() throws Exception {
+        var capture = new TerminalTrackingStreamManager();
         var clientChannel = new EmbeddedChannel(
+            captureHandler(capture),
             new ThrowingInboundHandler(),
             new FrontsideHandler(null)
         );
@@ -31,6 +49,7 @@ class ProxyForwardingHandlersTest {
         clientChannel.runPendingTasks();
 
         Assertions.assertFalse(clientChannel.isOpen());
+        assertTerminalCapture(capture);
         clientChannel.finishAndReleaseAll();
     }
 
@@ -43,8 +62,12 @@ class ProxyForwardingHandlersTest {
     }
 
     @Test
-    void targetToClientWriteFailureClosesBothChannels() {
-        var clientChannel = new EmbeddedChannel(new FailingOutboundWriteHandler());
+    void targetToClientWriteFailureClosesBothChannelsWithTerminalCapture() throws Exception {
+        var capture = new TerminalTrackingStreamManager();
+        var clientChannel = new EmbeddedChannel(
+            captureHandler(capture),
+            new FailingOutboundWriteHandler()
+        );
         var targetChannel = new EmbeddedChannel(new BacksideHandler(clientChannel));
 
         targetChannel.writeInbound(Unpooled.wrappedBuffer(new byte[] { 1, 2, 3 }));
@@ -53,13 +76,15 @@ class ProxyForwardingHandlersTest {
 
         Assertions.assertFalse(clientChannel.isOpen());
         Assertions.assertFalse(targetChannel.isOpen());
+        assertTerminalCapture(capture);
         clientChannel.finishAndReleaseAll();
         targetChannel.finishAndReleaseAll();
     }
 
     @Test
-    void targetExceptionExplicitlyClosesBothChannels() {
-        var clientChannel = new EmbeddedChannel();
+    void targetExceptionExplicitlyClosesBothChannelsWithTerminalCapture() throws Exception {
+        var capture = new TerminalTrackingStreamManager();
+        var clientChannel = new EmbeddedChannel(captureHandler(capture));
         var targetChannel = new EmbeddedChannel(new BacksideHandler(clientChannel));
 
         targetChannel.pipeline().fireExceptionCaught(new IllegalStateException("target failed"));
@@ -68,6 +93,7 @@ class ProxyForwardingHandlersTest {
 
         Assertions.assertFalse(clientChannel.isOpen());
         Assertions.assertFalse(targetChannel.isOpen());
+        assertTerminalCapture(capture);
         clientChannel.finishAndReleaseAll();
         targetChannel.finishAndReleaseAll();
     }
@@ -87,9 +113,11 @@ class ProxyForwardingHandlersTest {
     }
 
     @Test
-    void inactiveTargetClosesTheSourceInsteadOfDroppingTrafficIndefinitely() {
+    void inactiveTargetClosesTheSourceWithTerminalCapture() throws Exception {
         var targetChannel = new OpenInactiveEmbeddedChannel();
+        var capture = new TerminalTrackingStreamManager();
         var clientChannel = new EmbeddedChannel(
+            captureHandler(capture),
             new FrontsideHandler(new FixedConnectionPool(targetChannel))
         );
 
@@ -98,8 +126,67 @@ class ProxyForwardingHandlersTest {
         targetChannel.runPendingTasks();
 
         Assertions.assertFalse(clientChannel.isOpen());
+        assertTerminalCapture(capture);
         clientChannel.finishAndReleaseAll();
         targetChannel.finishAndReleaseAll();
+    }
+
+    private static ConditionallyReliableLoggingHttpHandler<Void> captureHandler(
+        TerminalTrackingStreamManager streamManager
+    ) throws IOException {
+        var rootContext = new RootCaptureContext(
+            OpenTelemetry.noop(),
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        return new ConditionallyReliableLoggingHttpHandler<>(
+            rootContext,
+            "writer",
+            "connection",
+            context -> new StreamChannelConnectionCaptureSerializer<>(
+                "writer",
+                "connection",
+                streamManager
+            ),
+            new RequestCapturePredicate(),
+            request -> false,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED)
+        );
+    }
+
+    private static void assertTerminalCapture(TerminalTrackingStreamManager capture) {
+        Assertions.assertEquals(1, capture.records.size());
+        Assertions.assertEquals(
+            1,
+            capture.records.stream()
+                .flatMap(record -> record.getObservationsList().stream())
+                .filter(observation -> observation.hasClose())
+                .count()
+        );
+    }
+
+    private static class TerminalTrackingStreamManager
+        extends OrderedStreamLifecyleManager<Void> {
+        private final List<TrafficRecord> records = new ArrayList<>();
+
+        @Override
+        public CodedOutputStreamAndByteBufferWrapper createStream() {
+            return new CodedOutputStreamAndByteBufferWrapper(1024 * 1024);
+        }
+
+        @Override
+        protected java.util.concurrent.CompletableFuture<Void> kickoffCloseStream(
+            CodedOutputStreamHolder outputStreamHolder,
+            int index
+        ) {
+            try {
+                var stream = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
+                stream.getOutputStream().flush();
+                records.add(TrafficRecord.parseFrom(stream.getByteBuffer().flip()));
+                return java.util.concurrent.CompletableFuture.completedFuture(null);
+            } catch (IOException e) {
+                return java.util.concurrent.CompletableFuture.failedFuture(e);
+            }
+        }
     }
 
     private static class FixedConnectionPool extends BacksideConnectionPool {

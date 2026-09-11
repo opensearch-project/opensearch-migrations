@@ -40,6 +40,11 @@ import lombok.extern.slf4j.Slf4j;
 public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public static final Duration DEFAULT_MAXIMUM_CONNECTION_DURATION = Duration.ofMinutes(60);
 
+    @FunctionalInterface
+    private interface RequiredCaptureOperation {
+        void run() throws Exception;
+    }
+
     static class CaptureIgnoreState {
         static final byte CAPTURE = 0;
         static final byte IGNORE_REQUEST = 1;
@@ -406,11 +411,27 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         var shouldCapture = processCaptureEnabled && captureState.shouldCapture();
         if (shouldCapture) {
             captureState.liveReadObservationsInOffloader = true;
-            trafficOffloader.addReadEvent(timestamp, bb);
+            if (!runRequiredCaptureOperation(
+                ctx,
+                () -> trafficOffloader.addReadEvent(timestamp, bb)
+            )) {
+                ReferenceCountUtil.release(msg);
+                return;
+            }
+            if (!captureProcessState.shouldCapture()) {
+                shouldCapture = false;
+                captureState.liveReadObservationsInOffloader = false;
+            }
         } else if (captureState.liveReadObservationsInOffloader) {
             requestContext.onCaptureSuppressed();
             if (processCaptureEnabled) {
-                trafficOffloader.cancelCaptureForCurrentRequest(timestamp);
+                if (!runRequiredCaptureOperation(
+                    ctx,
+                    () -> trafficOffloader.cancelCaptureForCurrentRequest(timestamp)
+                )) {
+                    ReferenceCountUtil.release(msg);
+                    return;
+                }
             }
             captureState.liveReadObservationsInOffloader = false;
         }
@@ -435,18 +456,24 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
             if (shouldCapture) {
                 var decoderResultLoose = httpRequest.decoderResult();
-                if (decoderResultLoose instanceof HttpMessageDecoderResult) {
-                    var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
-                    trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
-                    trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
-                } else {
-                    log.atWarn().setMessage("HttpRequest decoder result was not an HttpMessageDecoderResult "
-                        + "(was {}). EOM will have -1 for firstLineByteLength and headersByteLength. "
-                        + "This may indicate a missing header in PassThruHttpHeaders.")
-                        .addArgument(() -> decoderResultLoose.getClass().getName())
-                        .log();
+                if (!runRequiredCaptureOperation(ctx, () -> {
+                    if (decoderResultLoose instanceof HttpMessageDecoderResult) {
+                        var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
+                        trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
+                        trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+                    } else {
+                        log.atWarn().setMessage("HttpRequest decoder result was not an HttpMessageDecoderResult "
+                            + "(was {}). EOM will have -1 for firstLineByteLength and headersByteLength. "
+                            + "This may indicate a missing header in PassThruHttpHeaders.")
+                            .addArgument(() -> decoderResultLoose.getClass().getName())
+                            .log();
+                    }
+                    trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
+                })) {
+                    ReferenceCountUtil.release(msg);
+                    return;
                 }
-                trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
+                shouldCapture = captureProcessState.shouldCapture();
             }
             channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         } else {
@@ -524,11 +551,38 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         var bb = (ByteBuf) msg;
         if (captureProcessState.shouldCapture()
             && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
-            trafficOffloader.addWriteEvent(Instant.now(), bb);
+            if (!runRequiredCaptureOperation(
+                ctx,
+                () -> trafficOffloader.addWriteEvent(Instant.now(), bb)
+            )) {
+                ReferenceCountUtil.release(msg);
+                promise.tryFailure(new IOException("Required response capture failed"));
+                return;
+            }
         }
         responseContext.onBytesWritten(bb.readableBytes());
 
         super.write(ctx, msg, promise);
+    }
+
+    private boolean runRequiredCaptureOperation(
+        ChannelHandlerContext ctx,
+        RequiredCaptureOperation operation
+    ) {
+        try {
+            operation.run();
+            return true;
+        } catch (Throwable failure) {
+            messageContext.addCaughtException(failure);
+            var resultingState = failure instanceof Error
+                ? captureProcessState.unstableProcessFailed(failure)
+                : captureProcessState.requiredCaptureFailed(failure);
+            if (resultingState == CaptureProcessState.State.TERMINATING) {
+                ctx.close();
+                return false;
+            }
+            return true;
+        }
     }
 
     @Override

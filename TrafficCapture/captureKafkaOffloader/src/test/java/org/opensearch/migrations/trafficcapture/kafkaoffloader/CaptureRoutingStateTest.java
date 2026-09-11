@@ -1,7 +1,13 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +39,63 @@ class CaptureRoutingStateTest {
         assertEquals("activation:1", route.writerNodeId());
         assertTrue(List.of(0, 2).contains(route.partition()));
         assertEquals(1, route.manifestCycle());
+    }
+
+    @Test
+    void initialManifestEstablishesBrokerTimeAndLaterManifestsReplaceItWhenFresh() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var assignment = state.prepareAssignment(List.of(0));
+        var initial = only(state.prepareInitialManifests(assignment));
+
+        state.acceptManifestLogAppendTime(initial, 1_000L, Duration.ofSeconds(60));
+        assertEquals(1_000L, state.lastAcceptedManifestLogAppendTime("activation:1", 0));
+
+        state.activateAssignment(assignment);
+        var later = only(state.preparePeriodicManifests());
+        state.acceptManifestLogAppendTime(later, 60_999L, Duration.ofSeconds(60));
+        assertEquals(60_999L, state.lastAcceptedManifestLogAppendTime("activation:1", 0));
+    }
+
+    @Test
+    void manifestAtExpirationBoundaryIsRejectedWithoutChangingBaseline() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var assignment = state.prepareAssignment(List.of(0));
+        var initial = only(state.prepareInitialManifests(assignment));
+        state.acceptManifestLogAppendTime(initial, 1_000L, Duration.ofSeconds(60));
+        state.activateAssignment(assignment);
+
+        var late = only(state.preparePeriodicManifests());
+        assertThrows(
+            IllegalStateException.class,
+            () -> state.acceptManifestLogAppendTime(late, 61_000L, Duration.ofSeconds(60))
+        );
+        assertEquals(1_000L, state.lastAcceptedManifestLogAppendTime("activation:1", 0));
+    }
+
+    @Test
+    void backwardBrokerTimeMovementBecomesTheNewAcceptedBaseline() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var assignment = state.prepareAssignment(List.of(0));
+        var initial = only(state.prepareInitialManifests(assignment));
+        state.acceptManifestLogAppendTime(initial, 10_000L, Duration.ofSeconds(60));
+        state.activateAssignment(assignment);
+
+        var later = only(state.preparePeriodicManifests());
+        state.acceptManifestLogAppendTime(later, 9_000L, Duration.ofSeconds(60));
+        assertEquals(9_000L, state.lastAcceptedManifestLogAppendTime("activation:1", 0));
+    }
+
+    @Test
+    void writerPartitionsMaintainIndependentBrokerTimeBaselines() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 2);
+        var assignment = state.prepareAssignment(List.of(0, 1));
+        var manifests = state.prepareInitialManifests(assignment);
+
+        state.acceptManifestLogAppendTime(manifests.get(0), 1_000L, Duration.ofSeconds(60));
+        state.acceptManifestLogAppendTime(manifests.get(1), 2_000L, Duration.ofSeconds(60));
+
+        assertEquals(1_000L, state.lastAcceptedManifestLogAppendTime("activation:1", 0));
+        assertEquals(2_000L, state.lastAcceptedManifestLogAppendTime("activation:1", 1));
     }
 
     @Test
@@ -113,6 +176,58 @@ class CaptureRoutingStateTest {
         var nextManifest = only(state.preparePeriodicManifests());
         assertEquals(2, nextManifest.manifestCycle());
         assertEquals(List.of("first", "second"), nextManifest.connectionIds());
+    }
+
+    @Test
+    void connectionRegistrationAndRetirementRemainLinearizableWhileManifestsRace()
+        throws Exception {
+        var state = activeState(1, List.of(0));
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            for (int iteration = 0; iteration < 500; ++iteration) {
+                var connectionId = "connection-" + iteration;
+                var admissionRace = race(
+                    executor,
+                    () -> state.admitConnection(connectionId),
+                    () -> only(state.preparePeriodicManifests())
+                );
+                var route = admissionRace.first();
+                var admissionManifest = admissionRace.second();
+
+                assertTrue(
+                    admissionManifest.connectionIds().equals(List.of())
+                        || admissionManifest.connectionIds().equals(List.of(connectionId))
+                );
+                assertEquals(
+                    admissionManifest.manifestCycle() + 1,
+                    route.manifestCycle()
+                );
+
+                state.acceptTrafficSubmission(route, true);
+                var retirementRace = race(
+                    executor,
+                    () -> {
+                        state.removeAfterTerminalAcknowledgement(route);
+                        return null;
+                    },
+                    () -> only(state.preparePeriodicManifests())
+                );
+                var retirementManifest = retirementRace.second();
+
+                assertTrue(
+                    retirementManifest.connectionIds().equals(List.of())
+                        || retirementManifest.connectionIds().equals(List.of(connectionId))
+                );
+                assertEquals(List.of(), state.snapshot(route.writerNodeId(), route.partition()));
+                assertEquals(
+                    retirementManifest.manifestCycle() + 1,
+                    route.manifestCycle()
+                );
+            }
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 
     @Test
@@ -212,5 +327,28 @@ class CaptureRoutingStateTest {
     private static <T> T only(List<T> values) {
         assertEquals(1, values.size());
         return values.get(0);
+    }
+
+    private record RaceResult<T, U>(T first, U second) {}
+
+    private static <T, U> RaceResult<T, U> race(
+        ExecutorService executor,
+        Callable<T> first,
+        Callable<U> second
+    ) throws Exception {
+        var start = new CyclicBarrier(3);
+        var firstResult = executor.submit(() -> {
+            start.await();
+            return first.call();
+        });
+        var secondResult = executor.submit(() -> {
+            start.await();
+            return second.call();
+        });
+        start.await();
+        return new RaceResult<>(
+            firstResult.get(5, TimeUnit.SECONDS),
+            secondResult.get(5, TimeUnit.SECONDS)
+        );
     }
 }

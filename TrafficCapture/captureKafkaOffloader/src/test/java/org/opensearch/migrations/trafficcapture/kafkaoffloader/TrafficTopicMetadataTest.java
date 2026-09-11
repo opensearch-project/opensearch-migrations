@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.util.List;
+import java.util.Set;
 
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.Node;
@@ -20,6 +21,7 @@ class TrafficTopicMetadataTest {
 
         assertEquals(7, first.getTopicPartitionCount());
         assertEquals(List.of(0, 1, 2, 3, 4, 5, 6), first.getRepresentativePartitionsByLeader());
+        assertEquals(Set.of(0, 1, 2, 3, 4, 5, 6), first.getLeaderIds());
         assertEquals(first, second);
     }
 
@@ -40,6 +42,7 @@ class TrafficTopicMetadataTest {
 
         assertEquals(4, metadata.getTopicPartitionCount());
         assertEquals(List.of(0, 1), metadata.getRepresentativePartitionsByLeader());
+        assertEquals(Set.of(10, 11), metadata.getLeaderIds());
     }
 
     @Test

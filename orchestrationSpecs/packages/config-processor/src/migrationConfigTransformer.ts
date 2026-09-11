@@ -783,6 +783,26 @@ function buildKafkaClientConfig(
     };
 }
 
+function requireLogAppendTimeForWorkflowManagedCapture(
+    kafkaConfig: ReturnType<typeof buildKafkaClientConfig>
+) {
+    if (!kafkaConfig.managedByWorkflow) {
+        return kafkaConfig;
+    }
+    const topicSpecOverrides =
+        kafkaConfig.topicSpecOverrides ?? DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES;
+    return {
+        ...kafkaConfig,
+        topicSpecOverrides: {
+            ...topicSpecOverrides,
+            config: {
+                ...(topicSpecOverrides.config ?? {}),
+                "message.timestamp.type": "LogAppendTime",
+            },
+        },
+    };
+}
+
 function isGenerateSnapshot(config: WorkflowSnapshotNameConfig): config is WorkflowGeneratedSnapshotConfig {
     return 'createSnapshotConfig' in config;
 }
@@ -1147,7 +1167,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             });
             return {
                 name: proxyName,
-                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                kafkaConfig: requireLogAppendTimeForWorkflowManagedCapture(
+                    buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic)
+                ),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
                 sourceConnectionIdentity,
                 proxyConfig: prepareProxyConfig(proxy.proxyConfig),

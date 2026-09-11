@@ -157,7 +157,7 @@ public class KafkaCaptureFactoryTest {
             1,
             topicName,
             1024 * 1024,
-            Duration.ofDays(1),
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
             ignored -> {},
             ignored -> {}
         );
@@ -358,7 +358,7 @@ public class KafkaCaptureFactoryTest {
 
     private RecordMetadata generateRecordMetadata(String topicName, int partition) {
         TopicPartition topicPartition = new TopicPartition(topicName, partition);
-        return new RecordMetadata(topicPartition, 0, 0, 0, 0, 0);
+        return new RecordMetadata(topicPartition, 0, 0, 1, 0, 0);
     }
 
     @SneakyThrows
@@ -568,7 +568,7 @@ public class KafkaCaptureFactoryTest {
         var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         var metadata = partitionInfo(topicName, 4);
         var metadataRefreshes = new AtomicInteger();
-        var producer = new MockProducer<String, byte[]>(
+        var producer = new LogAppendTimeMockProducer(
             new Cluster("test", leaders(metadata), metadata, Set.of(), Set.of()),
             false,
             null,
@@ -598,7 +598,7 @@ public class KafkaCaptureFactoryTest {
             1,
             topicName,
             1024 * 1024,
-            Duration.ofDays(1),
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
             ignored -> {},
             ignored -> {}
         );
@@ -633,9 +633,79 @@ public class KafkaCaptureFactoryTest {
     }
 
     @Test
+    public void newlyCurrentBrokerLeaderIsProbedBeforeGroupMembershipStarts() throws Exception {
+        var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
+        var leader0 = new Node(0, "broker-0", 9092);
+        var leader1 = new Node(1, "broker-1", 9092);
+        var leader2 = new Node(2, "broker-2", 9092);
+        var initialMetadata = List.of(
+            partitionInfo(topicName, 0, leader0),
+            partitionInfo(topicName, 1, leader1)
+        );
+        var changedMetadata = List.of(
+            partitionInfo(topicName, 0, leader0),
+            partitionInfo(topicName, 1, leader2)
+        );
+        var metadataRefreshes = new AtomicInteger();
+        var producer = new LogAppendTimeMockProducer(
+            new Cluster("test", List.of(leader0, leader1, leader2), initialMetadata, Set.of(), Set.of()),
+            false,
+            null,
+            new StringSerializer(),
+            new ByteArraySerializer()
+        ) {
+            @Override
+            public List<PartitionInfo> partitionsFor(String requestedTopic) {
+                return metadataRefreshes.getAndIncrement() == 0
+                    ? initialMetadata
+                    : changedMetadata;
+            }
+        };
+        var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var topicPartitions = changedMetadata.stream()
+            .map(info -> new TopicPartition(info.topic(), info.partition()))
+            .toList();
+        membershipConsumer.updateBeginningOffsets(
+            topicPartitions.stream().collect(Collectors.toMap(partition -> partition, ignored -> 0L))
+        );
+        membershipConsumer.schedulePollTask(() -> membershipConsumer.rebalance(topicPartitions));
+        var factory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            membershipConsumer,
+            assignmentTracker(),
+            1,
+            topicName,
+            1024 * 1024,
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
+            ignored -> {},
+            ignored -> {}
+        );
+
+        awaitHistorySize(producer, 2);
+        Assertions.assertEquals(Set.of(), membershipConsumer.subscription());
+        Assertions.assertTrue(producer.completeNext());
+        Assertions.assertTrue(producer.completeNext());
+
+        awaitHistorySize(producer, 4);
+        Assertions.assertEquals(Set.of(), membershipConsumer.subscription());
+        Assertions.assertEquals(
+            List.of(0, 1, 0, 1),
+            producer.history().stream().map(ProducerRecord::partition).toList()
+        );
+        Assertions.assertTrue(producer.completeNext());
+        Assertions.assertEquals(Set.of(), membershipConsumer.subscription());
+        Assertions.assertTrue(producer.completeNext());
+
+        awaitCondition(() -> membershipConsumer.subscription().equals(Set.of(topicName)));
+        factory.close();
+    }
+
+    @Test
     public void connectionAttemptBeforeTheFirstAssignmentPermanentlyFailsCapture() throws Exception {
         var topicMetadata = partitionInfo(topic, 3);
-        var producer = new MockProducer<String, byte[]>(
+        var producer = new LogAppendTimeMockProducer(
             new Cluster("test", leaders(topicMetadata), topicMetadata, Set.of(), Set.of()),
             true,
             null,
@@ -670,7 +740,7 @@ public class KafkaCaptureFactoryTest {
             1,
             topic,
             1024 * 1024,
-            Duration.ofDays(1),
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
             captureFailure::set,
             ignored -> {}
         );
@@ -700,7 +770,7 @@ public class KafkaCaptureFactoryTest {
         var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var closeCalls = new AtomicInteger();
         var producerClosed = new CountDownLatch(1);
-        var producer = new MockProducer<String, byte[]>(
+        var producer = new LogAppendTimeMockProducer(
             true,
             null,
             new StringSerializer(),
@@ -742,7 +812,7 @@ public class KafkaCaptureFactoryTest {
             1,
             topic,
             1024 * 1024,
-            Duration.ofDays(1),
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
             failure -> {
                 captureFailure.set(failure);
                 captureFailureReported.countDown();
@@ -771,7 +841,7 @@ public class KafkaCaptureFactoryTest {
         var writeFailure = new IllegalStateException("producer write failed");
         var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         var topicPartitions = partitionInfo(topicName, 4);
-        var producer = new MockProducer<String, byte[]>(
+        var producer = new LogAppendTimeMockProducer(
             new Cluster("test", leaders(topicPartitions), topicPartitions, Set.of(), Set.of()),
             true,
             null,
@@ -794,7 +864,7 @@ public class KafkaCaptureFactoryTest {
                         new TopicPartition(record.topic(), record.partition()),
                         0,
                         0,
-                        0,
+                        1,
                         0,
                         0
                     );
@@ -833,7 +903,7 @@ public class KafkaCaptureFactoryTest {
         var unstableError = new AssertionError("producer owner failed");
         var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         var topicPartitions = partitionInfo(topicName, 4);
-        var producer = new MockProducer<String, byte[]>(
+        var producer = new LogAppendTimeMockProducer(
             new Cluster("test", leaders(topicPartitions), topicPartitions, Set.of(), Set.of()),
             true,
             null,
@@ -856,7 +926,7 @@ public class KafkaCaptureFactoryTest {
                         new TopicPartition(record.topic(), record.partition()),
                         0,
                         0,
-                        0,
+                        1,
                         0,
                         0
                     );
@@ -944,7 +1014,7 @@ public class KafkaCaptureFactoryTest {
             1,
             topicName,
             messageSize,
-            Duration.ofDays(1),
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
             captureFailureCallback,
             unstableProcessFailureCallback
         );
@@ -955,13 +1025,61 @@ public class KafkaCaptureFactoryTest {
     private MockProducer<String, byte[]> createMockProducer(boolean autoComplete) {
         var partitionInfo = partitionInfo(KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC, 4);
         var cluster = new Cluster("test", leaders(partitionInfo), partitionInfo, Set.of(), Set.of());
-        return new MockProducer<>(
+        return new LogAppendTimeMockProducer(
             cluster,
             autoComplete,
             null,
             new StringSerializer(),
             new ByteArraySerializer()
         );
+    }
+
+    private static class LogAppendTimeMockProducer extends MockProducer<String, byte[]> {
+        private LogAppendTimeMockProducer(
+            Cluster cluster,
+            boolean autoComplete,
+            org.apache.kafka.clients.producer.Partitioner partitioner,
+            StringSerializer keySerializer,
+            ByteArraySerializer valueSerializer
+        ) {
+            super(cluster, autoComplete, partitioner, keySerializer, valueSerializer);
+        }
+
+        private LogAppendTimeMockProducer(
+            boolean autoComplete,
+            org.apache.kafka.clients.producer.Partitioner partitioner,
+            StringSerializer keySerializer,
+            ByteArraySerializer valueSerializer
+        ) {
+            super(autoComplete, partitioner, keySerializer, valueSerializer);
+        }
+
+        @Override
+        public synchronized java.util.concurrent.Future<RecordMetadata> send(
+            ProducerRecord<String, byte[]> record,
+            Callback callback
+        ) {
+            return super.send(record, (metadata, failure) -> {
+                if (failure != null || metadata == null) {
+                    callback.onCompletion(metadata, failure);
+                    return;
+                }
+                var brokerTimestamp = record.timestamp() != null && record.timestamp() > 0
+                    ? record.timestamp()
+                    : 1L;
+                callback.onCompletion(
+                    new RecordMetadata(
+                        new TopicPartition(metadata.topic(), metadata.partition()),
+                        metadata.offset(),
+                        0,
+                        brokerTimestamp,
+                        metadata.serializedKeySize(),
+                        metadata.serializedValueSize()
+                    ),
+                    null
+                );
+            });
+        }
     }
 
     private static List<ProducerRecord<String, byte[]>> trafficRecords(
@@ -1008,6 +1126,16 @@ public class KafkaCaptureFactoryTest {
                 );
             })
             .toList();
+    }
+
+    private static PartitionInfo partitionInfo(String topicName, int partition, Node leader) {
+        return new PartitionInfo(
+            topicName,
+            partition,
+            leader,
+            new Node[] { leader },
+            new Node[] { leader }
+        );
     }
 
     private static List<Node> leaders(List<PartitionInfo> partitionInfo) {

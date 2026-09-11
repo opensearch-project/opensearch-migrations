@@ -147,8 +147,13 @@ class NettyScanningHttpProxyTest {
     }
 
     @Test
-    public void testTlsHandshakeFailureIsLoggedAndProxyStaysAlive() throws Exception {
-        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+    public void testTlsHandshakeFailureIsLoggedTerminallyCapturedAndProxyStaysAlive() throws Exception {
+        var tlsFailureCaptured = new CountDownLatch(1);
+        var captureFactory = new InMemoryConnectionCaptureFactory(
+            TEST_NODE_ID_STRING,
+            1024 * 1024,
+            tlsFailureCaptured::countDown
+        );
         var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
         var rootCtx = new RootWireLoggingContext(
             inMemoryInstrumentationBundle.openTelemetrySdk,
@@ -162,6 +167,17 @@ class NettyScanningHttpProxyTest {
             sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
 
             assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+            Assertions.assertTrue(tlsFailureCaptured.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            var failedTlsConnection = captureFactory.getRecordedTrafficStreamsStream()
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                1,
+                failedTlsConnection.getSubStreamList()
+                    .stream()
+                    .filter(observation -> observation.hasClose())
+                    .count()
+            );
 
             var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
             Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);

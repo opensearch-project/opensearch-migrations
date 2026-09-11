@@ -81,7 +81,7 @@ final class CaptureKafkaCapabilityProbe {
             var record = new ProducerRecord<String, byte[]>(
                 topic,
                 partition,
-                null,
+                0L,
                 writerNodeId + ":" + probeId,
                 payload,
                 new RecordHeaders(List.of(new RecordHeader(
@@ -93,6 +93,14 @@ final class CaptureKafkaCapabilityProbe {
                 producer.send(record, (metadata, failure) -> {
                     if (failure != null) {
                         result.completeExceptionally(failure);
+                    } else if (metadata == null || !metadata.hasTimestamp() || metadata.timestamp() <= 0) {
+                        result.completeExceptionally(new IllegalStateException(
+                            "Kafka capability probe did not receive a positive broker-assigned timestamp for "
+                                + topic
+                                + "/"
+                                + partition
+                                + "; the traffic topic must use message.timestamp.type=LogAppendTime"
+                        ));
                     } else if (remainingAcknowledgements.decrementAndGet() == 0) {
                         result.complete(null);
                     }

@@ -34,11 +34,21 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 @Slf4j
 @WrapWithNettyLeakDetection
 public class ConditionallyReliableLoggingHttpHandlerTest {
+
+    private enum RequiredCaptureFailurePoint {
+        ADD_READ,
+        CANCEL_REQUEST,
+        END_FIRST_LINE,
+        END_HEADERS,
+        END_MESSAGE,
+        ADD_WRITE
+    }
 
     private static CaptureProcessState failOpenCaptureState() {
         return new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN);
@@ -270,6 +280,38 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    void aggregateHeaderByteLimitStopsOneByteAtATimeHeaderGrowth() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    new IncompleteRequestLimits(Duration.ofMinutes(1), 32, 1024),
+                    failOpenCaptureState()
+                )
+            );
+            var request = (
+                "GET / HTTP/1.1\r\nX-Large: 1234567890123456789012345678901234567890\r\n\r\n"
+            ).getBytes(StandardCharsets.US_ASCII);
+
+            writeOneByteAtATimeUntilClosed(channel, request);
+            channel.runPendingTasks();
+
+            assertIncrementalBoundViolationClosesBeforeTheRequestCompletes(
+                channel,
+                streamManager,
+                request.length
+            );
+        }
+    }
+
+    @Test
     void aggregateTotalRequestByteLimitIncludesBodyAndStopsForwarding() throws Exception {
         try (var rootContext = new TestRootContext()) {
             var streamManager = new TestStreamManager();
@@ -298,12 +340,112 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         }
     }
 
+    @Test
+    void aggregateTotalRequestByteLimitStopsOneByteAtATimeBodyGrowth() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    new IncompleteRequestLimits(Duration.ofMinutes(1), 128, 150),
+                    failOpenCaptureState()
+                )
+            );
+            var request = (
+                "POST / HTTP/1.1\r\nContent-Length: 200\r\n\r\n"
+                    + "x".repeat(200)
+            ).getBytes(StandardCharsets.US_ASCII);
+
+            writeOneByteAtATimeUntilClosed(channel, request);
+            channel.runPendingTasks();
+
+            assertIncrementalBoundViolationClosesBeforeTheRequestCompletes(
+                channel,
+                streamManager,
+                request.length
+            );
+        }
+    }
+
+    @Test
+    void aggregateRequestByteCounterResetsBetweenKeepAliveRequests() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    new IncompleteRequestLimits(Duration.ofMinutes(1), 32, 32),
+                    failOpenCaptureState()
+                )
+            );
+
+            Assertions.assertTrue(
+                channel.writeInbound(Unpooled.copiedBuffer("GET /one HTTP/1.1\r\n\r\n", StandardCharsets.US_ASCII))
+            );
+            Assertions.assertTrue(
+                channel.writeInbound(Unpooled.copiedBuffer("GET /two HTTP/1.1\r\n\r\n", StandardCharsets.US_ASCII))
+            );
+            channel.runPendingTasks();
+
+            Assertions.assertTrue(channel.isOpen());
+            channel.close();
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    private static void writeOneByteAtATimeUntilClosed(EmbeddedChannel channel, byte[] request) {
+        for (var value : request) {
+            if (!channel.isOpen()) {
+                return;
+            }
+            channel.writeInbound(Unpooled.wrappedBuffer(new byte[] { value }));
+        }
+    }
+
     private static void assertBoundViolationClosesWithCapturedReadThenOneTerminalClose(
         EmbeddedChannel channel,
         TestStreamManager streamManager
     ) throws Exception {
         Assertions.assertFalse(channel.isOpen());
         Assertions.assertTrue(channel.inboundMessages().isEmpty());
+        Assertions.assertEquals(1, streamManager.flushCount.get());
+
+        var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
+        var observations = finalStream.getSubStreamList();
+        Assertions.assertTrue(observations.stream().anyMatch(TrafficObservation::hasRead));
+        Assertions.assertEquals(1, observations.stream().filter(TrafficObservation::hasClose).count());
+        Assertions.assertTrue(observations.get(observations.size() - 1).hasClose());
+
+        channel.close();
+        channel.runPendingTasks();
+        Assertions.assertEquals(1, streamManager.flushCount.get());
+        channel.finishAndReleaseAll();
+    }
+
+    private static void assertIncrementalBoundViolationClosesBeforeTheRequestCompletes(
+        EmbeddedChannel channel,
+        TestStreamManager streamManager,
+        int completeRequestBytes
+    ) throws Exception {
+        Assertions.assertFalse(channel.isOpen());
+        var forwardedBytes = channel.inboundMessages()
+            .stream()
+            .mapToInt(message -> ((ByteBuf) message).readableBytes())
+            .sum();
+        Assertions.assertTrue(forwardedBytes > 0);
+        Assertions.assertTrue(forwardedBytes < completeRequestBytes);
         Assertions.assertEquals(1, streamManager.flushCount.get());
 
         var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
@@ -515,6 +657,82 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         @Override
         public CompletableFuture<Void> flushCommitAndResetStream(boolean isFinal) {
             return CompletableFuture.failedFuture(failure);
+        }
+    }
+
+    private static class BlockingFlushFailureOffloader
+        extends NoopChannelConnectionCaptureSerializer<Void> {
+        private final AtomicInteger flushes = new AtomicInteger();
+        private final Throwable failure;
+
+        private BlockingFlushFailureOffloader(Throwable failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public CompletableFuture<Void> flushCommitAndResetStream(boolean isFinal) {
+            flushes.incrementAndGet();
+            return CompletableFuture.failedFuture(failure);
+        }
+    }
+
+    private static class RequiredCaptureFailureOffloader
+        extends NoopChannelConnectionCaptureSerializer<Void> {
+        private final RequiredCaptureFailurePoint failurePoint;
+        private final Throwable failure;
+
+        private RequiredCaptureFailureOffloader(RequiredCaptureFailurePoint failurePoint) {
+            this(failurePoint, new IOException("Required capture failed at " + failurePoint));
+        }
+
+        private RequiredCaptureFailureOffloader(
+            RequiredCaptureFailurePoint failurePoint,
+            Throwable failure
+        ) {
+            this.failurePoint = failurePoint;
+            this.failure = failure;
+        }
+
+        private void failAt(RequiredCaptureFailurePoint point) throws IOException {
+            if (failurePoint == point) {
+                if (failure instanceof Error error) {
+                    throw error;
+                }
+                if (failure instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                throw (IOException) failure;
+            }
+        }
+
+        @Override
+        public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {
+            failAt(RequiredCaptureFailurePoint.ADD_READ);
+        }
+
+        @Override
+        public void cancelCaptureForCurrentRequest(Instant timestamp) throws IOException {
+            failAt(RequiredCaptureFailurePoint.CANCEL_REQUEST);
+        }
+
+        @Override
+        public void addEndOfFirstLineIndicator(int characterIndex) throws IOException {
+            failAt(RequiredCaptureFailurePoint.END_FIRST_LINE);
+        }
+
+        @Override
+        public void addEndOfHeadersIndicator(int characterIndex) throws IOException {
+            failAt(RequiredCaptureFailurePoint.END_HEADERS);
+        }
+
+        @Override
+        public void commitEndOfHttpMessageIndicator(Instant timestamp) throws IOException {
+            failAt(RequiredCaptureFailurePoint.END_MESSAGE);
+        }
+
+        @Override
+        public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
+            failAt(RequiredCaptureFailurePoint.ADD_WRITE);
         }
     }
 
@@ -810,6 +1028,39 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    void sourceActivityDoesNotExtendTheMaximumConnectionDuration() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var offloader = new DelayedFinalAcknowledgementOffloader();
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofMillis(10),
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED)
+                )
+            );
+
+            channel.advanceTimeBy(6, java.util.concurrent.TimeUnit.MILLISECONDS);
+            Assertions.assertTrue(
+                channel.writeInbound(Unpooled.copiedBuffer("GET / HTTP/1.1\r\n\r\n", StandardCharsets.US_ASCII))
+            );
+            channel.advanceTimeBy(5, java.util.concurrent.TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            channel.runPendingTasks();
+
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, offloader.closeObservations.get());
+            offloader.finalAcknowledgement.complete(null);
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
     void closeObservationFailureInvokesTheCaptureFailurePolicyExactlyOnce() throws Exception {
         try (var rootContext = new TestRootContext()) {
             var transitions = new AtomicInteger();
@@ -908,6 +1159,183 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
             Assertions.assertEquals(1, transitions.get());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(RequiredCaptureFailurePoint.class)
+    void synchronousRequiredCaptureFailureAppliesTheProcessWideFailOpenPolicy(
+        RequiredCaptureFailurePoint failurePoint
+    ) throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var transitions = new AtomicInteger();
+            var captureProcessState = new CaptureProcessState(
+                CaptureFailurePolicy.FAIL_OPEN,
+                ignored -> transitions.incrementAndGet()
+            );
+            var offloader = new RequiredCaptureFailureOffloader(failurePoint);
+            var requestCapturePredicate = failurePoint == RequiredCaptureFailurePoint.CANCEL_REQUEST
+                ? new RequestCapturePredicate() {
+                    @Override
+                    public CaptureDirective apply(io.netty.handler.codec.http.HttpRequest request) {
+                        return CaptureDirective.DROP;
+                    }
+                }
+                : new RequestCapturePredicate();
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    requestCapturePredicate,
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            if (failurePoint == RequiredCaptureFailurePoint.ADD_WRITE) {
+                var response = Unpooled.wrappedBuffer("HTTP/1.1 200 OK\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+                Assertions.assertTrue(channel.writeOutbound(response));
+            } else if (failurePoint == RequiredCaptureFailurePoint.CANCEL_REQUEST) {
+                Assertions.assertTrue(channel.writeInbound(Unpooled.wrappedBuffer(new byte[] { 'G' })));
+                Assertions.assertTrue(
+                    channel.writeInbound(
+                        Unpooled.wrappedBuffer("ET / HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.UTF_8))
+                    )
+                );
+            } else {
+                Assertions.assertTrue(
+                    channel.writeInbound(
+                        Unpooled.wrappedBuffer(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8))
+                    )
+                );
+            }
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(CaptureProcessState.State.PASS_THROUGH, captureProcessState.state());
+            Assertions.assertEquals(1, transitions.get());
+            Assertions.assertTrue(channel.isOpen());
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void synchronousRequiredCaptureFailureAppliesTheProcessWideFailClosedPolicy() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var transitions = new AtomicInteger();
+            var captureProcessState = new CaptureProcessState(
+                CaptureFailurePolicy.FAIL_CLOSED,
+                ignored -> transitions.incrementAndGet()
+            );
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> new RequiredCaptureFailureOffloader(RequiredCaptureFailurePoint.ADD_READ),
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            Assertions.assertFalse(
+                channel.writeInbound(
+                    Unpooled.wrappedBuffer(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8))
+                )
+            );
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
+            Assertions.assertEquals(1, transitions.get());
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertTrue(channel.inboundMessages().isEmpty());
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void errorDuringARequiredCaptureOperationAlwaysTerminatesTheProcess() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var transitions = new AtomicInteger();
+            var captureProcessState = new CaptureProcessState(
+                CaptureFailurePolicy.FAIL_OPEN,
+                ignored -> transitions.incrementAndGet()
+            );
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> new RequiredCaptureFailureOffloader(
+                        RequiredCaptureFailurePoint.ADD_READ,
+                        new AssertionError("capture owner failed")
+                    ),
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            Assertions.assertFalse(
+                channel.writeInbound(
+                    Unpooled.wrappedBuffer(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8))
+                )
+            );
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
+            Assertions.assertEquals(1, transitions.get());
+            Assertions.assertFalse(channel.isOpen());
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void errorFromBlockedRequestFlushAlwaysTerminatesAndClosesTheConnection() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var transitions = new AtomicInteger();
+            var captureProcessState = new CaptureProcessState(
+                CaptureFailurePolicy.FAIL_OPEN,
+                ignored -> transitions.incrementAndGet()
+            );
+            var offloader = new BlockingFlushFailureOffloader(
+                new AssertionError("capture acknowledgement owner failed")
+            );
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            Assertions.assertFalse(
+                channel.writeInbound(
+                    Unpooled.wrappedBuffer(SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8))
+                )
+            );
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
+            Assertions.assertEquals(1, transitions.get());
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertTrue(channel.inboundMessages().isEmpty());
+            Assertions.assertTrue(offloader.flushes.get() >= 1);
+            channel.finishAndReleaseAll();
         }
     }
 

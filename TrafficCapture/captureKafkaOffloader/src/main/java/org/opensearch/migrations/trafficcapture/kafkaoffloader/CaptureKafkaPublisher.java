@@ -58,6 +58,11 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         CompletableFuture<?> result
     ) {}
 
+    private record ManifestPublication(
+        CaptureRoutingState.PreparedManifest manifest,
+        List<CompletableFuture<RecordMetadata>> chunkAcknowledgements
+    ) {}
+
     private final Producer<String, byte[]> producer;
     private final String topic;
     @Getter
@@ -65,6 +70,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     private final CaptureKafkaWriteGate writeGate;
     private final Consumer<Throwable> unstableProcessFailureCallback;
     private final int payloadSizeLimit;
+    private final Duration manifestExpirationInterval;
     private final Clock clock;
     private final ScheduledThreadPoolExecutor executor;
     private final Map<WriterPartitionKey, Long> lastControlTimestamp = new HashMap<>();
@@ -95,6 +101,29 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             routingState,
             maximumKafkaMessageSize,
             snapshotInterval,
+            KafkaCaptureFactory.DEFAULT_MANIFEST_EXPIRATION_INTERVAL,
+            Clock.systemUTC(),
+            CaptureKafkaWriteGate.unrestricted(),
+            unstableProcessFailureCallback
+        );
+    }
+
+    public CaptureKafkaPublisher(
+        Producer<String, byte[]> producer,
+        String topic,
+        CaptureRoutingState routingState,
+        int maximumKafkaMessageSize,
+        Duration snapshotInterval,
+        Duration manifestExpirationInterval,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
+        this(
+            producer,
+            topic,
+            routingState,
+            maximumKafkaMessageSize,
+            snapshotInterval,
+            manifestExpirationInterval,
             Clock.systemUTC(),
             CaptureKafkaWriteGate.unrestricted(),
             unstableProcessFailureCallback
@@ -116,6 +145,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             routingState,
             maximumKafkaMessageSize,
             snapshotInterval,
+            KafkaCaptureFactory.DEFAULT_MANIFEST_EXPIRATION_INTERVAL,
             clock,
             CaptureKafkaWriteGate.unrestricted(),
             unstableProcessFailureCallback
@@ -132,6 +162,30 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         CaptureKafkaWriteGate writeGate,
         Consumer<Throwable> unstableProcessFailureCallback
     ) {
+        this(
+            producer,
+            topic,
+            routingState,
+            maximumKafkaMessageSize,
+            snapshotInterval,
+            KafkaCaptureFactory.DEFAULT_MANIFEST_EXPIRATION_INTERVAL,
+            clock,
+            writeGate,
+            unstableProcessFailureCallback
+        );
+    }
+
+    CaptureKafkaPublisher(
+        Producer<String, byte[]> producer,
+        String topic,
+        CaptureRoutingState routingState,
+        int maximumKafkaMessageSize,
+        Duration snapshotInterval,
+        Duration manifestExpirationInterval,
+        Clock clock,
+        CaptureKafkaWriteGate writeGate,
+        Consumer<Throwable> unstableProcessFailureCallback
+    ) {
         this.producer = Objects.requireNonNull(producer);
         this.topic = Objects.requireNonNull(topic);
         this.routingState = Objects.requireNonNull(routingState);
@@ -144,6 +198,15 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         payloadSizeLimit = maximumKafkaMessageSize - KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES;
         if (snapshotInterval.isZero() || snapshotInterval.isNegative()) {
             throw new IllegalArgumentException("snapshotInterval must be positive");
+        }
+        this.manifestExpirationInterval = Objects.requireNonNull(manifestExpirationInterval);
+        if (manifestExpirationInterval.isZero() || manifestExpirationInterval.isNegative()) {
+            throw new IllegalArgumentException("manifestExpirationInterval must be positive");
+        }
+        if (snapshotInterval.compareTo(manifestExpirationInterval) >= 0) {
+            throw new IllegalArgumentException(
+                "snapshotInterval must be lower than manifestExpirationInterval"
+            );
         }
         executor = new ScheduledThreadPoolExecutor(1, runnable -> {
             var thread = new Thread(runnable, "capture-kafka-publisher");
@@ -252,47 +315,54 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
                 manifests = routingState.preparePeriodicManifests();
             }
         } catch (Throwable t) {
-            finishManifestRequest(request, t);
+            finishManifestRequest(request, List.of(), t);
             return;
         }
 
-        var sends = new ArrayList<CompletableFuture<RecordMetadata>>();
+        var publications = new ArrayList<ManifestPublication>();
         try {
             for (var manifest : manifests) {
                 var emittedAtMillis = allocateControlTimestamp(
                     manifest.writerNodeId(),
                     manifest.partition()
                 );
+                var chunkAcknowledgements = new ArrayList<CompletableFuture<RecordMetadata>>();
                 for (var chunk : buildSnapshotChunks(manifest, emittedAtMillis)) {
                     var key = manifest.writerNodeId() + ":liveness:" + manifest.partition();
                     var producerRecord = new ProducerRecord<>(
                         topic,
                         manifest.partition(),
-                        null,
+                        emittedAtMillis,
                         key,
                         chunk.toByteArray(),
                         recordHeaders(LIVENESS_RECORD_TYPE)
                     );
-                    sends.add(sendFromPublisherThread(producerRecord, () -> {}));
+                    chunkAcknowledgements.add(sendFromPublisherThread(producerRecord, () -> {}));
                 }
+                publications.add(new ManifestPublication(manifest, List.copyOf(chunkAcknowledgements)));
             }
         } catch (Throwable t) {
-            finishManifestRequest(request, t);
+            finishManifestRequest(request, List.of(), t);
             return;
         }
 
-        CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
+        CompletableFuture.allOf(
+            publications.stream()
+                .flatMap(publication -> publication.chunkAcknowledgements().stream())
+                .toArray(CompletableFuture[]::new)
+        )
             .whenComplete((ignored, throwable) ->
-                finishManifestRequestOnPublisherThread(request, throwable)
+                finishManifestRequestOnPublisherThread(request, publications, throwable)
             );
     }
 
     private void finishManifestRequestOnPublisherThread(
         ManifestRequest request,
+        List<ManifestPublication> publications,
         Throwable failure
     ) {
         try {
-            executor.execute(() -> finishManifestRequest(request, failure));
+            executor.execute(() -> finishManifestRequest(request, publications, failure));
         } catch (RejectedExecutionException e) {
             request.result().completeExceptionally(failure == null ? e : failure);
             if (!closed.get()) {
@@ -302,9 +372,28 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     @SuppressWarnings("unchecked")
-    private void finishManifestRequest(ManifestRequest request, Throwable requestFailure) {
+    private void finishManifestRequest(
+        ManifestRequest request,
+        List<ManifestPublication> publications,
+        Throwable requestFailure
+    ) {
         if (requestFailure == null) {
             try {
+                for (var publication : publications) {
+                    var manifestLogAppendTime = publication.chunkAcknowledgements()
+                        .stream()
+                        .map(CompletableFuture::join)
+                        .mapToLong(CaptureKafkaPublisher::requireBrokerTimestamp)
+                        .max()
+                        .orElseThrow(() -> new IllegalStateException(
+                            "A complete manifest must contain at least one Kafka record"
+                        ));
+                    routingState.acceptManifestLogAppendTime(
+                        publication.manifest(),
+                        manifestLogAppendTime,
+                        manifestExpirationInterval
+                    );
+                }
                 if (request.orderlyRetirement()) {
                     beginOrderlyWriterRetirement(request);
                     return;
@@ -330,6 +419,15 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
         manifestPublicationActive = false;
         startNextManifestRequest();
+    }
+
+    private static long requireBrokerTimestamp(RecordMetadata metadata) {
+        if (metadata == null || !metadata.hasTimestamp() || metadata.timestamp() <= 0) {
+            throw new IllegalStateException(
+                "Kafka did not report a positive LogAppendTime for an acknowledged manifest record"
+            );
+        }
+        return metadata.timestamp();
     }
 
     private void beginOrderlyWriterRetirement(ManifestRequest request) {
@@ -414,7 +512,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             var result = new CompletableFuture<Void>();
             var key = new WriterPartitionKey(manifest.writerNodeId(), manifest.partition());
             if (writerRetirementResults.putIfAbsent(key, result) != null) {
-                throw new IllegalStateException(
+                throw new CorruptedCaptureStateException(
                     "Writer retirement was already queued for "
                         + manifest.writerNodeId()
                         + "/"
@@ -711,7 +809,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     }
 
     private void failForThrowable(Throwable throwable) {
-        if (throwable instanceof Error) {
+        if (throwable instanceof Error || throwable instanceof CorruptedCaptureStateException) {
             failUnstableProcess(throwable);
         } else {
             failPublisher(throwable);

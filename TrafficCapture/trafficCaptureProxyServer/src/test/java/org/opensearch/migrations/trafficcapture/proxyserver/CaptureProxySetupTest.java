@@ -102,6 +102,27 @@ public class CaptureProxySetupTest {
     }
 
     @Test
+    void manifestTimingDefaultsToThirtyAndSixtySecondsAndIsConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--liveness-snapshot-interval-seconds", "15",
+            "--manifest-expiration-interval-seconds", "45"
+        });
+
+        Assertions.assertEquals(30, defaults.livenessSnapshotIntervalSeconds);
+        Assertions.assertEquals(60, defaults.manifestExpirationIntervalSeconds);
+        Assertions.assertEquals(15, configured.livenessSnapshotIntervalSeconds);
+        Assertions.assertEquals(45, configured.manifestExpirationIntervalSeconds);
+    }
+
+    @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {
         CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(
             new String[] {

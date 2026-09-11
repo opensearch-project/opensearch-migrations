@@ -16,13 +16,27 @@ public class RootCaptureContext extends RootWireLoggingContext implements IRootK
     final CaptureProcessMetrics captureProcessMetrics;
 
     public RootCaptureContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
-        this(openTelemetry, contextTracker, SCOPE_NAME);
+        this(openTelemetry, contextTracker, SCOPE_NAME, null, null);
     }
 
     public RootCaptureContext(OpenTelemetry openTelemetry, IContextTracker contextTracker, String scopeName) {
+        this(openTelemetry, contextTracker, scopeName, null, null);
+    }
+
+    public RootCaptureContext(
+        OpenTelemetry openTelemetry,
+        IContextTracker contextTracker,
+        String scopeName,
+        String processId,
+        String captureActivationId
+    ) {
         super(openTelemetry, contextTracker, scopeName);
         var meter = this.getMeterProvider().get(scopeName);
         kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);
-        captureProcessMetrics = new CaptureProcessMetrics(meter);
+        captureProcessMetrics = new CaptureProcessMetrics(
+            meter,
+            processId,
+            captureActivationId
+        );
     }
 }

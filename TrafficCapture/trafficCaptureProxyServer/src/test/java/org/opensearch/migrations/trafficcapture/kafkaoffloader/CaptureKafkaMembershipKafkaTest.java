@@ -21,8 +21,12 @@ import io.opentelemetry.api.OpenTelemetry;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
@@ -117,6 +121,45 @@ class CaptureKafkaMembershipKafkaTest {
         }
     }
 
+    @Test
+    void capabilityProbeAcceptsLogAppendTimeAndRejectsCreateTime() throws Exception {
+        var bootstrapServers = KAFKA.getContainer().getBootstrapServers();
+        var logAppendTopic = "proxy-log-append-time-" + UUID.randomUUID();
+        var createTimeTopic = "proxy-create-time-" + UUID.randomUUID();
+        createTopic(bootstrapServers, logAppendTopic, "LogAppendTime");
+        createTopic(bootstrapServers, createTimeTopic, "CreateTime");
+
+        var parameters = new KafkaConfig.KafkaParameters();
+        parameters.kafkaBrokers = bootstrapServers;
+        parameters.kafkaClientId = "capability-probe-test";
+        parameters.kafkaAuthType = KafkaConfig.AUTH_TYPE_NONE;
+        try (var producer = new KafkaProducer<String, byte[]>(
+            KafkaConfig.buildKafkaProperties(parameters)
+        )) {
+            CaptureKafkaCapabilityProbe.publish(
+                producer,
+                logAppendTopic,
+                "activation",
+                List.of(0),
+                () -> "log-append-time"
+            ).get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+
+            Assertions.assertThrows(
+                java.util.concurrent.ExecutionException.class,
+                () -> CaptureKafkaCapabilityProbe.publish(
+                    producer,
+                    createTimeTopic,
+                    "activation",
+                    List.of(0),
+                    () -> "create-time"
+                ).get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)
+            );
+        } finally {
+            deleteTopic(bootstrapServers, logAppendTopic);
+            deleteTopic(bootstrapServers, createTimeTopic);
+        }
+    }
+
     private static ManualFactoryHarness startFactoryWithManualAcknowledgements(
         RootCaptureContext rootContext,
         String bootstrapServers,
@@ -193,7 +236,7 @@ class CaptureKafkaMembershipKafkaTest {
             1,
             topic,
             1024 * 1024,
-            Duration.ofHours(1),
+            KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL,
             captureFailure::set,
             unstableFailure::set
         );
@@ -298,14 +341,52 @@ class CaptureKafkaMembershipKafkaTest {
             null,
             new StringSerializer(),
             new ByteArraySerializer()
-        );
+        ) {
+            @Override
+            public synchronized java.util.concurrent.Future<RecordMetadata> send(
+                ProducerRecord<String, byte[]> record,
+                Callback callback
+            ) {
+                return super.send(record, (metadata, failure) -> {
+                    if (failure != null || metadata == null) {
+                        callback.onCompletion(metadata, failure);
+                        return;
+                    }
+                    var brokerTimestamp = record.timestamp() != null && record.timestamp() > 0
+                        ? record.timestamp()
+                        : 1L;
+                    callback.onCompletion(
+                        new RecordMetadata(
+                            new org.apache.kafka.common.TopicPartition(
+                                metadata.topic(),
+                                metadata.partition()
+                            ),
+                            metadata.offset(),
+                            0,
+                            brokerTimestamp,
+                            metadata.serializedKeySize(),
+                            metadata.serializedValueSize()
+                        ),
+                        null
+                    );
+                });
+            }
+        };
     }
 
     private static void createTopic(String bootstrapServers, String topic) throws Exception {
+        createTopic(bootstrapServers, topic, "LogAppendTime");
+    }
+
+    private static void createTopic(
+        String bootstrapServers,
+        String topic,
+        String timestampType
+    ) throws Exception {
         try (var admin = AdminClient.create(adminProperties(bootstrapServers))) {
             admin.createTopics(List.of(
                 new NewTopic(topic, 4, (short) 1).configs(
-                    Map.of("message.timestamp.type", "LogAppendTime")
+                    Map.of("message.timestamp.type", timestampType)
                 )
             )).all().get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         }

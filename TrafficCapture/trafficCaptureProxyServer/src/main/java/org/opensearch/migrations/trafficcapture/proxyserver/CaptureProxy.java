@@ -15,6 +15,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -230,7 +231,14 @@ public class CaptureProxy {
             names = { "--liveness-snapshot-interval-seconds" },
             arity = 1,
             description = "Interval between complete proxy liveness declarations.")
-        public int livenessSnapshotIntervalSeconds = 30;
+        public int livenessSnapshotIntervalSeconds =
+            Math.toIntExact(KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL.toSeconds());
+        @Parameter(required = false,
+            names = { "--manifest-expiration-interval-seconds" },
+            arity = 1,
+            description = "Maximum accepted broker-time interval between complete proxy manifests.")
+        public int manifestExpirationIntervalSeconds =
+            Math.toIntExact(KafkaCaptureFactory.DEFAULT_MANIFEST_EXPIRATION_INTERVAL.toSeconds());
         @Parameter(required = false,
             names = { "--minimum-active-proxy-count" },
             arity = 1,
@@ -281,6 +289,12 @@ public class CaptureProxy {
             p.kafkaParameters.validateKafkaAuthFlags();
             if (p.livenessSnapshotIntervalSeconds <= 0) {
                 throw new ParameterException("--liveness-snapshot-interval-seconds must be positive");
+            }
+            if (p.manifestExpirationIntervalSeconds <= p.livenessSnapshotIntervalSeconds) {
+                throw new ParameterException(
+                    "--manifest-expiration-interval-seconds must be greater than "
+                        + "--liveness-snapshot-interval-seconds"
+                );
             }
             if (p.minimumActiveProxyCount <= 0) {
                 throw new ParameterException("--minimum-active-proxy-count must be positive");
@@ -361,9 +375,10 @@ public class CaptureProxy {
     protected static IConnectionCaptureFactory<?> getConnectionCaptureFactory(
         Parameters params,
         RootCaptureContext rootContext,
-        CaptureProcessState captureProcessState
+        CaptureProcessState captureProcessState,
+        String captureActivationId
     ) throws IOException {
-        var captureActivationId = newCaptureActivationId();
+        Objects.requireNonNull(captureActivationId);
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(
@@ -396,6 +411,7 @@ public class CaptureProxy {
                     params.kafakTopicName,
                     params.maximumTrafficStreamSize,
                     Duration.ofSeconds(params.livenessSnapshotIntervalSeconds),
+                    Duration.ofSeconds(params.manifestExpirationIntervalSeconds),
                     captureProcessState::requiredCaptureFailed,
                     captureProcessState::unstableProcessFailed
                 );
@@ -527,7 +543,9 @@ public class CaptureProxy {
 
     public static void main(String[] args) throws InterruptedException, IOException {
         System.err.println("Got args: " + String.join("; ", args));
-        log.info("Starting Capture Proxy on " + ProcessHelpers.getNodeInstanceName());
+        var processId = ProcessHelpers.getNodeInstanceName();
+        var captureActivationId = newCaptureActivationId();
+        log.info("Starting Capture Proxy on " + processId);
 
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
@@ -536,8 +554,11 @@ public class CaptureProxy {
             RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
                 new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
                 "capture",
-                ProcessHelpers.getNodeInstanceName()),
-            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+                processId),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()),
+            RootCaptureContext.SCOPE_NAME,
+            processId,
+            captureActivationId
         );
 
         var sslEngineSupplier = buildSslEngineSupplier(params);
@@ -557,7 +578,12 @@ public class CaptureProxy {
             params.frontsidePort,
             captureProcessState::unstableProcessFailed
         );
-        var connectionCaptureFactory = getConnectionCaptureFactory(params, ctx, captureProcessState);
+        var connectionCaptureFactory = getConnectionCaptureFactory(
+            params,
+            ctx,
+            captureProcessState,
+            captureActivationId
+        );
         try {
             var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0
                 ? Duration.ZERO

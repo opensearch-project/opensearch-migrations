@@ -6,16 +6,22 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.LongUnaryOperator;
 
 import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
 import org.opensearch.migrations.trafficcapture.protos.NoMoreWrites;
 
+import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
@@ -50,6 +56,87 @@ class CaptureKafkaPublisherTest {
         assertTrue(producer.completeNext());
         assertEquals("activation:1", install.get(1, TimeUnit.SECONDS));
         assertEquals(List.of(0), routingState.assignedPartitions());
+        publisher.close();
+    }
+
+    @Test
+    void chunkedManifestUsesMaximumBrokerTimestampAcrossAllChunks() throws Exception {
+        var producer = new TimestampingProducer(index -> {
+            if (index == 0) {
+                return 1_000L;
+            }
+            return 5_001L - index;
+        });
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = new CaptureKafkaPublisher(
+            producer,
+            TOPIC,
+            routingState,
+            650,
+            Duration.ofDays(1),
+            Duration.ofDays(2),
+            Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+            CaptureKafkaWriteGate.unrestricted(),
+            ignored -> {}
+        );
+        publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
+        for (int i = 0; i < 20; ++i) {
+            routingState.admitConnection("connection-" + i + "-" + "x".repeat(40));
+        }
+
+        int beforeManifest = producer.history().size();
+        publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
+        int chunkCount = producer.history().size() - beforeManifest;
+
+        assertTrue(chunkCount > 1);
+        assertEquals(5_000L, routingState.lastAcceptedManifestLogAppendTime("activation:1", 0));
+        publisher.close();
+    }
+
+    @Test
+    void lateManifestFailsClosedBeforeAnotherManifestCanStart() throws Exception {
+        var producer = new TimestampingProducer(index -> index == 0 ? 1_000L : 61_000L);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = new CaptureKafkaPublisher(
+            producer,
+            TOPIC,
+            routingState,
+            MESSAGE_SIZE,
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(60),
+            Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+            CaptureKafkaWriteGate.unrestricted(),
+            ignored -> {}
+        );
+        publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
+
+        var late = publisher.publishLivenessSnapshotNow();
+        assertThrows(ExecutionException.class, () -> late.get(1, TimeUnit.SECONDS));
+        var queuedAfterFailure = publisher.publishLivenessSnapshotNow();
+        assertThrows(
+            ExecutionException.class,
+            () -> queuedAfterFailure.get(1, TimeUnit.SECONDS)
+        );
+
+        assertEquals(2, producer.history().size());
+        assertEquals(1_000L, routingState.lastAcceptedManifestLogAppendTime("activation:1", 0));
+        publisher.close();
+    }
+
+    @Test
+    void failedManifestDoesNotRefreshAcceptedBrokerTime() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+        var failure = new IllegalStateException("manifest failed");
+
+        var manifest = publisher.publishLivenessSnapshotNow();
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.errorNext(failure));
+        assertThrows(ExecutionException.class, () -> manifest.get(1, TimeUnit.SECONDS));
+
+        assertEquals(1_234L, routingState.lastAcceptedManifestLogAppendTime("activation:1", 0));
         publisher.close();
     }
 
@@ -454,6 +541,33 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
+    void corruptedWriterRetirementStateIsAnUnstableProcessFailure() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var assignment = routingState.prepareAssignment(List.of(0));
+        var initialManifest = routingState.prepareInitialManifests(assignment).getFirst();
+        routingState.activateAssignment(assignment);
+        var unstableFailure = new AtomicReference<Throwable>();
+        var publisher = publisher(producer, routingState, unstableFailure::set);
+
+        var retirement = publisher.retireAllWriters();
+        awaitHistorySize(producer, 1);
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 2);
+
+        routingState.completeWriterRetirement(initialManifest);
+        assertTrue(producer.completeNext());
+
+        var failure = assertThrows(
+            ExecutionException.class,
+            () -> retirement.get(1, TimeUnit.SECONDS)
+        ).getCause();
+        assertTrue(failure instanceof CorruptedCaptureStateException);
+        assertEquals(failure, unstableFailure.get());
+        publisher.close();
+    }
+
+    @Test
     void diagnosticManifestTimestampsIncreaseWhenClockMovesBackward() throws Exception {
         var producer = producer(true);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
@@ -530,13 +644,15 @@ class CaptureKafkaPublisherTest {
             routingState,
             MESSAGE_SIZE,
             Duration.ofDays(1),
+            Duration.ofDays(2),
             clock,
+            CaptureKafkaWriteGate.unrestricted(),
             unstableProcessFailureCallback
         );
     }
 
     private static MockProducer<String, byte[]> producer(boolean autoComplete) {
-        return new MockProducer<>(
+        return new LogAppendTimeMockProducer(
             autoComplete,
             null,
             new StringSerializer(),
@@ -611,6 +727,72 @@ class CaptureKafkaPublisherTest {
             int current = Math.min(index, values.length - 1);
             index++;
             return values[current];
+        }
+    }
+
+    private static final class TimestampingProducer extends MockProducer<String, byte[]> {
+        private final LongUnaryOperator timestampForSendIndex;
+        private long sendIndex;
+
+        private TimestampingProducer(LongUnaryOperator timestampForSendIndex) {
+            super(false, null, new StringSerializer(), new ByteArraySerializer());
+            this.timestampForSendIndex = timestampForSendIndex;
+        }
+
+        @Override
+        public synchronized Future<RecordMetadata> send(
+            ProducerRecord<String, byte[]> record,
+            Callback callback
+        ) {
+            super.send(record, (ignoredMetadata, ignoredFailure) -> {});
+            var metadata = new RecordMetadata(
+                new TopicPartition(record.topic(), record.partition()),
+                0,
+                0,
+                timestampForSendIndex.applyAsLong(sendIndex++),
+                0,
+                record.value().length
+            );
+            callback.onCompletion(metadata, null);
+            return CompletableFuture.completedFuture(metadata);
+        }
+    }
+
+    private static final class LogAppendTimeMockProducer extends MockProducer<String, byte[]> {
+        private LogAppendTimeMockProducer(
+            boolean autoComplete,
+            org.apache.kafka.clients.producer.Partitioner partitioner,
+            StringSerializer keySerializer,
+            ByteArraySerializer valueSerializer
+        ) {
+            super(autoComplete, partitioner, keySerializer, valueSerializer);
+        }
+
+        @Override
+        public synchronized Future<RecordMetadata> send(
+            ProducerRecord<String, byte[]> record,
+            Callback callback
+        ) {
+            return super.send(record, (metadata, failure) -> {
+                if (failure != null || metadata == null) {
+                    callback.onCompletion(metadata, failure);
+                    return;
+                }
+                var brokerTimestamp = record.timestamp() != null && record.timestamp() > 0
+                    ? record.timestamp()
+                    : 1L;
+                callback.onCompletion(
+                    new RecordMetadata(
+                        new TopicPartition(metadata.topic(), metadata.partition()),
+                        metadata.offset(),
+                        0,
+                        brokerTimestamp,
+                        metadata.serializedKeySize(),
+                        metadata.serializedValueSize()
+                    ),
+                    null
+                );
+            });
         }
     }
 }
