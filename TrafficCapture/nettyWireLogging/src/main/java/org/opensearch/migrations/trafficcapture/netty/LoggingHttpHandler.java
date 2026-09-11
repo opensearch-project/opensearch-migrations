@@ -219,69 +219,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         String nodeId,
         String channelKey,
         @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-        @NonNull RequestCapturePredicate httpHeadersCapturePredicate
-    ) throws IOException {
-        this(
-            rootContext,
-            nodeId,
-            channelKey,
-            trafficOffloaderFactory,
-            httpHeadersCapturePredicate,
-            IncompleteRequestLimits.DEFAULT,
-            DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
-        );
-    }
-
-    public LoggingHttpHandler(
-        @NonNull IRootWireLoggingContext rootContext,
-        String nodeId,
-        String channelKey,
-        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-        @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
-        @NonNull Duration maximumRequestAssemblyDuration
-    ) throws IOException {
-        this(
-            rootContext,
-            nodeId,
-            channelKey,
-            trafficOffloaderFactory,
-            httpHeadersCapturePredicate,
-            new IncompleteRequestLimits(
-                maximumRequestAssemblyDuration,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
-            ),
-            DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
-        );
-    }
-
-    public LoggingHttpHandler(
-        @NonNull IRootWireLoggingContext rootContext,
-        String nodeId,
-        String channelKey,
-        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-        @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
-        @NonNull IncompleteRequestLimits incompleteRequestLimits
-    ) throws IOException {
-        this(
-            rootContext,
-            nodeId,
-            channelKey,
-            trafficOffloaderFactory,
-            httpHeadersCapturePredicate,
-            incompleteRequestLimits,
-            DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
-        );
-    }
-
-    public LoggingHttpHandler(
-        @NonNull IRootWireLoggingContext rootContext,
-        String nodeId,
-        String channelKey,
-        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
         @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
         @NonNull IncompleteRequestLimits incompleteRequestLimits,
         @NonNull Duration maximumConnectionDuration,
@@ -420,11 +357,16 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         HttpRequest httpRequest
     ) throws Exception {
         messageContext = messageContext.createWaitingForResponseContext();
-        super.channelRead(ctx, msg);
+        forwardSourceTrafficOrClose(ctx, msg);
     }
 
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
+        if (captureProcessState.isTerminating()) {
+            rejectSourceTraffic(ctx, msg);
+            return;
+        }
+
         IWireCaptureContexts.IRequestContext requestContext;
         if (!(messageContext instanceof IWireCaptureContexts.IRequestContext)) {
             messageContext = requestContext = messageContext.createNextRequestContext();
@@ -498,8 +440,23 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             }
             channelFinishedReadingAnHttpMessage(ctx, msg, shouldCapture, httpRequest);
         } else {
-            super.channelRead(ctx, msg);
+            forwardSourceTrafficOrClose(ctx, msg);
         }
+    }
+
+    private void forwardSourceTrafficOrClose(ChannelHandlerContext ctx, Object msg) throws Exception {
+        var forwarded = captureProcessState.forwardSourceTrafficIfPermitted(() -> {
+            super.channelRead(ctx, msg);
+            return null;
+        });
+        if (!forwarded) {
+            rejectSourceTraffic(ctx, msg);
+        }
+    }
+
+    private void rejectSourceTraffic(ChannelHandlerContext ctx, Object msg) {
+        ReferenceCountUtil.release(msg);
+        ctx.close();
     }
 
     private void updateRequestAssemblyDeadline(

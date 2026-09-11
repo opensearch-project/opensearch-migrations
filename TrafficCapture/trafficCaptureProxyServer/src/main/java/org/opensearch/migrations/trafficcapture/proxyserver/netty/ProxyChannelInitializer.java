@@ -8,7 +8,6 @@ import java.time.Duration;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
@@ -48,7 +47,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         BacksideConnectionPool backsideConnectionPool,
         Supplier<SSLEngine> sslEngineSupplier,
         IConnectionCaptureFactory<T> connectionCaptureFactory,
-        @NonNull RequestCapturePredicate requestCapturePredicate
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull CaptureProcessState captureProcessState
     ) {
         this(
             rootContext,
@@ -59,32 +59,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             requestCapturePredicate,
             IncompleteRequestLimits.DEFAULT,
             org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
-        );
-    }
-
-    public ProxyChannelInitializer(
-        IRootWireLoggingContext rootContext,
-        BacksideConnectionPool backsideConnectionPool,
-        Supplier<SSLEngine> sslEngineSupplier,
-        IConnectionCaptureFactory<T> connectionCaptureFactory,
-        @NonNull RequestCapturePredicate requestCapturePredicate,
-        @NonNull Duration maximumRequestAssemblyDuration
-    ) {
-        this(
-            rootContext,
-            backsideConnectionPool,
-            sslEngineSupplier,
-            connectionCaptureFactory,
-            connectionCaptureFactory,
-            requestCapturePredicate,
-            new IncompleteRequestLimits(
-                maximumRequestAssemblyDuration,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
-            ),
-            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
+            captureProcessState
         );
     }
 
@@ -95,7 +70,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         IConnectionCaptureFactory<T> connectionCaptureFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate,
         @NonNull Duration maximumRequestAssemblyDuration,
-        @NonNull CaptureFailurePolicy captureFailurePolicy
+        @NonNull CaptureProcessState captureProcessState
     ) {
         this(
             rootContext,
@@ -110,7 +85,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
             ),
             org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(captureFailurePolicy)
+            captureProcessState
         );
     }
 
@@ -121,7 +96,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         IConnectionCaptureFactory<T> connectionCaptureFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate,
         @NonNull IncompleteRequestLimits incompleteRequestLimits,
-        @NonNull CaptureFailurePolicy captureFailurePolicy
+        @NonNull CaptureProcessState captureProcessState
     ) {
         this(
             rootContext,
@@ -132,7 +107,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             requestCapturePredicate,
             incompleteRequestLimits,
             org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler.DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(captureFailurePolicy)
+            captureProcessState
         );
     }
 
@@ -170,6 +145,10 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
 
     @Override
     protected void initChannel(@NonNull SocketChannel ch) throws IOException {
+        if (captureProcessState.isTerminating()) {
+            ch.close();
+            return;
+        }
         var sslEngine = sslEngineProvider != null ? sslEngineProvider.get() : null;
         if (sslEngine != null) {
             ch.pipeline().addLast(new SslHandler(sslEngine));
@@ -182,6 +161,9 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     }
 
     ConditionallyReliableLoggingHttpHandler<T> createCaptureHandler(String connectionId) throws IOException {
+        if (captureProcessState.isTerminating()) {
+            throw new IllegalStateException("Proxy capture process is terminating");
+        }
         var selectedFactory = captureProcessState.isPassThrough()
             ? passThroughConnectionCaptureFactory
             : connectionCaptureFactory;

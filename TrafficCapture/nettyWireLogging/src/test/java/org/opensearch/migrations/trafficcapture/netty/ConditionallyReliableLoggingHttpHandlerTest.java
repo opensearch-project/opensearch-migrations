@@ -41,6 +41,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 @WrapWithNettyLeakDetection
 public class ConditionallyReliableLoggingHttpHandlerTest {
 
+    private static CaptureProcessState failOpenCaptureState() {
+        return new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN);
+    }
+
     private static void writeMessageAndVerify(
         byte[] fullTrafficBytes,
         Consumer<EmbeddedChannel> channelWriter,
@@ -57,7 +61,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "c",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    x -> true
+                    x -> true,
+                    failOpenCaptureState()
                 )
             ); // true: block every request
             channelWriter.accept(channel);
@@ -147,7 +152,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     ctx -> offloader,
                     new RequestCapturePredicate(),
                     request -> false,
-                    Duration.ofMillis(1)
+                    Duration.ofMillis(1),
+                    failOpenCaptureState()
                 )
             );
 
@@ -177,7 +183,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     ctx -> offloader,
                     new RequestCapturePredicate(),
                     request -> false,
-                    Duration.ofMillis(10)
+                    Duration.ofMillis(10),
+                    failOpenCaptureState()
                 )
             );
 
@@ -216,7 +223,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     ctx -> offloader,
                     new RequestCapturePredicate(),
                     request -> false,
-                    Duration.ofMillis(1)
+                    Duration.ofMillis(1),
+                    failOpenCaptureState()
                 )
             );
 
@@ -248,7 +256,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     new RequestCapturePredicate(),
                     request -> false,
                     new IncompleteRequestLimits(Duration.ofMinutes(1), 32, 1024),
-                    CaptureFailurePolicy.FAIL_OPEN
+                    failOpenCaptureState()
                 )
             );
 
@@ -276,7 +284,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     new RequestCapturePredicate(),
                     request -> false,
                     new IncompleteRequestLimits(Duration.ofMinutes(1), 128, 150),
-                    CaptureFailurePolicy.FAIL_OPEN
+                    failOpenCaptureState()
                 )
             );
             var request = (
@@ -324,7 +332,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "connection",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    request -> false
+                    request -> false,
+                    failOpenCaptureState()
                 ),
                 new ExceptionConsumingHandler()
             );
@@ -361,7 +370,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "connection",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    request -> false
+                    request -> false,
+                    failOpenCaptureState()
                 ),
                 new ExceptionConsumingHandler()
             );
@@ -395,7 +405,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "connection",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    request -> false
+                    request -> false,
+                    failOpenCaptureState()
                 ),
                 new ExceptionConsumingHandler()
             );
@@ -498,7 +509,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "c",
                     ctx -> offloader,
                     headerCapturePredicate,
-                    x -> true
+                    x -> true,
+                    failOpenCaptureState()
                 )
             );
             getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
@@ -537,7 +549,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "c",
                     ctx -> offloader,
                     headerCapturePredicate,
-                    x -> false
+                    x -> false,
+                    failOpenCaptureState()
                 )
             );
             getWriter(singleBytes, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
@@ -774,7 +787,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     new RequestCapturePredicate(),
                     request -> true,
                     Duration.ZERO,
-                    CaptureFailurePolicy.FAIL_CLOSED
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED)
                 )
             );
 
@@ -785,6 +798,60 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             Assertions.assertFalse(channel.isOpen());
             Assertions.assertEquals(1, failingStreamManager.flushCount.get());
             channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void failClosedTransitionStopsAnotherExistingConnectionBeforeItCanForward() throws IOException {
+        byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
+
+        try (var rootContext = new TestRootContext()) {
+            var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+            var failingStreamManager = new FailingStreamManager();
+            var firstOffloader =
+                new StreamChannelConnectionCaptureSerializer("Test", "first", failingStreamManager);
+            var secondStreamManager = new TestStreamManager();
+            var secondOffloader =
+                new StreamChannelConnectionCaptureSerializer("Test", "second", secondStreamManager);
+            var firstChannel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "n",
+                    "first",
+                    ctx -> firstOffloader,
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+            var secondChannel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "n",
+                    "second",
+                    ctx -> secondOffloader,
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            firstChannel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            firstChannel.runPendingTasks();
+            Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
+
+            secondChannel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            secondChannel.runPendingTasks();
+
+            Assertions.assertTrue(secondChannel.inboundMessages().isEmpty());
+            Assertions.assertFalse(secondChannel.isOpen());
+            Assertions.assertEquals(0, secondStreamManager.flushCount.get());
+            firstChannel.finishAndReleaseAll();
+            secondChannel.finishAndReleaseAll();
         }
     }
 

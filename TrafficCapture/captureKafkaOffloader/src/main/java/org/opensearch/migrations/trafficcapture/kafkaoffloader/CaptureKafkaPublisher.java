@@ -3,7 +3,9 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -20,8 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
-import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
-import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
+import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
 
 import com.google.protobuf.ByteString;
 import lombok.Getter;
@@ -33,41 +34,45 @@ import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
 /**
- * Owns the ordered Kafka submission lane for traffic and authoritative liveness declarations.
+ * Owns the ordered Kafka submission lane for traffic and exact connection manifests.
  */
 @Slf4j
 public class CaptureKafkaPublisher implements AutoCloseable {
     public static final String RECORD_TYPE_HEADER = CaptureRecordTypes.RECORD_TYPE_HEADER;
     public static final String TRAFFIC_RECORD_TYPE = CaptureRecordTypes.TRAFFIC_RECORD_TYPE;
     public static final String LIVENESS_RECORD_TYPE = CaptureRecordTypes.LIVENESS_RECORD_TYPE;
-    public static final String NO_MORE_WRITES_RECORD_TYPE =
-        CaptureRecordTypes.NO_MORE_WRITES_RECORD_TYPE;
 
     static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
 
+    private record WriterPartitionKey(String writerNodeId, int partition) {}
+
+    private record ManifestRequest(
+        CaptureRoutingState.PendingAssignment pendingAssignment,
+        CompletableFuture<?> result
+    ) {}
+
     private final Producer<String, byte[]> producer;
     private final String topic;
-    @Getter
-    private final String nodeId;
     @Getter
     private final CaptureRoutingState routingState;
     private final CaptureKafkaWriteGate writeGate;
     private final int payloadSizeLimit;
     private final Clock clock;
     private final ScheduledThreadPoolExecutor executor;
-    private final Map<Integer, Long> nextSnapshotSequence = new HashMap<>();
-    private final Map<Integer, Long> lastControlTimestamp = new HashMap<>();
+    private final Map<WriterPartitionKey, Long> lastControlTimestamp = new HashMap<>();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Object inFlightLock = new Object();
     private final Set<CompletableFuture<RecordMetadata>> inFlightSends =
         Collections.newSetFromMap(new IdentityHashMap<>());
+    private final ArrayDeque<ManifestRequest> manifestRequests = new ArrayDeque<>();
+    private final AtomicBoolean scheduledManifestPending = new AtomicBoolean();
+    private boolean manifestPublicationActive;
     private final ScheduledFuture<?> scheduledSnapshots;
 
     public CaptureKafkaPublisher(
         Producer<String, byte[]> producer,
         String topic,
-        String nodeId,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration snapshotInterval
@@ -75,7 +80,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         this(
             producer,
             topic,
-            nodeId,
             routingState,
             maximumKafkaMessageSize,
             snapshotInterval,
@@ -87,7 +91,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     CaptureKafkaPublisher(
         Producer<String, byte[]> producer,
         String topic,
-        String nodeId,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration snapshotInterval,
@@ -96,7 +99,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         this(
             producer,
             topic,
-            nodeId,
             routingState,
             maximumKafkaMessageSize,
             snapshotInterval,
@@ -108,7 +110,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     CaptureKafkaPublisher(
         Producer<String, byte[]> producer,
         String topic,
-        String nodeId,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration snapshotInterval,
@@ -117,7 +118,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     ) {
         this.producer = Objects.requireNonNull(producer);
         this.topic = Objects.requireNonNull(topic);
-        this.nodeId = Objects.requireNonNull(nodeId);
         this.routingState = Objects.requireNonNull(routingState);
         this.clock = Objects.requireNonNull(clock);
         this.writeGate = Objects.requireNonNull(writeGate);
@@ -143,64 +143,91 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         writeGate.addTerminalFailureListener(this::failPublisher);
     }
 
+    CompletableFuture<String> installAssignment(Collection<Integer> partitions) {
+        var result = new CompletableFuture<String>();
+        executeOnPublisher(() -> {
+            var pendingAssignment = routingState.prepareAssignment(partitions);
+            manifestRequests.addLast(new ManifestRequest(pendingAssignment, result));
+            startNextManifestRequest();
+        }, result);
+        return result;
+    }
+
     public CompletableFuture<RecordMetadata> publishTraffic(
-        String connectionId,
-        int partition,
+        CaptureRoutingState.ConnectionRoute route,
         byte[] payload,
         boolean finalRecord
     ) {
-        final int registeredPartition;
-        try {
-            registeredPartition = routingState.partitionFor(connectionId);
-        } catch (IllegalStateException e) {
-            return CompletableFuture.failedFuture(e);
-        }
-        if (registeredPartition != partition) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException(
-                    "Connection "
-                        + connectionId
-                        + " is registered for partition "
-                        + registeredPartition
-                        + ", not "
-                        + partition
-                )
-            );
-        }
+        Objects.requireNonNull(route);
+        Objects.requireNonNull(payload);
         var producerRecord = new ProducerRecord<>(
             topic,
-            partition,
+            route.partition(),
             null,
-            connectionId,
+            route.connectionId(),
             payload.clone(),
             recordHeaders(TRAFFIC_RECORD_TYPE)
         );
         return enqueueSend(
             producerRecord,
-            finalRecord
-                ? () -> routingState.remove(connectionId, partition).ifPresent(this::publishSelfNoMoreWrites)
-                : () -> {}
+            finalRecord ? () -> routingState.remove(route) : () -> {}
         );
     }
 
     public CompletableFuture<Void> publishLivenessSnapshotNow() {
         var result = new CompletableFuture<Void>();
         executeOnPublisher(() -> {
-            var sends = new ArrayList<CompletableFuture<RecordMetadata>>();
-            for (var partition : routingState.partitionsForSnapshot()) {
-                var sequence = nextSnapshotSequence.merge(partition, 1L, Long::sum) - 1;
-                var emittedAtMillis = allocateControlTimestamp(partition);
-                var chunks = buildSnapshotChunks(
-                    partition,
-                    sequence,
-                    emittedAtMillis,
-                    routingState.snapshot(partition)
+            manifestRequests.addLast(new ManifestRequest(null, result));
+            startNextManifestRequest();
+        }, result);
+        return result;
+    }
+
+    void removeConnectionRegistration(CaptureRoutingState.ConnectionRoute route) {
+        routingState.remove(route);
+    }
+
+    private void startNextManifestRequest() {
+        if (manifestPublicationActive) {
+            return;
+        }
+        var terminalFailure = failure.get();
+        if (terminalFailure == null && closed.get()) {
+            terminalFailure = new IllegalStateException("Capture Kafka publisher is closed");
+        }
+        if (terminalFailure != null) {
+            while (!manifestRequests.isEmpty()) {
+                manifestRequests.removeFirst().result().completeExceptionally(terminalFailure);
+            }
+            return;
+        }
+        var request = manifestRequests.pollFirst();
+        if (request == null) {
+            return;
+        }
+        manifestPublicationActive = true;
+        final List<CaptureRoutingState.PreparedManifest> manifests;
+        try {
+            manifests = request.pendingAssignment() == null
+                ? routingState.preparePeriodicManifests()
+                : routingState.prepareInitialManifests(request.pendingAssignment());
+        } catch (Throwable t) {
+            finishManifestRequest(request, t);
+            return;
+        }
+
+        var sends = new ArrayList<CompletableFuture<RecordMetadata>>();
+        try {
+            for (var manifest : manifests) {
+                var emittedAtMillis = allocateControlTimestamp(
+                    manifest.writerNodeId(),
+                    manifest.partition()
                 );
-                for (var chunk : chunks) {
-                    var key = nodeId + ":liveness:" + partition;
+                for (var chunk : buildSnapshotChunks(manifest, emittedAtMillis)) {
+                    var key = manifest.writerNodeId() + ":liveness:" + manifest.partition();
                     var producerRecord = new ProducerRecord<>(
                         topic,
-                        partition,
+                        manifest.partition(),
                         null,
                         key,
                         chunk.toByteArray(),
@@ -209,114 +236,63 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                     sends.add(sendFromPublisherThread(producerRecord, () -> {}));
                 }
             }
-            CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
-                .whenComplete((ignored, throwable) -> {
-                    if (throwable == null) {
-                        result.complete(null);
-                    } else {
-                        result.completeExceptionally(throwable);
-                    }
-                });
-        }, result);
-        return result;
-    }
-
-    CompletableFuture<RecordMetadata> publishSelfNoMoreWrites(CaptureRoutingState.SelfRelease release) {
-        var result = new CompletableFuture<RecordMetadata>();
-        executeOnPublisher(() -> {
-            boolean submitted = routingState.submitSelfReleaseIfCurrent(release, () ->
-                sendFromPublisherThread(
-                    noMoreWritesRecord(nodeId, release.partition(), nodeId),
-                    () -> routingState.completeSelfRelease(release)
-                ).whenComplete((metadata, throwable) -> completeFrom(metadata, throwable, result))
-            );
-            if (!submitted) {
-                result.complete(null);
-            }
-        }, result);
-        return result;
-    }
-
-    void removeConnectionRegistration(String connectionId, int partition) {
-        routingState.remove(connectionId, partition).ifPresent(this::publishSelfNoMoreWrites);
-    }
-
-    CompletableFuture<Void> prepareForGracefulShutdown() {
-        var result = new CompletableFuture<Void>();
-        executeOnPublisher(() -> {
-            producer.flush();
-            executeInternal(() -> publishShutdownDeclarations(result), result);
-        }, result);
-        return result;
-    }
-
-    private void publishShutdownDeclarations(CompletableFuture<Void> result) {
-        try {
-            var sends = routingState.beginGracefulShutdown()
-                .stream()
-                .map(partition ->
-                    sendFromPublisherThread(noMoreWritesRecord(nodeId, partition, nodeId), () -> {})
-                )
-                .toArray(CompletableFuture[]::new);
-            CompletableFuture.allOf(sends)
-                .whenComplete((ignored, throwable) -> {
-                    if (throwable == null) {
-                        result.complete(null);
-                    } else {
-                        result.completeExceptionally(throwable);
-                    }
-                });
         } catch (Throwable t) {
-            result.completeExceptionally(t);
+            finishManifestRequest(request, t);
+            return;
+        }
+
+        CompletableFuture.allOf(sends.toArray(CompletableFuture[]::new))
+            .whenComplete((ignored, throwable) ->
+                finishManifestRequestOnPublisherThread(request, throwable)
+            );
+    }
+
+    private void finishManifestRequestOnPublisherThread(
+        ManifestRequest request,
+        Throwable failure
+    ) {
+        try {
+            executor.execute(() -> finishManifestRequest(request, failure));
+        } catch (RejectedExecutionException e) {
+            request.result().completeExceptionally(failure == null ? e : failure);
         }
     }
 
-    private ProducerRecord<String, byte[]> noMoreWritesRecord(
-        String finishedNodeId,
-        int partition,
-        String declaredBy
-    ) {
-        var declaration = ProxyNoMoreWrites.newBuilder()
-            .setNodeId(finishedNodeId)
-            .setPartition(partition)
-            .setDeclaredBy(declaredBy)
-            .setEmittedAtMillis(allocateControlTimestamp(partition))
-            .build();
-        return new ProducerRecord<>(
-            topic,
-            partition,
-            null,
-            finishedNodeId + ":no-more-writes:" + partition,
-            declaration.toByteArray(),
-            recordHeaders(NO_MORE_WRITES_RECORD_TYPE)
-        );
-    }
-
-    private static <T> void completeFrom(
-        T value,
-        Throwable throwable,
-        CompletableFuture<T> result
-    ) {
-        if (throwable == null) {
-            result.complete(value);
-        } else {
-            result.completeExceptionally(throwable);
+    @SuppressWarnings("unchecked")
+    private void finishManifestRequest(ManifestRequest request, Throwable requestFailure) {
+        if (requestFailure == null) {
+            try {
+                if (request.pendingAssignment() != null) {
+                    routingState.activateAssignment(request.pendingAssignment());
+                    ((CompletableFuture<String>) request.result()).complete(
+                        request.pendingAssignment().writerNodeId()
+                    );
+                } else {
+                    ((CompletableFuture<Void>) request.result()).complete(null);
+                }
+            } catch (Throwable t) {
+                requestFailure = t;
+            }
         }
+        if (requestFailure != null) {
+            request.result().completeExceptionally(requestFailure);
+            failPublisher(requestFailure);
+        }
+        manifestPublicationActive = false;
+        startNextManifestRequest();
     }
 
-    List<ProxyLivenessSnapshotChunk> buildSnapshotChunks(
-        int partition,
-        long sequence,
-        long emittedAtMillis,
-        List<String> openConnections
+    List<LivenessSnapshotChunk> buildSnapshotChunks(
+        CaptureRoutingState.PreparedManifest manifest,
+        long emittedAtMillis
     ) {
         var chunkConnections = new ArrayList<List<ByteString>>();
         var current = new ArrayList<ByteString>();
-        for (var connection : openConnections) {
+        for (var connection : manifest.connectionIds()) {
             var encoded = ByteString.copyFromUtf8(connection);
             var candidate = new ArrayList<>(current);
             candidate.add(encoded);
-            if (estimatedChunkSize(partition, sequence, emittedAtMillis, candidate) <= payloadSizeLimit) {
+            if (estimatedChunkSize(manifest, emittedAtMillis, candidate) <= payloadSizeLimit) {
                 current.add(encoded);
             } else {
                 if (current.isEmpty()) {
@@ -334,12 +310,12 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         }
 
         int chunkCount = chunkConnections.size();
-        var chunks = new ArrayList<ProxyLivenessSnapshotChunk>(chunkCount);
+        var chunks = new ArrayList<LivenessSnapshotChunk>(chunkCount);
         for (int i = 0; i < chunkCount; ++i) {
-            var chunk = baseSnapshotChunk(partition, sequence, emittedAtMillis)
+            var chunk = baseSnapshotChunk(manifest, emittedAtMillis)
                 .setChunkIndex(i)
                 .setChunkCount(chunkCount)
-                .addAllOpenConnections(chunkConnections.get(i))
+                .addAllConnectionIds(chunkConnections.get(i))
                 .build();
             if (chunk.getSerializedSize() > payloadSizeLimit) {
                 throw new IllegalStateException("Liveness snapshot chunk exceeds Kafka payload limit");
@@ -349,38 +325,37 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return List.copyOf(chunks);
     }
 
-    private long allocateControlTimestamp(int partition) {
-        var observed = clock.millis();
-        var previous = lastControlTimestamp.get(partition);
-        var allocated = previous == null || observed > previous ? observed : Math.incrementExact(previous);
-        lastControlTimestamp.put(partition, allocated);
-        return allocated;
-    }
-
     private int estimatedChunkSize(
-        int partition,
-        long sequence,
+        CaptureRoutingState.PreparedManifest manifest,
         long emittedAtMillis,
         List<ByteString> connections
     ) {
-        return baseSnapshotChunk(partition, sequence, emittedAtMillis)
+        return baseSnapshotChunk(manifest, emittedAtMillis)
             .setChunkIndex(Integer.MAX_VALUE)
             .setChunkCount(Integer.MAX_VALUE)
-            .addAllOpenConnections(connections)
+            .addAllConnectionIds(connections)
             .build()
             .getSerializedSize();
     }
 
-    private ProxyLivenessSnapshotChunk.Builder baseSnapshotChunk(
-        int partition,
-        long sequence,
+    private LivenessSnapshotChunk.Builder baseSnapshotChunk(
+        CaptureRoutingState.PreparedManifest manifest,
         long emittedAtMillis
     ) {
-        return ProxyLivenessSnapshotChunk.newBuilder()
-            .setNodeId(nodeId)
-            .setPartition(partition)
-            .setSnapshotSequence(sequence)
+        return LivenessSnapshotChunk.newBuilder()
+            .setWriterNodeId(manifest.writerNodeId())
+            .setPartition(manifest.partition())
+            .setManifestCycle(manifest.manifestCycle())
             .setEmittedAtMillis(emittedAtMillis);
+    }
+
+    private long allocateControlTimestamp(String writerNodeId, int partition) {
+        var key = new WriterPartitionKey(writerNodeId, partition);
+        var observed = clock.millis();
+        var previous = lastControlTimestamp.get(key);
+        var allocated = previous == null || observed > previous ? observed : Math.incrementExact(previous);
+        lastControlTimestamp.put(key, allocated);
+        return allocated;
     }
 
     private CompletableFuture<RecordMetadata> enqueueSend(
@@ -388,14 +363,11 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         Runnable acknowledgedAction
     ) {
         var result = new CompletableFuture<RecordMetadata>();
-        executeOnPublisher(() -> sendFromPublisherThread(producerRecord, acknowledgedAction)
-            .whenComplete((metadata, throwable) -> {
-                if (throwable == null) {
-                    result.complete(metadata);
-                } else {
-                    result.completeExceptionally(throwable);
-                }
-            }), result);
+        executeOnPublisher(() ->
+            sendFromPublisherThread(producerRecord, acknowledgedAction)
+                .whenComplete((metadata, throwable) -> completeFrom(metadata, throwable, result)),
+            result
+        );
         return result;
     }
 
@@ -495,7 +467,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             return;
         }
         try {
-            executeInternal(() -> {
+            executor.execute(() -> {
                 var taskFailure = failure.get();
                 if (taskFailure == null) {
                     taskFailure = writeGate.failureIfNotWritable();
@@ -511,22 +483,18 @@ public class CaptureKafkaPublisher implements AutoCloseable {
                         result.completeExceptionally(t);
                     }
                 }
-            }, result);
-        } catch (RejectedExecutionException e) {
-            result.completeExceptionally(e);
-        }
-    }
-
-    private void executeInternal(Runnable action, CompletableFuture<?> result) {
-        try {
-            executor.execute(action);
+            });
         } catch (RejectedExecutionException e) {
             result.completeExceptionally(e);
         }
     }
 
     private void publishScheduledSnapshot() {
+        if (!scheduledManifestPending.compareAndSet(false, true)) {
+            return;
+        }
         publishLivenessSnapshotNow().whenComplete((ignored, throwable) -> {
+            scheduledManifestPending.set(false);
             if (throwable != null) {
                 log.atError()
                     .setCause(throwable)
@@ -548,9 +516,17 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         }
         pending.forEach(send -> send.completeExceptionally(throwable));
         scheduledSnapshots.cancel(false);
+        try {
+            executor.execute(this::startNextManifestRequest);
+        } catch (RejectedExecutionException e) {
+            log.atWarn()
+                .setCause(e)
+                .setMessage("Publisher executor stopped before queued manifest requests were failed")
+                .log();
+        }
         log.atError()
             .setCause(throwable)
-            .setMessage("Capture Kafka publisher failed closed; no more liveness declarations will be sent")
+            .setMessage("Capture Kafka publisher failed closed; no more manifests will be sent")
             .log();
     }
 
@@ -565,7 +541,10 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         )));
     }
 
-    public static boolean isRecordType(Iterable<org.apache.kafka.common.header.Header> headers, String expected) {
+    public static boolean isRecordType(
+        Iterable<org.apache.kafka.common.header.Header> headers,
+        String expected
+    ) {
         for (var header : headers) {
             if (RECORD_TYPE_HEADER.equals(header.key())
                 && expected.equals(new String(header.value(), StandardCharsets.UTF_8))) {
@@ -575,12 +554,25 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return false;
     }
 
+    private static <T> void completeFrom(
+        T value,
+        Throwable throwable,
+        CompletableFuture<T> result
+    ) {
+        if (throwable == null) {
+            result.complete(value);
+        } else {
+            result.completeExceptionally(throwable);
+        }
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
         scheduledSnapshots.cancel(false);
+        routingState.beginShutdown();
         try {
             var flush = new CompletableFuture<Void>();
             try {

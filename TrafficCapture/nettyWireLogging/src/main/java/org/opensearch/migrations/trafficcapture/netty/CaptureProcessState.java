@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.netty;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,25 @@ public final class CaptureProcessState {
 
     public synchronized boolean isPassThrough() {
         return state == State.PASS_THROUGH;
+    }
+
+    public synchronized boolean isTerminating() {
+        return state == State.TERMINATING;
+    }
+
+    /**
+     * Linearizes source forwarding with the fail-closed transition.
+     *
+     * @return true when the forwarding action ran; false when process termination had already begun
+     */
+    public synchronized boolean forwardSourceTrafficIfPermitted(Callable<Void> forwarding)
+        throws Exception {
+        Objects.requireNonNull(forwarding);
+        if (state == State.TERMINATING) {
+            return false;
+        }
+        forwarding.call();
+        return true;
     }
 
     public void addTerminationListener(Consumer<Throwable> listener) {
@@ -88,5 +108,29 @@ public final class CaptureProcessState {
             listeners.forEach(listener -> listener.accept(failure));
         }
         return resultingState;
+    }
+
+    /**
+     * Terminates the process regardless of the configured capture-failure policy because local
+     * execution ownership is no longer trustworthy.
+     */
+    public State unstableProcessFailed(Throwable failure) {
+        List<Consumer<Throwable>> listeners;
+        synchronized (this) {
+            Objects.requireNonNull(failure);
+            if (state == State.TERMINATING) {
+                return state;
+            }
+            captureFailure = failure;
+            state = State.TERMINATING;
+            listeners = List.copyOf(terminationListeners);
+        }
+
+        log.atError()
+            .setCause(failure)
+            .setMessage("Proxy process execution is unstable; terminating immediately")
+            .log();
+        listeners.forEach(listener -> listener.accept(failure));
+        return State.TERMINATING;
     }
 }

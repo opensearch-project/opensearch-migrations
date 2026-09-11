@@ -531,7 +531,6 @@ public class CaptureProxy {
         );
 
         var sslEngineSupplier = buildSslEngineSupplier(params);
-        var proxy = new NettyScanningHttpProxy(params.frontsidePort);
         var captureProcessState = new CaptureProcessState(params.captureFailurePolicy);
         captureProcessState.addTerminationListener(
             new CaptureFailureTerminator(
@@ -540,6 +539,10 @@ public class CaptureProxy {
                 LogManager::shutdown,
                 code -> Runtime.getRuntime().halt(code)
             )
+        );
+        var proxy = new NettyScanningHttpProxy(
+            params.frontsidePort,
+            captureProcessState::unstableProcessFailed
         );
         var connectionCaptureFactory = getConnectionCaptureFactory(params, ctx, captureProcessState);
         try {
@@ -602,97 +605,6 @@ public class CaptureProxy {
     }
 
     @SuppressWarnings("java:S4030") // Collections removeStrings and addBufs are incorrectly reported as being unused
-    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
-                                                                BacksideConnectionPool backsideConnectionPool,
-                                                                Supplier<SSLEngine> sslEngineSupplier,
-                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
-                                                                List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory<T> connectionFactory)
-    {
-        return buildProxyChannelInitializer(
-            rootContext,
-            backsideConnectionPool,
-            sslEngineSupplier,
-            headerCapturePredicate,
-            headerOverridesArgs,
-            connectionFactory,
-            Duration.ZERO,
-            CaptureFailurePolicy.FAIL_OPEN
-        );
-    }
-
-    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
-                                                                BacksideConnectionPool backsideConnectionPool,
-                                                                Supplier<SSLEngine> sslEngineSupplier,
-                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
-                                                                List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory<T> connectionFactory,
-                                                                Duration maximumRequestAssemblyDuration)
-    {
-        return buildProxyChannelInitializer(
-            rootContext,
-            backsideConnectionPool,
-            sslEngineSupplier,
-            headerCapturePredicate,
-            headerOverridesArgs,
-            connectionFactory,
-            new IncompleteRequestLimits(
-                maximumRequestAssemblyDuration,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
-            ),
-            CaptureFailurePolicy.FAIL_OPEN
-        );
-    }
-
-    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
-                                                                BacksideConnectionPool backsideConnectionPool,
-                                                                Supplier<SSLEngine> sslEngineSupplier,
-                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
-                                                                List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory<T> connectionFactory,
-                                                                Duration maximumRequestAssemblyDuration,
-                                                                CaptureFailurePolicy captureFailurePolicy)
-    {
-        return buildProxyChannelInitializer(
-            rootContext,
-            backsideConnectionPool,
-            sslEngineSupplier,
-            headerCapturePredicate,
-            headerOverridesArgs,
-            connectionFactory,
-            new IncompleteRequestLimits(
-                maximumRequestAssemblyDuration,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
-            ),
-            captureFailurePolicy
-        );
-    }
-
-    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
-                                                                BacksideConnectionPool backsideConnectionPool,
-                                                                Supplier<SSLEngine> sslEngineSupplier,
-                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
-                                                                List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory<T> connectionFactory,
-                                                                IncompleteRequestLimits incompleteRequestLimits,
-                                                                CaptureFailurePolicy captureFailurePolicy)
-    {
-        return buildProxyChannelInitializer(
-            rootContext,
-            backsideConnectionPool,
-            sslEngineSupplier,
-            headerCapturePredicate,
-            headerOverridesArgs,
-            connectionFactory,
-            incompleteRequestLimits,
-            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler
-                .DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(captureFailurePolicy)
-        );
-    }
-
     static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
                                                                 BacksideConnectionPool backsideConnectionPool,
                                                                 Supplier<SSLEngine> sslEngineSupplier,

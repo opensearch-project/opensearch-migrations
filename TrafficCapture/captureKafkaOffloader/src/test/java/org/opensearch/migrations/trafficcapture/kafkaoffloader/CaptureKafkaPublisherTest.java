@@ -9,8 +9,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
-import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
+import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
 
 import org.apache.kafka.clients.producer.MockProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -25,148 +24,213 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CaptureKafkaPublisherTest {
     private static final String TOPIC = "traffic";
-    private static final String NODE_ID = "node";
+    private static final String ACTIVATION_ID = "activation";
     private static final int MESSAGE_SIZE = 1024;
 
     @Test
-    void finalRecordMustBeAcknowledgedBeforeACompleteManifestCanOmitConnection() throws Exception {
+    void initialManifestMustBeAcknowledgedBeforeAssignmentBecomesUsable() throws Exception {
         var producer = producer(false);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-        registry.register("connection", 0);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
 
-        var finalSend = publisher.publishTraffic("connection", 0, new byte[] { 1 }, true);
+        var install = publisher.installAssignment(List.of(0));
         awaitHistorySize(producer, 1);
-        var manifestBeforeAcknowledgement = publisher.publishLivenessSnapshotNow();
-        awaitHistorySize(producer, 2);
 
-        assertEquals(List.of("connection"), registry.snapshot(0));
-        assertFalse(finalSend.isDone());
-        assertEquals(List.of("connection"), openConnections(producer.history().get(1)));
+        assertFalse(install.isDone());
+        assertEquals(List.of(), routingState.assignedPartitions());
+        assertThrows(IllegalStateException.class, () -> routingState.admitConnection("too-early"));
+        var initialManifest = snapshotChunk(producer.history().get(0));
+        assertEquals("activation:1", initialManifest.getWriterNodeId());
+        assertEquals(0, initialManifest.getManifestCycle());
+        assertEquals(0, initialManifest.getConnectionIdsCount());
+
+        assertTrue(producer.completeNext());
+        assertEquals("activation:1", install.get(1, TimeUnit.SECONDS));
+        assertEquals(List.of(0), routingState.assignedPartitions());
+        publisher.close();
+    }
+
+    @Test
+    void replacementUsesANewWriterOnlyAfterItsInitialManifestIsAcknowledged() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+        var beforeReplacement = routingState.admitConnection("before");
+
+        var replacement = publisher.installAssignment(List.of(0));
+        awaitHistorySize(producer, 2);
+        var whileReplacementIsPending = routingState.admitConnection("during");
+
+        assertEquals("activation:1", beforeReplacement.writerNodeId());
+        assertEquals("activation:1", whileReplacementIsPending.writerNodeId());
+        assertEquals("activation:2", snapshotChunk(producer.history().get(1)).getWriterNodeId());
+
+        assertTrue(producer.completeNext());
+        assertEquals("activation:2", replacement.get(1, TimeUnit.SECONDS));
+        assertEquals("activation:2", routingState.admitConnection("after").writerNodeId());
+        publisher.close();
+    }
+
+    @Test
+    void finalRecordAcknowledgementPrecedesManifestOmission() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+        var route = routingState.admitConnection("connection");
+
+        var finalSend = publisher.publishTraffic(route, new byte[] { 1 }, true);
+        awaitHistorySize(producer, 2);
+        var manifestBeforeAcknowledgement = publisher.publishLivenessSnapshotNow();
+        awaitHistorySize(producer, 3);
+
+        assertEquals(List.of("connection"), connectionIds(producer.history().get(2)));
+        assertEquals(List.of("connection"), routingState.snapshot(route.writerNodeId(), 0));
 
         assertTrue(producer.completeNext());
         finalSend.get(1, TimeUnit.SECONDS);
-        assertEquals(List.of(), registry.snapshot(0));
+        assertEquals(List.of(), routingState.snapshot(route.writerNodeId(), 0));
         assertTrue(producer.completeNext());
         manifestBeforeAcknowledgement.get(1, TimeUnit.SECONDS);
 
         var manifestAfterAcknowledgement = publisher.publishLivenessSnapshotNow();
-        awaitHistorySize(producer, 3);
-        assertEquals(List.of(), openConnections(producer.history().get(2)));
+        awaitHistorySize(producer, 4);
+        assertEquals(List.of(), connectionIds(producer.history().get(3)));
         assertTrue(producer.completeNext());
         manifestAfterAcknowledgement.get(1, TimeUnit.SECONDS);
         publisher.close();
     }
 
     @Test
-    void registrationPrecedesBothFirstTrafficAndAnyLaterManifestCopy() throws Exception {
-        var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
+    void completeManifestPublicationsDoNotOverlap() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
 
-        registry.register("connection", 0);
-        publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
-        publisher.publishTraffic("connection", 0, new byte[] { 1 }, false)
-            .get(1, TimeUnit.SECONDS);
+        var first = publisher.publishLivenessSnapshotNow();
+        var second = publisher.publishLivenessSnapshotNow();
+        awaitHistorySize(producer, 2);
+        assertEquals(2, producer.history().size());
+        assertFalse(first.isDone());
+        assertFalse(second.isDone());
 
-        assertEquals(List.of("connection"), openConnections(producer.history().get(0)));
-        assertTrue(CaptureKafkaPublisher.isRecordType(
-            producer.history().get(1).headers(),
-            CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-        ));
+        assertTrue(producer.completeNext());
+        first.get(1, TimeUnit.SECONDS);
+        awaitHistorySize(producer, 3);
+        assertEquals(1, snapshotChunk(producer.history().get(1)).getManifestCycle());
+        assertEquals(2, snapshotChunk(producer.history().get(2)).getManifestCycle());
+
+        assertTrue(producer.completeNext());
+        second.get(1, TimeUnit.SECONDS);
         publisher.close();
     }
 
     @Test
-    void snapshotsCoverEveryTopicPartitionIncludingEmptySets() throws Exception {
+    void periodicManifestsCoverActiveAndDrainingWriterIdentities() throws Exception {
         var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(3);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-        var connection = "connection";
-        int connectionPartition = registry.admitConnection(connection);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
+        var oldRoute = routingState.admitConnection("old");
+        publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
+        var newRoute = routingState.admitConnection("new");
 
         publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
 
-        assertEquals(3, producer.history().size());
-        for (var record : producer.history()) {
-            assertTrue(CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
-            ));
-            var chunk = ProxyLivenessSnapshotChunk.parseFrom(record.value());
-            assertEquals(record.partition(), chunk.getPartition());
-            assertEquals(0, chunk.getChunkIndex());
-            assertEquals(1, chunk.getChunkCount());
-            if (record.partition() == connectionPartition) {
-                assertEquals(List.of(connection), chunk.getOpenConnectionsList()
-                    .stream()
-                    .map(com.google.protobuf.ByteString::toStringUtf8)
-                    .toList());
-            } else {
-                assertEquals(0, chunk.getOpenConnectionsCount());
-            }
-        }
-        publisher.close();
-    }
-
-    @Test
-    void snapshotsCoverAssignedPartitionsAndRevokedPartitionsThatAreStillDraining() throws Exception {
-        var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(3);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-        registry.register("draining", 2);
-        registry.replaceAssignedPartitions(List.of(0, 1));
-
-        publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
-
-        assertEquals(List.of(0, 1, 2), producer.history().stream()
-            .map(ProducerRecord::partition)
+        var periodicRecords = producer.history().subList(2, 4);
+        assertEquals(List.of("activation:1", "activation:2"), periodicRecords.stream()
+            .map(record -> {
+                try {
+                    return snapshotChunk(record).getWriterNodeId();
+                } catch (Exception e) {
+                    throw new AssertionError(e);
+                }
+            })
             .toList());
-        assertEquals(
-            List.of("draining"),
-            openConnections(producer.history().get(2))
-        );
+        assertEquals(List.of("old"), connectionIds(periodicRecords.get(0)));
+        assertEquals(List.of("new"), connectionIds(periodicRecords.get(1)));
+        assertEquals("activation:1", oldRoute.writerNodeId());
+        assertEquals("activation:2", newRoute.writerNodeId());
         publisher.close();
     }
 
     @Test
-    void snapshotChunksAreCompleteBoundedAndNonInterleaved() throws Exception {
+    void snapshotChunksUseStableProtocolFieldsAndStayWithinThePayloadLimit() throws Exception {
         var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
         for (int i = 0; i < 40; ++i) {
-            registry.register("connection-" + i + "-" + "x".repeat(30), 0);
+            routingState.admitConnection("connection-" + i + "-" + "x".repeat(30));
         }
 
         publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
 
-        assertTrue(producer.history().size() > 1);
-        int expectedChunks = producer.history().size();
-        long expectedTimestamp = snapshotChunk(producer.history().get(0)).getEmittedAtMillis();
+        var periodicRecords = producer.history().subList(1, producer.history().size());
+        assertTrue(periodicRecords.size() > 1);
+        int expectedChunks = periodicRecords.size();
         for (int i = 0; i < expectedChunks; ++i) {
-            var record = producer.history().get(i);
+            var record = periodicRecords.get(i);
             var chunk = snapshotChunk(record);
+            assertEquals("activation:1", chunk.getWriterNodeId());
+            assertEquals(0, chunk.getPartition());
+            assertEquals(1, chunk.getManifestCycle());
             assertEquals(i, chunk.getChunkIndex());
             assertEquals(expectedChunks, chunk.getChunkCount());
-            assertEquals(expectedTimestamp, chunk.getEmittedAtMillis());
             assertTrue(record.value().length <= MESSAGE_SIZE - KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES);
         }
         publisher.close();
     }
 
     @Test
-    void snapshotTimestampsIncreaseWhenTheClockStallsOrMovesBackward() throws Exception {
+    void trafficUsesTheImmutableRouteSelectedAtConnectionAdmission() throws Exception {
         var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry, new SequenceClock(1234, 1234, 1200));
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 3);
+        var publisher = publisher(producer, routingState);
+        publisher.installAssignment(List.of(0, 2)).get(1, TimeUnit.SECONDS);
+        var route = routingState.admitConnection("connection");
 
-        publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
+        publisher.publishTraffic(route, new byte[] { 1, 2 }, false)
+            .get(1, TimeUnit.SECONDS);
+
+        var trafficRecord = producer.history().get(2);
+        assertEquals(route.partition(), trafficRecord.partition());
+        assertTrue(CaptureKafkaPublisher.isRecordType(
+            trafficRecord.headers(),
+            CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
+        ));
+        publisher.close();
+    }
+
+    @Test
+    void trafficFailureDoesNotRemoveTheConnection() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(producer, routingState);
+        installAndAcknowledge(producer, publisher, List.of(0));
+        var route = routingState.admitConnection("connection");
+
+        var finalSend = publisher.publishTraffic(route, new byte[] { 1 }, true);
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.errorNext(new IllegalStateException("send failed")));
+
+        assertThrows(ExecutionException.class, () -> finalSend.get(1, TimeUnit.SECONDS));
+        assertEquals(List.of("connection"), routingState.snapshot(route.writerNodeId(), 0));
+        publisher.close();
+    }
+
+    @Test
+    void diagnosticManifestTimestampsIncreaseWhenClockMovesBackward() throws Exception {
+        var producer = producer(true);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var publisher = publisher(
+            producer,
+            routingState,
+            new SequenceClock(1234, 1234, 1200)
+        );
+        publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
         publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
         publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
 
@@ -176,176 +240,26 @@ class CaptureKafkaPublisherTest {
         publisher.close();
     }
 
-    @Test
-    void trafficFailureKeepsConnectionOpenAndStopsDeclarations() throws Exception {
-        var producer = producer(false);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-        registry.register("connection", 0);
-
-        var finalSend = publisher.publishTraffic("connection", 0, new byte[] { 1 }, true);
-        awaitHistorySize(producer, 1);
-        assertTrue(producer.errorNext(new IllegalStateException("send failed")));
-
-        assertThrows(ExecutionException.class, () -> finalSend.get(1, TimeUnit.SECONDS));
-        assertEquals(List.of("connection"), registry.snapshot(0));
-        var snapshot = publisher.publishLivenessSnapshotNow();
-        assertThrows(ExecutionException.class, () -> snapshot.get(1, TimeUnit.SECONDS));
-        assertEquals(1, producer.history().size());
-        publisher.close();
-    }
-
-    @Test
-    void terminalGateFailsInFlightTrafficWithoutRemovingTheConnection() throws Exception {
-        var producer = producer(false);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var registry = routingState(plan);
-        var gate = new CaptureKafkaWriteGate();
-        var publisher = publisher(producer, plan, registry, gate);
-        registry.register("connection", 0);
-
-        var finalSend = publisher.publishTraffic("connection", 0, new byte[] { 1 }, true);
-        awaitHistorySize(producer, 1);
-        var terminalFailure = new IllegalStateException("membership lost");
-        gate.trip(terminalFailure);
-
-        var failure = assertThrows(
-            ExecutionException.class,
-            () -> finalSend.get(1, TimeUnit.SECONDS)
-        );
-        assertEquals(terminalFailure, failure.getCause());
-        assertEquals(List.of("connection"), registry.snapshot(0));
-
-        assertTrue(producer.completeNext());
-        assertEquals(List.of("connection"), registry.snapshot(0));
-        publisher.close();
-    }
-
-    @Test
-    void trafficRecordsUseExplicitKafkaPartitionAndTypeHeader() throws Exception {
-        var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(8);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-        var connection = "connection";
-        int partition = registry.admitConnection(connection);
-
-        publisher.publishTraffic(connection, partition, new byte[] { 1, 2 }, false)
-            .get(1, TimeUnit.SECONDS);
-
-        ProducerRecord<String, byte[]> record = producer.history().get(0);
-        assertEquals(partition, record.partition());
-        assertTrue(CaptureKafkaPublisher.isRecordType(
-            record.headers(),
-            CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-        ));
-        publisher.close();
-    }
-
-    @Test
-    void trafficUsesThePartitionStoredAtAdmission() throws Exception {
-        var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(8);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-        var connection = "connection";
-        int admittedPartition = registry.admitConnection(connection);
-        int differentPartition = (admittedPartition + 1) % plan.getTopicPartitionCount();
-
-        publisher.publishTraffic(connection, admittedPartition, new byte[] { 1, 2 }, false)
-            .get(1, TimeUnit.SECONDS);
-
-        assertEquals(admittedPartition, producer.history().get(0).partition());
-        assertThrows(
-            ExecutionException.class,
-            () -> publisher.publishTraffic(connection, differentPartition, new byte[] { 3 }, false)
-                .get(1, TimeUnit.SECONDS)
-        );
-        publisher.close();
-    }
-
-    @Test
-    void revokedPartitionSelfReleaseIsOrderedAfterTheFinalTrafficAcknowledgement() throws Exception {
-        var producer = producer(false);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var routingState = routingState(plan);
-        var publisher = publisher(producer, plan, routingState);
-        routingState.register("connection", 0);
-        assertEquals(List.of(), routingState.revokePartitions(List.of(0)));
-
-        var finalSend = publisher.publishTraffic("connection", 0, new byte[] { 1 }, true);
-        awaitHistorySize(producer, 1);
-        assertTrue(producer.completeNext());
-        finalSend.get(1, TimeUnit.SECONDS);
-        awaitHistorySize(producer, 2);
-
-        var releaseRecord = producer.history().get(1);
-        assertTrue(CaptureKafkaPublisher.isRecordType(
-            releaseRecord.headers(),
-            CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
-        ));
-        var release = ProxyNoMoreWrites.parseFrom(releaseRecord.value());
-        assertEquals(NODE_ID, release.getNodeId());
-        assertEquals(NODE_ID, release.getDeclaredBy());
-        assertEquals(0, release.getPartition());
-        assertTrue(producer.completeNext());
-        publisher.close();
-    }
-
-    @Test
-    void gracefulShutdownDeclaresEveryPartitionAfterAllConnectionsDrain() throws Exception {
-        var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(3);
-        var routingState = routingState(plan);
-        var publisher = publisher(producer, plan, routingState);
-        routingState.register("connection", 1);
-        publisher.publishTraffic("connection", 1, new byte[] { 1 }, true)
-            .get(1, TimeUnit.SECONDS);
-
-        publisher.prepareForGracefulShutdown().get(1, TimeUnit.SECONDS);
-
-        assertEquals(4, producer.history().size());
-        assertTrue(CaptureKafkaPublisher.isRecordType(
-            producer.history().get(0).headers(),
-            CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-        ));
-        assertEquals(
-            List.of(0, 1, 2),
-            producer.history().subList(1, 4).stream().map(ProducerRecord::partition).toList()
-        );
-        for (var record : producer.history().subList(1, 4)) {
-            var release = ProxyNoMoreWrites.parseFrom(record.value());
-            assertEquals(NODE_ID, release.getNodeId());
-            assertEquals(NODE_ID, release.getDeclaredBy());
+    private static void installAndAcknowledge(
+        MockProducer<String, byte[]> producer,
+        CaptureKafkaPublisher publisher,
+        List<Integer> partitions
+    ) throws Exception {
+        int expectedHistory = producer.history().size() + partitions.size();
+        var install = publisher.installAssignment(partitions);
+        awaitHistorySize(producer, expectedHistory);
+        for (int i = 0; i < partitions.size(); ++i) {
+            assertTrue(producer.completeNext());
         }
-        publisher.close();
-    }
-
-    @Test
-    void gracefulShutdownRefusesToDeclareWhileAConnectionIsStillOpen() {
-        var producer = producer(true);
-        var plan = TrafficTopicMetadata.forTopic(1);
-        var routingState = routingState(plan);
-        var publisher = publisher(producer, plan, routingState);
-        routingState.register("connection", 0);
-
-        assertThrows(
-            ExecutionException.class,
-            () -> publisher.prepareForGracefulShutdown().get(1, TimeUnit.SECONDS)
-        );
-        assertEquals(0, producer.history().size());
-        publisher.close();
+        install.get(1, TimeUnit.SECONDS);
     }
 
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
-        TrafficTopicMetadata plan,
         CaptureRoutingState routingState
     ) {
         return publisher(
             producer,
-            plan,
             routingState,
             Clock.fixed(Instant.ofEpochMilli(1234), ZoneOffset.UTC)
         );
@@ -353,43 +267,16 @@ class CaptureKafkaPublisherTest {
 
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
-        TrafficTopicMetadata plan,
         CaptureRoutingState routingState,
         Clock clock
     ) {
         return new CaptureKafkaPublisher(
             producer,
             TOPIC,
-            NODE_ID,
             routingState,
             MESSAGE_SIZE,
             Duration.ofDays(1),
             clock
-        );
-    }
-
-    private static CaptureKafkaPublisher publisher(
-        MockProducer<String, byte[]> producer,
-        TrafficTopicMetadata plan,
-        CaptureRoutingState routingState,
-        CaptureKafkaWriteGate writeGate
-    ) {
-        return new CaptureKafkaPublisher(
-            producer,
-            TOPIC,
-            NODE_ID,
-            routingState,
-            MESSAGE_SIZE,
-            Duration.ofDays(1),
-            Clock.fixed(Instant.ofEpochMilli(1234), ZoneOffset.UTC),
-            writeGate
-        );
-    }
-
-    private static CaptureRoutingState routingState(TrafficTopicMetadata plan) {
-        return new CaptureRoutingState(
-            plan.getTopicPartitionCount(),
-            java.util.stream.IntStream.range(0, plan.getTopicPartitionCount()).boxed().toList()
         );
     }
 
@@ -402,17 +289,17 @@ class CaptureKafkaPublisherTest {
         );
     }
 
-    private static List<String> openConnections(ProducerRecord<String, byte[]> record) throws Exception {
+    private static List<String> connectionIds(ProducerRecord<String, byte[]> record) throws Exception {
         return snapshotChunk(record)
-            .getOpenConnectionsList()
+            .getConnectionIdsList()
             .stream()
             .map(com.google.protobuf.ByteString::toStringUtf8)
             .toList();
     }
 
-    private static ProxyLivenessSnapshotChunk snapshotChunk(ProducerRecord<String, byte[]> record)
+    private static LivenessSnapshotChunk snapshotChunk(ProducerRecord<String, byte[]> record)
         throws Exception {
-        return ProxyLivenessSnapshotChunk.parseFrom(record.value());
+        return LivenessSnapshotChunk.parseFrom(record.value());
     }
 
     private static void awaitHistorySize(MockProducer<String, byte[]> producer, int expected)
@@ -425,11 +312,11 @@ class CaptureKafkaPublisherTest {
     }
 
     private static final class SequenceClock extends Clock {
-        private final long[] timestamps;
+        private final long[] values;
         private int index;
 
-        private SequenceClock(long... timestamps) {
-            this.timestamps = timestamps.clone();
+        private SequenceClock(long... values) {
+            this.values = values.clone();
         }
 
         @Override
@@ -439,16 +326,19 @@ class CaptureKafkaPublisherTest {
 
         @Override
         public Clock withZone(ZoneId zone) {
-            if (!ZoneOffset.UTC.equals(zone)) {
-                throw new IllegalArgumentException("Only UTC is supported");
-            }
             return this;
         }
 
         @Override
-        public synchronized Instant instant() {
-            int current = Math.min(index++, timestamps.length - 1);
-            return Instant.ofEpochMilli(timestamps[current]);
+        public Instant instant() {
+            return Instant.ofEpochMilli(millis());
+        }
+
+        @Override
+        public long millis() {
+            int current = Math.min(index, values.length - 1);
+            index++;
+            return values[current];
         }
     }
 }

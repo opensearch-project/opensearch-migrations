@@ -42,10 +42,10 @@ final class CaptureFailureTerminator implements Consumer<Throwable> {
 
         log.atError()
             .setCause(failure)
-            .setMessage("Capture is compromised; terminating the proxy immediately")
+            .setMessage("Capture is compromised or the proxy is unstable; terminating immediately")
             .log();
         System.err.println(
-            "Capture is compromised; terminating the proxy with exit code " + exitCode
+            "Capture is compromised or the proxy is unstable; terminating with exit code " + exitCode
         );
 
         var terminationThread = new Thread(

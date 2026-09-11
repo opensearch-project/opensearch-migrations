@@ -24,7 +24,8 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         String connectionId,
         @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate,
-        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull CaptureProcessState captureProcessState
     ) throws IOException {
         this(
             rootContext,
@@ -35,33 +36,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
             headerPredicateForWhenToBlock,
             IncompleteRequestLimits.DEFAULT,
             DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
-        );
-    }
-
-    public ConditionallyReliableLoggingHttpHandler(
-        @NonNull IRootWireLoggingContext rootContext,
-        @NonNull String nodeId,
-        String connectionId,
-        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-        @NonNull RequestCapturePredicate requestCapturePredicate,
-        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
-        @NonNull Duration maximumRequestAssemblyDuration
-    ) throws IOException {
-        this(
-            rootContext,
-            nodeId,
-            connectionId,
-            trafficOffloaderFactory,
-            requestCapturePredicate,
-            headerPredicateForWhenToBlock,
-            new IncompleteRequestLimits(
-                maximumRequestAssemblyDuration,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
-                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
-            ),
-            DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
+            captureProcessState
         );
     }
 
@@ -73,7 +48,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         @NonNull RequestCapturePredicate requestCapturePredicate,
         @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
         @NonNull Duration maximumRequestAssemblyDuration,
-        @NonNull CaptureFailurePolicy captureFailurePolicy
+        @NonNull CaptureProcessState captureProcessState
     ) throws IOException {
         this(
             rootContext,
@@ -88,7 +63,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
             ),
             DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(captureFailurePolicy)
+            captureProcessState
         );
     }
 
@@ -100,7 +75,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         @NonNull RequestCapturePredicate requestCapturePredicate,
         @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
         @NonNull IncompleteRequestLimits incompleteRequestLimits,
-        @NonNull CaptureFailurePolicy captureFailurePolicy
+        @NonNull CaptureProcessState captureProcessState
     ) throws IOException {
         this(
             rootContext,
@@ -111,7 +86,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
             headerPredicateForWhenToBlock,
             incompleteRequestLimits,
             DEFAULT_MAXIMUM_CONNECTION_DURATION,
-            new CaptureProcessState(captureFailurePolicy)
+            captureProcessState
         );
     }
 

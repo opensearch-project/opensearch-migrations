@@ -45,7 +45,8 @@ public class RootWireLoggingContextTest {
                     "c",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    x -> shouldBlock
+                    x -> shouldBlock,
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
                 )
             );
             channelWriter.accept(channel);

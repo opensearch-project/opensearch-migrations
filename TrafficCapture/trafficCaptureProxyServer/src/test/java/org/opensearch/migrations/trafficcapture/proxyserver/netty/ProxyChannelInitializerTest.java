@@ -17,6 +17,7 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ProxyChannelInitializerTest {
     @Test
@@ -60,6 +61,40 @@ class ProxyChannelInitializerTest {
 
         assertEquals(0, captureFactoryCalls.get());
         assertEquals(1, passThroughFactoryCalls.get());
+        instrumentation.close();
+    }
+
+    @Test
+    void newConnectionsAreRejectedAfterFailClosedTerminationBegins() throws Exception {
+        var instrumentation = new InMemoryInstrumentationBundle(false, false);
+        var rootContext = new RootWireLoggingContext(
+            instrumentation.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var captureFactoryCalls = new AtomicInteger();
+        IConnectionCaptureFactory<Void> captureFactory = context -> {
+            captureFactoryCalls.incrementAndGet();
+            throw new AssertionError("No capture handler may be created while terminating");
+        };
+        var processState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+        processState.requiredCaptureFailed(new IllegalStateException("Kafka capture failed"));
+        var initializer = new ProxyChannelInitializer<>(
+            rootContext,
+            null,
+            null,
+            captureFactory,
+            captureFactory,
+            new RequestCapturePredicate(),
+            IncompleteRequestLimits.DEFAULT,
+            Duration.ofHours(1),
+            processState
+        );
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> initializer.createCaptureHandler("connection")
+        );
+        assertEquals(0, captureFactoryCalls.get());
         instrumentation.close();
     }
 }

@@ -2,147 +2,132 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CaptureRoutingStateTest {
+    private static final String ACTIVATION_ID = "activation";
+
     @Test
-    void assignmentChangesAffectOnlySubsequentAdmissionDecisions() {
-        var state = new CaptureRoutingState(4, List.of(0, 1));
-        int existingPartition = state.admitConnection("existing");
+    void assignmentIsNotUsableUntilItsInitialManifestBoundaryIsPreparedAndActivated() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 3);
+        var assignment = state.prepareAssignment(List.of(0, 2));
 
-        state.replaceAssignedPartitions(List.of(2, 3));
+        assertEquals("activation:1", assignment.writerNodeId());
+        assertThrows(IllegalStateException.class, () -> state.admitConnection("too-early"));
 
-        assertEquals(existingPartition, state.partitionFor("existing"));
-        assertTrue(List.of(2, 3).contains(state.admitConnection("new")));
+        var initialManifests = state.prepareInitialManifests(assignment);
+        assertEquals(List.of(0, 2), initialManifests.stream()
+            .map(CaptureRoutingState.PreparedManifest::partition)
+            .toList());
+        assertTrue(initialManifests.stream().allMatch(manifest -> manifest.manifestCycle() == 0));
+        assertTrue(initialManifests.stream().allMatch(manifest -> manifest.connectionIds().isEmpty()));
+
+        state.activateAssignment(assignment);
+        var route = state.admitConnection("accepted");
+        assertEquals("activation:1", route.writerNodeId());
+        assertTrue(List.of(0, 2).contains(route.partition()));
+        assertEquals(1, route.manifestCycle());
     }
 
     @Test
-    void anAssignmentRemainsUsableUntilItIsExplicitlyReplaced() {
-        var state = new CaptureRoutingState(3, List.of(0, 1));
+    void replacementAssignmentChangesOnlyNewConnectionRoutes() {
+        var state = activeState(4, List.of(0, 1));
+        var existing = state.admitConnection("same-local-id");
 
-        assertTrue(List.of(0, 1).contains(state.admitConnection("before-replacement")));
-        assertEquals(List.of(0, 1), state.assignedPartitions());
+        var replacement = state.prepareAssignment(List.of(2, 3));
+        state.prepareInitialManifests(replacement);
+        state.activateAssignment(replacement);
+        var later = state.admitConnection("same-local-id");
 
-        state.replaceAssignedPartitions(List.of(2));
-
-        assertEquals(2, state.admitConnection("after-replacement"));
+        assertEquals("activation:1", existing.writerNodeId());
+        assertTrue(List.of(0, 1).contains(existing.partition()));
+        assertEquals("activation:2", later.writerNodeId());
+        assertTrue(List.of(2, 3).contains(later.partition()));
+        assertNotEquals(existing.writerNodeId(), later.writerNodeId());
+        assertEquals(Set.of("activation:1", "activation:2"), state.writerNodeIds());
     }
 
     @Test
-    void revokedPartitionReleasesOnlyAfterItsLastConnectionCloses() {
-        var state = new CaptureRoutingState(4, List.of(0, 1));
-        state.register("first", 1);
-        state.register("last", 1);
+    void oldAndNewWriterRegistriesRemainIndependentOnTheSamePartition() {
+        var state = activeState(1, List.of(0));
+        var oldRoute = state.admitConnection("connection");
 
-        assertEquals(List.of(), state.revokePartitions(List.of(1)));
-        assertEquals(List.of(), state.remove("first", 1).stream().toList());
+        var replacement = state.prepareAssignment(List.of(0));
+        state.prepareInitialManifests(replacement);
+        state.activateAssignment(replacement);
+        var newRoute = state.admitConnection("connection");
 
-        var release = state.remove("last", 1).orElseThrow();
-        assertEquals(1, release.partition());
-        assertEquals(List.of(0), state.assignedPartitions());
-        assertThrows(IllegalStateException.class, () -> state.remove("missing", 1));
+        assertEquals(List.of("connection"), state.snapshot(oldRoute.writerNodeId(), 0));
+        assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
+
+        state.remove(oldRoute);
+        assertEquals(List.of(), state.snapshot(oldRoute.writerNodeId(), 0));
+        assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
     }
 
     @Test
-    void reassignmentInvalidatesAnUnsubmittedSelfRelease() {
-        var state = new CaptureRoutingState(2, List.of(0));
-        var release = state.revokePartitions(List.of(0)).get(0);
-        state.replaceAssignedPartitions(List.of(0));
-        var submitted = new AtomicBoolean();
+    void manifestCopyAndCycleAdvanceShareOneBoundary() {
+        var state = activeState(1, List.of(0));
+        var first = state.admitConnection("first");
+        assertEquals(1, first.manifestCycle());
 
-        assertFalse(state.submitSelfReleaseIfCurrent(release, () -> submitted.set(true)));
-        assertFalse(submitted.get());
-        assertEquals(0, state.admitConnection("new"));
+        var manifest = only(state.preparePeriodicManifests());
+        assertEquals(1, manifest.manifestCycle());
+        assertEquals(List.of("first"), manifest.connectionIds());
+        assertEquals(2, first.manifestCycle());
+
+        var second = state.admitConnection("second");
+        assertEquals(2, second.manifestCycle());
+        var nextManifest = only(state.preparePeriodicManifests());
+        assertEquals(2, nextManifest.manifestCycle());
+        assertEquals(List.of("first", "second"), nextManifest.connectionIds());
     }
 
     @Test
-    void releaseSubmissionLinearizesBeforeReassignmentAndNewAdmission() throws Exception {
-        var state = new CaptureRoutingState(1, List.of(0));
-        var release = state.revokePartitions(List.of(0)).get(0);
-        var submissionEntered = new CountDownLatch(1);
-        var allowSubmission = new CountDownLatch(1);
-        var reassignmentStarted = new CountDownLatch(1);
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var submitted = executor.submit(() -> state.submitSelfReleaseIfCurrent(release, () -> {
-                submissionEntered.countDown();
-                try {
-                    assertTrue(allowSubmission.await(1, TimeUnit.SECONDS));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new AssertionError(e);
-                }
-            }));
-            assertTrue(submissionEntered.await(1, TimeUnit.SECONDS));
+    void removalRequiresTheExactImmutableConnectionRoute() {
+        var state = activeState(1, List.of(0));
+        var route = state.admitConnection("connection");
 
-            var reassigned = executor.submit(() -> {
-                reassignmentStarted.countDown();
-                return state.replaceAssignedPartitions(List.of(0));
-            });
-            assertTrue(reassignmentStarted.await(1, TimeUnit.SECONDS));
-            assertFalse(reassigned.isDone());
+        state.remove(route);
 
-            allowSubmission.countDown();
-            assertTrue(submitted.get(1, TimeUnit.SECONDS));
-            reassigned.get(1, TimeUnit.SECONDS);
-            assertEquals(0, state.admitConnection("new"));
-        }
+        assertEquals(0, state.size());
+        assertThrows(IllegalStateException.class, () -> state.remove(route));
     }
 
     @Test
-    void snapshotsAreExactSortedCopiesAtOneLinearizationPoint() {
-        var state = new CaptureRoutingState(3, List.of(0, 1, 2));
-        state.register("connection-b", 1);
-        state.register("connection-a", 1);
-        state.register("connection-c", 2);
+    void shutdownRemovesNewConnectionEligibility() {
+        var state = activeState(1, List.of(0));
+        state.beginShutdown();
 
-        var snapshot = state.snapshot(1);
-        state.remove("connection-a", 1);
-
-        assertEquals(List.of("connection-a", "connection-b"), snapshot);
-        assertEquals(List.of("connection-b"), state.snapshot(1));
-        assertEquals(List.of("connection-c"), state.snapshot(2));
-        assertEquals(Set.of(1, 2), state.partitionsWithConnections());
-        assertEquals(List.of(0, 1, 2), state.partitionsForSnapshot());
-    }
-
-    @Test
-    void gracefulShutdownRequiresACompleteDrainAndBlocksFutureAdmission() {
-        var state = new CaptureRoutingState(3, List.of(0, 1));
-        state.register("connection", 0);
-        assertThrows(IllegalStateException.class, state::beginGracefulShutdown);
-        state.remove("connection", 0);
-
-        assertEquals(List.of(0, 1, 2), state.beginGracefulShutdown());
         assertEquals(List.of(), state.assignedPartitions());
         assertThrows(IllegalStateException.class, () -> state.admitConnection("new"));
     }
 
     @Test
-    void duplicateOrInvalidTransitionsFailLoudly() {
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> new CaptureRoutingState(2, List.of(0, 0))
-        );
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> new CaptureRoutingState(2, List.of(2))
-        );
-        var state = new CaptureRoutingState(2, List.of(0, 1));
-        state.register("connection", 1);
-        assertThrows(IllegalStateException.class, () -> state.register("connection", 1));
-        assertThrows(IllegalStateException.class, () -> state.remove("connection", 0));
-        state.remove("connection", 1);
-        assertThrows(IllegalStateException.class, () -> state.remove("connection", 1));
-        assertThrows(IllegalStateException.class, () -> state.partitionFor("connection"));
+    void invalidAssignmentsFailLoudly() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 2);
+
+        assertThrows(IllegalArgumentException.class, () -> state.prepareAssignment(List.of()));
+        assertThrows(IllegalArgumentException.class, () -> state.prepareAssignment(List.of(0, 0)));
+        assertThrows(IllegalArgumentException.class, () -> state.prepareAssignment(List.of(2)));
+    }
+
+    private static CaptureRoutingState activeState(int partitionCount, List<Integer> partitions) {
+        var state = new CaptureRoutingState(ACTIVATION_ID, partitionCount);
+        var assignment = state.prepareAssignment(partitions);
+        state.prepareInitialManifests(assignment);
+        state.activateAssignment(assignment);
+        return state;
+    }
+
+    private static <T> T only(List<T> values) {
+        assertEquals(1, values.size());
+        return values.get(0);
     }
 }

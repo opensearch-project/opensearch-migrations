@@ -1,6 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -17,16 +19,24 @@ public class NettyScanningHttpProxy {
     protected Channel mainChannel;
     protected EventLoopGroup workerGroup;
     protected EventLoopGroup bossGroup;
+    private final Consumer<Throwable> unstableProcessFailureHandler;
+    private final AtomicBoolean stopping = new AtomicBoolean();
+    private final AtomicBoolean unexpectedTerminationReported = new AtomicBoolean();
 
-    public NettyScanningHttpProxy(int proxyPort) {
+    public NettyScanningHttpProxy(
+        int proxyPort,
+        Consumer<Throwable> unstableProcessFailureHandler
+    ) {
         this.proxyPort = proxyPort;
+        this.unstableProcessFailureHandler = Objects.requireNonNull(unstableProcessFailureHandler);
     }
 
     public void start(ProxyChannelInitializer<?> proxyChannelInitializer, int numThreads)
-        throws InterruptedException
-    {
+        throws InterruptedException {
         bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("captureProxyPoolBoss"));
         workerGroup = new NioEventLoopGroup(numThreads, new DefaultThreadFactory("captureProxyPoolWorker"));
+        monitorEventLoops("boss", bossGroup);
+        monitorEventLoops("worker", workerGroup);
         ServerBootstrap serverBootstrap = new ServerBootstrap();
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
@@ -37,6 +47,7 @@ public class NettyScanningHttpProxy {
                 .sync()
                 .channel();
         } catch (Exception e) {
+            stopping.set(true);
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
             throw e;
@@ -44,6 +55,7 @@ public class NettyScanningHttpProxy {
     }
 
     public void stop() throws InterruptedException {
+        stopping.set(true);
         mainChannel.close();
         try {
             mainChannel.closeFuture().sync();
@@ -57,5 +69,22 @@ public class NettyScanningHttpProxy {
 
     public void waitForClose() throws InterruptedException {
         mainChannel.closeFuture().sync();
+    }
+
+    private void monitorEventLoops(String groupName, EventLoopGroup group) {
+        int index = 0;
+        for (var eventLoop : group) {
+            var eventLoopName = groupName + "-" + index++;
+            eventLoop.terminationFuture().addListener(future -> {
+                if (stopping.get() || !unexpectedTerminationReported.compareAndSet(false, true)) {
+                    return;
+                }
+                var failure = new IllegalStateException(
+                    "Netty " + eventLoopName + " event loop terminated unexpectedly",
+                    future.cause()
+                );
+                unstableProcessFailureHandler.accept(failure);
+            });
+        }
     }
 }
