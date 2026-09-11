@@ -232,36 +232,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return result;
     }
 
-    public CompletableFuture<RecordMetadata> publishNoMoreWrites(
-        String finishedNodeId,
-        int partition,
-        String declaredBy
-    ) {
-        if (finishedNodeId == null || finishedNodeId.isBlank()) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("finishedNodeId must not be blank")
-            );
-        }
-        if (declaredBy == null || declaredBy.isBlank()) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("declaredBy must not be blank")
-            );
-        }
-        if (partition < 0 || partition >= routingPlan.getTopicPartitionCount()) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("partition is outside the traffic topic")
-            );
-        }
-        var result = new CompletableFuture<RecordMetadata>();
-        executeOnPublisher(() -> {
-            sendFromPublisherThread(noMoreWritesRecord(finishedNodeId, partition, declaredBy), () -> {})
-                .whenComplete((metadata, throwable) -> {
-                    completeFrom(metadata, throwable, result);
-                });
-        }, result);
-        return result;
-    }
-
     CompletableFuture<RecordMetadata> publishSelfNoMoreWrites(CaptureRoutingState.SelfRelease release) {
         var result = new CompletableFuture<RecordMetadata>();
         executeOnPublisher(() -> {

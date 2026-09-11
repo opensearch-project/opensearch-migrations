@@ -8,10 +8,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
 
-import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.common.Cluster;
@@ -25,7 +22,6 @@ public final class CaptureCooperativeStickyAssignor extends CooperativeStickyAss
     public static final String NODE_ID_CONFIG = "opensearch.migrations.capture.node.id";
 
     private static final int SUBSCRIPTION_FOOTER_MAGIC = 0x43504e49;
-    private static final Map<String, Consumer<Set<String>>> MEMBERSHIP_OBSERVERS = new ConcurrentHashMap<>();
 
     private String nodeId;
 
@@ -84,28 +80,6 @@ public final class CaptureCooperativeStickyAssignor extends CooperativeStickyAss
             )
         );
         return new ConsumerPartitionAssignor.GroupAssignment(Map.copyOf(decorated));
-    }
-
-    @Override
-    public void onAssignment(
-        ConsumerPartitionAssignor.Assignment assignment,
-        ConsumerGroupMetadata metadata
-    ) {
-        super.onAssignment(assignment, metadata);
-        var observer = MEMBERSHIP_OBSERVERS.get(configuredNodeId());
-        if (observer != null) {
-            observer.accept(decodeMembership(assignment.userData()));
-        }
-    }
-
-    static AutoCloseable registerMembershipObserver(String nodeId, Consumer<Set<String>> observer) {
-        Objects.requireNonNull(nodeId);
-        Objects.requireNonNull(observer);
-        var previous = MEMBERSHIP_OBSERVERS.putIfAbsent(nodeId, observer);
-        if (previous != null) {
-            throw new IllegalStateException("A membership observer is already registered for node " + nodeId);
-        }
-        return () -> MEMBERSHIP_OBSERVERS.remove(nodeId, observer);
     }
 
     static String decodeNodeId(ByteBuffer subscriptionData) {

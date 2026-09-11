@@ -78,6 +78,18 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        log.atError()
+            .setCause(cause)
+            .setMessage("Closing proxy connection after an unrecoverable frontside forwarding error")
+            .log();
+        if (outboundChannel != null) {
+            closeAndFlush(outboundChannel);
+        }
+        closeAndFlush(ctx.channel());
+    }
+
     /**
      * Closes the specified channel after all queued write requests are flushed.
      */

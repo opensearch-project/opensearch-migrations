@@ -180,49 +180,6 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
-    void noMoreWritesUsesTheOrderedControlLaneAndStrictPartitionTimestamp() throws Exception {
-        var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(1, 1, NODE_ID);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-
-        publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
-        publisher.publishNoMoreWrites(NODE_ID, 0, "surviving-node")
-            .get(1, TimeUnit.SECONDS);
-
-        var record = producer.history().get(1);
-        assertEquals(0, record.partition());
-        assertTrue(CaptureKafkaPublisher.isRecordType(
-            record.headers(),
-            CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
-        ));
-        var declaration = ProxyNoMoreWrites.parseFrom(record.value());
-        assertEquals(NODE_ID, declaration.getNodeId());
-        assertEquals(0, declaration.getPartition());
-        assertEquals("surviving-node", declaration.getDeclaredBy());
-        assertEquals(1235, declaration.getEmittedAtMillis());
-        publisher.close();
-    }
-
-    @Test
-    void noMoreWritesRejectsInvalidIdentityAndPartition() {
-        var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(1, 1, NODE_ID);
-        var registry = routingState(plan);
-        var publisher = publisher(producer, plan, registry);
-
-        assertThrows(
-            ExecutionException.class,
-            () -> publisher.publishNoMoreWrites("", 0, NODE_ID).get(1, TimeUnit.SECONDS)
-        );
-        assertThrows(
-            ExecutionException.class,
-            () -> publisher.publishNoMoreWrites(NODE_ID, 1, NODE_ID).get(1, TimeUnit.SECONDS)
-        );
-        publisher.close();
-    }
-
-    @Test
     void trafficFailureKeepsConnectionOpenAndStopsDeclarations() throws Exception {
         var producer = producer(false);
         var plan = PartitionRoutingPlan.forTopic(1, 1, NODE_ID);

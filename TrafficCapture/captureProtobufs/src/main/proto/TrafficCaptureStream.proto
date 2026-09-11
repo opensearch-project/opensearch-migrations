@@ -45,6 +45,8 @@ message RequestIntentionallyDropped {}
 
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
+  optional uint64 manifestCycle = 17;
+  optional uint64 connectionObservationSequence = 18;
   oneof Capture {
     BindObservation bind = 2;
     ConnectObservation connect = 3;
@@ -68,6 +70,8 @@ message TrafficObservation {
 }
 
 message TrafficStream {
+  option deprecated = true;
+
   string connectionId = 1; // persistent identifier for all stream objects within a single connection
   string nodeId = 5; // unique namespace such as a nodeId or computer mac address
   optional int32 priorRequestsReceived = 6;
@@ -82,7 +86,23 @@ message TrafficStream {
   }
 }
 
+message TrafficRecord {
+  string connectionId = 1;
+  string writerNodeId = 5;
+  optional int32 priorRequestsReceived = 6;
+  optional bool lastObservationWasUnterminatedRead = 7;
+  optional int32 partition = 8;
+  optional string routingPlanId = 9 [deprecated = true];
+  repeated TrafficObservation observations = 2;
+  oneof index {
+    int32 number = 3;
+    int32 numberOfThisLastChunk = 4;
+  }
+}
+
 message ProxyLivenessSnapshotChunk {
+  option deprecated = true;
+
   string nodeId = 1;
   int32 partition = 2;
   string routingPlanId = 3;
@@ -93,9 +113,36 @@ message ProxyLivenessSnapshotChunk {
   repeated bytes openConnections = 8;
 }
 
+message LivenessSnapshotChunk {
+  string writerNodeId = 1;
+  int32 partition = 2;
+  string routingPlanId = 3 [deprecated = true];
+  uint64 manifestCycle = 4;
+  int32 chunkIndex = 5;
+  int32 chunkCount = 6;
+  int64 emittedAtMillis = 7; // diagnostic only
+  repeated bytes connectionIds = 8;
+}
+
 message ProxyNoMoreWrites {
+  option deprecated = true;
+
   string nodeId = 1;
   int32 partition = 2;
   string declaredBy = 3;
   int64 emittedAtMillis = 4; // diagnostic only; Kafka offset defines the declaration boundary
+}
+
+message NoMoreWrites {
+  // The Kafka writer header is authoritative.
+  string writerNodeId = 1 [deprecated = true];
+  int32 partition = 2;
+  string declaredBy = 3 [deprecated = true];
+  int64 emittedAtMillis = 4; // diagnostic only; Kafka offset defines the terminal boundary
+}
+
+message CaptureCapabilityProbe {
+  string writerNodeId = 1;
+  string probeId = 2;
+  optional string captureSessionId = 3;
 }

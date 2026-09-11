@@ -16,15 +16,12 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CaptureKafkaMembershipTest {
     private static final String TOPIC = "traffic";
-    private static final String NODE_ID = "node-a";
 
     @Test
     void pollThreadPausesAssignmentsAndRevocationOnlyChangesNewAdmission() throws Exception {
@@ -36,7 +33,6 @@ class CaptureKafkaMembershipTest {
         var membership = new CaptureKafkaMembership(
             consumer,
             TOPIC,
-            NODE_ID,
             routingState,
             publisher,
             writeGate(),
@@ -90,30 +86,6 @@ class CaptureKafkaMembershipTest {
     }
 
     @Test
-    void aPreviouslyObservedPeerDepartureIsDeclaredOnEveryTopicPartition() {
-        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
-        var routingState = new CaptureRoutingState(3, List.of(0));
-        var publisher = publisher();
-        var membership = new CaptureKafkaMembership(
-            consumer,
-            TOPIC,
-            NODE_ID,
-            routingState,
-            publisher,
-            writeGate(),
-            () -> {},
-            ignored -> {}
-        );
-
-        membership.observeMembership(Set.of(NODE_ID, "node-b"));
-        membership.observeMembership(Set.of(NODE_ID));
-
-        verify(publisher).publishNoMoreWrites("node-b", 0, NODE_ID);
-        verify(publisher).publishNoMoreWrites("node-b", 1, NODE_ID);
-        verify(publisher).publishNoMoreWrites("node-b", 2, NODE_ID);
-    }
-
-    @Test
     void lostPartitionsFailClosedAndRemoveAllAdmissionChoices() {
         var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var routingState = new CaptureRoutingState(3, List.of(0, 1));
@@ -123,7 +95,6 @@ class CaptureKafkaMembershipTest {
         var membership = new CaptureKafkaMembership(
             consumer,
             TOPIC,
-            NODE_ID,
             routingState,
             publisher,
             writeGate,
@@ -148,7 +119,6 @@ class CaptureKafkaMembershipTest {
         var membership = new CaptureKafkaMembership(
             consumer,
             TOPIC,
-            NODE_ID,
             routingState,
             publisher,
             writeGate(),
@@ -169,7 +139,6 @@ class CaptureKafkaMembershipTest {
         var membership = new CaptureKafkaMembership(
             consumer,
             TOPIC,
-            NODE_ID,
             new CaptureRoutingState(1, List.of()),
             publisher(),
             writeGate(),
@@ -184,8 +153,6 @@ class CaptureKafkaMembershipTest {
 
     private static CaptureKafkaPublisher publisher() {
         var publisher = mock(CaptureKafkaPublisher.class);
-        when(publisher.publishNoMoreWrites(anyString(), anyInt(), anyString()))
-            .thenReturn(CompletableFuture.completedFuture(null));
         when(publisher.publishSelfNoMoreWrites(any(CaptureRoutingState.SelfRelease.class)))
             .thenReturn(CompletableFuture.completedFuture(null));
         return publisher;
@@ -196,7 +163,6 @@ class CaptureKafkaMembershipTest {
         return new CaptureKafkaMembership(
             mock(org.apache.kafka.clients.consumer.Consumer.class),
             TOPIC,
-            NODE_ID,
             routingState,
             publisher(),
             writeGate(),

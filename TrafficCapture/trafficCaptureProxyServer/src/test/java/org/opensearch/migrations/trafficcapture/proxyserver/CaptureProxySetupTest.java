@@ -2,9 +2,11 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Properties;
 
 import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 
 import com.beust.jcommander.ParameterException;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -40,6 +42,39 @@ public class CaptureProxySetupTest {
             ParameterException.class,
             () -> new CaptureProxy.CaptureFailurePolicyConverter().convert("sometimes")
         );
+    }
+
+    @Test
+    void incompleteRequestLimitsHaveSafeDefaultsAndAreConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--max-request-assembly-duration-seconds", "17",
+            "--max-incomplete-request-header-bytes", "4096",
+            "--max-incomplete-request-total-bytes", "8192"
+        });
+
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_ASSEMBLY_DURATION,
+            Duration.ofSeconds(defaults.maximumRequestAssemblyDurationSeconds)
+        );
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+            defaults.maximumIncompleteRequestHeaderBytes
+        );
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES,
+            defaults.maximumIncompleteRequestTotalBytes
+        );
+        Assertions.assertEquals(17, configured.maximumRequestAssemblyDurationSeconds);
+        Assertions.assertEquals(4096, configured.maximumIncompleteRequestHeaderBytes);
+        Assertions.assertEquals(8192, configured.maximumIncompleteRequestTotalBytes);
     }
 
     @Test

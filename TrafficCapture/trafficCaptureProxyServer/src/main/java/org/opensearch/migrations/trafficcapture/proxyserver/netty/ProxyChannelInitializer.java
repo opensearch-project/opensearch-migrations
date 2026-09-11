@@ -10,6 +10,7 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.UnauthenticatedClientLogDeduper.KnownEvent;
@@ -35,7 +36,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     protected final IRootWireLoggingContext rootContext;
     protected final BacksideConnectionPool backsideConnectionPool;
     protected final RequestCapturePredicate requestCapturePredicate;
-    protected final Duration maximumConnectionDuration;
+    protected final IncompleteRequestLimits incompleteRequestLimits;
     protected final CaptureFailurePolicy captureFailurePolicy;
     private final UnauthenticatedClientLogDeduper unauthenticatedClientLogDeduper;
 
@@ -52,7 +53,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             sslEngineSupplier,
             connectionCaptureFactory,
             requestCapturePredicate,
-            Duration.ZERO,
+            IncompleteRequestLimits.DEFAULT,
             CaptureFailurePolicy.FAIL_OPEN
         );
     }
@@ -63,7 +64,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         Supplier<SSLEngine> sslEngineSupplier,
         IConnectionCaptureFactory<T> connectionCaptureFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate,
-        @NonNull Duration maximumConnectionDuration
+        @NonNull Duration maximumRequestAssemblyDuration
     ) {
         this(
             rootContext,
@@ -71,7 +72,11 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             sslEngineSupplier,
             connectionCaptureFactory,
             requestCapturePredicate,
-            maximumConnectionDuration,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            ),
             CaptureFailurePolicy.FAIL_OPEN
         );
     }
@@ -82,7 +87,31 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         Supplier<SSLEngine> sslEngineSupplier,
         IConnectionCaptureFactory<T> connectionCaptureFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate,
-        @NonNull Duration maximumConnectionDuration,
+        @NonNull Duration maximumRequestAssemblyDuration,
+        @NonNull CaptureFailurePolicy captureFailurePolicy
+    ) {
+        this(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionCaptureFactory,
+            requestCapturePredicate,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            ),
+            captureFailurePolicy
+        );
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
         @NonNull CaptureFailurePolicy captureFailurePolicy
     ) {
         this.rootContext = rootContext;
@@ -90,7 +119,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
         this.requestCapturePredicate = requestCapturePredicate;
-        this.maximumConnectionDuration = maximumConnectionDuration;
+        this.incompleteRequestLimits = incompleteRequestLimits;
         this.captureFailurePolicy = captureFailurePolicy;
         this.unauthenticatedClientLogDeduper =
             new UnauthenticatedClientLogDeduper(UNAUTHENTICATED_CLIENT_LOG_DEDUPE_WINDOW);
@@ -122,7 +151,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
                     connectionCaptureFactory,
                     requestCapturePredicate,
                     this::shouldGuaranteeMessageOffloading,
-                    maximumConnectionDuration,
+                    incompleteRequestLimits,
                     captureFailurePolicy
                 )
             );

@@ -5,17 +5,21 @@ import java.io.IOException;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -23,6 +27,8 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -129,7 +135,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
-    void durationCapUsesTheIdempotentCapturedClosePath() throws Exception {
+    void requestAssemblyDurationDoesNotLimitIdleConnectionLifetime() throws Exception {
         try (var rootContext = new TestRootContext()) {
             var streamManager = new TestStreamManager();
             var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
@@ -145,23 +151,320 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                 )
             );
 
-            Thread.sleep(5);
+            channel.advanceTimeBy(5, java.util.concurrent.TimeUnit.MILLISECONDS);
             channel.runScheduledPendingTasks();
             channel.runPendingTasks();
 
-            Assertions.assertFalse(channel.isOpen());
-            Assertions.assertEquals(1, streamManager.flushCount.get());
-            var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            Assertions.assertTrue(finalStream.hasNumberOfThisLastChunk());
-            Assertions.assertEquals(
-                1,
-                finalStream.getSubStreamList().stream().filter(TrafficObservation::hasClose).count()
-            );
+            Assertions.assertTrue(channel.isOpen());
+            Assertions.assertEquals(0, streamManager.flushCount.get());
 
             channel.close();
             channel.runPendingTasks();
             Assertions.assertEquals(1, streamManager.flushCount.get());
             channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void requestAssemblyDurationStartsWithTheFirstByteAndIsNotResetByProgress() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var offloader = new DelayedFinalAcknowledgementOffloader();
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    Duration.ofMillis(10)
+                )
+            );
+
+            channel.writeInbound(Unpooled.copiedBuffer(
+                "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nx",
+                StandardCharsets.US_ASCII
+            ));
+            channel.advanceTimeBy(6, java.util.concurrent.TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            Assertions.assertTrue(channel.isOpen());
+
+            channel.writeInbound(Unpooled.copiedBuffer("y", StandardCharsets.US_ASCII));
+            channel.advanceTimeBy(5, java.util.concurrent.TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            channel.runPendingTasks();
+
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, offloader.closeObservations.get());
+            Assertions.assertFalse(offloader.finalAcknowledgement.isDone());
+
+            offloader.finalAcknowledgement.complete(null);
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void completedRequestCancelsItsAssemblyDeadlineAndKeepAliveConnectionRemainsValid() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    Duration.ofMillis(1)
+                )
+            );
+
+            channel.writeInbound(Unpooled.copiedBuffer(
+                "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\nx",
+                StandardCharsets.US_ASCII
+            ));
+            channel.advanceTimeBy(5, java.util.concurrent.TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            channel.runPendingTasks();
+
+            Assertions.assertTrue(channel.isOpen());
+            channel.close();
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void aggregateHeaderByteLimitStopsForwardingAndUsesNormalTerminalCapture() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    new IncompleteRequestLimits(Duration.ofMinutes(1), 32, 1024),
+                    CaptureFailurePolicy.FAIL_OPEN
+                )
+            );
+
+            channel.writeInbound(Unpooled.copiedBuffer(
+                "GET / HTTP/1.1\r\nX-Large: 1234567890123456789012345678901234567890\r\n\r\n",
+                StandardCharsets.US_ASCII
+            ));
+            channel.runPendingTasks();
+
+            assertBoundViolationClosesWithCapturedReadThenOneTerminalClose(channel, streamManager);
+        }
+    }
+
+    @Test
+    void aggregateTotalRequestByteLimitIncludesBodyAndStopsForwarding() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    new IncompleteRequestLimits(Duration.ofMinutes(1), 128, 150),
+                    CaptureFailurePolicy.FAIL_OPEN
+                )
+            );
+            var request = (
+                "POST / HTTP/1.1\r\nContent-Length: 200\r\n\r\n"
+                    + "x".repeat(200)
+            ).getBytes(StandardCharsets.US_ASCII);
+
+            channel.writeInbound(Unpooled.wrappedBuffer(request));
+            channel.runPendingTasks();
+
+            assertBoundViolationClosesWithCapturedReadThenOneTerminalClose(channel, streamManager);
+        }
+    }
+
+    private static void assertBoundViolationClosesWithCapturedReadThenOneTerminalClose(
+        EmbeddedChannel channel,
+        TestStreamManager streamManager
+    ) throws Exception {
+        Assertions.assertFalse(channel.isOpen());
+        Assertions.assertTrue(channel.inboundMessages().isEmpty());
+        Assertions.assertEquals(1, streamManager.flushCount.get());
+
+        var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
+        var observations = finalStream.getSubStreamList();
+        Assertions.assertTrue(observations.stream().anyMatch(TrafficObservation::hasRead));
+        Assertions.assertEquals(1, observations.stream().filter(TrafficObservation::hasClose).count());
+        Assertions.assertTrue(observations.get(observations.size() - 1).hasClose());
+
+        channel.close();
+        channel.runPendingTasks();
+        Assertions.assertEquals(1, streamManager.flushCount.get());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void exceptionObservationIsDiagnosticAndChannelCloseEmitsOneTerminalObservation() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader =
+                new StreamChannelConnectionCaptureSerializer<>("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false
+                ),
+                new ExceptionConsumingHandler()
+            );
+
+            channel.pipeline().fireExceptionCaught(new IllegalStateException("unrecoverable"));
+            channel.runPendingTasks();
+
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, streamManager.flushCount.get());
+            var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
+            var observations = finalStream.getSubStreamList();
+            Assertions.assertEquals(
+                1,
+                observations.stream().filter(TrafficObservation::hasConnectionException).count()
+            );
+            Assertions.assertEquals(1, observations.stream().filter(TrafficObservation::hasClose).count());
+            Assertions.assertTrue(observations.get(observations.size() - 1).hasClose());
+
+            channel.close();
+            channel.runPendingTasks();
+            Assertions.assertEquals(1, streamManager.flushCount.get());
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void diagnosticCaptureFailureStillClosesTheChannelExactlyOnce() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var offloader = new DiagnosticFailureOffloader();
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false
+                ),
+                new ExceptionConsumingHandler()
+            );
+
+            channel.pipeline().fireExceptionCaught(new IllegalStateException("unrecoverable"));
+            channel.runPendingTasks();
+
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, offloader.diagnosticAttempts.get());
+            Assertions.assertEquals(1, offloader.closeObservations.get());
+            Assertions.assertEquals(1, offloader.finalFlushes.get());
+
+            channel.close();
+            channel.runPendingTasks();
+            Assertions.assertEquals(1, offloader.closeObservations.get());
+            Assertions.assertEquals(1, offloader.finalFlushes.get());
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void exceptionWithoutAMessageStillProducesADiagnosticObservation() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader =
+                new StreamChannelConnectionCaptureSerializer<>("Test", "connection", streamManager);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false
+                ),
+                new ExceptionConsumingHandler()
+            );
+
+            channel.pipeline().fireExceptionCaught(new IllegalStateException());
+            channel.runPendingTasks();
+
+            var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
+            var diagnostic = finalStream.getSubStreamList()
+                .stream()
+                .filter(TrafficObservation::hasConnectionException)
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                IllegalStateException.class.getName(),
+                diagnostic.getConnectionException().getMessage()
+            );
+            Assertions.assertTrue(
+                finalStream.getSubStream(finalStream.getSubStreamCount() - 1).hasClose()
+            );
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    private static class ExceptionConsumingHandler extends ChannelInboundHandlerAdapter {
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            // The test inspects capture and channel lifecycle directly.
+        }
+    }
+
+    private static class DiagnosticFailureOffloader implements IChannelConnectionCaptureSerializer<Void> {
+        private final AtomicInteger diagnosticAttempts = new AtomicInteger();
+        private final AtomicInteger closeObservations = new AtomicInteger();
+        private final AtomicInteger finalFlushes = new AtomicInteger();
+
+        @Override
+        public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {
+            diagnosticAttempts.incrementAndGet();
+            throw new IOException("diagnostic capture failed");
+        }
+
+        @Override
+        public void addCloseEvent(Instant timestamp) {
+            closeObservations.incrementAndGet();
+        }
+
+        @Override
+        public CompletableFuture<Void> flushCommitAndResetStream(boolean isFinal) {
+            if (isFinal) {
+                finalFlushes.incrementAndGet();
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    private static class DelayedFinalAcknowledgementOffloader
+        implements IChannelConnectionCaptureSerializer<Void> {
+        private final AtomicInteger closeObservations = new AtomicInteger();
+        private final CompletableFuture<Void> finalAcknowledgement = new CompletableFuture<>();
+
+        @Override
+        public void addCloseEvent(Instant timestamp) {
+            closeObservations.incrementAndGet();
+        }
+
+        @Override
+        public CompletableFuture<Void> flushCommitAndResetStream(boolean isFinal) {
+            return isFinal ? finalAcknowledgement : CompletableFuture.completedFuture(null);
         }
     }
 

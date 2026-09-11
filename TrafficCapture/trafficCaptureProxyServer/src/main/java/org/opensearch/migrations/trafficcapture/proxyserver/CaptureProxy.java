@@ -38,6 +38,7 @@ import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
 import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderAdderHandler;
@@ -226,10 +227,24 @@ public class CaptureProxy {
             description = "Interval between complete proxy liveness declarations.")
         public int livenessSnapshotIntervalSeconds = 30;
         @Parameter(required = false,
-            names = { "--max-connection-duration-seconds" },
+            names = { "--max-request-assembly-duration-seconds", "--max-connection-duration-seconds" },
             arity = 1,
-            description = "Maximum frontside connection duration. Zero disables the cap.")
-        public long maximumConnectionDurationSeconds;
+            description = "Maximum duration for assembling one incomplete request. "
+                + "The legacy --max-connection-duration-seconds name has the same request-scoped behavior.")
+        public long maximumRequestAssemblyDurationSeconds =
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_ASSEMBLY_DURATION.toSeconds();
+        @Parameter(required = false,
+            names = { "--max-incomplete-request-header-bytes" },
+            arity = 1,
+            description = "Maximum aggregate header bytes for one incomplete request.")
+        public long maximumIncompleteRequestHeaderBytes =
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES;
+        @Parameter(required = false,
+            names = { "--max-incomplete-request-total-bytes" },
+            arity = 1,
+            description = "Maximum aggregate wire bytes for one incomplete request.")
+        public long maximumIncompleteRequestTotalBytes =
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES;
         @Parameter(required = false,
             names = { "--capture-failure-policy" },
             arity = 1,
@@ -253,8 +268,20 @@ public class CaptureProxy {
             if (p.livenessSnapshotIntervalSeconds <= 0) {
                 throw new ParameterException("--liveness-snapshot-interval-seconds must be positive");
             }
-            if (p.maximumConnectionDurationSeconds < 0) {
-                throw new ParameterException("--max-connection-duration-seconds must not be negative");
+            if (p.maximumRequestAssemblyDurationSeconds <= 0) {
+                throw new ParameterException("--max-request-assembly-duration-seconds must be positive");
+            }
+            if (p.maximumIncompleteRequestHeaderBytes <= 0
+                || p.maximumIncompleteRequestHeaderBytes > Integer.MAX_VALUE) {
+                throw new ParameterException(
+                    "--max-incomplete-request-header-bytes must be positive and no greater than Integer.MAX_VALUE"
+                );
+            }
+            if (p.maximumIncompleteRequestTotalBytes < p.maximumIncompleteRequestHeaderBytes) {
+                throw new ParameterException(
+                    "--max-incomplete-request-total-bytes must be at least "
+                        + "--max-incomplete-request-header-bytes"
+                );
             }
             if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaBrokers, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
@@ -499,7 +526,11 @@ public class CaptureProxy {
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
                     params.headerOverrides, connectionCaptureFactory,
-                    Duration.ofSeconds(params.maximumConnectionDurationSeconds),
+                    new IncompleteRequestLimits(
+                        Duration.ofSeconds(params.maximumRequestAssemblyDurationSeconds),
+                        params.maximumIncompleteRequestHeaderBytes,
+                        params.maximumIncompleteRequestTotalBytes
+                    ),
                     params.captureFailurePolicy);
             proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
@@ -559,7 +590,7 @@ public class CaptureProxy {
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
                                                                 List<String> headerOverridesArgs,
                                                                 IConnectionCaptureFactory<T> connectionFactory,
-                                                                Duration maximumConnectionDuration)
+                                                                Duration maximumRequestAssemblyDuration)
     {
         return buildProxyChannelInitializer(
             rootContext,
@@ -568,7 +599,11 @@ public class CaptureProxy {
             headerCapturePredicate,
             headerOverridesArgs,
             connectionFactory,
-            maximumConnectionDuration,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            ),
             CaptureFailurePolicy.FAIL_OPEN
         );
     }
@@ -579,7 +614,32 @@ public class CaptureProxy {
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
                                                                 List<String> headerOverridesArgs,
                                                                 IConnectionCaptureFactory<T> connectionFactory,
-                                                                Duration maximumConnectionDuration,
+                                                                Duration maximumRequestAssemblyDuration,
+                                                                CaptureFailurePolicy captureFailurePolicy)
+    {
+        return buildProxyChannelInitializer(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            headerCapturePredicate,
+            headerOverridesArgs,
+            connectionFactory,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            ),
+            captureFailurePolicy
+        );
+    }
+
+    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
+                                                                BacksideConnectionPool backsideConnectionPool,
+                                                                Supplier<SSLEngine> sslEngineSupplier,
+                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
+                                                                List<String> headerOverridesArgs,
+                                                                IConnectionCaptureFactory<T> connectionFactory,
+                                                                IncompleteRequestLimits incompleteRequestLimits,
                                                                 CaptureFailurePolicy captureFailurePolicy)
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
@@ -599,7 +659,7 @@ public class CaptureProxy {
             sslEngineSupplier,
             connectionFactory,
             headerCapturePredicate,
-            maximumConnectionDuration,
+            incompleteRequestLimits,
             captureFailurePolicy
         ) {
             @Override

@@ -8,7 +8,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import lombok.extern.slf4j.Slf4j;
@@ -27,25 +26,21 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
 
     private final org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer;
     private final String topic;
-    private final String nodeId;
     private final CaptureRoutingState routingState;
     private final CaptureKafkaPublisher publisher;
     private final CaptureKafkaWriteGate writeGate;
     private final Runnable initialAssignmentCallback;
     private final Consumer<Throwable> terminalFailureCallback;
     private final Set<Integer> kafkaAssignment = new HashSet<>();
-    private final AtomicReference<Set<String>> observedMembers = new AtomicReference<>();
     private final AtomicBoolean initialAssignmentReported = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean started = new AtomicBoolean();
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
     private final Thread pollThread;
-    private AutoCloseable membershipObserverRegistration;
 
     public CaptureKafkaMembership(
         org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer,
         String topic,
-        String nodeId,
         CaptureRoutingState routingState,
         CaptureKafkaPublisher publisher,
         CaptureKafkaWriteGate writeGate,
@@ -54,7 +49,6 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     ) {
         this.consumer = Objects.requireNonNull(consumer);
         this.topic = Objects.requireNonNull(topic);
-        this.nodeId = Objects.requireNonNull(nodeId);
         this.routingState = Objects.requireNonNull(routingState);
         kafkaAssignment.addAll(routingState.assignedPartitions());
         this.publisher = Objects.requireNonNull(publisher);
@@ -107,30 +101,8 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         writeGate.trip(new IllegalStateException("Kafka membership lost partitions: " + partitions));
     }
 
-    void observeMembership(Set<String> currentMembers) {
-        var immutableCurrent = Set.copyOf(currentMembers);
-        if (!immutableCurrent.contains(nodeId)) {
-            writeGate.trip(new IllegalStateException(
-                "Kafka membership view does not contain this proxy node " + nodeId
-            ));
-            return;
-        }
-        var previous = observedMembers.getAndSet(immutableCurrent);
-        if (previous == null) {
-            return;
-        }
-        previous.stream()
-            .filter(departed -> !immutableCurrent.contains(departed))
-            .filter(departed -> !departed.equals(nodeId))
-            .forEach(this::declarePeerDeparture);
-    }
-
     private void runPollLoop() {
         try {
-            membershipObserverRegistration = CaptureCooperativeStickyAssignor.registerMembershipObserver(
-                nodeId,
-                this::observeMembership
-            );
             consumer.subscribe(List.of(topic), this);
             while (!closed.get()) {
                 var records = consumer.poll(POLL_INTERVAL);
@@ -151,24 +123,12 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
                 writeGate.trip(t);
             }
         } finally {
-            closeObserverRegistration();
             try {
                 consumer.close(CLOSE_TIMEOUT);
                 stopped.complete(null);
             } catch (Throwable t) {
                 stopped.completeExceptionally(t);
             }
-        }
-    }
-
-    private void declarePeerDeparture(String departedNodeId) {
-        for (int partition = 0; partition < routingState.topicPartitionCount(); ++partition) {
-            publisher.publishNoMoreWrites(departedNodeId, partition, nodeId)
-                .whenComplete((ignored, failure) -> {
-                    if (failure != null) {
-                        writeGate.trip(failure);
-                    }
-                });
         }
     }
 
@@ -198,17 +158,6 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private void validateTopic(Collection<TopicPartition> partitions) {
         if (partitions.stream().anyMatch(partition -> !topic.equals(partition.topic()))) {
             throw new IllegalArgumentException("Kafka membership callback contained a different topic");
-        }
-    }
-
-    private void closeObserverRegistration() {
-        if (membershipObserverRegistration == null) {
-            return;
-        }
-        try {
-            membershipObserverRegistration.close();
-        } catch (Exception e) {
-            log.atWarn().setCause(e).setMessage("Unable to unregister capture membership observer").log();
         }
     }
 

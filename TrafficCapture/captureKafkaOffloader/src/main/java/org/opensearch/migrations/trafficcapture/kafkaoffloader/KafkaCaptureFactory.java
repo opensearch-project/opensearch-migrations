@@ -396,7 +396,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             initializedMembership = new CaptureKafkaMembership(
                 membershipConsumer,
                 topicNameForTraffic,
-                nodeId,
                 routingState,
                 createdPublisher,
                 createdWriteGate,

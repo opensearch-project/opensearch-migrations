@@ -3,7 +3,7 @@ package org.opensearch.migrations.trafficcapture;
 import java.time.Instant;
 
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
 
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
@@ -37,12 +37,21 @@ public class CodedOutputStreamSizeUtil {
         Instant timestamp,
         int observationFieldNumber,
         int dataFieldNumber,
-        ByteBuf buf
+        ByteBuf buf,
+        long manifestCycle,
+        long connectionObservationSequence
     ) {
         // Timestamp required bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);
         int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize)
             + tsContentSize;
+
+        int orderingMetadataSize =
+            CodedOutputStream.computeUInt64Size(TrafficObservation.MANIFESTCYCLE_FIELD_NUMBER, manifestCycle)
+                + CodedOutputStream.computeUInt64Size(
+                    TrafficObservation.CONNECTIONOBSERVATIONSEQUENCE_FIELD_NUMBER,
+                    connectionObservationSequence
+                );
 
         // Capture required bytes
         int dataSize = computeByteBufRemainingSize(dataFieldNumber, buf);
@@ -50,7 +59,7 @@ public class CodedOutputStreamSizeUtil {
 
         // Observation and closing index required bytes
         return bytesNeededForObservationAndClosingIndex(
-            tsTagAndContentSize + captureTagAndContentSize,
+            tsTagAndContentSize + orderingMetadataSize + captureTagAndContentSize,
             Integer.MAX_VALUE
         );
     }
@@ -72,21 +81,21 @@ public class CodedOutputStreamSizeUtil {
 
     /**
      * This function determines the number of bytes needed to store a TrafficObservation and a closing index for a
-     * TrafficStream, from the provided input.
+     * TrafficRecord, from the provided input.
      */
     public static int bytesNeededForObservationAndClosingIndex(
         int observationContentSize,
-        int numberOfTrafficStreamsSoFar
+        int numberOfTrafficRecordsSoFar
     ) {
         int observationTagSize = CodedOutputStream.computeUInt32Size(
-            TrafficStream.SUBSTREAM_FIELD_NUMBER,
+            TrafficRecord.OBSERVATIONS_FIELD_NUMBER,
             observationContentSize
         );
 
-        // Size for TrafficStream index added when flushing, use arbitrary field to calculate
+        // Size for TrafficRecord index added when flushing, use arbitrary field to calculate
         int indexSize = CodedOutputStream.computeInt32Size(
-            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
-            numberOfTrafficStreamsSoFar
+            TrafficRecord.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            numberOfTrafficRecordsSoFar
         );
 
         return observationTagSize + observationContentSize + indexSize;

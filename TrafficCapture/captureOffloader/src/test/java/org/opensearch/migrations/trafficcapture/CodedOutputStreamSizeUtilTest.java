@@ -28,8 +28,8 @@ class CodedOutputStreamSizeUtilTest {
         Instant timestamp = Instant.parse("2024-01-01T00:00:00Z");
         ByteBuf buf = Unpooled.buffer(100);
         buf.writeCharSequence("Test", StandardCharsets.UTF_8);
-        int result = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp, 1, 2, buf);
-        Assertions.assertEquals(24, result);
+        int result = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp, 1, 2, buf, 0, 1);
+        Assertions.assertEquals(30, result);
     }
 
     @Test
@@ -73,11 +73,11 @@ class CodedOutputStreamSizeUtilTest {
     @Test
     void testBytesNeededForObservationAndClosingIndex() {
         int observationContentSize = 50;
-        int numberOfTrafficStreamsSoFar = 10;
+        int numberOfTrafficRecordsSoFar = 10;
 
         int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
             observationContentSize,
-            numberOfTrafficStreamsSoFar
+            numberOfTrafficRecordsSoFar
         );
         Assertions.assertEquals(54, result);
     }
@@ -85,11 +85,11 @@ class CodedOutputStreamSizeUtilTest {
     @Test
     void testBytesNeededForObservationAndClosingIndex_WithZeroContent() {
         int observationContentSize = 0;
-        int numberOfTrafficStreamsSoFar = 0;
+        int numberOfTrafficRecordsSoFar = 0;
 
         int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
             observationContentSize,
-            numberOfTrafficStreamsSoFar
+            numberOfTrafficRecordsSoFar
         );
         Assertions.assertEquals(4, result);
     }

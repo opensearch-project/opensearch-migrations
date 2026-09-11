@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.netty;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +21,7 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.DefaultHttpRequest;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpDecoderConfig;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpMessageDecoderResult;
 import io.netty.handler.codec.http.HttpMethod;
@@ -27,6 +29,8 @@ import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.codec.http.TooLongHttpHeaderException;
+import io.netty.util.ReferenceCountUtil;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -62,15 +66,30 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
+        enum LimitViolation {
+            HEADER_BYTES,
+            TOTAL_BYTES
+        }
+
         private final PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve;
         private final CaptureState captureState;
+        private final long maximumTotalRequestBytes;
+        private long currentRequestBytes;
+        private long completedRequestCount;
+        private LimitViolation limitViolation;
 
         public SimpleHttpRequestDecoder(
             @NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve,
-            CaptureState captureState
+            CaptureState captureState,
+            @NonNull IncompleteRequestLimits incompleteRequestLimits
         ) {
+            super(
+                new HttpDecoderConfig()
+                    .setMaxHeaderSize(Math.toIntExact(incompleteRequestLimits.maximumHeaderBytes()))
+            );
             this.headersToPreserve = headersToPreserve;
             this.captureState = captureState;
+            this.maximumTotalRequestBytes = incompleteRequestLimits.maximumTotalBytes();
         }
 
         /**
@@ -94,6 +113,51 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                 captureState.captureIgnoreState = CaptureIgnoreState.CAPTURE;
             }
             super.channelRead(ctx, msg);
+        }
+
+        @Override
+        protected void decode(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
+            if (limitViolation != null) {
+                buffer.skipBytes(buffer.readableBytes());
+                return;
+            }
+
+            var readerIndexBeforeDecode = buffer.readerIndex();
+            var outputCountBeforeDecode = out.size();
+            super.decode(ctx, buffer, out);
+            currentRequestBytes += buffer.readerIndex() - readerIndexBeforeDecode;
+
+            for (int i = outputCountBeforeDecode; i < out.size(); ++i) {
+                var decoded = out.get(i);
+                if (decoded instanceof HttpRequest request
+                    && request.decoderResult().isFailure()
+                    && request.decoderResult().cause() instanceof TooLongHttpHeaderException) {
+                    limitViolation = LimitViolation.HEADER_BYTES;
+                }
+            }
+
+            if (limitViolation == null && currentRequestBytes > maximumTotalRequestBytes) {
+                limitViolation = LimitViolation.TOTAL_BYTES;
+            }
+
+            for (int i = outputCountBeforeDecode; i < out.size(); ++i) {
+                if (out.get(i) instanceof LastHttpContent) {
+                    ++completedRequestCount;
+                    currentRequestBytes = 0;
+                }
+            }
+        }
+
+        boolean isRequestInProgress() {
+            return currentRequestBytes > 0;
+        }
+
+        long getCompletedRequestCount() {
+            return completedRequestCount;
+        }
+
+        LimitViolation getLimitViolation() {
+            return limitViolation;
         }
     }
 
@@ -141,9 +205,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     protected final EmbeddedChannel httpDecoderChannel;
 
     protected IWireCaptureContexts.IHttpMessageContext messageContext;
-    private final Duration maximumConnectionDuration;
+    private final IncompleteRequestLimits incompleteRequestLimits;
     private CompletableFuture<T> captureCloseFuture;
-    private ScheduledFuture<?> durationCloseTask;
+    private ScheduledFuture<?> requestAssemblyDeadline;
     private boolean contextsClosed;
 
     public LoggingHttpHandler(
@@ -159,7 +223,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             channelKey,
             trafficOffloaderFactory,
             httpHeadersCapturePredicate,
-            Duration.ZERO
+            IncompleteRequestLimits.DEFAULT
         );
     }
 
@@ -169,19 +233,42 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         String channelKey,
         @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
         @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
-        @NonNull Duration maximumConnectionDuration
+        @NonNull Duration maximumRequestAssemblyDuration
+    ) throws IOException {
+        this(
+            rootContext,
+            nodeId,
+            channelKey,
+            trafficOffloaderFactory,
+            httpHeadersCapturePredicate,
+            new IncompleteRequestLimits(
+                maximumRequestAssemblyDuration,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+                IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
+            )
+        );
+    }
+
+    public LoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        String nodeId,
+        String channelKey,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits
     ) throws IOException {
         var parentContext = rootContext.createConnectionContext(channelKey, nodeId);
         this.messageContext = parentContext.createInitialRequestContext();
-        if (maximumConnectionDuration.isNegative()) {
-            throw new IllegalArgumentException("maximumConnectionDuration must not be negative");
-        }
-        this.maximumConnectionDuration = maximumConnectionDuration;
+        this.incompleteRequestLimits = incompleteRequestLimits;
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext);
         var captureState = new CaptureState();
         httpDecoderChannel = new EmbeddedChannel(
-            new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher(), captureState),
+            new SimpleHttpRequestDecoder(
+                httpHeadersCapturePredicate.getHeadersRequiredForMatcher(),
+                captureState,
+                incompleteRequestLimits
+            ),
             new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
         );
     }
@@ -195,54 +282,47 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     @Override
-    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        if (!maximumConnectionDuration.isZero()) {
-            durationCloseTask = ctx.executor().schedule(
-                () -> closeCaptureOnce(Instant.now()).whenComplete((ignored, throwable) -> {
-                    if (throwable != null) {
-                        log.atWarn()
-                            .setCause(throwable)
-                            .setMessage("Unable to finish capture before enforcing the connection duration cap")
-                            .log();
-                    }
-                    ctx.close();
-                }),
-                maximumConnectionDuration.toNanos(),
-                TimeUnit.NANOSECONDS
-            );
-        }
-        super.handlerAdded(ctx);
-    }
-
-    @Override
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-        getConnectionContext().onUnregistered();
-        closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
-            if (throwable != null) {
-                log.atWarn().setCause(throwable).setMessage("Unable to finalize capture during channel teardown").log();
-            }
-        });
-        super.channelUnregistered(ctx);
+        try {
+            getConnectionContext().onUnregistered();
+        } finally {
+            closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
+                if (throwable != null) {
+                    log.atWarn()
+                        .setCause(throwable)
+                        .setMessage("Unable to finalize capture during channel teardown")
+                        .log();
+                }
+            });
+            super.channelUnregistered(ctx);
+        }
     }
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        closeContextsOnce();
-        closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
-            if (throwable != null) {
-                log.atWarn().setCause(throwable).setMessage("Unable to finalize capture during handler removal").log();
+        try {
+            if (ctx.channel().isOpen()) {
+                ctx.close();
             }
-        });
-        super.handlerRemoved(ctx);
+            closeContextsOnce();
+        } finally {
+            closeCaptureOnce(Instant.now()).whenComplete((result, throwable) -> {
+                if (throwable != null) {
+                    log.atWarn()
+                        .setCause(throwable)
+                        .setMessage("Unable to finalize capture during handler removal")
+                        .log();
+                }
+            });
+            super.handlerRemoved(ctx);
+        }
     }
 
     private synchronized CompletableFuture<T> closeCaptureOnce(Instant timestamp) {
         if (captureCloseFuture != null) {
             return captureCloseFuture;
         }
-        if (durationCloseTask != null) {
-            durationCloseTask.cancel(false);
-        }
+        cancelRequestAssemblyDeadline();
         try {
             trafficOffloader.addCloseEvent(timestamp);
             captureCloseFuture = trafficOffloader.flushCommitAndResetStream(true);
@@ -292,8 +372,20 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
         var timestamp = Instant.now();
         var requestParsingHandler = getHandlerThatHoldsParsedHttpRequest();
+        var requestDecoder = (SimpleHttpRequestDecoder) httpDecoderChannel.pipeline().first();
         var bb = ((ByteBuf) msg);
+        var requestWasInProgress = requestDecoder.isRequestInProgress();
+        var completedRequestCountBeforeRead = requestDecoder.getCompletedRequestCount();
+        if (!requestWasInProgress && bb.isReadable()) {
+            startRequestAssemblyDeadline(ctx);
+        }
         httpDecoderChannel.writeInbound(bb.retainedDuplicate()); // the ByteBuf is consumed/release by this method
+        updateRequestAssemblyDeadline(
+            ctx,
+            requestDecoder,
+            requestWasInProgress,
+            completedRequestCountBeforeRead
+        );
 
         var captureState = requestParsingHandler.captureState;
         var shouldCapture = captureState.shouldCapture();
@@ -307,6 +399,16 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
 
         requestContext.onBytesRead(bb.readableBytes());
+
+        if (requestDecoder.getLimitViolation() != null) {
+            log.atWarn()
+                .setMessage("Closing connection because an incomplete request exceeded its {} limit")
+                .addArgument(requestDecoder.getLimitViolation())
+                .log();
+            ReferenceCountUtil.release(msg);
+            ctx.close();
+            return;
+        }
 
         if (requestParsingHandler.haveParsedFullRequest) {
             requestContext.onFullyParsedRequest();
@@ -335,6 +437,49 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
     }
 
+    private void updateRequestAssemblyDeadline(
+        ChannelHandlerContext ctx,
+        SimpleHttpRequestDecoder requestDecoder,
+        boolean requestWasInProgress,
+        long completedRequestCountBeforeRead
+    ) {
+        if (requestDecoder.getLimitViolation() != null || !requestDecoder.isRequestInProgress()) {
+            cancelRequestAssemblyDeadline();
+            return;
+        }
+
+        if (requestWasInProgress
+            && requestDecoder.getCompletedRequestCount() > completedRequestCountBeforeRead) {
+            cancelRequestAssemblyDeadline();
+            startRequestAssemblyDeadline(ctx);
+        } else if (requestAssemblyDeadline == null) {
+            startRequestAssemblyDeadline(ctx);
+        }
+    }
+
+    private void startRequestAssemblyDeadline(ChannelHandlerContext ctx) {
+        if (incompleteRequestLimits.maximumAssemblyDuration().isZero() || requestAssemblyDeadline != null) {
+            return;
+        }
+        requestAssemblyDeadline = ctx.executor().schedule(
+            () -> {
+                log.atWarn()
+                    .setMessage("Closing connection because an incomplete request exceeded its assembly duration")
+                    .log();
+                ctx.close();
+            },
+            incompleteRequestLimits.maximumAssemblyDuration().toNanos(),
+            TimeUnit.NANOSECONDS
+        );
+    }
+
+    private void cancelRequestAssemblyDeadline() {
+        if (requestAssemblyDeadline != null) {
+            requestAssemblyDeadline.cancel(false);
+            requestAssemblyDeadline = null;
+        }
+    }
+
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         IWireCaptureContexts.IResponseContext responseContext;
@@ -355,10 +500,18 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
-        messageContext.addCaughtException(cause);
-        httpDecoderChannel.close();
-        super.exceptionCaught(ctx, cause);
+        try {
+            trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
+            messageContext.addCaughtException(cause);
+            httpDecoderChannel.close();
+            super.exceptionCaught(ctx, cause);
+        } finally {
+            /*
+             * ConnectionExceptionObservation is diagnostic only. Explicitly close the real
+             * channel so normal channel teardown emits the terminal CloseObservation.
+             */
+            ctx.close();
+        }
     }
 
 }

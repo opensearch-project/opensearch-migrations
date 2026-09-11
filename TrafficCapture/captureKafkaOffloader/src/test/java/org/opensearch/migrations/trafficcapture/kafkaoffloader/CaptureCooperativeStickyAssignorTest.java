@@ -3,11 +3,8 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
@@ -22,7 +19,7 @@ class CaptureCooperativeStickyAssignorTest {
     private static final String TOPIC = "traffic";
 
     @Test
-    void cooperativeAssignmentCarriesTheCompleteProxyMembershipToEveryMember() throws Exception {
+    void cooperativeAssignmentCarriesTheCompleteProxyMembershipToEveryMember() {
         var nodeA = assignor("node-a");
         var nodeB = assignor("node-b");
         var subscriptions = Map.of(
@@ -33,30 +30,19 @@ class CaptureCooperativeStickyAssignorTest {
         );
 
         var assignment = nodeA.assign(cluster(4), new ConsumerPartitionAssignor.GroupSubscription(subscriptions));
-        var seenByA = new AtomicReference<Set<String>>();
-        var seenByB = new AtomicReference<Set<String>>();
-        try (
-            var registrationA = CaptureCooperativeStickyAssignor.registerMembershipObserver(
-                "node-a",
-                seenByA::set
-            );
-            var registrationB = CaptureCooperativeStickyAssignor.registerMembershipObserver(
-                "node-b",
-                seenByB::set
-            )
-        ) {
-            nodeA.onAssignment(
-                assignment.groupAssignment().get("member-a"),
-                metadata("member-a")
-            );
-            nodeB.onAssignment(
-                assignment.groupAssignment().get("member-b"),
-                metadata("member-b")
-            );
-        }
 
-        assertEquals(Set.of("node-a", "node-b"), seenByA.get());
-        assertEquals(Set.of("node-a", "node-b"), seenByB.get());
+        assertEquals(
+            Set.of("node-a", "node-b"),
+            CaptureCooperativeStickyAssignor.decodeMembership(
+                assignment.groupAssignment().get("member-a").userData()
+            )
+        );
+        assertEquals(
+            Set.of("node-a", "node-b"),
+            CaptureCooperativeStickyAssignor.decodeMembership(
+                assignment.groupAssignment().get("member-b").userData()
+            )
+        );
         assertEquals(
             Set.of(
                 new TopicPartition(TOPIC, 0),
@@ -113,10 +99,6 @@ class CaptureCooperativeStickyAssignorTest {
             assignor.subscriptionUserData(Set.of(TOPIC)),
             List.of()
         );
-    }
-
-    private static ConsumerGroupMetadata metadata(String memberId) {
-        return new ConsumerGroupMetadata("capture-proxy", 1, memberId, Optional.empty());
     }
 
     private static Cluster cluster(int partitionCount) {
