@@ -1,5 +1,11 @@
 # Traffic Replayer Architecture
 
+> **Reference status:** This document describes the existing replayer implementation and earlier
+> planned changes. It is retained as an implementation reference during the hardening work, but it
+> is not the protocol or target-architecture authority. See
+> [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md) and
+> [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md).
+
 ## Design Goals and Invariants
 
 The replayer faithfully reproduces HTTP traffic from a source cluster against a target cluster,

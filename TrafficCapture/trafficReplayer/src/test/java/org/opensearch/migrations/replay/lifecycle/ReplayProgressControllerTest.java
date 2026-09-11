@@ -16,6 +16,23 @@ import org.junit.jupiter.api.Test;
 
 class ReplayProgressControllerTest {
     @Test
+    void retirementRejectsOutstandingReplayWork() {
+        var fixture = new Fixture(Duration.ZERO);
+        var partition = new SourcePartitionKey("topic", 0, 1);
+        fixture.controller.onAssigned(List.of(partition));
+        fixture.controller.admit(
+            partition,
+            request(0),
+            Instant.EPOCH
+        ).toCompletableFuture().join();
+
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> fixture.controller.onRetired(List.of(partition))
+        );
+    }
+
+    @Test
     void watermarkOnlyAdvancesAcrossContiguousSettledWork() {
         var fixture = new Fixture(Duration.ofSeconds(30));
         var partition = partition(0, 1);

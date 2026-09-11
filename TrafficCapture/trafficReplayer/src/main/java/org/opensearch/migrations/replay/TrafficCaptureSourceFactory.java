@@ -24,7 +24,10 @@ public class TrafficCaptureSourceFactory {
         TrafficReplayer.Parameters appParams,
         Duration bufferTimeWindow
     ) throws IOException {
-        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(ctx, appParams), bufferTimeWindow);
+        return new BlockingTrafficSource(
+            createUnbufferedTrafficCaptureSource(ctx, appParams),
+            bufferTimeWindow
+        );
     }
 
     public static ISimpleTrafficCaptureSource createUnbufferedTrafficCaptureSource(

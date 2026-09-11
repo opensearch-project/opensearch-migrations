@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
@@ -49,6 +51,8 @@ class RepeatedGenerationLifecycleTest extends InstrumentationTest {
     private RequestSenderOrchestrator orchestrator;
     private AsyncPermitPool permitPool;
     private RecordDispositionLedger ledger;
+    private ExecutorService ledgerOwner;
+    private CompletableFuture<Error> fatalFailure;
 
     @BeforeEach
     void setUpLifecycle() {
@@ -59,21 +63,37 @@ class RepeatedGenerationLifecycleTest extends InstrumentationTest {
             "generation-turnover-test",
             1
         );
+        fatalFailure = new CompletableFuture<>();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
             (session, context) -> new ImmediatePacketConsumer(),
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             metrics,
             metrics,
-            metrics
+            metrics,
+            (RequestSenderOrchestrator.FatalReplayHandler) fatalFailure::complete
         );
         permitPool = new AsyncPermitPool(PERMIT_CAPACITY, Runnable::run, metrics);
-        ledger = new RecordDispositionLedger(Runnable::run);
+        ledgerOwner = Executors.newSingleThreadExecutor(
+            command -> new Thread(command, "generation-ledger-owner")
+        );
+        ledger = new RecordDispositionLedger(ledgerOwner);
     }
 
     @AfterEach
     void closePool() throws Exception {
         connectionPool.shutdownNow().get(5, TimeUnit.SECONDS);
+        if (fatalFailure.isDone()) {
+            throw new AssertionError(
+                "test unexpectedly terminated a live replay event loop",
+                fatalFailure.join()
+            );
+        }
+        ledgerOwner.shutdownNow();
+        Assertions.assertTrue(
+            ledgerOwner.awaitTermination(5, TimeUnit.SECONDS),
+            "record disposition ledger owner did not terminate"
+        );
     }
 
     @Test

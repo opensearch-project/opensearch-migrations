@@ -776,7 +776,8 @@ public class TrafficReplayer {
                 params.maxConcurrentRequests,
                 orderedRequestTracker,
                 errorClassifier,
-                poisonAllowlist
+                poisonAllowlist,
+                Runtime.getRuntime()::halt
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +

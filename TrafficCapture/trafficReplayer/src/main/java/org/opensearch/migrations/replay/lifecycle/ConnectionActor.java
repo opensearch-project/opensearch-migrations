@@ -80,6 +80,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             public void pendingAbortChildChanged(AbortChild child, int delta) {
                 // Metrics are optional for non-production actor instances.
             }
+
         };
 
         void queuedCommandsChanged(int delta);
@@ -92,9 +93,6 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
         void pendingAbortChildChanged(AbortChild child, int delta);
 
-        default void fatalEventLoopTermination() {
-            // Optional for non-production actor metrics.
-        }
     }
 
     public interface TargetExchange<P, R> {
@@ -179,6 +177,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
     private final ConnectionSessionKey sessionKey;
     private final ActorMailbox mailbox;
+    private final OwnerThreadGuard ownerThreadGuard;
     private final TargetExchange<P, R> targetExchange;
     private final Metrics metrics;
     private final LongSupplier nanoTime;
@@ -195,8 +194,6 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     private boolean targetAbortPending;
     private Throwable abortCleanupFailure;
     private State state = State.OPEN;
-    private boolean mailboxAbandoned;
-    private CancellationException mailboxAbandonCause;
 
     public ConnectionActor(
         @NonNull ConnectionSessionKey sessionKey,
@@ -224,6 +221,10 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     ) {
         this.sessionKey = sessionKey;
         this.mailbox = mailbox;
+        this.ownerThreadGuard = new OwnerThreadGuard(
+            "connection actor for " + sessionKey,
+            mailbox::inMailbox
+        );
         this.targetExchange = targetExchange;
         this.metrics = metrics;
         this.nanoTime = nanoTime;
@@ -231,14 +232,12 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
     private boolean post(Runnable command) {
         synchronized (lifecycleLock) {
-            if (mailboxAbandoned) {
-                return false;
-            }
             try {
                 mailbox.execute(() -> runMailboxTransition(command));
                 return true;
             } catch (RejectedExecutionException e) {
-                abandonOnDeadMailboxLocked(e);
+                // The owning event-loop termination listener halts the process. Do not transfer
+                // actor mutation or cleanup authority to this calling thread.
                 return false;
             }
         }
@@ -246,110 +245,9 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
     private void runMailboxTransition(Runnable command) {
         synchronized (lifecycleLock) {
-            if (!mailboxAbandoned) {
-                command.run();
-            }
+            ownerThreadGuard.requireOwnerThread();
+            command.run();
         }
-    }
-
-    /**
-     * Fences the actor when its mailbox has stopped running commands for good.  A target exchange can be
-     * parked on the network with nothing left to complete it, so waiting for an orderly abort would wait
-     * forever; whoever owns the mailbox calls this once it knows the mailbox is gone.
-     */
-    public void abandonBecauseMailboxStopped(@NonNull CancellationException cause) {
-        abandon(cause);
-    }
-
-    private void abandonOnDeadMailboxLocked(RejectedExecutionException rejection) {
-        var cause = new CancellationException(
-            "the event loop backing session " + sessionKey + " terminated before the session did"
-        );
-        cause.initCause(rejection);
-        abandonLocked(cause);
-    }
-
-    /**
-     * Settles everything the actor still owes without relying on another mailbox delivery.  Mailbox
-     * transitions use the same lock, so direct abandonment cannot race a command that is still running.
-     */
-    private void abandon(CancellationException cause) {
-        synchronized (lifecycleLock) {
-            abandonLocked(cause);
-        }
-    }
-
-    private void abandonLocked(CancellationException cause) {
-        if (mailboxAbandoned) {
-            return;
-        }
-        mailboxAbandoned = true;
-        mailboxAbandonCause = cause;
-        Throwable cleanupFailure = null;
-        try {
-            setHeadWaitReason(null);
-        } catch (Throwable t) {
-            cleanupFailure = combineFailures(cleanupFailure, t);
-        }
-        try {
-            cancelHeadTimer();
-        } catch (Throwable t) {
-            cleanupFailure = combineFailures(cleanupFailure, t);
-        }
-        if (targetAbortPending) {
-            targetAbortPending = false;
-            try {
-                metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
-            } catch (Throwable t) {
-                cleanupFailure = combineFailures(cleanupFailure, t);
-            }
-        }
-        if (activeRequest != null) {
-            try {
-                recordActiveDuration();
-            } catch (Throwable t) {
-                cleanupFailure = combineFailures(cleanupFailure, t);
-            }
-        }
-        if (state == State.ABORTING) {
-            try {
-                metrics.abortDuration(elapsedSince(abortStartedNanos));
-            } catch (Throwable t) {
-                cleanupFailure = combineFailures(cleanupFailure, t);
-            }
-        }
-        for (var command : new ArrayList<>(obligations)) {
-            if (command instanceof RequestCommand<P, R> request) {
-                request.settled = true;
-                cleanupFailure = combineFailures(
-                    cleanupFailure,
-                    cancelPreparationFailure(request)
-                );
-                cleanupFailure = combineFailures(
-                    cleanupFailure,
-                    releasePreparedFailure(request)
-                );
-                request.completion.complete(new TargetOutcome.Cancelled<>(cause));
-            } else if (command instanceof CloseCommand<P, R> close) {
-                close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
-            }
-            try {
-                untrackObligation(command);
-            } catch (Throwable t) {
-                cleanupFailure = combineFailures(cleanupFailure, t);
-            }
-        }
-        cleanupFailure = combineFailures(cleanupFailure, abortCleanupFailure);
-        abortCleanupFailure = null;
-        commands.clear();
-        activeRequest = null;
-        orderedCloseActive = false;
-        state = State.TERMINATED;
-        termination.complete(
-            cleanupFailure == null
-                ? new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause)
-                : new SessionOutcome.Failed(cleanupFailure)
-        );
     }
 
     public CompletionStage<TargetOutcome<R>> admitRequest(
@@ -394,27 +292,9 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
 
     private boolean trackObligation(Command<P, R> command) {
         synchronized (lifecycleLock) {
-            if (mailboxAbandoned) {
-                settleAfterAbandonment(command);
-                return false;
-            }
             obligations.add(command);
             metrics.queuedCommandsChanged(1);
             return true;
-        }
-    }
-
-    private void settleAfterAbandonment(Command<P, R> command) {
-        var cause = mailboxAbandonCause == null
-            ? new CancellationException("session mailbox is no longer available: " + sessionKey)
-            : mailboxAbandonCause;
-        if (command instanceof RequestCommand<P, R> request) {
-            request.settled = true;
-            cancelPreparationFailure(request);
-            releasePreparedQuietly(request);
-            request.completion.complete(new TargetOutcome.Cancelled<>(cause));
-        } else if (command instanceof CloseCommand<P, R> close) {
-            close.completion.complete(new SessionOutcome.Aborted(AbortReason.SESSION_TERMINATED, cause));
         }
     }
 
@@ -461,7 +341,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         }
         synchronized (lifecycleLock) {
             command.preparation = normalized;
-            if (mailboxAbandoned || command.settled) {
+            if (command.settled) {
                 releasePreparedQuietly(command);
                 return;
             }
@@ -507,7 +387,8 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                     delay
                 );
             } catch (RejectedExecutionException e) {
-                abandonOnDeadMailboxLocked(e);
+                // The owning event-loop termination listener halts the process. Do not mutate the
+                // actor from the scheduler's rejection path.
             }
         }
     }
@@ -843,9 +724,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     }
 
     private void assertInMailbox() {
-        if (!mailbox.inMailbox()) {
-            throw new IllegalStateException("connection actor transition ran outside its mailbox");
-        }
+        ownerThreadGuard.requireOwnerThread();
     }
 
     private static Throwable unwrap(Throwable throwable) {

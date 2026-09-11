@@ -1,5 +1,10 @@
 # OpenSearch Migrations Architecture
 
+> **Reference status:** This document describes the broader migration product and user journey. Its
+> capture-and-replay details are historical context, not the current protocol contract. See
+> [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md) and its linked companion
+> documents for the current capture and replay design.
+
 ## Background
 
 Organizations use searchable data stores for a variety of reasons.  Some common use cases are observability where machine produced logs are aggregated into dashboards/alerts and search which can include product search or document discovery.  The size of the data managed by these systems range from terabytes to petabytes and typically sharded over many nodes, making it difficult to reason about the systems in an atomic way.  That difficulty extends to migrating a datastore to new infrastructure or even just upgrading to a new version in a safe way.
@@ -344,4 +349,3 @@ As mentioned in the description, switching production traffic to the target is t
 - [ ] Rollback post switch
 - [ ] Dashboard parity testing
 - [ ] Legacy External Transport node clients (9300 non-http protocol)
-

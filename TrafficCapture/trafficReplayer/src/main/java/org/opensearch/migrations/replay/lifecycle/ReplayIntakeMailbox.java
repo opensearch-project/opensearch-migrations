@@ -20,6 +20,8 @@ public final class ReplayIntakeMailbox implements Executor {
     private static final Runnable WAKE_UP = () -> {};
 
     private final Thread owner = Thread.currentThread();
+    private final OwnerThreadGuard ownerThreadGuard =
+        new OwnerThreadGuard("replay intake mailbox", this::isOwnerThread);
     private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
     private boolean dispatching;
     private Throwable queuedFailure;
@@ -122,8 +124,6 @@ public final class ReplayIntakeMailbox implements Executor {
     }
 
     private void assertOwner() {
-        if (!isOwnerThread()) {
-            throw new IllegalStateException("replay intake mailbox accessed from a non-owner thread");
-        }
+        ownerThreadGuard.requireOwnerThread();
     }
 }

@@ -4,6 +4,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -108,6 +109,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     private final Object intakeLifecycleLock = new Object();
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
+    private final ReplayProcessFatalHandler.ProcessTerminator fatalProcessTerminator;
 
     public TrafficReplayerTopLevel(
         IRootReplayerContext context,
@@ -156,6 +158,32 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         BulkItemErrorClassifier errorClassifier,
         ExceptionTypeAllowlist poisonAllowlist
     ) {
+        this(
+            context,
+            serverUri,
+            authTransformerFactory,
+            jsonTransformerSupplier,
+            clientConnectionPool,
+            maxConcurrentRequests,
+            workTracker,
+            errorClassifier,
+            poisonAllowlist,
+            Runtime.getRuntime()::halt
+        );
+    }
+
+    public TrafficReplayerTopLevel(
+        IRootReplayerContext context,
+        URI serverUri,
+        IAuthTransformerFactory authTransformerFactory,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
+        ClientConnectionPool clientConnectionPool,
+        int maxConcurrentRequests,
+        IStreamableWorkTracker<Void> workTracker,
+        BulkItemErrorClassifier errorClassifier,
+        ExceptionTypeAllowlist poisonAllowlist,
+        ReplayProcessFatalHandler.ProcessTerminator fatalProcessTerminator
+    ) {
         super(
             context,
             serverUri,
@@ -170,6 +198,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
+        this.fatalProcessTerminator = Objects.requireNonNull(fatalProcessTerminator);
     }
 
 
@@ -297,7 +326,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             topLevelContext.getConnectionActorMetrics(),
             topLevelContext.getTargetExchangeStateMetrics(),
             topLevelContext.getResourceOwnershipMetrics(),
-            error -> shutdown(error)
+            new ReplayProcessFatalHandler(
+                ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
+                topLevelContext.getReplayProcessFatalMetrics(),
+                fatalProcessTerminator
+            )
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
         var progressController = new ReplayProgressController(intakeMailbox, readGate);
@@ -638,19 +671,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             permitPool.close(cancellationCause);
         }
 
-        // Releasing Netty's event loops must not depend on the actors settling: one session that never
-        // reaches termination would otherwise hold every thread in the pool and keep the process alive.
-        // Reaching this bound is always a bug, and the shutdown watchdog above names the stuck session.
-        //
-        // Timing out here and shutting the pool down anyway is safe only because of the four event-loop
-        // death gates documented in docs/replayerProcessingAndCommitArchitecture.md, section 16.3.  A session's
-        // event loop is both its channel's I/O thread and its actor's mailbox, so once this pool goes away
-        // nothing can advance a session that is still live: work parked on the network has no thread left
-        // to complete it, and posted commands are dropped.  Those gates turn that into prompt cancellation
-        // rather than a hang.  Cancellation always retains records (never commits), so the cost of landing
-        // here is re-replaying in-flight work after restart, not data loss.  If you change this ordering or
-        // the timeout, re-read 16.3 first -- removing any one of the four gates reintroduces a shutdown
-        // that never completes.
+        // Normal shutdown gives every actor a bounded opportunity to settle before releasing Netty's
+        // event loops. Reaching this bound while a session is still live is a process-fatal ownership
+        // failure: event-loop termination closes commit admission, flushes fatal diagnostics, and halts
+        // the process as documented in section 16.3.
         var actorShutdownFuture = beginReplayShutdownAfterIntakeFence(replayEngine, cancellationCause)
             .copy()
             .orTimeout(ACTOR_TERMINATION_SHUTDOWN_LIMIT.toSeconds(), TimeUnit.SECONDS);

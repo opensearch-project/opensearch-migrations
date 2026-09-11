@@ -34,7 +34,10 @@ This addendum extends those rules for a controller-managed Kubernetes fleet:
   `max.in.flight.requests.per.connection`; deployment configuration cannot weaken those settings;
 - only exact-registry add, remove, and manifest copy-and-increment use the standalone design's
   narrow partition-local lifecycle boundary; ordinary packet capture remains concurrent;
-- pass-through permanently abandons capture and raises a persistent gap alarm; and
+- pass-through permanently abandons capture and raises a persistent gap alarm;
+- fatal replayer termination is alarmed from Kubernetes-observed container state and the
+  reason-specific halt code; the replayer's final in-process OpenTelemetry metric remains
+  best-effort; and
 - an uncaptured source interval starts a new capture and replay run with a fresh source snapshot.
 
 For the current round, any terminal capture failure after bounded retry terminates the entire
@@ -126,6 +129,60 @@ replayer stops making broker-time expiration decisions for the affected Kafka in
 affected incomplete records, and raises a high-severity alarm. It must not continue committing
 incomplete state using an invalid timestamp proof. Replay processing that does not depend on that
 proof may continue.
+
+### 2.2 Replayer fatal-termination alarming
+
+The replayer cannot guarantee export of a final OpenTelemetry metric before
+`Runtime.halt()`. Updating an in-process metric only records the point in the local telemetry SDK;
+an exporter or external scraper may not observe it before the process disappears. The fatal
+handler still attempts
+`replayFatalFailures{reason=event_loop_terminated}` before logging and termination, but fleet
+alarming does not depend upon that attempt succeeding or being exported.
+
+Fatal event-loop-owner loss uses `Runtime.halt(80)`. Code `80` is reserved for that reason and is
+distinct from the replayer's normal `System.exit` codes. Kubernetes observes this as a container
+termination. For a workload whose Pod restart policy restarts the container, the Pod normally
+remains while the kubelet records the terminated container state and increments its restart count;
+this is a container termination and restart, not necessarily Pod deletion.
+
+Every managed deployment runs kube-state-metrics or an equivalent independent observer and exports:
+
+- `kube_pod_container_status_restarts_total`;
+- `kube_pod_container_status_last_terminated_exitcode`; and
+- when available, `kube_pod_container_status_last_terminated_timestamp`.
+
+The last-termination metrics are version-dependent kube-state-metrics interfaces and must be
+verified during deployment qualification. The stable, general alarm is any unexpected replayer
+container restart. A second reason-specific alarm correlates a recent restart with exit code `80`.
+For example:
+
+```promql
+(
+  increase(kube_pod_container_status_restarts_total{
+    namespace="migrations",
+    container="traffic-replayer"
+  }[5m]) > 0
+)
+and on (namespace, pod, container)
+(
+  kube_pod_container_status_last_terminated_exitcode{
+    namespace="migrations",
+    container="traffic-replayer"
+  } == 80
+)
+```
+
+The alert has no waiting period and remains firing long enough for operators and automation to
+observe it after the five-minute query window. Namespace, workload, and container selectors are
+deployment parameters rather than protocol constants.
+
+This removes dependence on the dying JVM, but a pull-based metrics system still cannot guarantee
+that every termination is observed if the monitoring system is unavailable or the Pod object
+disappears before collection. A strict no-loss requirement needs an external controller that
+watches Kubernetes container-status transitions and persists each termination event to durable
+storage. Whether the managed-fleet controller must provide that durable event journal, and the
+storage and acknowledgement contract for it, remain unresolved; the metrics alarms do not claim to
+provide that guarantee.
 
 ## 3. Terminology and identities
 
@@ -1159,6 +1216,7 @@ replacement-snapshot automation remain future deltas.
 | Snapshot replay plan | Current | Persist the capture domain, accepted session, domain sequence, immutable Kafka IDs, and partition start offsets; include reset offsets when reusing a topic. |
 | Capability probe | Current | Implement the base acknowledged per-leader capability probe using `writerNodeId = captureActivationId + ":PROBE"` and the assignment-scoped initial-manifest gate rather than metadata connectivity. |
 | Kafka clock-skew enforcement | Current | Supply the same `E` and `S` parameters to proxies and replayers, configure the node monitor against that `S`, block unhealthy broker startup, stop a skewed broker locally, publish a custom `ClockSkew` condition, and disable replayer broker-time expiration whenever the declared bound is not healthy. |
+| Replayer fatal-termination alarms | Current | Treat the final in-process fatal metric as best-effort; alert independently on unexpected replayer container restarts and correlate exit code `80` with fatal event-loop-owner loss. Qualify the required kube-state-metrics interfaces for the deployed version. |
 | Source retirement proof | Current fresh-run precondition; future automation | Define how forced termination excludes source operations completing after the recovery boundary. |
 | Security | Current | Authenticate and authorize every mutation and control-record emission. |
 | Observability | Current and future | Export terminal failure, inventory, compromise, suppression, proxy connection-set-drain, and rejection metrics now; add session, fan-out, and replacement-snapshot metrics with future recovery. |
@@ -1187,6 +1245,8 @@ now when a topic is reused. Coverage-establishment boundaries remain future auto
   the current resource, recovery, session, and activation: it lacks the current domain fence and
   cannot persist a current immutable command intent.
 - A percentage below 100% can authorize capacity decisions but never complete capture.
+- Absence of the replayer's final OpenTelemetry fatal metric does not suppress a
+  Kubernetes-observed restart or exit-code alarm.
 - Simultaneous capture-activation and final-manifest loss is not retroactively repaired. The current
   workflow explicitly abandons that incomplete interval and may start a fresh capture and snapshot
   workflow only after §7.2's isolation and source-quiescence preconditions.
@@ -1327,6 +1387,12 @@ Current round:
 - custom `ClockSkew` condition, cordon, taint, and node replacement without modifying kubelet
   `Ready`;
 - replayer broker-time expiration disabled and alarmed when the fleet cannot attest the skew bound;
+- a replayer event-loop death producing container exit code `80`, incrementing the Kubernetes
+  restart signal, and firing the reason-specific alarm even when the final in-process
+  `replayFatalFailures` point is not exported;
+- an ordinary replayer `System.exit` path not being classified as event-loop-owner loss;
+- deployment qualification failing when the required kube-state-metrics restart or
+  last-termination interfaces are absent;
 - controlled strict-proxy replacement with sufficient remaining capacity and no terminal capture
   failure;
 - AZ capacity falling below policy and controller-authorized routing to pass-through capacity;
@@ -1365,6 +1431,9 @@ The current terminal-on-error Kubernetes implementation still requires:
 6. Finalize the Kubernetes termination-evidence adapters for the supported runtimes, durable
    unresolved-grant storage outside the custom-resource lifecycle, and the infrastructure-fencing
    operation for unreachable nodes.
+7. Decide whether fatal replayer termination requires a strict no-loss event journal in addition
+   to the current Kubernetes metrics alarms. If it does, define the controller's Pod-status watch,
+   durable event identity, storage, replay after watch interruption, and acknowledgement contract.
 
 Future automatic recovery within a failed workflow additionally requires:
 

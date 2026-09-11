@@ -21,7 +21,32 @@ import lombok.Value;
 import lombok.experimental.Accessors;
 
 /**
- * Owns generation-scoped work ledgers and publishes the minimum safe source-time watermark.
+ * Controls how far replay intake may advance based on work already admitted for replay.
+ *
+ * <p>For each Kafka partition generation, the controller keeps admitted work in source order.
+ * {@link #admit(SourcePartitionKey, ReplayWorkId, Instant)} returns a {@link WorkToken}; closing
+ * that token reports that the associated replay work has reached its required final state. Work
+ * may finish out of order, but the partition's completed frontier advances only by removing a
+ * contiguous settled prefix from the admission queue.
+ *
+ * <p>The value supplied to {@link ReplayReadGate} is the minimum constraint across tracked
+ * partition generations. A partition with outstanding work contributes the source time of its
+ * oldest admitted work. An idle partition contributes the later of its completed frontier and the
+ * replay clock supplied through {@link #advanceIdlePartitions(Instant)}. {@code ReplayReadGate}
+ * applies the configured read-ahead allowance to that global minimum before permitting more source
+ * input. Consequently, the {@link Snapshot#settledWatermark()} field is the currently published
+ * global source-time constraint; while work is active it may identify the oldest outstanding work
+ * rather than a timestamp through which every operation has completed.
+ *
+ * <p>The controller also owns the replay-quiescence interval. {@link #whenQuiescent()} completes
+ * when every admitted token has settled. Partition revocation prevents new admissions for that
+ * generation but retains its progress until existing tokens settle; partition retirement requires
+ * that no admitted work remain.
+ *
+ * <p>This class does not reconstruct traffic, decide Kafka-record {@code Commit} or {@code Retain}
+ * dispositions, submit Kafka offset commits, or own transaction resources. Those responsibilities
+ * belong to the reconstruction, disposition-ledger, Kafka-source, and transaction components
+ * described in {@code replayerProcessingAndCommitArchitecture.md}.
  */
 public final class ReplayProgressController implements SourcePartitionLifecycleListener {
     public interface WorkToken extends AutoCloseable {
@@ -69,6 +94,8 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
     private record PartitionIdentity(@NonNull String sourceId, int partition) {}
 
     private final Executor ownerExecutor;
+    private final OwnerThreadGuard ownerThreadGuard =
+        new OwnerThreadGuard("replay progress controller");
     private final ReplayReadGate readGate;
     private final Map<SourcePartitionKey, PartitionProgress> partitions = new LinkedHashMap<>();
     private final Map<PartitionIdentity, Integer> endedGenerationWatermarks = new LinkedHashMap<>();
@@ -90,7 +117,7 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
 
     @Override
     public void onAssigned(@NonNull Collection<SourcePartitionKey> assigned) {
-        ownerExecutor.execute(() -> {
+        executeOnOwner(() -> {
             assigned.forEach(partition ->
                 partitions.computeIfAbsent(partition, ignored -> {
                     var progress = new PartitionProgress();
@@ -104,7 +131,7 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
 
     @Override
     public void onRevoked(@NonNull Collection<SourcePartitionKey> revoked) {
-        ownerExecutor.execute(() -> {
+        executeOnOwner(() -> {
             for (var partition : revoked) {
                 endedGenerationWatermarks.merge(
                     identity(partition),
@@ -124,13 +151,34 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         });
     }
 
+    @Override
+    public void onRetired(@NonNull Collection<SourcePartitionKey> retired) {
+        executeOnOwner(() -> {
+            for (var partition : retired) {
+                var progress = partitions.get(partition);
+                if (progress != null && !progress.admitted.isEmpty()) {
+                    throw new IllegalStateException(
+                        "source partition generation retired with replay work still admitted: " + partition
+                    );
+                }
+                partitions.remove(partition);
+                endedGenerationWatermarks.merge(
+                    identity(partition),
+                    partition.sourceGeneration(),
+                    Math::max
+                );
+            }
+            publish();
+        });
+    }
+
     public CompletionStage<WorkToken> admit(
         @NonNull SourcePartitionKey partition,
         @NonNull ReplayWorkId workId,
         @NonNull Instant sourceTime
     ) {
         var completion = new CompletableFuture<WorkToken>();
-        ownerExecutor.execute(() -> {
+        executeOnOwner(() -> {
             var progress = partitions.get(partition);
             if (progress != null && progress.revoking) {
                 completion.completeExceptionally(
@@ -175,7 +223,7 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
      * partition's contribution to the global minimum.
      */
     public void advanceIdlePartitions(@NonNull Instant replayClock) {
-        ownerExecutor.execute(() -> {
+        executeOnOwner(() -> {
             lastReplayClock = later(lastReplayClock, replayClock);
             partitions.values().stream()
                 .filter(progress -> progress.admitted.isEmpty())
@@ -200,7 +248,12 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         return snapshot.get();
     }
 
+    private void executeOnOwner(Runnable command) {
+        ownerExecutor.execute(ownerThreadGuard.guard(command));
+    }
+
     private void publish() {
+        ownerThreadGuard.requireOwnerThread();
         var minimum = partitions.values().stream()
             .map(PartitionProgress::constrainingWatermark)
             .filter(watermark -> !watermark.equals(Instant.MIN))
@@ -241,11 +294,12 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         @Override
         public void close() {
             if (closeRequested.compareAndSet(false, true)) {
-                ownerExecutor.execute(this::settle);
+                executeOnOwner(this::settle);
             }
         }
 
         private void settle() {
+            ownerThreadGuard.requireOwnerThread();
             var progress = partitions.get(partition);
             if (progress == null) {
                 throw new IllegalStateException(

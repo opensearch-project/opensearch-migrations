@@ -8,11 +8,11 @@ for the traffic generation design work that follows. Implementation and tool sel
 separately.
 
 The pipeline is the "live capture and replay" (change-data-capture) path used to mirror traffic
-from a source cluster onto a target cluster during a migration. For the component-level design, see
-[`TrafficCaptureAndReplayDesign.md`](./TrafficCaptureAndReplayDesign.md),
-[`replayerArchitecture.md`](./replayerArchitecture.md), and
-[`ScalingTrafficCaptureAndReplayer.md`](./ScalingTrafficCaptureAndReplayer.md). This document is
-concerned specifically with how to load-test that pipeline.
+from a source cluster onto a target cluster during a migration. The current design contracts are
+[`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md),
+[`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md), and
+[`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md). This
+document is concerned specifically with how to load-test that pipeline.
 
 ---
 
@@ -46,6 +46,9 @@ OpenSearch/Elasticsearch clusters that represent the real-world environment (the
 case — see [Scope](#scope-and-applicability-source-engines) for Solr's more nuanced relationship to
 this pipeline).
 
+The following diagram is a simplified load-testing model. Where its implementation-oriented labels
+conflict with the current design contracts linked above, the design contracts are authoritative.
+
 ```
                   ┌──────────────────────────────────────────────────────────────────┐
                   │                    CAPTURE PATH (live traffic)                   │
@@ -55,22 +58,23 @@ this pipeline).
   │  Traffic │───►│  │ trafficCaptureProxyServer   │─────►│   (OpenSearch /       │  │
   │Generator │    │  │ Netty; NettyScanningHttp-   │◄─────│    Elasticsearch)     │  │
   │          │    │  │ Proxy                       │      │                       │  │
-  └──────────┘    │  │ • mutating reqs HELD until  │      └───────────────────────┘  │
-                  │  │   Kafka commit, THEN sent   │                                 │
-                  │  │   to source                 │                                 │
+  └──────────┘    │  │ • Critical Mutation Traffic │      └───────────────────────┘  │
+                  │  │   waits for Kafka ack before│                                 │
+                  │  │   forwarding to source      │                                 │
                   │  │ • GETs forwarded now,       │                                 │
                   │  │   offloaded async           │                                 │
                   │  │ memory: LOW while Kafka     │                                 │
                   │  │ keeps up                    │                                 │
                   │  └─────────────┬───────────────┘                                 │
-                  │                │ TrafficStream protobufs (req + response bytes)  │
+                  │                │ TrafficRecord protobufs (observed HTTP bytes)  │
                   └────────────────┼─────────────────────────────────────────────────┘
                                    │  KafkaCaptureFactory (captureKafkaOffloader)
                                    ▼
                   ┌────────────────────────────────────┐
                   │                KAFKA               │
                   │  topic: logging-traffic-topic      │
-                  │  partition key: connectionId       │
+                  │  each connection identity maps     │
+                  │  to one partition                  │
                   │  (durable buffer; hours–days at    │
                   │   normal rates)                    │
                   │                                    │
@@ -105,8 +109,8 @@ The Capture Proxy and Traffic Replayer have fundamentally different memory profi
 request rate. The asymmetry is a direct consequence of their designs:
 
 ```
-Capture Proxy memory ≈ (mutating_req/s × kafka_commit_latency × avg_request_body_size)
-                          ── mutating requests are HELD until committed to Kafka
+Capture Proxy memory ≈ (critical_mutation_req/s × kafka_ack_latency × avg_request_body_size)
+                          ── Critical Mutation Traffic waits for Kafka acknowledgement
                        + (req/s × offload_lag × avg_message_size)
                           ── async offload backlog of GETs + captured responses
                        (bounded while Kafka keeps up; Kafka write/commit throughput
@@ -124,10 +128,9 @@ Kafka lag rate       = proxy_write_rate − replayer_consume_rate
 ```
 
 The replayer's memory burden is meaningfully larger at equivalent throughput because it holds whole
-tuples for comparison while the proxy mostly streams bytes through. The proxy's one *non-streaming*
-behaviour — committing mutating requests (PUT/POST/DELETE/PATCH) to Kafka **before** releasing them
-to the source — is its main backpressure mechanism: a slow Kafka write path directly raises
-client-visible write latency.
+tuples for comparison while the proxy mostly streams bytes through. The proxy waits for Kafka to
+acknowledge the corresponding `TrafficObservation` before forwarding Critical Mutation Traffic to
+the source. A slow Kafka write path therefore directly raises client-visible write latency.
 
 ---
 
@@ -140,7 +143,7 @@ Specifically:
 
 1. **Capture Proxy correctness under load** — does the proxy handle high connection rates, large
    bodies, and stateful request sequences (create → update → query → delete) without dropping,
-   reordering, or corrupting captured `TrafficStream` data?
+   reordering, or corrupting captured records?
 
 2. **Capture Proxy memory and backpressure** — when Kafka write throughput degrades, mutating
    requests are held until commit (coupling write correctness and latency). Does that backpressure
@@ -164,11 +167,10 @@ Specifically:
 
 6. **Horizontal scaling** — we intend to support scaling the Capture Proxy and Traffic Replayer
    horizontally to meet demand. This apparatus is designed with TDD in mind: it will validate
-   scaling behaviour before and as that feature is built out. Because Kafka is partitioned by
-   `connectionId`, key questions are whether adding proxy or replayer instances preserves
-   per-connection ordering and whether consumer-group rebalancing is handled without gaps or
-   duplicate replays. See [`ScalingTrafficCaptureAndReplayer.md`](./ScalingTrafficCaptureAndReplayer.md)
-   for the current scaling design.
+   scaling behaviour before and as that feature is built out. Because each immutable complete
+   connection identity maps to one partition, key questions are whether adding proxy or replayer
+   instances preserves per-connection ordering and whether consumer-group rebalancing follows the
+   current proxy and replayer design contracts without gaps or invalid concurrent processing.
 
 ---
 
@@ -186,8 +188,8 @@ Specifically:
 
 | Failure | How to induce | What to assert |
 |---|---|---|
-| Slow Kafka writes | Underscale Kafka brokers / throttle broker network | Mutating-request latency rises (they block on commit); in-flight state stays bounded; no unbounded buffering |
-| Kafka outage | Stop / partition brokers mid-test | Proxy behaviour during outage (block vs. fail mutating requests); recovery after brokers return; no lost `TrafficStream` data |
+| Slow Kafka writes | Underscale Kafka brokers / throttle broker network | Critical Mutation Traffic latency rises while awaiting acknowledgement; in-flight state stays bounded; no unbounded buffering |
+| Kafka outage | Stop / partition brokers mid-test | Proxy behavior follows its configured capture mode; recovery does not lose acknowledged `TrafficRecord` data |
 
 ### Traffic Replayer ↔ Target cluster
 
@@ -198,18 +200,19 @@ Specifically:
 | Target unreachable | Drop connections to the target | Replayer halts or retries safely (at-least-once); lag grows; no data loss on recovery |
 | Lag catch-up burst | Relieve target pressure after lag has built | Replayer resumes at a controlled rate; no secondary failure on the target |
 
-### Sequence ordering and `connectionId` partitioning
+### Sequence ordering and complete connection identity
 
-The Capture Proxy keys Kafka records by **`connectionId`** — every `TrafficStream` for a single TCP
-connection lands on the same partition and is therefore consumed in order, and the replayer
-reconstructs each connection's requests via the `CapturedTrafficToHttpTransactionAccumulator`. The
+The complete connection identity is `(writerNodeId, connectionId)`. A bare `connectionId` is not
+globally unique. The Capture Proxy stores one partition for each accepted connection, and every
+record for that connection is published to that partition in connection-observation order. The
+replayer therefore does not reorder Kafka records to reconstruct a request or source response. The
 direct consequence for testing:
 
 - **Ordering is guaranteed *within* a connection, not *across* connections.** A stateful sequence
   (create → update → query → delete) replays in the captured order **only if those requests share a
   single connection** (HTTP keep-alive on one TCP socket). If the client spreads the sequence across
-  several connections, the requests land on different partitions and there is no cross-partition
-  ordering guarantee on replay.
+  several connections, there is no cross-connection ordering guarantee on replay, whether those
+  connections happen to map to the same partition or to different partitions.
 - This makes connection reuse a **first-class dimension of the traffic generator**, not an
   incidental detail: the generator must be able to pin a sequence to one connection (to test
   coherent replay) and to deliberately spread a sequence across connections (to exercise the
@@ -455,12 +458,16 @@ and OpenSearch Benchmark tooling where it fits.
 
 ## Related Documents
 
-- [`TrafficCaptureAndReplayDesign.md`](./TrafficCaptureAndReplayDesign.md) — overall capture/replay
-  design and the `TrafficStream`/`TrafficObservation` protocol.
-- [`replayerArchitecture.md`](./replayerArchitecture.md) — Traffic Replayer internals: connection
-  accumulation, Kafka commit tracking, partition revocation, backpressure.
-- [`ScalingTrafficCaptureAndReplayer.md`](./ScalingTrafficCaptureAndReplayer.md) — scaling and
-  backpressure design for the proxy and replayer.
+- [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md) — current top-level
+  capture-and-replay design contract.
+- [`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md) — current proxy scaling, manifests, and
+  failure protocol.
+- [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md) —
+  current replayer processing, reassignment, and commit design.
+- [`TrafficCaptureAndReplayDesign.md`](./TrafficCaptureAndReplayDesign.md) — retained product and
+  component overview.
+- [`replayerArchitecture.md`](./replayerArchitecture.md) — retained existing-implementation
+  reference during hardening.
 - [`Architecture.md`](./Architecture.md) — end-to-end migration architecture and where this pipeline
   fits.
 - [`../TrafficCapture/README.md`](../TrafficCapture/README.md) — module overview for the

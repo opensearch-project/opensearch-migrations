@@ -63,10 +63,11 @@ mechanisms; each opens with the problem it solves, so they can be read in any or
 the example in mind. §15–§18 are rules, metrics, tests, and gates. §19 records the design decisions
 that constrain the first implementation.
 
-**Deliberate omissions.** Current class names and the migration sequence live in the companion
-crosswalk, not here. And the current replayer is not claimed to be broken in general: Kafka
-consumption, HTTP reconstruction, transformation, Netty I/O, tuple sinks, and offset-commit
-mechanics are all retained. Only their orchestration contracts change.
+**Deliberate omissions.** Current class names and migration sequencing are implementation
+bookkeeping, not prerequisites for understanding this design. The current replayer is not claimed
+to be broken in general: Kafka consumption, HTTP reconstruction, transformation, Netty I/O, tuple
+sinks, target retry policy, and offset-commit mechanics are retained. Only their orchestration
+contracts change.
 
 ---
 
@@ -163,7 +164,8 @@ Three consequences make this worth doing:
   queue is settled, its in-flight exchange has been actively cancelled and its owned cleanup joined,
   its channel is closed, every transaction has submitted terminal WorkClaim decisions and released
   its resources, and its source acknowledgement is delivered. The generation ledger-settlement gate
-  separately covers parent Kafka-record disposition and any broker acknowledgement. Gates await real
+  separately covers parent Kafka-record disposition and invocation of any selected Kafka commit.
+  Broker acknowledgement is source-internal telemetry and does not hold replay resources. Gates await real
   completions instead of counting or passively waiting for a normal callback that cancellation made
   impossible.
 
@@ -246,34 +248,32 @@ This ambiguity is a real source of bugs, so the design keeps the five lexically 
   the claim, child, and parent remain lifecycle-active until every owned dependency and sibling has
   settled. The first `RetainRequired` decision immediately and irrevocably selects parent
   `Retain`, making the whole Kafka record ineligible for commit, while cleanup continues. Only the
-  commit path waits for every child to become terminal and `Satisfied` before creating a
-  `CommitCandidate` that still requires source-owner acceptance. Child obligations are accounting
+  commit path waits for every child to become terminal and `Satisfied` before selecting parent
+  `Commit` and invoking the Kafka source commit operation. Child obligations are accounting
   units, not independently committable Kafka offsets. Registration has explicit child and claim
   seals so commit reduction cannot race discovery of another dependency.
 - **Out of runway** — we lost the right or the time to finish this work (partition reassigned,
   process shutting down). Never commit-eligible: someone else must be able to pick it up.
 - **Runway state** — generation-scoped authority to accept a parent commit. `KafkaSourceActor`
   owns the authoritative source-generation state. `RecordDispositionLedger`, on the replay-intake
-  owner, keeps a monotonic observed runway so it can reject known-stale commits early, but source
-  acceptance is final only when the source actor processes the commit command in order with poll
-  and rebalance callbacks. It starts `Available` and may transition once to
+  owner, keeps a monotonic observed runway so it can convert a known-stale `Commit` disposition to
+  `Retain` before invoking the source. The source actor later processes the commit command in order
+  with poll and rebalance callbacks. It starts `Available` and may transition once to
   `Lost(REASSIGNMENT)` or `Lost(SHUTDOWN)`. Transactions hold only a monotonic local observation
   delivered as `RunwayLost`. Runway is orthogonal to source and target outcomes: reassignment can
-  occur after both have already settled but before evidence or disposition has finished. Losing
-  runway never rewrites an existing outcome; it vetoes any commit that the source actor has not
-  already accepted.
-- **Parent retained / commit candidate / commit accepted / commit result** — deliberately distinct
-  stages. Transactions and accumulations decide only their WorkClaims. The first
+  occur after both have already settled but before evidence or disposition has finished.
+- **Parent retained / commit invoked** — deliberately distinct stages. Transactions and
+  accumulations decide only their WorkClaims. The first
   `RetainRequired` decision immediately selects parent `Retain`; the ledger still tracks every
   child and owner until process-local cleanup finishes. If no retain veto exists and every child is
-  terminal `Satisfied`, `RecordDispositionLedger` creates a nonterminal `CommitCandidate`. The
-  ledger sends the candidate to `KafkaSourceActor`; only source-owner
-  generation validation and pending-offset registration select final parent `Commit`. A typed
-  generation rejection instead selects parent `Retain`. Kafka acknowledges the accepted commit
-  only when the broker commit succeeds. After source acceptance, `KafkaSourceActor` owns the
-  pending broker-commit operation until acknowledgement, explicit failure, or assignment
-  revocation records the result as unknown. The ledger continues to own process-local cleanup until
-  one of those source-owned results arrives.
+  terminal `Satisfied`, `RecordDispositionLedger` selects parent `Commit`. If the ledger has
+  already observed that the partition generation ended, it converts that input to parent `Retain`.
+  Otherwise it invokes the Kafka source commit operation. Returning from that invocation is the
+  process-local cleanup boundary: the ledger releases its bookkeeping and callers release their
+  resources without waiting for Kafka. The source actor independently accepts, stages, retries, or
+  ignores the request in order with poll and rebalance callbacks. Its later broker result affects
+  only source-owned logs, metrics, and offset state. Kafka's committed offset on the next assignment
+  determines whether the record is redelivered.
 - **Per-connection HTTP accumulation** — the source-side state currently assembling HTTP
   observations for one captured client connection. A manifest-cycle reset discards only the
   incomplete request or incomplete source-response accumulator covered by an applicable omission.
@@ -385,18 +385,17 @@ machinery — it is §2 traced concretely.
    decisions—not the raw outcomes for a second policy decision—to `RecordDispositionLedger` on
    replay intake. The ledger validates them and reduces each sealed child independently. The first
    `RetainRequired` decision immediately selects parent `Retain`; cleanup remains active. If no
-   retain veto exists, every child must become terminal `Satisfied` before the ledger creates a
-   nonterminal `CommitCandidate`. It sends a candidate to `KafkaSourceActor`. The source actor serializes it
-   with rebalance and poll state, accepts or rejects it after validating the generation, and
-   reports the result. Acceptance selects final parent `Commit`; generation rejection selects final
-   parent `Retain`; an accepted commit remains ledger-owned until broker acknowledgement.
+   retain veto exists, every child must become terminal `Satisfied` before the ledger selects
+   parent `Commit`. If the ledger has already observed the end of the partition generation, it
+   converts that disposition to parent `Retain`. Otherwise it invokes the Kafka source commit
+   operation.
 
 10. **Release.** The transaction closes its owned resources exactly once: prepared request, permit,
     tracing contexts. Its completion gate completes after all of its WorkClaim decisions have been
     accepted by the ledger and its owned resources are closed. It does not wait for unrelated
     sibling claims or children, the parent disposition, or a broker commit acknowledgement. The
-    ledger independently owns unresolved child reduction, parent disposition, and broker
-    acknowledgement.
+    ledger independently owns unresolved child reduction and parent disposition. The Kafka source
+    owns later broker outcomes for logs, metrics, retries, and offset state.
 
 11. **Progress.** The transaction gate settles its work token, `ReplayProgressController` advances
     the settled watermark, `ReplayReadGate` raises, and step 1 can happen again.
@@ -492,7 +491,7 @@ from §1.1, that is named.
 | Every mutable state object has one executor or thread owner | Concurrent mutation of accumulator or session state — the class of bug that a `volatile` on one flag does not fix |
 | Cross-thread completions post typed messages to the owner; they never mutate foreign state | A second thread calling into single-threaded machinery (the wall-clock heartbeat-expiry hazard) |
 | Generation runway authority is owned by `KafkaSourceActor`; the ledger and transactions hold only monotonic observations | A transaction, ledger, and Kafka consumer disagree about whether an old generation may still commit |
-| Every resource is released by whoever accepted ownership of it | The refcount leaks of §13 (R16–R18) |
+| Every resource is released by whoever accepted ownership of it | Request, retry, signing, and tuple buffers can otherwise outlive the operation that accepted them |
 | No required lifecycle notification is an optional no-op callback | **F3** — a `default {}` method silently swallowing every close notification |
 
 Mandatory lifecycle interfaces use **no Java default methods and no built-in `NO_OP` instance**.
@@ -517,7 +516,7 @@ optional for test convenience.
 | Closing a traffic-stream context and committing its offset are separate actions | Retained records leak open contexts — F1/F2 territory |
 | Every accepted record is deliberately committed or deliberately retained | Records with no decision at all: offsets pinned, dashboards clean (**F1**) |
 | Normal replay commits only after required evidence is durable | Committing data whose evidence was never written |
-| Work whose runway is lost before source acceptance, and any unclassified failure, does not commit | Teardown masquerading as successful replay — silent data loss |
+| Work whose runway is lost before commit invocation, and any unclassified failure, does not commit | Teardown masquerading as successful replay — silent data loss |
 | A deterministic poison record commits only under an explicit classifier, with durable, loud skip evidence | Either an unskippable crash loop or a silent skip — and no way for an operator to choose which |
 | A complete manifest-cycle reset may commit only the incomplete accumulation covered by that cycle; replayer wall-clock time may not | An old omission or an impatient timeout committing newer or still-live data |
 
@@ -560,8 +559,7 @@ while work is still in flight.
     generation, including committed, retained, decode-failed, and still-unresolved parents. It
     succeeds only after child and WorkClaim registration is sealed, every local obligation is
     lifecycle-terminal, every parent disposition is selected, all record contexts are closed, and
-    every source-accepted commit has reached broker acknowledgement, explicit failure, or
-    `UnknownAfterRevocation`. A
+    every selected commit operation has been invoked. A
     transaction gate does not substitute for this gate because one transaction may cover only some
     WorkClaims beneath one child, and one parent may contain work for several transactions.
 
@@ -634,8 +632,7 @@ flowchart LR
 
     READ -->|"read demand / pause"| KSA
     KSA -->|"immutable source batch /<br/>lifecycle event"| ASM
-    LEDGER -->|"ParentCommitCommand / release /<br/>source acknowledgement"| KSA
-    KSA -->|"CommitAccepted /<br/>CommitAcknowledged"| LEDGER
+    LEDGER -->|"invoke commit / release"| KSA
     ASM -.->|"completed request / close"| COORD
 
     COORD -->|"AdmitRequest"| ACTOR
@@ -723,7 +720,7 @@ flowchart TD
 | 3 | Terminal target outcome | `ConnectionActor` (event loop) | `TargetExchange`: `TargetOutcome` or abort outcome |
 | 4 | Every policy-required source and target outcome | `ReplayTransaction` (event loop) | The last required outcome turning terminal |
 | 5 | Evidence outcome, when required | `ReplayTransaction` (event loop) | `EvidenceWriter`: `EvidenceOutcome`, or policy: not required |
-| 6 | WorkClaim decisions accepted by the ledger and owned-resource release | `ReplayTransaction` computes one decision per owned claim (event loop); `RecordDispositionLedger` validates and applies it (replay intake) | Ledger acceptance and transaction resource closure; this wait does not include sibling claims, parent reduction, source acceptance, or broker acknowledgement |
+| 6 | WorkClaim decisions accepted by the ledger and owned-resource release | `ReplayTransaction` computes one decision per owned claim (event loop); `RecordDispositionLedger` validates and applies it (replay intake) | Ledger acceptance and transaction resource closure; this wait does not include sibling claims, parent reduction, commit invocation by the ledger, or later Kafka results |
 
 The two side entries are orthogonal to the main path on purpose. The source slot may settle at any
 time relative to target work—state 4 simply requires both. Cancellation from any phase actively
@@ -764,15 +761,15 @@ flowchart TD
 | Gate | Local postconditions, beyond joined child gates |
 | --- | --- |
 | Transaction | Required outcomes terminal; all owned WorkClaim decisions accepted by the ledger; transaction contexts and resources released. It does not wait for parent disposition or commit acknowledgement. |
-| Generation ledger settlement | Every registered parent has sealed coverage or an explicit decode-failure transition; every child and WorkClaim is lifecycle-terminal; every parent disposition is selected; all record contexts are closed; every source-accepted commit has broker acknowledgement, explicit failure, or `UnknownAfterRevocation`. |
+| Generation ledger settlement | Every registered parent has sealed coverage or an explicit decode-failure transition; every child and WorkClaim is lifecycle-terminal; every parent disposition is selected; all record contexts are closed; every selected commit operation has been invoked. |
 | Session termination | Queue empty; `TargetExchange` cleanup joined; channel closed; cache entry removed; source acknowledgement delivered |
 | Replay quiescence | Every admitted request and session work token settled — outstanding work reaches zero |
 | Rebalance / shutdown | Every in-scope transaction, session, generation ledger-settlement, and quiescence gate succeeded. |
 
 Two further waits gate record flow rather than lifecycle completion: `ReplayReadGate` admits another
 source record only when the settled watermark plus epsilon allows it and lifecycle intake is open,
-and the Kafka commit watermark advances only across a contiguous prefix of commit-eligible
-obligations whose broker commits have been acknowledged. A `Retain` decision closes local contexts
+and Kafka's durable committed offset advances only when the source successfully commits a
+contiguous prefix of eligible offsets. A `Retain` decision closes local contexts
 and settles the process-local lifecycle, but it continues to block the Kafka commit watermark so
 the record remains eligible for redelivery.
 
@@ -815,7 +812,7 @@ not a dedicated thread.**
 
 | Owner | Thread/executor | Mutable state |
 | --- | --- | --- |
-| `KafkaSourceActor` | One source-I/O owner thread | Consumer assignment, source-generation runway, replay/scan positions, offset trackers, commit acceptance and acknowledgement |
+| `KafkaSourceActor` | One source-I/O owner thread | Consumer assignment, source-generation runway, replay/scan positions, offset trackers, commit staging, retries, and broker-result diagnostics |
 | `SourceAssembler`, `ReplayCoordinator`, and `ProxyManifestIndex` | One replay-intake owner thread | Reconstruction state, manifest/control-record state, session admission, affinity registry |
 | `AsyncPermitPool` | Replay-intake owner | Permit queue and available capacity; releases are posted back to this owner |
 | `ConnectionRuntime` | One assigned existing Netty event loop | `ConnectionActor`, session transactions, command mailbox, timers, target channel, terminal state |
@@ -826,8 +823,8 @@ not a dedicated thread.**
 | `RecordDispositionLedger` | Replay-intake owner | Parent record obligations, observation and control children, WorkClaims, observed runway, context closure, reduction state, generation ledger-settlement gate |
 
 Cross-thread completions are converted into messages: `Prepared`, `SourceSettled`,
-`EvidenceSettled`, `PermitReleased`, `RunwayLost`, `ParentCommitCommand`, `CommitAccepted`,
-`CommitAcknowledged`, and `AbortRequested`. Target exchange callbacks already run on the assigned
+`EvidenceSettled`, `PermitReleased`, `RunwayLost`, `ParentCommitCommand`, and `AbortRequested`.
+Kafka commit completion remains internal to the source owner. Target exchange callbacks already run on the assigned
 Netty event loop, so **the actor and transaction communicate with no extra executor hop** — this is
 why co-locating the transaction with its actor matters rather than giving transactions their own
 executor.
@@ -839,18 +836,11 @@ return `CompletionStage` acknowledgements where ordering matters. They never exp
 queues, lifecycle registries, or callbacks that mutate foreign-owned state directly. A lock or
 `ConcurrentHashMap` is not a substitute for assigning an owner.
 
-The sole cross-owner mutable primitive is a process-wide, one-way `ReplayFatalFence`. It carries no
-per-request state, registry, cleanup operation, or recovery authority. Its
-`tryAcceptCommit(registration)` and `close()` operations share one bounded synchronization point:
-
-- `KafkaSourceActor` calls `tryAcceptCommit` on its owner thread. If open, the gate executes only the
-  bounded generation validation and pending-commit registration before releasing the gate.
-- A fatal observer calls `close`. Closure waits only for any acceptance already inside that bounded
-  critical section, then permanently rejects later acceptance.
-
-Kafka I/O and broker acknowledgement never run while holding the gate. This creates one exact order:
-a commit is accepted before fatal closure or rejected after it; a check-then-register race is
-impossible.
+Unexpected event-loop death does not introduce a cross-owner coordination primitive. In particular,
+there is no fatal-path commit barrier: a process-local barrier cannot fence Kafka or another
+external system. Once event-loop death is detected, Kafka commits and other operations already in
+progress race naturally with immediate process termination. Kafka's committed offset determines
+the durable result after restart.
 
 The normal logical handoffs are bounded and explicit:
 
@@ -1556,6 +1546,32 @@ to resume legitimately. A new assignment-scoped identity gives new connections a
 initial manifest baseline while old connections keep their continuous old baseline until final
 retirement.
 
+### 10.9 Imported capture archives
+
+Bring-your-own capture input uses the archive contract in
+[`captureAndReplayArchitecture.md`](captureAndReplayArchitecture.md). The replayer accepts an
+archive only when its protocol version matches the input protocol implemented by that replayer.
+
+The importer recreates one Kafka application record per archived record on the archived partition,
+preserving binary key, value, ordered headers, and partition-local order. The imported Kafka topic
+assigns new offsets, and those new offsets are the parent-record identities used by the disposition
+ledger and commit path. Archived offsets are used only to verify that export and import were
+complete, ordered, and free of duplicates.
+
+The source adapter exposes one timestamp policy for the entire imported input:
+
+- `preserve`: the imported record timestamp is the original archived `LogAppendTime`. The user
+  asserts that the original capture run respected the archived skew bound `S`; the replayer may use
+  the archived `E`, `S`, and record timestamps for the ordinary broker-time expiration proof.
+- `rebase-without-expiration`: imported records receive new broker time and broker-time expiration
+  is disabled for that source. No component may reinterpret the new timestamps as proof about the
+  original capture run.
+
+The timestamp policy is immutable after replay starts. A missing timestamp, header, partition,
+partition-range boundary, `E`, `S`, or archive integrity value rejects `preserve` mode rather than
+silently weakening it. In either mode, file end is not a terminal connection observation,
+manifest, or `NoMoreWrites`.
+
 ---
 
 ## 11. Connection Actor
@@ -1622,7 +1638,8 @@ The actor owns:
 * the FIFO command deque,
 * **one** head timer,
 * **one** active target exchange,
-* channel creation and reconnection policy,
+* target-channel creation, reuse across requests from the same captured connection, and
+  reconnection policy,
 * the cancellation token,
 * the target-exchange abort and cleanup gate,
 * the session close acknowledgement,
@@ -1638,6 +1655,17 @@ not hardened — they are **deleted**.
 Preparation may run concurrently across requests and connections, so a later command may become ready
 first. The actor examines only the head command. That single rule preserves ordering without
 re-sorting completed preparation callbacks, and it is why the sorter can go.
+
+For a positive configured `speedupFactor`, a command's nominal scheduled time is:
+
+```text
+replayStart + (sourceObservationTime - firstSourceObservationTime) / speedupFactor
+```
+
+The actor applies that time only to the FIFO head. If an earlier request is still active when a
+later request's nominal time arrives, the later request waits. Exact pacing may therefore drift
+when the target is slower than the source, but a later request on the same captured connection can
+never overtake an earlier one. Independent connection actors continue concurrently.
 
 The actor never blocks its Netty thread. It reacts when the head's preparation future posts a
 `Prepared` message, or when its scheduled timer fires.
@@ -1704,7 +1732,7 @@ blocks on the semaphore — intake itself does not block; `queueWork` only `offe
 queue. So the cost is not a stalled intake thread but three other things: a queued acquisition is not
 addressable, so "cancel this request's pending acquisition" cannot be expressed at all; `close()`
 interrupts the feeder and leaves every queued `WorkItem` stranded, its task never invoked and its
-waiters never settled (audit row R2, and one of the ways a shutdown fails to be a shutdown); and the
+waiters never settled, so shutdown can return while accepted work remains ownerless; and the
 unbounded queue means backpressure shows up as memory rather than as refusal.
 
 `AsyncPermitPool` is the replacement for `TrafficStreamLimiter`, not a wrapper, subclass, or second
@@ -1748,8 +1776,8 @@ no settlement contract, not that it exists.
 
 **The problem.** A request's concerns are spread across several owners: the limiter releases the
 permit, the orchestrator releases a temporary buffer retain, a tracker holds the join future, tuple
-packaging closes some contexts, and a commit helper may or may not be reached. Audit rows R13–R15 are
-all the same story — the last link breaks and nothing owns the decision.
+packaging closes some contexts, and a commit helper may or may not be reached. If the last callback
+link breaks, nothing owns context closure, record disposition, or eventual commit eligibility.
 
 ### 13.1 Responsibilities
 
@@ -1791,8 +1819,8 @@ stateDiagram-v2
     DECIDING_CLAIMS --> TERMINATED
     note right of DECIDING_CLAIMS
         Runway lost while claim decisions are pending
-        requires RetainRequired. Parent disposition and
-        broker acknowledgement belong to the ledger.
+        requires RetainRequired. Parent disposition belongs
+        to the ledger; later Kafka results belong to the source.
     end note
 ```
 
@@ -1846,12 +1874,6 @@ sealed interface EvidenceOutcome {
     record NotRequired(...) implements EvidenceOutcome {}
 }
 
-sealed interface BrokerCommitResult {
-    record Acknowledged(...) implements BrokerCommitResult {}
-    record Failed(...) implements BrokerCommitResult {}
-    record UnknownAfterRevocation(...) implements BrokerCommitResult {}
-}
-
 sealed interface RunwayObservation {
     record Available(int sourceGeneration) implements RunwayObservation {}
     record Lost(int sourceGeneration, RunwayLossReason reason) implements RunwayObservation {}
@@ -1864,14 +1886,10 @@ outcome to be considered everywhere. `RunwayObservation` is different: it is mon
 not a replacement outcome or the authoritative Kafka generation fence. Its only transition is
 `Available -> Lost`, and the transaction mailbox serializes that transition with entry into
 WorkClaim decision. The ledger validates its monotonic observed runway before selecting a parent
-commit, and `KafkaSourceActor` makes the authoritative generation check when it accepts or rejects
-the parent commit command.
-
-`BrokerCommitResult.UnknownAfterRevocation` is process-local bookkeeping, not a claim that Kafka
-did or did not commit the offset. After revocation, the replayer neither retries nor waits
-indefinitely for a previously submitted commit. It records the unknown result, ignores a late
-callback except for diagnostics, releases the old assignment's process-local bookkeeping, and lets
-Kafka's next assigned offset determine whether redelivery occurs.
+commit. Once the ledger invokes the Kafka source commit operation, later source acceptance,
+rejection, retry, acknowledgement, or assignment loss does not flow back into transaction or ledger
+lifecycle state. The source emits its own logs and metrics. Kafka's next assigned offset determines
+whether redelivery occurs.
 
 `SourceOutcome` is also where the overloaded-status problem is fixed — but the problem is narrower than
 "today everything collapses into one status," so it is worth stating exactly.
@@ -1990,11 +2008,9 @@ PARENT_DECODING
   -> first RetainRequired decision, if any -> PARENT_RETAIN
   -> every WorkClaim or direct child decision becomes lifecycle-terminal
   -> each child decision reduced exactly once
-  -> when no Retain was selected and all children are Satisfied -> PARENT_COMMIT_CANDIDATE
-  -> candidate source result:
-       generation accepted -> PARENT_COMMIT
-       generation rejected -> PARENT_RETAIN
-  -> accepted commit broker acknowledgement, explicit failure, or UNKNOWN_AFTER_REVOCATION
+  -> when no Retain was selected and all children are Satisfied -> PARENT_COMMIT
+  -> if the ledger has already observed generation loss -> PARENT_RETAIN
+  -> otherwise invoke the Kafka source commit operation and release process-local ledger state
 ```
 
 - Parent child coverage is total and disjoint. A valid traffic record covers every decoded
@@ -2107,21 +2123,16 @@ Properties to internalize:
 - **Runway loss is not represented by rewriting outcomes.** A request may legitimately retain
   `SourceOutcome.Complete`, `TargetOutcome.Succeeded`, and even durable evidence while still being
   `RetainRequired` because reassignment arrived before the source accepted the parent commit.
-- **Parent source acceptance is the linearization point.** Transactions do not submit commits. Once
-  every child is terminal `Satisfied`, the ledger creates a `CommitCandidate` and asks the
-  source-I/O owner to register the offset as pending. Runway revocation and this source acceptance are
-  serialized by that owner:
-  - if revocation runs first, candidate rejection selects parent `Retain` and no commit is
-    registered;
-  - if source acceptance runs first, acceptance selects parent `Commit` and `KafkaSourceActor` owns
-    the pending broker commit until
-    acknowledgement, explicit failure, or revocation records
-    `BrokerCommitResult.UnknownAfterRevocation`; the ledger does not later relabel the parent as
-    `Retain`.
-- **Broker acknowledgement is a later stage.** After revocation, the replayer neither retries nor
-  waits indefinitely for an accepted attempt. `UnknownAfterRevocation` closes only the
-  process-local wait. Kafka's next assigned offset determines whether the record was committed or
-  is redelivered.
+- **Commit invocation is the process-local cleanup point.** Transactions do not submit commits.
+  Once every child is terminal `Satisfied`, the ledger selects parent `Commit`, invokes the Kafka
+  source commit operation, and releases its local record bookkeeping. The transaction and ledger do
+  not wait for source-owner acceptance or broker acknowledgement. If the ledger had already
+  observed generation loss before invocation, it selects parent `Retain` instead.
+- **Broker acknowledgement is source-internal.** The Kafka source serializes commit staging,
+  retries, rebalance, and broker callbacks on its owner thread. Later success, failure, or an
+  assignment ending produces source-owned logs and metrics but does not reopen released replay
+  lifecycle state. Kafka's next assigned offset determines whether the record was committed or is
+  redelivered.
 
 Failure classification cannot be judged at catch time, so it comes from retries plus an
 operator-declared poison classifier — see §19.1.
@@ -2186,13 +2197,14 @@ bounded protocol-violation drain.
 7. Closes child and parent contexts exactly once after their process-local lifecycle is terminal.
 8. Validates and applies each owner's one typed WorkClaim decision without recomputing policy, then
    mechanically reduces claims into children and children into the parent.
-9. Sends only reduced parent `CommitCandidate`s to `KafkaSourceActor`; generation-valid acceptance
-   selects final `Commit`, while authoritative generation rejection selects final
-   `Retain(RUNWAY_LOST)`.
-10. Tracks source-accepted parent `Commit` dispositions and joins broker acknowledgement, explicit
-    failure, or `UnknownAfterRevocation`.
-11. Rejects a parent commit when its observed generation is already lost or stale before submission;
-    `KafkaSourceActor` repeats the authoritative check.
+9. Selects parent `Commit` only after every child is terminal `Satisfied`. If the ledger has
+   already observed generation loss, it selects `Retain(RUNWAY_LOST)` instead; otherwise it invokes
+   the Kafka source commit operation.
+10. Releases process-local parent bookkeeping when the commit operation has been invoked. It does
+    not track source-owner acceptance or broker acknowledgement.
+11. Rejects a parent commit when its observed generation is already lost or stale before
+    invocation. `KafkaSourceActor` still validates current ownership when it later processes the
+    request.
 12. Closes retained records' process-local contexts without advancing the Kafka commit watermark.
    The retained offset continues to block every later offset in that partition from being committed
    past it.
@@ -2286,18 +2298,17 @@ For each revoked partition:
    generation may be polled or buffered under a hard bound, but replay intake does not deliver them
    until all old-generation session gates, the generation ledger-settlement gate, and replay
    quiescence complete successfully. The ledger gate—not transaction or session completion—proves
-   that every affected parent record has a selected disposition and any accepted commit has a
-   broker acknowledgement, explicit failure, or `UnknownAfterRevocation`. Revocation records an
-   accepted commit with no known broker result as `UnknownAfterRevocation`; the replayer does not
-   retry it or wait indefinitely for its callback.
+   that every affected parent record has a selected disposition, every selected commit operation
+   has been invoked, and all process-local record bookkeeping has been released. It does not wait
+   for source-owner acceptance or broker acknowledgement.
 10. Before delivering the next generation, assert that old-generation actor, transaction, exchange,
    timer, permit, target-context, and in-memory source-obligation registries are empty. Deliberately
    retained Kafka records are not live in-memory obligations.
 11. Do not commit unfinished old-generation obligations.
 
-After process-local cleanup finishes, a late callback for an
-`UnknownAfterRevocation` attempt is ignored except for logging and metrics. Kafka's next assigned
-offset—not that callback—determines whether the record is redelivered.
+After process-local cleanup finishes, later source-owner or broker results affect only source-owned
+logs, metrics, retries, and offset state. Kafka's next assigned offset determines whether the record
+is redelivered.
 
 **No timeout is allowed to reset the termination gate and continue lossily.** A timeout may halt loudly. A
 watchdog that discards records on a timer is impatience wearing a safety vest; when it eventually
@@ -2333,48 +2344,45 @@ that can advance the channel, actor, transaction, timer, or target exchange.
 The required response is therefore:
 
 1. detect termination through `EventLoop.terminationFuture()`;
-2. atomically close the process-wide `ReplayFatalFence`. Its shared commit-acceptance critical
-   section establishes whether a concurrent source commit was accepted before closure or rejected
-   after it; a command merely queued before closure receives no authority;
-3. post an immutable `InvalidateSession` command to replay intake, which remains the sole owner of
-   the affinity registry. The termination callback does not mutate that registry directly;
-4. emit an ERROR log and `replayFatalFailures{reason=event_loop_terminated}`;
-5. invoke the required process-level fatal handler immediately without waiting for owner-thread
-   cleanup;
-6. stop source intake and issue no new commit commands;
-7. begin bounded best-effort resource closure without making process termination depend on a dead
-   mailbox; and
-8. force non-successful process termination if bounded shutdown cannot finish.
+2. attempt to increment `replayFatalFailures{reason=event_loop_terminated}`;
+3. emit an ERROR log with the full cause;
+4. write the fatal diagnostic and stack trace to standard error;
+5. synchronously flush Log4j and standard error; and
+6. invoke `Runtime.halt(80)`.
 
-A commit accepted by `KafkaSourceActor` before the fatal fence closed remains source-actor-owned and
-may have an indeterminate broker outcome at process death. A commit processed after the fence closes
-is rejected even if its command was queued earlier. This is the fatal-path linearization point.
+The metric update is best-effort. Immediate process termination cannot guarantee that an
+OpenTelemetry exporter or external scraper observes the new point. The flushed ERROR diagnostic
+and reason-specific process exit code provide additional operational signals.
+
+There is deliberately no fatal-path ordering between process termination and an external operation
+such as a Kafka commit. Any such operation may or may not finish before the process halts. Kafka's
+committed offset determines the durable outcome after restart.
 
 This path does **not** transfer actor or transaction ownership to a cleanup thread and does not
-synthesize successful lifecycle completion. Cross-thread structures such as
-`terminateAfterMailboxLoss`, handoff/claim records, or alternate mutation paths are migration
-residue from an attempted local-recovery policy and should be deleted. They expand the production
-state machine precisely when its owner is already gone.
+synthesize successful lifecycle completion. It does not run normal shutdown hooks, wait for
+owner-thread cleanup, or attempt bounded resource closure. Those actions would require authority
+that disappeared with the event loop.
 
 The fatal handler is a mandatory constructor dependency for production composition; there is no
 log-only default. Tests inject a recording fatal handler and prove the observable contract:
 
 - one fatal signal even if several sessions notice loop termination;
-- the process fatal fence closes before the signal;
-- a queued-but-unaccepted commit is rejected after the fence closes;
-- registry invalidation occurs only on replay intake and is best-effort cleanup, not a precondition
-  for signaling fatal;
-- no new target or source work is admitted;
-- no source offset becomes commit-eligible because of loop death;
-- the top-level run terminates exceptionally; and
-- a shutdown watchdog prevents the JVM from hanging indefinitely.
+- one attempted metric increment with the event-loop-death reason;
+- Log4j and standard error are flushed after the ERROR diagnostic is written; and
+- a subprocess exits with status 80 after invoking the production fatal handler.
+
+Fatal halt codes are reserved separately from the replayer's normal `System.exit` codes:
+
+| Halt code | Reason |
+| --- | --- |
+| `80` | A live replay session lost its Netty event-loop owner. |
+| `89` | Catchall for a future unexpected fatal error without a more specific halt code. |
 
 Expected event-loop termination after the owning session and normal shutdown gates have completed
 is not fatal. The distinction is whether live owner state still exists when the loop terminates.
-The durable outcome matches an OOM or hard process kill. Work whose commit was never accepted by the
-source actor remains eligible for redelivery. For a commit already submitted to Kafka, process
-death may leave the broker result indeterminate: the broker may have committed it even if the
-process never observed the acknowledgement. The fatal path must not claim otherwise or attempt
+The durable outcome matches an OOM or hard process kill. For a commit already submitted to Kafka,
+process death may leave the broker result indeterminate: the broker may have committed it even if
+the process never observed the acknowledgement. The fatal path must not claim otherwise or attempt
 cross-thread recovery; restart relies on Kafka's actual committed offset and the existing
 at-least-once/idempotency behavior.
 
@@ -2453,15 +2461,16 @@ the production interface rather than adding callback configuration to the test.
 * request/close admission order with out-of-order preparation;
 * cancellation before permit, transformation, channel acquisition, pacing, send, response,
   retry delay, response finalization, and evidence durability;
+* time scaling with positive `speedupFactor`, target connection reuse, and a slow target that makes
+  same-connection pacing drift without allowing request reordering;
 * a response finalizer and channel acquisition that never complete normally, proving abort settles
   the owner-controlled exchange and cleanup gates;
 * late callbacks after actor termination and after a new generation has reused the same source
   connection identity;
 * runway loss after source completion, target completion, evidence durability, immediately before
-  source acceptance, and immediately after source acceptance but before broker acknowledgement;
-* revocation after a commit attempt is submitted but before its broker result is known records
-  `UnknownAfterRevocation`, releases old-assignment bookkeeping without retrying or waiting
-  indefinitely, and lets the next assigned offset determine redelivery;
+  commit invocation, and immediately after commit invocation before the source owner processes it;
+* revocation after a commit operation is invoked releases old-assignment replay bookkeeping without
+  waiting for the source owner or broker, and lets the next assigned offset determine redelivery;
 * runway loss after some WorkClaims are already terminal leaves those decisions unchanged, makes
   only undecided active claims `RetainRequired`, and independently causes the source owner to reject
   an unaccepted parent `CommitCandidate` as `Retain(RUNWAY_LOST)`;
@@ -2470,6 +2479,10 @@ the production interface rather than adding callback configuration to the test.
 * duplicate and missing lifecycle events;
 * scanner follow-up, manifest-listed, manifest-omitted, terminal-self-completion,
   broker-time-expiration, skew-attestation-failure, inconclusive, and generation-change results;
+* imported `preserve` records retaining partition, binary key/value, ordered headers, original
+  timestamp, and protocol decisions while using new imported offsets for whole-record accounting;
+* imported `rebase-without-expiration` records never producing broker-time expiration, and
+  end-of-file never acting as completion evidence;
 * manifest-cycle cases: an incomplete manifest has no effect; M listing a connection preserves its
   incomplete accumulators across M; M does not expire an accumulator whose earliest contributing
   `TrafficObservation` is stamped after M; an applicable omission expires only the covered
@@ -2574,10 +2587,9 @@ the production interface rather than adding callback configuration to the test.
   baseline; serialized publication prevents a late manifest from being followed by a
   freshness-restoring manifest; a later unknown connection is isolated from an expired
   accumulator;
-* source-owner ordering: commit proposal before versus after revocation, broker acknowledgement
-  before versus after lifecycle notification, unknown broker result at revocation, scan-blocker and
-  connection-completion commands ordered with reads, and shutdown while source commands remain
-  queued;
+* source-owner ordering: commit request before versus after revocation, broker acknowledgement
+  before versus after source-owned diagnostic reporting, scan-blocker and connection-completion
+  commands ordered with reads, and shutdown while source commands remain queued;
 * decode ownership: the source owner transfers immutable raw envelopes, replay intake performs the
   only full semantic decode, and the scanner's limited metadata decoder creates no obligations and
   agrees with the full decoder on record type and identity;
@@ -2604,7 +2616,7 @@ Assertions:
 * no send, retry, target-response decode, or response-finalization work starts for an exchange after
   its actor accepts abort; already queued foreign callbacks may perform only fenced self-cleanup,
 * active-exchange abort does not complete before all owner-held contexts and resources are released,
-* runway loss before source acceptance prevents commit submission,
+* runway loss observed before commit invocation prevents commit submission,
 * no commit on teardown,
 * no owned resource remains,
 * completion gates do not complete successfully before their postconditions hold,
@@ -2664,8 +2676,14 @@ fired).
   prepared or submitted; the replayer has no sticky-lapse state.
 * Proxy, replayer, and broker skew monitor receive identical `E` and `S` parameters in the test
   deployment.
-* Revocation after commit submission with no broker result completes old-assignment cleanup as
-  `UnknownAfterRevocation`; the next assignment starts from Kafka's chosen offset.
+* Bring-your-own `preserve` import round-trips partition ranges, binary keys and values, duplicate
+  headers, manifest chunks, terminal `NoMoreWrites` headers, and original record timestamps;
+  corruption, omission, reordering, version mismatch, or required-metadata loss rejects the
+  archive.
+* Bring-your-own `rebase-without-expiration` import disables broker-time expiration even when the
+  new importing broker's timestamps span more than `E + S`.
+* Revocation after commit invocation cannot delay old-assignment replay cleanup; the next assignment
+  starts from Kafka's chosen offset.
 * Injected traffic after valid terminal `NoMoreWrites` retains the record, emits high-severity
   diagnostics and an alarm, and terminates the replayer process.
 * Proxy killed with connections open (`SIGKILL`, no close observations): complete requests replay;
@@ -2697,7 +2715,8 @@ each cycle, not only when the process exits.
 
 The redesigned path is ready to replace the current path when:
 
-1. The responsibility audit maps every concern to one proposed owner.
+1. Every lifecycle concern and owned resource named in this document maps to exactly one
+   implementation owner and at least one terminal-path test.
 2. All deterministic terminal-transition tests pass.
 3. Active target-exchange abort passes at every phase, including retry delay, channel acquisition,
    response wait, and a finalizer that never completes normally.
@@ -2705,7 +2724,7 @@ The redesigned path is ready to replace the current path when:
    postconditions.
 5. Consecutive generation turnovers in one long-lived process return all ownership counters and
    registries to baseline before the next generation is admitted.
-6. No teardown test commits work whose runway was lost before source acceptance.
+6. No teardown test commits work whose runway was lost before commit invocation.
 7. Hard byte, record, and owned-resource budgets remain bounded during a stalled target; scanner and
    epsilon settings affect latency and resource use, not disposition.
 8. Scanner settlement validates complete manifests and the `E + S` proof, applies expiration only
@@ -2823,10 +2842,14 @@ independently.
 
 ### 19.6 Target retries remain inside one exchange
 
-The target exchange performs retries while its actor command remains at the head of the FIFO. The
-transaction supplies the immutable retry and classification policy, receives one terminal
-`TargetOutcome`, and does not re-admit retries as new commands. This preserves per-connection ordering
-without another actor transition.
+Retry eligibility, classification, limits, and backoff remain the existing replayer policy and are
+out of scope for this architecture change. The implementation and its existing behavioral tests
+must not change that policy as part of this work.
+
+When the existing policy performs a retry, the retry remains inside the same target exchange while
+its actor command stays at the head of the FIFO. The transaction receives one terminal
+`TargetOutcome`; a retry is not re-admitted as a new actor command or Kafka obligation. This
+preserves per-connection ordering without redefining retry policy.
 
 ### 19.7 Proxy traffic assignments and manifests follow group membership
 
@@ -2861,6 +2884,8 @@ Deliberately out of scope:
 
 * Replacing Kafka or changing its at-least-once delivery model.
 * Rewriting HTTP reconstruction or request transformations.
+* Changing which target outcomes are retried, retry limits, retry backoff, or response-mismatch
+  policy.
 * Introducing a new durable tuple store in the first implementation.
 * Providing exactly-once target-side effects across process crashes.
 * Reproducing HTTP/2 multiplexing semantics.

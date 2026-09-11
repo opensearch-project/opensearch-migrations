@@ -133,6 +133,12 @@ class TrafficReplayerTest extends InstrumentationTest {
                     .setWrite(WriteObservation.newBuilder().build())
                     .build()
             )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setClose(CloseObservation.newBuilder().build())
+                    .build()
+            )
             // Don't need to add more because this gets looped multiple times (with the same connectionId)
             .build();
     }

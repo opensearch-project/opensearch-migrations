@@ -20,6 +20,8 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
@@ -48,6 +50,12 @@ import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpCon
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
 public class HttpRetryTest {
+    private record ScheduledRequest(
+        TrackedFuture<String, TransformedTargetRequestAndResponseList> completion,
+        RequestSenderOrchestrator orchestrator,
+        IReplayContexts.IReplayerHttpTransactionContext context
+    ) {}
+
     private ByteBufList makeRequest() {
         return new ByteBufList(Unpooled.wrappedBuffer(TestHttpServerContext.getRequestStringForSimpleGet("/")
             .getBytes(StandardCharsets.UTF_8)));
@@ -71,17 +79,34 @@ public class HttpRetryTest {
             1,
             "targetConnectionPool for testTransientRequestFailuresAreRetried"
         );
-        return scheduleSingleRequest(clientConnectionPool, rootContext)
-            .whenComplete((v,t) -> clientConnectionPool.shutdownNow(), () -> "cleaning up connection pool");
+        var scheduled = scheduleSingleRequest(clientConnectionPool, rootContext);
+        return scheduled.completion().thenCompose(
+            result -> scheduled.orchestrator().scheduleActorClose(
+                scheduled.context().getChannelKeyContext(),
+                0,
+                Instant.now()
+            ).thenApply(ignored -> result, () -> "preserve the retry result after closing its connection actor"),
+            () -> "close the connection actor after retry processing finishes"
+        ).thenCompose(
+            result -> new TextTrackedFuture<>(
+                clientConnectionPool.shutdownNow(),
+                () -> "wait for the retry test connection pool to stop"
+            ).thenApply(ignored -> result, () -> "preserve the retry result after stopping Netty"),
+            () -> "stop Netty only after the connection actor reaches its final state"
+        ).whenComplete(
+            (ignored, failure) -> scheduled.context().close(),
+            () -> "close the retry test request context"
+        );
     }
 
-    private TrackedFuture<String, TransformedTargetRequestAndResponseList>
+    private ScheduledRequest
     scheduleSingleRequest(ClientConnectionPool clientConnectionPool, TestContext rootContext) {
         var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
-            RequestSenderOrchestrator.noSourceTerminationObligations()
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rootContext.getReplayProcessFatalMetrics()
         );
         var baseTime = Instant.now();
         var requestContext = rootContext.getTestConnectionRequestContext(0);
@@ -94,14 +119,18 @@ public class HttpRetryTest {
             TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes),
                 () -> "static rrp"));
         log.info("Scheduling item to run at " + startTimeForThisRequest);
-        return schedulePreparedRequest(
+        return new ScheduledRequest(
+            schedulePreparedRequest(
+                senderOrchestrator,
+                requestContext,
+                startTimeForThisRequest,
+                Duration.ofMillis(1),
+                sourceRequestProducer,
+                retryVisitor
+            ),
             senderOrchestrator,
-            requestContext,
-            startTimeForThisRequest,
-            Duration.ofMillis(1),
-            sourceRequestProducer,
-            retryVisitor
-        ).whenComplete((v,t) -> requestContext.close(), () -> "test request context closure");
+            requestContext
+        );
     }
 
     private TransformedTargetRequestAndResponseList
@@ -170,7 +199,8 @@ public class HttpRetryTest {
             "targetConnectionPool for testTransientRequestFailuresAreRetried"
         );
         try (var rootContext = TestContext.withAllTracking()) {
-            var f = executor.submit(() -> scheduleSingleRequest(clientConnectionPool, rootContext).get());
+            var scheduled = scheduleSingleRequest(clientConnectionPool, rootContext);
+            var f = executor.submit(() -> scheduled.completion().get());
 
             // Wait until multiple connection attempts have been made instead of sleeping a fixed duration
             var deadline = System.currentTimeMillis() + 10_000;
@@ -181,10 +211,17 @@ public class HttpRetryTest {
                 }
                 Thread.sleep(10);
             }
+            scheduled.orchestrator().abortActor(
+                scheduled.context().getChannelKeyContext(),
+                0,
+                AbortReason.SHUTDOWN,
+                new CancellationException("test requested retry shutdown")
+            ).get(Duration.ofSeconds(5));
             var ccpShutdownFuture = clientConnectionPool.shutdownNow();
 
             var e = Assertions.assertThrows(Exception.class, f::get);
             var shutdownResult = ccpShutdownFuture.get();
+            scheduled.context().close();
             log.atInfo().setCause(e).setMessage("exception: ").log();
             // doubly-nested ExecutionException.  Once for the get() call here and once for the work done in submit,
             // which wraps the scheduled request's future.  Which exception surfaces depends on where the

@@ -1,5 +1,12 @@
 # Traffic Capture and Replay
 
+> **Reference status:** This document is a product and component overview. It predates the hardened
+> scaling and failure protocol and is not authoritative for capture or replay correctness. See
+> [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md),
+> [`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md), and
+> [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md) for
+> the current design contracts.
+
 ## Overview
 
 Two main components support cluster mirroring. The first component is the Capture Proxy, which relays network traffic
@@ -64,19 +71,14 @@ In addition to the impact incurred from TLS decrypting and encrypting, there may
 load. This solution assumes that the network has enough capacity to double the network traffic, albeit to different
 destinations. The proxy doesn’t compress traffic because many requests and responses may already be compressed.
 
-If a PUT or any other mutating call is dropped from the replay, it could have a long-lasting and irreversible impact on
-all future results. Because of that, the Capture Proxy parses the incoming stream as HTTP messages to determine the
-importance of an HTTP request. All GET traffic is immediately forwarded to the source cluster while data is
-asynchronously offloaded to Kafka. Mutating requests such as PUT, POST, DELETE, PATCH etc are handled more carefully.
-The Capture Proxy makes certain that all mutating requests have been committed to Kafka before the request is fully
-‘released’ and sent to the source cluster. This behavior means that GET traffic should flow through the system without
-being impacted by the latency of calls to Kafka. However, mutating requests will be impacted. Clients that have made
-those requests will not receive a response or will not be able to make another request until all prior offloaded traffic
-for the connection has been committed (which could include offloading previous GET requests that had been sent on the
-same connection).
+If a request that mutates the source is dropped from replay, it can have a long-lasting and irreversible impact on
+future results. The current protocol therefore classifies Critical Mutation Traffic. Before the proxy allows such a
+request to take effect at the source, Kafka must acknowledge every `TrafficObservation` needed to reconstruct the
+complete request.
 
-That guarantees that no mutating request was sent to the source without first being committed to Kafka. However, it also
-means that a request could be committed to Kafka without ever being sent and handled by the downstream service. Requests
+That guarantees that Critical Mutation Traffic cannot take effect at the source without its complete request
+representation first being acknowledged by Kafka. The converse is intentionally false: Kafka may contain a complete
+request that the proxy ultimately does not send to the source. Requests
 that are suspected of not being processed (or fully processed) by the source cluster are detectable by the Capture
 Proxy. Those requests will be missing a response. Notice that since responses themselves may not be fully returned in
 every case that its request is handled, there may be other cases where a mutating request DID succeed on the source

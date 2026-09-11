@@ -53,7 +53,8 @@ class ActorCancellationResourceTest extends InstrumentationTest {
                 targetStarted.set(true);
                 return null;
             },
-            RequestSenderOrchestrator.noSourceTerminationObligations()
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rootContext.getReplayProcessFatalMetrics()
         );
     }
 

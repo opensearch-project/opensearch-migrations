@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -154,6 +155,9 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
         );
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(
+                new IgnoringSourcePartitionLifecycleListener()
+            );
             // ---- poll #1: gen=1 — connection becomes mid-request (ACCUMULATING_WRITES) ----
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));    // → onPartitionsAssigned, gen=1

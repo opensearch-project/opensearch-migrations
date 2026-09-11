@@ -25,6 +25,7 @@ import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.lifecycle.UnconfiguredSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
@@ -198,7 +199,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private java.util.function.Consumer<Collection<SourcePartitionKey>> onPartitionsTrulyLostCallback =
         ignored -> {};
     private SourcePartitionLifecycleListener sourcePartitionLifecycleListener =
-        SourcePartitionLifecycleListener.NO_OP;
+        new UnconfiguredSourcePartitionLifecycleListener();
     /** Set true by {@link #cleanupRevokedPartitions} when a rebalance callback fires inline
      *  during {@code kafkaConsumer.poll()}; cleared at the top of each poll. The post-poll
      *  recovery in {@link #safePollWithSwallowedRuntimeExceptions} reads this to decide

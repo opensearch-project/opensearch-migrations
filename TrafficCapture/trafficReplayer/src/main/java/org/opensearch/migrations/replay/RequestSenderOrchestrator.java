@@ -82,6 +82,14 @@ public class RequestSenderOrchestrator {
         void onFatal(Error failure);
     }
 
+    private static FatalReplayHandler productionFatalHandler(ReplayProcessFatalHandler.Metrics fatalMetrics) {
+        return new ReplayProcessFatalHandler(
+            ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
+            fatalMetrics,
+            Runtime.getRuntime()::halt
+        );
+    }
+
     private final ClientConnectionPool clientConnectionPool;
     private final Duration initialRetryDelay;
     private final Duration maxRetryDelay;
@@ -120,7 +128,8 @@ public class RequestSenderOrchestrator {
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
         BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
-        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
+        ReplayProcessFatalHandler.Metrics fatalMetrics
     ) {
         this(
             clientConnectionPool,
@@ -128,7 +137,8 @@ public class RequestSenderOrchestrator {
             sessionTerminationAcknowledger,
             ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ResourceOwnership.Metrics.NOOP
+            ResourceOwnership.Metrics.NOOP,
+            fatalMetrics
         );
     }
 
@@ -137,7 +147,8 @@ public class RequestSenderOrchestrator {
         BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
         ConnectionActor.Metrics actorMetrics,
-        TargetExchangeState.Metrics targetExchangeMetrics
+        TargetExchangeState.Metrics targetExchangeMetrics,
+        ReplayProcessFatalHandler.Metrics fatalMetrics
     ) {
         this(
             clientConnectionPool,
@@ -145,7 +156,8 @@ public class RequestSenderOrchestrator {
             sessionTerminationAcknowledger,
             actorMetrics,
             targetExchangeMetrics,
-            ResourceOwnership.Metrics.NOOP
+            ResourceOwnership.Metrics.NOOP,
+            fatalMetrics
         );
     }
 
@@ -155,7 +167,8 @@ public class RequestSenderOrchestrator {
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
         ConnectionActor.Metrics actorMetrics,
         TargetExchangeState.Metrics targetExchangeMetrics,
-        ResourceOwnership.Metrics resourceOwnershipMetrics
+        ResourceOwnership.Metrics resourceOwnershipMetrics,
+        ReplayProcessFatalHandler.Metrics fatalMetrics
     ) {
         this(
             clientConnectionPool,
@@ -164,7 +177,7 @@ public class RequestSenderOrchestrator {
             actorMetrics,
             targetExchangeMetrics,
             resourceOwnershipMetrics,
-            RequestSenderOrchestrator::reportUnhandledFatal
+            productionFatalHandler(fatalMetrics)
         );
     }
 
@@ -195,7 +208,8 @@ public class RequestSenderOrchestrator {
         Duration initialRetryDelay,
         Duration maxRetryDelay,
         BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory,
-        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger
+        Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
+        ReplayProcessFatalHandler.Metrics fatalMetrics
     ) {
         this(
             clientConnectionPool,
@@ -205,7 +219,8 @@ public class RequestSenderOrchestrator {
             sessionTerminationAcknowledger,
             ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ResourceOwnership.Metrics.NOOP
+            ResourceOwnership.Metrics.NOOP,
+            fatalMetrics
         );
     }
 
@@ -217,7 +232,8 @@ public class RequestSenderOrchestrator {
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
         ConnectionActor.Metrics actorMetrics,
         TargetExchangeState.Metrics targetExchangeMetrics,
-        ResourceOwnership.Metrics resourceOwnershipMetrics
+        ResourceOwnership.Metrics resourceOwnershipMetrics,
+        ReplayProcessFatalHandler.Metrics fatalMetrics
     ) {
         this(
             clientConnectionPool,
@@ -228,7 +244,7 @@ public class RequestSenderOrchestrator {
             actorMetrics,
             targetExchangeMetrics,
             resourceOwnershipMetrics,
-            RequestSenderOrchestrator::reportUnhandledFatal
+            productionFatalHandler(fatalMetrics)
         );
     }
 
@@ -252,13 +268,6 @@ public class RequestSenderOrchestrator {
         this.targetExchangeMetrics = targetExchangeMetrics;
         this.resourceOwnershipMetrics = resourceOwnershipMetrics;
         this.fatalReplayHandler = Objects.requireNonNull(fatalReplayHandler);
-    }
-
-    private static void reportUnhandledFatal(Error failure) {
-        log.atError()
-            .setCause(failure)
-            .setMessage("Fatal replay failure was not connected to a process-level shutdown handler")
-            .log();
     }
 
     public static Function<ConnectionSessionKey, CompletionStage<Void>> noSourceTerminationObligations() {
@@ -365,9 +374,8 @@ public class RequestSenderOrchestrator {
                 mailbox.execute(() -> onActorTerminated(outcome, failure))
             );
             // The event loop is both the channel's thread and the actor's mailbox, so once it terminates
-            // nothing can advance this session: a target exchange parked on the network has no one left to
-            // complete it, and no posted command will ever run again.  Fence the session here so its
-            // callers get an answer instead of waiting on a thread that no longer exists.
+            // nothing can legally advance this session. The process-fatal handler deliberately does not
+            // transfer cleanup authority or enter normal shutdown.
             session.eventLoop.terminationFuture().addListener(ignored -> onEventLoopTerminated());
         }
 
@@ -378,42 +386,7 @@ public class RequestSenderOrchestrator {
             var fatalError = new Error(
                 "the event loop for " + key + " terminated before the session finished"
             );
-            var cleanupCause = new CancellationException(fatalError.getMessage());
-            cleanupCause.initCause(fatalError);
-            log.atError()
-                .setCause(fatalError)
-                .setMessage("The event loop for {} terminated while the session was still live; "
-                    + "the replay process is no longer safe to continue")
-                .addArgument(key)
-                .log();
-            clientConnectionPool.invalidateSession(
-                key.connection().connectionId(),
-                key.sessionNumber(),
-                key.sourceGeneration()
-            );
             signalFatal(fatalError);
-            // Settle the exchange before the actor, so that a target request still holding open
-            // instrumentation closes it while the transaction span that encloses it is still open.
-            exchange.fenceAfterMailboxLoss(cleanupCause);
-            // Fence the actor before anything that might post: the registry's mailbox is the same dead
-            // event loop, so asking it to do work throws, and that must not skip the fencing below.
-            actor.abandonBecauseMailboxStopped(cleanupCause);
-            // onActorTerminated runs as a posted command, so a dead mailbox never delivers it; complete
-            // the runtime's own gate from the registry's direct emergency sweep instead.  The sweep
-            // retains undisposed records and waits for accepted ledger work before this runtime retires.
-            actorTerminated = true;
-            transactions.terminateAfterMailboxLoss(cleanupCause).whenComplete((ignored, transactionFailure) -> {
-                if (transactionFailure != null) {
-                    var unwrappedFailure = unwrap(transactionFailure);
-                    fatalError.addSuppressed(unwrappedFailure);
-                    log.atError()
-                        .setMessage("Emergency transaction cleanup failed after the event loop for {} stopped")
-                        .addArgument(key)
-                        .setCause(unwrappedFailure)
-                        .log();
-                }
-                failTermination(fatalError);
-            });
         }
 
         private CompletionStage<SessionOutcome> termination() {
@@ -525,7 +498,6 @@ public class RequestSenderOrchestrator {
         if (!fatalFailure.compareAndSet(null, failure)) {
             return;
         }
-        actorMetrics.fatalEventLoopTermination();
         try {
             fatalReplayHandler.onFatal(failure);
         } catch (Throwable handlerFailure) {
@@ -671,35 +643,6 @@ public class RequestSenderOrchestrator {
                         : exchangeToJoin.handle((outcome, failure) -> null)
                 )
                 .whenComplete((ignored, failure) -> clearPhase());
-        }
-
-        /**
-         * Settles the exchange when its event loop has terminated, without waiting on anything that loop
-         * would have had to run.  {@link #abort} is the orderly counterpart, but it waits for the channel to
-         * close and for the active exchange to report, neither of which can still happen here.  This is safe
-         * to run off-thread for the same reason: a loop that no longer runs tasks cannot be running one now,
-         * so there is nothing to race with.
-         */
-        private void fenceAfterMailboxLoss(CancellationException cause) {
-            if (cancellationCause == null) {
-                cancellationCause = cause;
-            }
-            cancelScheduledWork(cancellationCause);
-            // The consumer's connection attempts retry until something stops them, so it can still be
-            // holding an open target request span with no path left to close it.
-            cancelActivePacketReceiver(cancellationCause);
-            var releaseFailure = releaseActiveAttempt();
-            if (releaseFailure != null) {
-                log.atWarn().setCause(releaseFailure)
-                    .setMessage("Failed to release the in-flight request payload for {} after its event loop "
-                        + "terminated")
-                    .addArgument(runtime.key)
-                    .log();
-            }
-            var exchangeToJoin = activeExchange;
-            if (exchangeToJoin != null) {
-                exchangeToJoin.complete(new TargetOutcome.Cancelled<>(cancellationCause));
-            }
         }
 
         private CompletionStage<Void> cancelRuntimeChannel() {

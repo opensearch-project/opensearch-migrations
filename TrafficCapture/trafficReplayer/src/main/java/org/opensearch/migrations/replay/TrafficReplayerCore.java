@@ -314,6 +314,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                             });
                         });
                     }
+
+                    @Override
+                    public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {
+                        // The disposition ledger owns generation retirement.
+                    }
                 }
             );
         }

@@ -7,7 +7,6 @@ import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.DoubleHistogram;
-import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
@@ -24,7 +23,6 @@ public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
         public static final String ACTIVE_DURATION = "connectionActorActiveDuration";
         public static final String ABORT_DURATION = "connectionActorAbortDuration";
         public static final String PENDING_ABORT_CHILD = "connectionActorPendingAbortChild";
-        public static final String FATAL_FAILURES = "replayFatalFailures";
     }
 
     private final LongUpDownCounter queuedCommands;
@@ -32,7 +30,6 @@ public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
     private final DoubleHistogram activeDuration;
     private final DoubleHistogram abortDuration;
     private final LongUpDownCounter pendingAbortChild;
-    private final LongCounter fatalFailures;
 
     public ConnectionActorMetrics(@NonNull Meter meter) {
         queuedCommands = meter.upDownCounterBuilder(MetricNames.QUEUED_COMMANDS)
@@ -49,9 +46,6 @@ public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
             .build();
         pendingAbortChild = meter.upDownCounterBuilder(MetricNames.PENDING_ABORT_CHILD)
             .setUnit("children")
-            .build();
-        fatalFailures = meter.counterBuilder(MetricNames.FATAL_FAILURES)
-            .setUnit("failures")
             .build();
     }
 
@@ -80,8 +74,4 @@ public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
         pendingAbortChild.add(delta, Attributes.of(CHILD_ATTRIBUTE, child.metricLabel()));
     }
 
-    @Override
-    public void fatalEventLoopTermination() {
-        fatalFailures.add(1, Attributes.of(REASON_ATTRIBUTE, "event_loop_terminated"));
-    }
 }

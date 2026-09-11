@@ -19,8 +19,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
-import org.opensearch.migrations.replay.lifecycle.SourceRunwayLostException;
+import org.opensearch.migrations.replay.lifecycle.SourceCommitUnknownAfterRevocationException;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -47,6 +49,17 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
     private static final Duration TEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final SourcePartitionLifecycleListener TEST_LIFECYCLE_LISTENER =
+        new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
+        };
 
     private static final class BlockingCommitMockConsumer extends MockConsumer<String, byte[]> {
         private final CountDownLatch commitStarted = new CountDownLatch(1);
@@ -112,6 +125,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 Duration.ofHours(1)
             )
         ) {
+            configureSource(protobufConsumer);
             initializeMockConsumerTopic(mockConsumer);
 
             List<Integer> substreamCounts = new ArrayList<>();
@@ -153,13 +167,14 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
 
     @Test
     void asyncCommitCompletesOnlyAfterKafkaAcknowledgesIt() throws Exception {
-        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var mockConsumer = new BlockingCommitMockConsumer();
         try (var source = new KafkaTrafficCaptureSource(
             rootContext,
             mockConsumer,
             TEST_TOPIC_NAME,
             Duration.ofHours(1)
         )) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
             mockConsumer.schedulePollTask(() -> {
                 mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
@@ -176,10 +191,12 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             key.getTrafficStreamsContext().close();
 
             var acknowledgement = source.commitTrafficStreamAsync(key);
-            Assertions.assertFalse(acknowledgement.isDone());
-
-            source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
-                .get(5, TimeUnit.SECONDS);
+            try {
+                mockConsumer.awaitCommitStarted();
+                Assertions.assertFalse(acknowledgement.isDone());
+            } finally {
+                mockConsumer.releaseCommit();
+            }
 
             acknowledgement.get(5, TimeUnit.SECONDS);
             Assertions.assertEquals(1L, mockConsumer.committed(
@@ -189,7 +206,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     }
 
     @Test
-    void asyncCommitFailsWhenItsSourceGenerationIsLost() throws Exception {
+    void acceptedAsyncCommitBecomesUnknownWhenItsSourceGenerationIsLost() throws Exception {
         var mockConsumer = new BlockingCommitMockConsumer();
         var partition = new TopicPartition(TEST_TOPIC_NAME, 0);
         try (var source = new KafkaTrafficCaptureSource(
@@ -198,6 +215,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             TEST_TOPIC_NAME,
             Duration.ofHours(1)
         )) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
             mockConsumer.schedulePollTask(() -> {
                 mockConsumer.rebalance(Collections.singletonList(partition));
@@ -216,7 +234,10 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             try {
                 source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition));
 
-                Assertions.assertThrows(SourceRunwayLostException.class, acknowledgement::join);
+                Assertions.assertThrows(
+                    SourceCommitUnknownAfterRevocationException.class,
+                    acknowledgement::join
+                );
             } finally {
                 mockConsumer.releaseCommit();
             }
@@ -233,6 +254,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             TEST_TOPIC_NAME,
             Duration.ofHours(1)
         )) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
             mockConsumer.schedulePollTask(() -> {
                 mockConsumer.rebalance(Collections.singletonList(partition));
@@ -263,6 +285,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             TEST_TOPIC_NAME,
             Duration.ofHours(1)
         )) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
             mockConsumer.schedulePollTask(() -> {
                 mockConsumer.rebalance(Collections.singletonList(partition));
@@ -311,6 +334,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 Duration.ofHours(1)
             )
         ) {
+            configureSource(protobufConsumer);
             initializeMockConsumerTopic(mockConsumer);
 
             List<Integer> substreamCounts = new ArrayList<>();
@@ -510,6 +534,10 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         mockConsumer.updateBeginningOffsets(startOffsets);
     }
 
+    private static void configureSource(KafkaTrafficCaptureSource source) {
+        source.setSourcePartitionLifecycleListener(TEST_LIFECYCLE_LISTENER);
+    }
+
     // -------------------------------------------------------------------------
     // Phase 3: Active connection tracking
     // -------------------------------------------------------------------------
@@ -523,6 +551,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public void activeConnectionsTrackedPerPartition() throws Exception {
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
         try (var source = new KafkaTrafficCaptureSource(rootContext, mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1))) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
             mockConsumer.schedulePollTask(() -> {
                 mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));

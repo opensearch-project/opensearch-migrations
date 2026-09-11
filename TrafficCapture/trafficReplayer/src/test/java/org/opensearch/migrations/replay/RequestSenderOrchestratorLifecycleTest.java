@@ -1,15 +1,14 @@
 package org.opensearch.migrations.replay;
 
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,10 +25,8 @@ import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
 import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
@@ -71,7 +68,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             (session, context) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
-            sessionKey -> sessionAcknowledger.get().apply(sessionKey)
+            sessionKey -> sessionAcknowledger.get().apply(sessionKey),
+            rootContext.getReplayProcessFatalMetrics()
         );
     }
 
@@ -145,7 +143,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             (session, context) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
-            RequestSenderOrchestrator.noSourceTerminationObligations()
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("cancel-retry", 0);
@@ -235,7 +234,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ownershipMetrics
+            ownershipMetrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("cancel-finalizer", 0);
@@ -290,7 +290,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ownershipMetrics
+            ownershipMetrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("abort-terminal-result", 0);
@@ -399,7 +400,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             metrics,
-            org.opensearch.migrations.replay.lifecycle.ResourceOwnership.Metrics.NOOP
+            org.opensearch.migrations.replay.lifecycle.ResourceOwnership.Metrics.NOOP,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("phase-state", 0);
@@ -463,7 +465,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ),
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
-            metrics
+            metrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("synchronous-phase-state", 0);
@@ -501,7 +504,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ownershipMetrics
+            ownershipMetrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("sender-factory-failure", 0);
@@ -538,7 +542,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ownershipMetrics
+            ownershipMetrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("visitor-factory-failure", 0);
@@ -614,7 +619,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ownershipMetrics
+            ownershipMetrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext(
@@ -672,7 +678,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
-            ownershipMetrics
+            ownershipMetrics,
+            rootContext.getReplayProcessFatalMetrics()
         );
         var permits = new AsyncPermitPool(1, Runnable::run);
         var context = rootContext.getTestConnectionRequestContext("late-transformation", 0);
@@ -955,107 +962,54 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         abort.get(Duration.ofSeconds(5));
     }
 
-    /**
-     * Shutting the connection pool down without aborting the actors first takes each session's event loop
-     * -- which is also its actor mailbox -- away mid-exchange.  Nothing can report the outcome after that,
-     * so the request has to be failed rather than left pending; a caller blocked on it would never return.
-     */
     @Test
-    void poolShutdownUnderALiveExchangeFailsTheRequestInsteadOfStrandingIt() throws Exception {
-        var permits = new AsyncPermitPool(1, Runnable::run);
-        var context = rootContext.getTestConnectionRequestContext("pool-yanked", 0);
-        var neverCompletes = new CompletableFuture<Void>();
-        var fatalFailure = new CompletableFuture<Error>();
-        var writesStarted = new AtomicInteger();
+    void eventLoopDeathEmitsFatalMetricAndSignalsProcessTerminationOnceWithoutCleanup() throws Exception {
+        var terminationCalls = new AtomicInteger();
+        var fatalMetricCalls = new AtomicInteger();
+        var exitCode = new AtomicInteger(-1);
+        var actorMetrics = new RecordingConnectionActorMetrics();
+        var fatalHandler = new ReplayProcessFatalHandler(
+            ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
+            reason -> {
+                Assertions.assertEquals(ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED, reason);
+                fatalMetricCalls.incrementAndGet();
+            },
+            code -> {
+                exitCode.set(code);
+                terminationCalls.incrementAndGet();
+            },
+            () -> {},
+            new PrintStream(OutputStream.nullOutputStream())
+        );
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, ctx) -> new IPacketFinalizingConsumer<AggregatedRawResponse>() {
-                @Override
-                public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
-                    nextRequestPacket.release();
-                    writesStarted.incrementAndGet();
-                    // Stands in for a target exchange that is waiting on the network when the loop dies.
-                    return new TextTrackedFuture<>(neverCompletes, "never-completing packet write");
-                }
-
-                @Override
-                public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
-                    return new TextTrackedFuture<>(new CompletableFuture<>(), "never-completing response");
-                }
+            (session, ctx) -> {
+                throw new AssertionError("event-loop termination test must not start target work");
             },
             sessionKey -> sessionAcknowledger.get().apply(sessionKey),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            actorMetrics,
             TargetExchangeState.Metrics.NOOP,
             ResourceOwnership.Metrics.NOOP,
-            fatalFailure::complete
+            fatalHandler
         );
 
-        var request = schedule(context, permits, CompletableFuture.completedFuture(transformedRequest()));
-        // The exchange has to actually be parked on the write before the loop goes away, otherwise the
-        // shutdown could land on some earlier phase and the test would pass without exercising the fence.
-        await(() -> writesStarted.get() > 0);
-        Assertions.assertFalse(request.future.isDone());
+        var firstContext = rootContext.getTestConnectionRequestContext("first-live-session", 0);
+        var secondContext = rootContext.getTestConnectionRequestContext("second-live-session", 0);
+        orchestrator.transactionRuntime(firstContext.getReplayerRequestKey(), firstContext.getChannelKeyContext());
+        orchestrator.transactionRuntime(secondContext.getReplayerRequestKey(), secondContext.getChannelKeyContext());
 
         connectionPool.shutdownNow().get(30, TimeUnit.SECONDS);
+        await(() -> terminationCalls.get() == 1);
 
-        var reportedFatal = fatalFailure.get(5, TimeUnit.SECONDS);
-        Assertions.assertTrue(reportedFatal.getMessage().contains("event loop"));
-        Assertions.assertThrows(
-            java.util.concurrent.ExecutionException.class,
-            () -> request.future.get(30, TimeUnit.SECONDS),
-            "the request must settle once its event loop is gone"
+        Assertions.assertEquals(
+            ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED.exitCode(),
+            exitCode.get()
         );
-    }
-
-    @Test
-    void eventLoopLossRetainsTransactionsBeforeRetiringTheRuntime() throws Exception {
-        var context = rootContext.getTestConnectionRequestContext("transaction-pool-yanked", 0);
-        var runtime = orchestrator.transactionRuntime(
-            context.getReplayerRequestKey(),
-            context.getChannelKeyContext()
-        );
-        var ledgerExecutor = new PausingExecutor();
-        var ledger = new RecordDispositionLedger(ledgerExecutor);
-        var record = new RetentionWatchingRecord(
-            new KafkaRecordId("topic", 0, 41, runtime.requestId().session().sourceGeneration())
-        );
-        var resourceCloses = new AtomicInteger();
-        var transaction = new ReplayTransaction<String>(
-            runtime.requestId(),
-            runtime.mailbox(),
-            (id, source, target) -> CompletableFuture.completedFuture(
-                new org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome.Durable("unused")
-            ),
-            new ReplayDispositionPolicy(),
-            ledger,
-            List.of(record.id()),
-            List.of(resourceCloses::incrementAndGet),
-            ReplayTransaction.Metrics.NOOP
-        );
-        ledger.register(record, transaction.ledgerOwner()).toCompletableFuture().get(5, TimeUnit.SECONDS);
-        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
-        ledgerExecutor.pause();
-
-        connectionPool.shutdownNow().get(5, TimeUnit.SECONDS);
-        await(() -> ledgerExecutor.queuedTaskCount() == 1);
-
-        Assertions.assertFalse(
-            transaction.completion().toCompletableFuture().isDone(),
-            "the transaction must wait for the ledger's retained disposition"
-        );
+        Assertions.assertEquals(1, fatalMetricCalls.get());
         Assertions.assertFalse(
             orchestrator.describeUnterminatedSessions().isEmpty(),
-            "the runtime must remain visible while emergency disposition is unresolved"
+            "event-loop death must not transfer authority to cross-thread cleanup"
         );
-
-        ledgerExecutor.runUntilIdle();
-
-        Assertions.assertTrue(transaction.completion().toCompletableFuture().isCompletedExceptionally());
-        Assertions.assertEquals(1, record.contextCloses.get());
-        Assertions.assertEquals(1, record.releasesWithoutCommit.get());
-        Assertions.assertEquals(0, record.commits.get());
-        Assertions.assertEquals(1, resourceCloses.get());
-        await(() -> orchestrator.describeUnterminatedSessions().isEmpty());
     }
 
     private TrackedFuture<String, String> schedule(
@@ -1123,81 +1077,6 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         Assertions.assertTrue(condition.getAsBoolean(), "condition did not become true before timeout");
     }
 
-    private static final class PausingExecutor implements Executor {
-        private final Queue<Runnable> tasks = new ArrayDeque<>();
-        private boolean paused;
-
-        @Override
-        public void execute(Runnable command) {
-            synchronized (this) {
-                if (paused) {
-                    tasks.add(command);
-                    return;
-                }
-            }
-            command.run();
-        }
-
-        private synchronized void pause() {
-            paused = true;
-        }
-
-        private synchronized int queuedTaskCount() {
-            return tasks.size();
-        }
-
-        private void runUntilIdle() {
-            while (true) {
-                final Runnable task;
-                synchronized (this) {
-                    task = tasks.poll();
-                    if (task == null) {
-                        paused = false;
-                        return;
-                    }
-                }
-                task.run();
-            }
-        }
-    }
-
-    private static final class RetentionWatchingRecord implements RecordDispositionLedger.RecordHandle {
-        private final KafkaRecordId id;
-        private final AtomicInteger contextCloses = new AtomicInteger();
-        private final AtomicInteger releasesWithoutCommit = new AtomicInteger();
-        private final AtomicInteger commits = new AtomicInteger();
-
-        private RetentionWatchingRecord(KafkaRecordId id) {
-            this.id = id;
-        }
-
-        @Override
-        public KafkaRecordId id() {
-            return id;
-        }
-
-        @Override
-        public SourcePartitionKey sourcePartition() {
-            return new SourcePartitionKey(id.topic(), id.partition(), id.sourceGeneration());
-        }
-
-        @Override
-        public void closeContext() {
-            contextCloses.incrementAndGet();
-        }
-
-        @Override
-        public void releaseWithoutCommit() {
-            releasesWithoutCommit.incrementAndGet();
-        }
-
-        @Override
-        public CompletableFuture<Void> commit() {
-            commits.incrementAndGet();
-            return CompletableFuture.completedFuture(null);
-        }
-    }
-
     private static final class RecordingTargetExchangeMetrics implements TargetExchangeState.Metrics {
         private final List<TargetExchangeState.Phase> enteredPhases = new CopyOnWriteArrayList<>();
         private final AtomicReference<TargetExchangeState.Phase> activePhase = new AtomicReference<>();
@@ -1236,6 +1115,31 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         List<TargetExchangeState.Phase> enteredPhases() {
             return List.copyOf(enteredPhases);
         }
+    }
+
+    private static final class RecordingConnectionActorMetrics
+        implements org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics {
+
+        @Override
+        public void queuedCommandsChanged(int delta) {}
+
+        @Override
+        public void headWaitChanged(
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.HeadWaitReason reason,
+            int delta
+        ) {}
+
+        @Override
+        public void activeDuration(Duration duration) {}
+
+        @Override
+        public void abortDuration(Duration duration) {}
+
+        @Override
+        public void pendingAbortChildChanged(
+            org.opensearch.migrations.replay.lifecycle.ConnectionActor.AbortChild child,
+            int delta
+        ) {}
     }
 
     private static final class RecordingOwnershipMetrics implements ResourceOwnership.Metrics {

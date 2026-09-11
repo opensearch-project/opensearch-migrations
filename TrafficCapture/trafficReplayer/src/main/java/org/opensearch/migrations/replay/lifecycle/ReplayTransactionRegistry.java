@@ -51,24 +51,22 @@ public final class ReplayTransactionRegistry {
         private final Runnable transition;
         private final CompletableFuture<Void> acknowledgement;
         private final boolean completeAfterTransition;
-        private final boolean emergencySatisfiesCommand;
 
         private RegistryCommand(
             Runnable transition,
             CompletableFuture<Void> acknowledgement,
-            boolean completeAfterTransition,
-            boolean emergencySatisfiesCommand
+            boolean completeAfterTransition
         ) {
             this.transition = transition;
             this.acknowledgement = acknowledgement;
             this.completeAfterTransition = completeAfterTransition;
-            this.emergencySatisfiesCommand = emergencySatisfiesCommand;
         }
     }
 
     private final Object stateLock = new Object();
     private final ConnectionSessionKey sessionKey;
     private final ActorMailbox mailbox;
+    private final OwnerThreadGuard ownerThreadGuard;
     private final Map<ReplayRequestId, Entry> active = new LinkedHashMap<>();
     private final Set<PendingRegistration> pendingRegistrations =
         Collections.newSetFromMap(new IdentityHashMap<>());
@@ -76,8 +74,6 @@ public final class ReplayTransactionRegistry {
         Collections.newSetFromMap(new IdentityHashMap<>());
     private final CompletionGate<Void> termination = new CompletionGate<>();
     private boolean terminating;
-    private boolean mailboxLossStarted;
-    private int emergencyChildren;
     private CancellationException cancellationCause;
     private ReplayTransaction.RunwayLossReason runwayLossReason;
     private Throwable firstFailure;
@@ -88,6 +84,10 @@ public final class ReplayTransactionRegistry {
     ) {
         this.sessionKey = sessionKey;
         this.mailbox = mailbox;
+        this.ownerThreadGuard = new OwnerThreadGuard(
+            "replay transaction registry for " + sessionKey,
+            mailbox::inMailbox
+        );
     }
 
     public CompletionStage<Void> register(
@@ -104,7 +104,6 @@ public final class ReplayTransactionRegistry {
         return register(requestId, transaction.completion(), transaction);
     }
 
-    @SuppressWarnings("java:S1181") // Admission failure must trigger emergency registry teardown.
     private CompletionStage<Void> register(
         ReplayRequestId requestId,
         CompletionStage<?> transactionCompletion,
@@ -115,33 +114,19 @@ public final class ReplayTransactionRegistry {
         }
         var pending = new PendingRegistration(requestId, transactionCompletion, transaction);
         synchronized (stateLock) {
-            if (mailboxLossStarted) {
-                pending.acknowledgement.completeExceptionally(mailboxUnavailable());
-                terminateTransactionAfterMailboxLoss(transaction);
-                return pending.acknowledgement.minimalCompletionStage();
-            }
             pendingRegistrations.add(pending);
         }
         try {
             mailbox.execute(() -> runRegistration(pending));
         } catch (RuntimeException | Error failure) {
-            synchronized (stateLock) {
-                pending.acknowledgement.completeExceptionally(failure);
-            }
-            terminateAfterMailboxLoss(mailboxLoss("mailbox rejected transaction registration", failure));
+            pending.acknowledgement.completeExceptionally(failure);
         }
         return pending.acknowledgement.minimalCompletionStage();
     }
 
-    @SuppressWarnings("java:S1181") // Registration failure must settle acknowledgement before teardown.
     private void runRegistration(PendingRegistration pending) {
-        Throwable transitionFailure = null;
         synchronized (stateLock) {
             if (!pendingRegistrations.remove(pending)) {
-                return;
-            }
-            if (mailboxLossStarted) {
-                pending.acknowledgement.completeExceptionally(mailboxUnavailable());
                 return;
             }
             assertInMailbox();
@@ -151,7 +136,7 @@ public final class ReplayTransactionRegistry {
                         "session is already terminating: " + sessionKey
                     );
                     pending.acknowledgement.completeExceptionally(failure);
-                    terminateRejectedTransaction(pending.transaction, failure);
+                    failRejectedTransaction(pending.transaction, failure);
                     return;
                 }
                 var existing = active.get(pending.requestId);
@@ -161,7 +146,7 @@ public final class ReplayTransactionRegistry {
                     );
                     pending.acknowledgement.completeExceptionally(failure);
                     if (pending.transaction != existing.transaction) {
-                        terminateRejectedTransaction(pending.transaction, failure);
+                        failRejectedTransaction(pending.transaction, failure);
                     }
                     return;
                 }
@@ -179,57 +164,32 @@ public final class ReplayTransactionRegistry {
                 pending.acknowledgement.complete(null);
             } catch (RuntimeException | Error failure) {
                 pending.acknowledgement.completeExceptionally(failure);
-                transitionFailure = failure;
+                throw failure;
             }
-        }
-        if (transitionFailure != null) {
-            terminateAfterMailboxLoss(mailboxLoss("transaction registration failed", transitionFailure));
         }
     }
 
-    @SuppressWarnings("java:S1181") // Callback rejection must trigger emergency registry teardown.
     private void stageTransactionCompletion(
         ReplayRequestId requestId,
         Entry entry,
         Throwable failure
     ) {
-        boolean settleDirectly;
         synchronized (stateLock) {
             if (active.get(requestId) != entry) {
                 return;
             }
             entry.completionFailure = failure == null ? null : unwrap(failure);
             entry.completionReady = true;
-            settleDirectly = mailboxLossStarted;
         }
-        if (settleDirectly) {
-            settleAfterMailboxLoss(requestId, entry);
-            return;
-        }
-        try {
-            mailbox.execute(() -> settleFromMailbox(requestId, entry));
-        } catch (RuntimeException | Error callbackFailure) {
-            terminateAfterMailboxLoss(
-                mailboxLoss("mailbox rejected transaction completion", callbackFailure)
-            );
-        }
+        mailbox.execute(() -> settleFromMailbox(requestId, entry));
     }
 
     private void settleFromMailbox(ReplayRequestId requestId, Entry entry) {
         synchronized (stateLock) {
-            if (mailboxLossStarted || active.get(requestId) != entry || !entry.completionReady) {
-                return;
-            }
-            assertInMailbox();
-            settleLocked(requestId, entry.completionFailure);
-        }
-    }
-
-    private void settleAfterMailboxLoss(ReplayRequestId requestId, Entry entry) {
-        synchronized (stateLock) {
             if (active.get(requestId) != entry || !entry.completionReady) {
                 return;
             }
+            assertInMailbox();
             settleLocked(requestId, entry.completionFailure);
         }
     }
@@ -260,7 +220,6 @@ public final class ReplayTransactionRegistry {
                     });
             },
             acknowledgement,
-            false,
             false
         ));
         return acknowledgement.minimalCompletionStage();
@@ -278,7 +237,6 @@ public final class ReplayTransactionRegistry {
                 tryCompleteTerminationLocked();
             },
             null,
-            false,
             true
         ));
         return termination.stage();
@@ -304,86 +262,9 @@ public final class ReplayTransactionRegistry {
                 }
             },
             acknowledgement,
-            true,
             true
         ));
         return acknowledgement.minimalCompletionStage();
-    }
-
-    public CompletionStage<Void> terminateAfterMailboxLoss(
-        @NonNull CancellationException cause
-    ) {
-        Set<ReplayTransaction<?>> transactions =
-            Collections.newSetFromMap(new IdentityHashMap<>());
-        synchronized (stateLock) {
-            if (mailboxLossStarted) {
-                return termination.stage();
-            }
-            mailboxLossStarted = true;
-            terminating = true;
-            if (cancellationCause == null) {
-                cancellationCause = cause;
-            }
-            var commandFailure = mailboxUnavailable();
-            completePendingCommandsAfterMailboxLoss(commandFailure);
-            collectPendingRegistrationsAfterMailboxLoss(transactions, commandFailure);
-            collectActiveTransactionsAfterMailboxLoss(transactions);
-            emergencyChildren += transactions.size();
-            log.atWarn()
-                .setMessage(
-                    "Transaction-registry mailbox stopped for {}; emergencyTransactions={}; cause={}"
-                )
-                .addArgument(sessionKey)
-                .addArgument(transactions::size)
-                .addArgument(cause::getMessage)
-                .log();
-            tryCompleteTerminationLocked();
-        }
-        for (var transaction : transactions) {
-            transaction.terminateAfterMailboxLoss(cause)
-                .whenComplete((ignored, failure) -> emergencyChildSettled(failure));
-        }
-        return termination.stage();
-    }
-
-    private void completePendingCommandsAfterMailboxLoss(Throwable commandFailure) {
-        for (var command : List.copyOf(pendingCommands)) {
-            if (command.acknowledgement == null) {
-                continue;
-            }
-            if (command.emergencySatisfiesCommand) {
-                command.acknowledgement.complete(null);
-            } else {
-                command.acknowledgement.completeExceptionally(commandFailure);
-            }
-        }
-        pendingCommands.clear();
-    }
-
-    private void collectPendingRegistrationsAfterMailboxLoss(
-        Set<ReplayTransaction<?>> transactions,
-        Throwable commandFailure
-    ) {
-        for (var pending : List.copyOf(pendingRegistrations)) {
-            pending.acknowledgement.completeExceptionally(commandFailure);
-            if (pending.transaction != null) {
-                transactions.add(pending.transaction);
-            }
-        }
-        pendingRegistrations.clear();
-    }
-
-    private void collectActiveTransactionsAfterMailboxLoss(
-        Set<ReplayTransaction<?>> transactions
-    ) {
-        for (var entry : active.values()) {
-            if (entry.transaction != null) {
-                transactions.add(entry.transaction);
-            } else if (entry.completionReady) {
-                recordFailureLocked(entry.completionFailure);
-            }
-        }
-        active.clear();
     }
 
     public CompletionStage<Map<ReplayRequestId, String>> unresolvedTransactions() {
@@ -399,37 +280,22 @@ public final class ReplayTransactionRegistry {
         }
     }
 
-    @SuppressWarnings("java:S1181") // Admission failure must trigger emergency registry teardown.
     private void enqueueCommand(RegistryCommand command) {
         synchronized (stateLock) {
-            if (mailboxLossStarted) {
-                completeUnavailableCommand(command);
-                return;
-            }
             pendingCommands.add(command);
         }
         try {
             mailbox.execute(() -> runCommand(command));
         } catch (RuntimeException | Error failure) {
-            synchronized (stateLock) {
-                pendingCommands.remove(command);
-                if (command.acknowledgement != null) {
-                    command.acknowledgement.completeExceptionally(failure);
-                }
+            if (command.acknowledgement != null) {
+                command.acknowledgement.completeExceptionally(failure);
             }
-            terminateAfterMailboxLoss(mailboxLoss("mailbox rejected registry command", failure));
         }
     }
 
-    @SuppressWarnings("java:S1181") // Transition failure must settle acknowledgement before teardown.
     private void runCommand(RegistryCommand command) {
-        Throwable transitionFailure = null;
         synchronized (stateLock) {
             if (!pendingCommands.remove(command)) {
-                return;
-            }
-            if (mailboxLossStarted) {
-                completeUnavailableCommand(command);
                 return;
             }
             assertInMailbox();
@@ -442,22 +308,8 @@ public final class ReplayTransactionRegistry {
                 if (command.acknowledgement != null) {
                     command.acknowledgement.completeExceptionally(failure);
                 }
-                transitionFailure = failure;
+                throw failure;
             }
-        }
-        if (transitionFailure != null) {
-            terminateAfterMailboxLoss(mailboxLoss("registry transition failed", transitionFailure));
-        }
-    }
-
-    private void completeUnavailableCommand(RegistryCommand command) {
-        if (command.acknowledgement == null) {
-            return;
-        }
-        if (command.emergencySatisfiesCommand) {
-            command.acknowledgement.complete(null);
-        } else {
-            command.acknowledgement.completeExceptionally(mailboxUnavailable());
         }
     }
 
@@ -487,14 +339,6 @@ public final class ReplayTransactionRegistry {
         tryCompleteTerminationLocked();
     }
 
-    private void emergencyChildSettled(Throwable failure) {
-        synchronized (stateLock) {
-            recordFailureLocked(failure == null ? null : unwrap(failure));
-            emergencyChildren--;
-            tryCompleteTerminationLocked();
-        }
-    }
-
     private void recordFailureLocked(Throwable failure) {
         if (failure != null
             && firstFailure == null
@@ -507,7 +351,6 @@ public final class ReplayTransactionRegistry {
         if (!terminating
             || !active.isEmpty()
             || !pendingRegistrations.isEmpty()
-            || emergencyChildren != 0
             || termination.isDone()) {
             return;
         }
@@ -518,17 +361,7 @@ public final class ReplayTransactionRegistry {
         }
     }
 
-    private void terminateTransactionAfterMailboxLoss(ReplayTransaction<?> transaction) {
-        if (transaction != null) {
-            transaction.terminateAfterMailboxLoss(
-                cancellationCause == null
-                    ? new CancellationException("registry mailbox is unavailable for " + sessionKey)
-                    : cancellationCause
-            );
-        }
-    }
-
-    private void terminateRejectedTransaction(
+    private void failRejectedTransaction(
         ReplayTransaction<?> transaction,
         Throwable registrationFailure
     ) {
@@ -539,25 +372,11 @@ public final class ReplayTransactionRegistry {
             "transaction registration was rejected: " + registrationFailure.getMessage()
         );
         cancellation.initCause(registrationFailure);
-        transaction.terminateAfterMailboxLoss(cancellation);
-    }
-
-    private CancellationException mailboxUnavailable() {
-        return cancellationCause == null
-            ? new CancellationException("transaction-registry mailbox is unavailable for " + sessionKey)
-            : cancellationCause;
-    }
-
-    private static CancellationException mailboxLoss(String message, Throwable failure) {
-        var cancellation = new CancellationException(message);
-        cancellation.initCause(failure);
-        return cancellation;
+        transaction.fail(cancellation);
     }
 
     private void assertInMailbox() {
-        if (!mailbox.inMailbox()) {
-            throw new IllegalStateException("transaction registry transition ran outside its mailbox");
-        }
+        ownerThreadGuard.requireOwnerThread();
     }
 
     private static Throwable unwrap(Throwable throwable) {

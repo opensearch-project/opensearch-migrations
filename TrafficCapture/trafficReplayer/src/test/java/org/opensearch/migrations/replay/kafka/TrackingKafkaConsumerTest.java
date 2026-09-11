@@ -41,6 +41,17 @@ import org.mockito.Mockito;
 class TrackingKafkaConsumerTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
+    private static final SourcePartitionLifecycleListener TEST_LIFECYCLE_LISTENER =
+        new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
+        };
 
     private static final class MutableClock extends Clock {
         private Instant now = Instant.EPOCH;
@@ -144,9 +155,15 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
     }
 
     private TrackingKafkaConsumer buildConsumer(MockConsumer<String, byte[]> mc) {
-        return new TrackingKafkaConsumer(
+        var consumer = new TrackingKafkaConsumer(
             rootContext, mc, TOPIC, Duration.ofSeconds(30), Clock.systemUTC(), tsk -> {}
         );
+        installLifecycleListener(consumer);
+        return consumer;
+    }
+
+    private static void installLifecycleListener(TrackingKafkaConsumer consumer) {
+        consumer.setSourcePartitionLifecycleListener(TEST_LIFECYCLE_LISTENER);
     }
 
     @Test
@@ -164,6 +181,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             committedKeys::add,
             metrics
         );
+        installLifecycleListener(consumer);
         var partition = new TopicPartition(TOPIC, 0);
         consumer.onPartitionsAssigned(List.of(partition));
 
@@ -240,6 +258,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             ignored -> {},
             metrics
         );
+        installLifecycleListener(consumer);
         var partition = new TopicPartition(TOPIC, 0);
         consumer.onPartitionsAssigned(List.of(partition));
 
@@ -283,6 +302,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             2,
             1_000
         );
+        installLifecycleListener(consumer);
         var partition = new TopicPartition(TOPIC, 0);
         consumer.onPartitionsAssigned(List.of(partition));
         mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
@@ -335,6 +355,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             1,
             1_000
         );
+        installLifecycleListener(consumer);
         consumer.onPartitionsAssigned(List.of(partition0, partition1));
 
         mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
@@ -372,6 +393,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             1,
             1_000
         );
+        installLifecycleListener(consumer);
         var partition = new TopicPartition(TOPIC, 0);
         consumer.onPartitionsAssigned(List.of(partition));
         mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
@@ -410,6 +432,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             2,
             1_000
         );
+        installLifecycleListener(consumer);
         var partition = new TopicPartition(TOPIC, 0);
         consumer.onPartitionsAssigned(List.of(partition));
         mockConsumer.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, null, new byte[] { 0 }));
@@ -591,6 +614,9 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
                 revoked.addAll(partitions);
             }
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
         });
 
         consumer.onPartitionsAssigned(List.of(partition0));
@@ -620,6 +646,9 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
                 callbackOrder.add("runway-revoked");
             }
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
         });
         consumer.setOnPartitionsTrulyLostCallback(ignored -> callbackOrder.add("synthetic-close"));
         consumer.onPartitionsAssigned(List.of(partition));
@@ -647,6 +676,9 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
                 revoked.addAll(partitions);
             }
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
         });
         consumer.setOnPartitionsTrulyLostCallback(trulyLost::addAll);
         consumer.onPartitionsAssigned(List.of(partition));

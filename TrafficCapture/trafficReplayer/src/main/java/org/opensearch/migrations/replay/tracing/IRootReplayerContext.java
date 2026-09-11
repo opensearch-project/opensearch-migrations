@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
+import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
@@ -27,4 +28,6 @@ public interface IRootReplayerContext extends IRootOtelContext, IInstrumentConst
     TrackingKafkaConsumer.Metrics getKafkaCommitStateMetrics();
 
     ResourceOwnership.Metrics getResourceOwnershipMetrics();
+
+    ReplayProcessFatalHandler.Metrics getReplayProcessFatalMetrics();
 }

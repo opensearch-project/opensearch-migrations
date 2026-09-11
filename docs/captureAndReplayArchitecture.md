@@ -10,6 +10,12 @@ This document intentionally does not define implementation classes, thread names
 or migration history. Companion documents provide the lower-level proxy algorithms, replayer
 behavior, replayer asynchronous-work accounting, and managed-fleet orchestration.
 
+Capture and replay provides representative source traffic for target validation, load, and mutation
+replay. It does not promise that two distributed clusters will produce identical internal execution
+or responses for concurrent traffic. The protocol minimizes avoidable differences by preserving
+captured request bytes, source-connection ordering, and replay timing where those requirements do
+not conflict.
+
 ## 1. Scope and unresolved managed-fleet work
 
 The protocol in this document is complete for:
@@ -66,8 +72,9 @@ flowchart LR
 The **source** is the service receiving traffic during capture. The **target** is the service
 receiving reconstructed requests during replay.
 
-The proxy sits on the source traffic path. It forwards network traffic to the source and publishes
-the captured representation to Kafka.
+The proxy sits on the source traffic path. When source clients use TLS, the proxy terminates TLS and
+captures the resulting decrypted HTTP traffic before forwarding it to the source. It publishes the
+captured representation to Kafka.
 
 The replayer reads Kafka partitions, reconstructs HTTP requests and source responses, sends each
 reconstituted request to the target, and writes a durable tuple describing the source and target
@@ -144,6 +151,48 @@ The protocol uses these protobuf message names:
 
 The component documents define their exact fields and wire-compatibility plan. They may not change
 the observable meanings defined here.
+
+### 2.3 Imported capture archives
+
+Bring-your-own captured traffic is supported only when the archive was produced by the same capture
+protocol version that the replayer accepts. The archive is a versioned representation of Kafka
+application records, not a file containing protobuf payloads alone.
+
+[`BringYourOwnCapturedTraffic.md`](BringYourOwnCapturedTraffic.md) defines the archive and
+orchestration details.
+
+For every archived record, the exporter preserves:
+
+- the source partition and offset;
+- the original Kafka timestamp and timestamp type;
+- the binary key and value, including null values;
+- every Kafka header, preserving duplicate names and order; and
+- the record's position within its source partition.
+
+The archive also preserves the protocol/build version, source partition count, fixed exported
+offset range for every partition, capture parameters `E` and `S`, and integrity information that
+detects omitted, duplicated, reordered, or corrupted records. Export reads exactly the recorded
+partition ranges. It does not use a timeout as an implicit successful end boundary.
+
+Import creates one Kafka application record for every archived record, writes it to the archived
+partition, preserves partition-local order, and restores its binary key, value, and headers.
+Imported offsets and broker leader epochs are newly assigned Kafka transport identities; the
+replayer uses the imported offsets for commit accounting. The original offsets remain archive
+integrity and diagnostic data and do not participate in imported-topic commits.
+
+The timestamp policy has two modes:
+
+- **`preserve`**, the default, imports each archived original `LogAppendTime` as the record timestamp
+  on a dedicated bring-your-own topic configured to preserve producer-supplied timestamps. The user
+  asserts that the original broker clock-skew bound `S` was healthy. The replayer may apply the
+  ordinary `E + S` expiration proof using the archived timestamp and archived `E` and `S`.
+- **`rebase-without-expiration`**, an expert mode, accepts newly assigned import-broker timestamps
+  and automatically disables broker-time expiration for that input. Applicable manifests, terminal
+  connection observations, and valid `NoMoreWrites` records still resolve incomplete state.
+
+No mode may use newly assigned import-broker time to perform the original capture run's `E + S`
+expiration proof. An archive ending at an open writer or incomplete connection is not completion
+evidence merely because the file ended.
 
 ## 3. Proxy group membership and connection routing
 
@@ -668,6 +717,18 @@ preserves redelivery of the retained record.
 When the replayer recognizes a complete captured request, it may begin the target HTTP transaction
 without waiting for the captured source response or connection closure.
 
+For a positive configured `speedupFactor`, the nominal replay time is:
+
+```text
+replayStart + (sourceObservationTime - firstSourceObservationTime) / speedupFactor
+```
+
+Requests captured on the same source connection retain their captured order. That ordering takes
+priority over exact pacing: if the target is slower than the source, later requests on that
+connection wait rather than overtake the request ahead of them. Independent source connections may
+continue concurrently. The replayer reuses the corresponding target connection across requests
+while its unchanged target-connection policy permits that connection to remain open.
+
 The target result and captured source response may finish in either order.
 
 Before the Kafka records supporting a reconstituted request may be committed, the replayer writes a
@@ -683,6 +744,8 @@ The Kafka processing associated with that request cannot finish until:
 
 Manifest omission and connection expiration may finalize the source-response side as expired.
 They do not erase the request, cancel the target transaction, or waive durable tuple output.
+A missing or expired source response does not prove that the source mutation failed; the tuple must
+represent the source-response outcome without inferring an unobserved source result.
 
 The system is at-least-once. A process may crash after sending the target request or writing the
 tuple but before committing Kafka. Redelivery may therefore send the target request again and write
@@ -753,10 +816,18 @@ The process is unstable because the sole owner of mutable connection, target, ti
 state no longer exists. The system does not transfer that ownership to another thread or construct
 successful completion from partial cleanup.
 
-The failure path should emit a high-severity log and metric when possible, stop accepting new work,
-and terminate non-successfully. It may be an abrupt or incomplete shutdown. Correctness relies on
-Kafka redelivering records whose offsets were not committed, just as it would after an out-of-memory
-failure or hard process kill.
+After fatal event-loop death is detected, the replayer emits a best-effort
+`replayFatalFailures{reason=event_loop_terminated}` metric and an ERROR diagnostic, synchronously
+flushes Log4j and standard error, and immediately invokes `Runtime.halt(80)`. Metric export is not
+guaranteed before termination. The reason-specific halt code is distinct from the replayer's normal
+`System.exit` codes.
+
+The replayer does not initiate cleanup, completion, or Kafka commit coordination because of
+event-loop death. Any concurrent external operation may or may not complete. Kafka's committed
+offset determines the durable outcome after restart.
+
+Correctness relies on Kafka redelivering records whose offsets were not committed, just as it would
+after an out-of-memory failure or hard process kill.
 
 ### 12.2 Normal replayer shutdown
 
@@ -919,6 +990,7 @@ real-Kafka tests.
 | Replayer reassignment | Cancel and clean one partition generation before processing its successor; unrelated partitions proceed | Testcontainers partition transfer during target and tuple operations |
 | Event-loop death | Fatal signal and no ownership transfer | Process-level fault injection; live container restart |
 | Protocol violations | Immediate `Retain`, intake pause, bounded drain of admitted target/tuple work, and process termination | Corrupt and out-of-order Kafka records with in-flight target and tuple work; redelivery after exit |
+| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, `E`, `S`, checksums, and timestamp mode | Export/import round trip with chunked manifests, `NoMoreWrites` headers, mixed-cycle records, multiple partitions, corruption, and missing-record injection |
 
 The full acceptance suite must also prove:
 
@@ -947,7 +1019,11 @@ The full acceptance suite must also prove:
 - a semantic violation in a later record does not prevent an earlier complete request from reaching
   the target; and
 - a `NoMoreWrites` record with a missing or malformed writer header is inert, warned, and
-  committed.
+  committed;
+- a `preserve` archive replay produces the same protocol decisions as the original partition logs
+  while using newly assigned imported offsets for commits;
+- `rebase-without-expiration` never applies broker-time expiration; and
+- archive end-of-file alone never completes an open writer or incomplete connection.
 
 ## 16. Companion document boundaries
 

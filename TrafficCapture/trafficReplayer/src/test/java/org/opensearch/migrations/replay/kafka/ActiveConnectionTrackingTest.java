@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.HashMap;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -43,6 +44,9 @@ class ActiveConnectionTrackingTest extends InstrumentationTest {
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(
+                new IgnoringSourcePartitionLifecycleListener()
+            );
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
                 // Two streams for the same connection (keep-alive reuse)
@@ -86,6 +90,9 @@ class ActiveConnectionTrackingTest extends InstrumentationTest {
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(
+                new IgnoringSourcePartitionLifecycleListener()
+            );
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
                 // Two distinct connections on partition 0

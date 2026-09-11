@@ -41,7 +41,8 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         var orchestrator = new RequestSenderOrchestrator(
             pool,
             (session, ctx) -> null,
-            RequestSenderOrchestrator.noSourceTerminationObligations()
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rootContext.getReplayProcessFatalMetrics()
         );
 
         try {
@@ -72,7 +73,8 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         var orchestrator = new RequestSenderOrchestrator(
             pool,
             (session, ctx) -> null,
-            RequestSenderOrchestrator.noSourceTerminationObligations()
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rootContext.getReplayProcessFatalMetrics()
         );
 
         try {

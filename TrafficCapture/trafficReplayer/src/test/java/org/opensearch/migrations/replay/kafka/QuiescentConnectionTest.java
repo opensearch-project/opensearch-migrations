@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 
+import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -42,6 +43,9 @@ class QuiescentConnectionTest extends InstrumentationTest {
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(
+                new IgnoringSourcePartitionLifecycleListener()
+            );
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
                 // Stream with NO read observation (mid-connection, no open)
@@ -81,6 +85,9 @@ class QuiescentConnectionTest extends InstrumentationTest {
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
+            source.setSourcePartitionLifecycleListener(
+                new IgnoringSourcePartitionLifecycleListener()
+            );
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
                 // Stream starting with a READ — fresh connection

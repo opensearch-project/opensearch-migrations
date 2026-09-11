@@ -78,7 +78,7 @@ class TrafficReplayerTopLevelShutdownTest {
     }
 
     @Test
-    void shutdownWaitsForAcceptedSourceDispositionBeforeStoppingNetty() throws Exception {
+    void shutdownWaitsForCommitInvocationBeforeStoppingNetty() throws Exception {
         var connectionPool = Mockito.mock(ClientConnectionPool.class);
         var actorShutdown = new CompletableFuture<Void>();
         var nettyShutdown = new CompletableFuture<Void>();
@@ -118,13 +118,12 @@ class TrafficReplayerTopLevelShutdownTest {
             new RecordDisposition.Commit("replay-succeeded")
         );
         intakeMailbox.runUntilIdle();
-        Assertions.assertFalse(disposition.toCompletableFuture().isDone());
-        Mockito.verify(connectionPool, Mockito.never()).shutdownNow();
-
-        commitAcknowledgement.complete(null);
-        intakeMailbox.runUntilIdle();
         disposition.toCompletableFuture().join();
         Mockito.verify(connectionPool).shutdownNow();
+        Assertions.assertFalse(
+            commitAcknowledgement.isDone(),
+            "Kafka's later commit result must not hold replay resources"
+        );
         Assertions.assertFalse(shutdown.isDone());
 
         nettyShutdown.complete(null);

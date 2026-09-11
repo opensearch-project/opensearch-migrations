@@ -24,6 +24,7 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
@@ -708,7 +709,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
         int maximumOwnedRecords
     ) {
         mockConsumer.updateBeginningOffsets(Map.of(PARTITION, 0L));
-        return new KafkaTrafficCaptureSource(
+        var source = new KafkaTrafficCaptureSource(
             rootContext,
             mockConsumer,
             TOPIC,
@@ -719,6 +720,10 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
             TrackingKafkaConsumer.UNBOUNDED_OWNED_BYTES,
             livenessScanAheadEnabled
         );
+        source.setSourcePartitionLifecycleListener(
+            new IgnoringSourcePartitionLifecycleListener()
+        );
+        return source;
     }
 
     private void assertNoLivenessScanCycle() {

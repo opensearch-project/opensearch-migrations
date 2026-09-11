@@ -39,8 +39,9 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
+import org.opensearch.migrations.replay.lifecycle.SourceCommitUnknownAfterRevocationException;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
-import org.opensearch.migrations.replay.lifecycle.SourceRunwayLostException;
+import org.opensearch.migrations.replay.lifecycle.UnconfiguredSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -209,7 +210,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     final ConcurrentHashMap<SourceConnectionPartitionGenerationKey, SessionTerminationObligation>
         pendingSessionTerminationObligations = new ConcurrentHashMap<>();
     private volatile SourcePartitionLifecycleListener sourcePartitionLifecycleListener =
-        SourcePartitionLifecycleListener.NO_OP;
+        new UnconfiguredSourcePartitionLifecycleListener();
 
     public KafkaTrafficCaptureSource(
         @NonNull RootReplayerContext globalContext,
@@ -363,7 +364,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     private void failPendingCommitAcknowledgements(SourcePartitionKey lostPartition) {
-        var cause = new SourceRunwayLostException(lostPartition);
+        var cause = new SourceCommitUnknownAfterRevocationException(lostPartition);
         pendingCommitAcknowledgements.forEach((key, acknowledgement) -> {
             if (!(key instanceof KafkaCommitOffsetData kafkaKey)
                 || kafkaKey.getPartition() != lostPartition.partition()
@@ -1144,42 +1145,61 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public CompletableFuture<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
         var acknowledgement = new CompletableFuture<Void>();
-        var previous = pendingCommitAcknowledgements.putIfAbsent(trafficStreamKey, acknowledgement);
-        if (previous != null) {
-            return CompletableFuture.failedFuture(
-                new IllegalStateException("commit acknowledgement already pending for " + trafficStreamKey)
-            );
+        try {
+            kafkaExecutor.execute(() -> acceptCommitOnSourceOwnerThread(trafficStreamKey, acknowledgement));
+        } catch (Throwable t) {
+            acknowledgement.completeExceptionally(t);
         }
+        return acknowledgement;
+    }
+
+    private void acceptCommitOnSourceOwnerThread(
+        ITrafficStreamKey trafficStreamKey,
+        CompletableFuture<Void> acknowledgement
+    ) {
         if (isClosed.get()) {
-            // close() failed and cleared the pending map; an entry registered after that sweep
-            // would otherwise wait forever for an acknowledgement that can no longer arrive.
-            pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
             acknowledgement.completeExceptionally(
-                new CancellationException("Kafka traffic source closed before commit acknowledgement")
+                new CancellationException("Kafka traffic source closed before commit acceptance")
             );
-            return acknowledgement;
+            return;
         }
         try {
-            var result = commitTrafficStream(trafficStreamKey);
-            if (result == CommitResult.IGNORED) {
+            var previous = pendingCommitAcknowledgements.putIfAbsent(
+                trafficStreamKey,
+                acknowledgement
+            );
+            if (previous != null) {
+                throw new IllegalStateException(
+                    "commit acknowledgement already pending for " + trafficStreamKey
+                );
+            }
+            CommitResult result;
+            try {
+                result = commitTrafficStream(trafficStreamKey);
+                if (result == CommitResult.IGNORED || result == CommitResult.IMMEDIATE) {
+                    pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
+                }
+            } catch (Throwable t) {
                 pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
+                throw t;
+            }
+            if (result == CommitResult.IGNORED) {
                 acknowledgement.completeExceptionally(
                     new SourceCommitNotAcceptedException(sourcePartitionFor(trafficStreamKey))
                 );
-            } else if (result == CommitResult.IMMEDIATE) {
-                pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
-                acknowledgement.complete(null);
-            } else {
-                // AFTER_NEXT_READ / BLOCKED_BY_OTHER_COMMITS: a next read may never happen —
-                // intake can end while dispositions are still settling — so nudge a flush on the
-                // consumer thread instead of leaving the acknowledgement to wait for a poll cycle.
-                kafkaExecutor.execute(trackingKafkaConsumer::commitStagedOffsets);
+                return;
             }
+            if (result == CommitResult.IMMEDIATE) {
+                acknowledgement.complete(null);
+                return;
+            }
+            // AFTER_NEXT_READ / BLOCKED_BY_OTHER_COMMITS: intake may end before another poll-driven
+            // flush. The source owner performs the flush directly after accepting the commit.
+            trackingKafkaConsumer.commitStagedOffsets();
         } catch (Throwable t) {
             pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
             acknowledgement.completeExceptionally(t);
         }
-        return acknowledgement;
     }
 
     @Override
