@@ -31,7 +31,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void finalRecordMustBeAcknowledgedBeforeACompleteManifestCanOmitConnection() throws Exception {
         var producer = producer(false);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         registry.register("connection", 0);
@@ -62,7 +62,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void registrationPrecedesBothFirstTrafficAndAnyLaterManifestCopy() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
 
@@ -82,7 +82,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void snapshotsCoverEveryTopicPartitionIncludingEmptySets() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(3);
+        var plan = TrafficTopicMetadata.forTopic(3);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         var connection = "connection";
@@ -98,7 +98,6 @@ class CaptureKafkaPublisherTest {
             ));
             var chunk = ProxyLivenessSnapshotChunk.parseFrom(record.value());
             assertEquals(record.partition(), chunk.getPartition());
-            assertEquals(plan.getRoutingPlanId(), chunk.getRoutingPlanId());
             assertEquals(0, chunk.getChunkIndex());
             assertEquals(1, chunk.getChunkCount());
             if (record.partition() == connectionPartition) {
@@ -116,7 +115,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void snapshotsCoverAssignedPartitionsAndRevokedPartitionsThatAreStillDraining() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(3);
+        var plan = TrafficTopicMetadata.forTopic(3);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         registry.register("draining", 2);
@@ -137,7 +136,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void snapshotChunksAreCompleteBoundedAndNonInterleaved() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         for (int i = 0; i < 40; ++i) {
@@ -163,7 +162,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void snapshotTimestampsIncreaseWhenTheClockStallsOrMovesBackward() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry, new SequenceClock(1234, 1234, 1200));
 
@@ -180,7 +179,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void trafficFailureKeepsConnectionOpenAndStopsDeclarations() throws Exception {
         var producer = producer(false);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         registry.register("connection", 0);
@@ -200,7 +199,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void terminalGateFailsInFlightTrafficWithoutRemovingTheConnection() throws Exception {
         var producer = producer(false);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var registry = routingState(plan);
         var gate = new CaptureKafkaWriteGate();
         var publisher = publisher(producer, plan, registry, gate);
@@ -224,9 +223,9 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
-    void trafficRecordsUseExplicitPlanPartitionAndTypeHeader() throws Exception {
+    void trafficRecordsUseExplicitKafkaPartitionAndTypeHeader() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(8);
+        var plan = TrafficTopicMetadata.forTopic(8);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         var connection = "connection";
@@ -247,7 +246,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void trafficUsesThePartitionStoredAtAdmission() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(8);
+        var plan = TrafficTopicMetadata.forTopic(8);
         var registry = routingState(plan);
         var publisher = publisher(producer, plan, registry);
         var connection = "connection";
@@ -269,7 +268,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void revokedPartitionSelfReleaseIsOrderedAfterTheFinalTrafficAcknowledgement() throws Exception {
         var producer = producer(false);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var routingState = routingState(plan);
         var publisher = publisher(producer, plan, routingState);
         routingState.register("connection", 0);
@@ -297,7 +296,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void gracefulShutdownDeclaresEveryPartitionAfterAllConnectionsDrain() throws Exception {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(3);
+        var plan = TrafficTopicMetadata.forTopic(3);
         var routingState = routingState(plan);
         var publisher = publisher(producer, plan, routingState);
         routingState.register("connection", 1);
@@ -326,7 +325,7 @@ class CaptureKafkaPublisherTest {
     @Test
     void gracefulShutdownRefusesToDeclareWhileAConnectionIsStillOpen() {
         var producer = producer(true);
-        var plan = PartitionRoutingPlan.forTopic(1);
+        var plan = TrafficTopicMetadata.forTopic(1);
         var routingState = routingState(plan);
         var publisher = publisher(producer, plan, routingState);
         routingState.register("connection", 0);
@@ -341,7 +340,7 @@ class CaptureKafkaPublisherTest {
 
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
-        PartitionRoutingPlan plan,
+        TrafficTopicMetadata plan,
         CaptureRoutingState routingState
     ) {
         return publisher(
@@ -354,7 +353,7 @@ class CaptureKafkaPublisherTest {
 
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
-        PartitionRoutingPlan plan,
+        TrafficTopicMetadata plan,
         CaptureRoutingState routingState,
         Clock clock
     ) {
@@ -362,7 +361,6 @@ class CaptureKafkaPublisherTest {
             producer,
             TOPIC,
             NODE_ID,
-            plan,
             routingState,
             MESSAGE_SIZE,
             Duration.ofDays(1),
@@ -372,7 +370,7 @@ class CaptureKafkaPublisherTest {
 
     private static CaptureKafkaPublisher publisher(
         MockProducer<String, byte[]> producer,
-        PartitionRoutingPlan plan,
+        TrafficTopicMetadata plan,
         CaptureRoutingState routingState,
         CaptureKafkaWriteGate writeGate
     ) {
@@ -380,7 +378,6 @@ class CaptureKafkaPublisherTest {
             producer,
             TOPIC,
             NODE_ID,
-            plan,
             routingState,
             MESSAGE_SIZE,
             Duration.ofDays(1),
@@ -389,7 +386,7 @@ class CaptureKafkaPublisherTest {
         );
     }
 
-    private static CaptureRoutingState routingState(PartitionRoutingPlan plan) {
+    private static CaptureRoutingState routingState(TrafficTopicMetadata plan) {
         return new CaptureRoutingState(
             plan.getTopicPartitionCount(),
             java.util.stream.IntStream.range(0, plan.getTopicPartitionCount()).boxed().toList()

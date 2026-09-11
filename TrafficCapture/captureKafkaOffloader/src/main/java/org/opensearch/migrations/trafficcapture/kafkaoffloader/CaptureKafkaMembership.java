@@ -35,6 +35,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final Consumer<Throwable> publisherFailureCallback;
     private final Set<Integer> kafkaAssignment = new HashSet<>();
     private final AtomicBoolean initialAssignmentReported = new AtomicBoolean();
+    private final AtomicBoolean publisherFailureReported = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean started = new AtomicBoolean();
     private final CompletableFuture<Void> stopped = new CompletableFuture<>();
@@ -84,10 +85,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-        routingState.suspendNewConnections();
         kafkaAssignment.removeAll(partitionNumbers(partitions));
-        routingState.replaceAssignedPartitions(kafkaAssignment, false)
-            .forEach(this::publishSelfRelease);
     }
 
     @Override
@@ -97,23 +95,24 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
             return;
         }
         kafkaAssignment.addAll(partitionNumbers(partitions));
-        boolean minimumSatisfied = assignmentTracker.satisfiesMinimum(minimumActiveProxyCount);
-        routingState.replaceAssignedPartitions(kafkaAssignment, minimumSatisfied)
-            .forEach(this::publishSelfRelease);
         consumer.pause(partitions);
-        if (minimumSatisfied
-            && !routingState.assignedPartitions().isEmpty()
-            && initialAssignmentReported.compareAndSet(false, true)) {
+        if (kafkaAssignment.isEmpty()) {
+            return;
+        }
+        boolean minimumSatisfied = assignmentTracker.satisfiesMinimum(minimumActiveProxyCount);
+        if (!initialAssignmentReported.get() && !minimumSatisfied) {
+            return;
+        }
+        routingState.replaceAssignedPartitions(kafkaAssignment)
+            .forEach(this::publishSelfRelease);
+        if (initialAssignmentReported.compareAndSet(false, true)) {
             initialAssignmentCallback.run();
         }
     }
 
     @Override
     public void onPartitionsLost(Collection<TopicPartition> partitions) {
-        routingState.suspendNewConnections();
         kafkaAssignment.removeAll(partitionNumbers(partitions));
-        routingState.replaceAssignedPartitions(kafkaAssignment, false)
-            .forEach(this::publishSelfRelease);
     }
 
     private void runPollLoop() {
@@ -156,18 +155,29 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     }
 
     private void handleTerminalFailure(Throwable failure) {
-        if (closed.compareAndSet(false, true)) {
+        if (publisherFailureReported.compareAndSet(false, true)) {
             routingState.replaceAssignedPartitions(List.of());
             publisher.failClosed(failure);
             publisherFailureCallback.accept(failure);
-            consumer.wakeup();
+            if (closed.compareAndSet(false, true)) {
+                consumer.wakeup();
+            }
         }
     }
 
     private void handleMembershipFailure(Throwable failure) {
         if (closed.compareAndSet(false, true)) {
-            routingState.suspendNewConnections();
-            membershipFailureCallback.accept(failure);
+            if (initialAssignmentReported.get()) {
+                log.atError()
+                    .setCause(failure)
+                    .setMessage(
+                        "Kafka membership stopped after the initial assignment; "
+                            + "continuing capture with the last completed assignment"
+                    )
+                    .log();
+            } else {
+                membershipFailureCallback.accept(failure);
+            }
         }
     }
 

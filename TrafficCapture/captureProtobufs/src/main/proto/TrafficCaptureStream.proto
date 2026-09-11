@@ -77,8 +77,7 @@ message TrafficStream {
   optional int32 priorRequestsReceived = 6;
   optional bool lastObservationWasUnterminatedRead = 7; // there were previous Read observations encountered that
                                                         // have yet to have EOM observations after them
-  optional int32 partition = 8; // explicit Kafka partition selected by the immutable routing plan
-  optional string routingPlanId = 9; // identity of the routing plan used by traffic and liveness records
+  optional int32 partition = 8; // explicit Kafka partition containing this record
   repeated TrafficObservation subStream = 2;
   oneof index {
     int32 number = 3;
@@ -92,7 +91,6 @@ message TrafficRecord {
   optional int32 priorRequestsReceived = 6;
   optional bool lastObservationWasUnterminatedRead = 7;
   optional int32 partition = 8;
-  optional string routingPlanId = 9 [deprecated = true];
   repeated TrafficObservation observations = 2;
   oneof index {
     int32 number = 3;
@@ -105,7 +103,6 @@ message ProxyLivenessSnapshotChunk {
 
   string nodeId = 1;
   int32 partition = 2;
-  string routingPlanId = 3;
   int64 snapshotSequence = 4;
   int32 chunkIndex = 5;
   int32 chunkCount = 6;
@@ -116,7 +113,6 @@ message ProxyLivenessSnapshotChunk {
 message LivenessSnapshotChunk {
   string writerNodeId = 1;
   int32 partition = 2;
-  string routingPlanId = 3 [deprecated = true];
   uint64 manifestCycle = 4;
   int32 chunkIndex = 5;
   int32 chunkCount = 6;

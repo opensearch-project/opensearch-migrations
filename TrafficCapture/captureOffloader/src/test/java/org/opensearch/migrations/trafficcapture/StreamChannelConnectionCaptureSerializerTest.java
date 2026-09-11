@@ -507,7 +507,6 @@ class StreamChannelConnectionCaptureSerializerTest {
             TEST_NODE_ID_STRING,
             TEST_TRAFFIC_RECORD_ID_STRING,
             3,
-            "routing-plan",
             manifestCycle::get,
             new StreamManager(1024 * 1024, outputBuffers)
         );

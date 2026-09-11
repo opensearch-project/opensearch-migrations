@@ -645,12 +645,13 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
     @Test
     @WrapWithNettyLeakDetection(repetitions = 32)
-    public void testMessageForwardedDownstreamEvenWhenOffloadFails() throws IOException {
+    public void failOpenTransitionsTheWholeConnectionToPassThrough() throws IOException {
         byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
 
         try (var rootContext = new TestRootContext()) {
             var failingStreamManager = new FailingStreamManager();
             var offloader = new StreamChannelConnectionCaptureSerializer("Test", "c", failingStreamManager);
+            var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN);
 
             EmbeddedChannel channel = new EmbeddedChannel(
                 new ConditionallyReliableLoggingHttpHandler(
@@ -659,32 +660,100 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     "c",
                     ctx -> offloader,
                     new RequestCapturePredicate(),
-                    x -> true
+                    x -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
                 )
             );
 
-            var bb = Unpooled.wrappedBuffer(fullTrafficBytes);
-            channel.writeInbound(bb);
+            channel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            channel.runPendingTasks();
 
-            // The offload failed, but the message must still flow downstream
-            var outputDataStream = new SequenceInputStream(
-                Collections.enumeration(
-                    channel.inboundMessages()
-                        .stream()
-                        .map(m -> new ByteBufInputStream((ByteBuf) m, false))
-                        .collect(Collectors.toList())
+            Assertions.assertTrue(captureProcessState.isPassThrough());
+            Assertions.assertTrue(channel.isOpen());
+            Assertions.assertEquals(1, failingStreamManager.flushCount.get());
+
+            channel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            channel.runPendingTasks();
+
+            var forwardedBytes = channel.inboundMessages().stream()
+                .mapToInt(message -> ((ByteBuf) message).readableBytes())
+                .sum();
+            Assertions.assertEquals(2 * fullTrafficBytes.length, forwardedBytes);
+            Assertions.assertEquals(
+                1,
+                failingStreamManager.flushCount.get(),
+                "No later request may resume capture after entering pass-through"
+            );
+
+            var secondConnectionManager = new TestStreamManager();
+            var secondConnectionOffloader =
+                new StreamChannelConnectionCaptureSerializer("Test", "second", secondConnectionManager);
+            var secondChannel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "n",
+                    "second",
+                    ctx -> secondConnectionOffloader,
+                    new RequestCapturePredicate(),
+                    x -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
                 )
             );
-            var outputData = outputDataStream.readAllBytes();
-            outputDataStream.close();
+            secondChannel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            secondChannel.runPendingTasks();
 
-            Assertions.assertArrayEquals(fullTrafficBytes, outputData,
-                "ByteBuf must be forwarded downstream even when Kafka offload fails");
-            Assertions.assertEquals(1, failingStreamManager.flushCount.get(),
-                "Offloader should have attempted one flush");
+            var secondForwardedMessage = (ByteBuf) secondChannel.readInbound();
+            try {
+                Assertions.assertEquals(fullTrafficBytes.length, secondForwardedMessage.readableBytes());
+            } finally {
+                secondForwardedMessage.release();
+            }
+            Assertions.assertEquals(
+                0,
+                secondConnectionManager.flushCount.get(),
+                "A new connection must not resume capture after the process enters pass-through"
+            );
+            secondChannel.finishAndReleaseAll();
 
             channel.finishAndReleaseAll();
-            channel.close();
+            Assertions.assertEquals(
+                1,
+                failingStreamManager.flushCount.get(),
+                "Pass-through teardown must not attempt terminal capture"
+            );
+        }
+    }
+
+    @Test
+    void maximumConnectionDurationClosesAndTerminallyCapturesAnAuthoritativeConnection() throws Exception {
+        try (var rootContext = new TestRootContext()) {
+            var offloader = new DelayedFinalAcknowledgementOffloader();
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ctx -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> false,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofMillis(5),
+                    new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED)
+                )
+            );
+
+            channel.advanceTimeBy(6, java.util.concurrent.TimeUnit.MILLISECONDS);
+            channel.runScheduledPendingTasks();
+            channel.runPendingTasks();
+
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertEquals(1, offloader.closeObservations.get());
+            offloader.finalAcknowledgement.complete(null);
+            channel.finishAndReleaseAll();
         }
     }
 

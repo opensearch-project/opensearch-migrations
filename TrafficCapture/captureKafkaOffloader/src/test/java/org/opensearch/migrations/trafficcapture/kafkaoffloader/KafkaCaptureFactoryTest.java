@@ -17,7 +17,9 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
@@ -422,11 +424,6 @@ public class KafkaCaptureFactoryTest {
         var stream = TrafficStream.parseFrom(record.value());
         Assertions.assertTrue(stream.hasPartition());
         Assertions.assertEquals(record.partition(), stream.getPartition());
-        Assertions.assertTrue(stream.hasRoutingPlanId());
-        Assertions.assertEquals(
-            kafkaCaptureFactory.getPublisher().getRoutingPlan().getRoutingPlanId(),
-            stream.getRoutingPlanId()
-        );
 
         bb.release();
         producer.close();
@@ -446,7 +443,7 @@ public class KafkaCaptureFactoryTest {
     }
 
     @Test
-    public void connectionAdmissionWaitsForTheFirstCompleteAssignment() throws Exception {
+    public void connectionAttemptBeforeTheFirstAssignmentPermanentlyFailsCapture() throws Exception {
         var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var partition0 = new TopicPartition(topic, 0);
         var partition1 = new TopicPartition(topic, 1);
@@ -470,19 +467,7 @@ public class KafkaCaptureFactoryTest {
             new PartitionInfo(topic, 1, null, new Node[0], new Node[0]),
             new PartitionInfo(topic, 2, null, new Node[0], new Node[0])
         ));
-        var sentRecord = new CompletableFuture<ProducerRecord<String, byte[]>>();
-        var sentRecords = java.util.Collections.synchronizedList(
-            new ArrayList<ProducerRecord<String, byte[]>>()
-        );
-        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
-            ProducerRecord<String, byte[]> record = invocation.getArgument(0);
-            Callback callback = invocation.getArgument(1);
-            var metadata = generateRecordMetadata(record.topic(), record.partition());
-            sentRecords.add(record);
-            sentRecord.complete(record);
-            callback.onCompletion(metadata, null);
-            return CompletableFuture.completedFuture(metadata);
-        });
+        var captureFailure = new AtomicReference<Throwable>();
         var factory = new KafkaCaptureFactory(
             TestRootKafkaOffloaderContext.noTracking(),
             TEST_NODE_ID_STRING,
@@ -492,55 +477,35 @@ public class KafkaCaptureFactoryTest {
             1,
             topic,
             1024 * 1024,
-            Duration.ofDays(1)
+            Duration.ofDays(1),
+            captureFailure::set
         );
 
+        var startupFailure = Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> factory.createOffloader(createCtx())
+        );
+        Assertions.assertEquals(startupFailure, captureFailure.get());
+
+        permitAssignment.countDown();
+        Assertions.assertThrows(
+            ExecutionException.class,
+            () -> factory.publisherReady().get(5, TimeUnit.SECONDS)
+        );
         Assertions.assertThrows(
             IllegalStateException.class,
             () -> factory.createOffloader(createCtx())
         );
-
-        permitAssignment.countDown();
-        factory.publisherReady().get(5, TimeUnit.SECONDS);
-        var offloader = factory.createOffloader(createCtx());
-        var payload = Unpooled.wrappedBuffer("after-membership".getBytes(StandardCharsets.UTF_8));
-        offloader.addReadEvent(Instant.EPOCH, payload);
-        var published = offloader.flushCommitAndResetStream(false);
-        payload.release();
-
-        published.get(5, TimeUnit.SECONDS);
-        var record = sentRecord.get(5, TimeUnit.SECONDS);
-        Assertions.assertTrue(List.of(0, 1, 2).contains(record.partition()));
-        Assertions.assertEquals(
-            List.of(0, 1, 2),
-            factory.getPublisher().getRoutingState().assignedPartitions()
-        );
-        offloader.flushCommitAndResetStream(true).get(5, TimeUnit.SECONDS);
         factory.close();
         Assertions.assertTrue(membershipConsumer.closed());
-        var gracefulDeclarations = sentRecords.stream()
-            .filter(recordToCheck -> CaptureKafkaPublisher.isRecordType(
-                recordToCheck.headers(),
-                CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
-            ))
-            .toList();
-        Assertions.assertEquals(
-            List.of(0, 1, 2),
-            gracefulDeclarations.stream().map(ProducerRecord::partition).toList()
-        );
-        for (var declarationRecord : gracefulDeclarations) {
-            var declaration = org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites.parseFrom(
-                declarationRecord.value()
-            );
-            Assertions.assertEquals(TEST_NODE_ID_STRING, declaration.getNodeId());
-            Assertions.assertEquals(TEST_NODE_ID_STRING, declaration.getDeclaredBy());
-        }
+        org.mockito.Mockito.verify(mockProducer, org.mockito.Mockito.never()).send(any(), any());
     }
 
     @Test
     public void membershipInitializationFailureClosesTheUnpublishedPublisher() throws Exception {
         var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var closeCalls = new AtomicInteger();
+        var producerClosed = new CountDownLatch(1);
         var producer = new MockProducer<String, byte[]>(
             true,
             null,
@@ -555,12 +520,18 @@ public class KafkaCaptureFactoryTest {
             @Override
             public void close(Duration timeout) {
                 closeCalls.incrementAndGet();
-                super.close(timeout);
+                try {
+                    super.close(timeout);
+                } finally {
+                    producerClosed.countDown();
+                }
             }
         };
         membershipConsumer.schedulePollTask(() -> {
             throw new IllegalStateException("membership initialization failed");
         });
+        var captureFailure = new AtomicReference<Throwable>();
+        var captureFailureReported = new CountDownLatch(1);
         var factory = new KafkaCaptureFactory(
             TestRootKafkaOffloaderContext.noTracking(),
             TEST_NODE_ID_STRING,
@@ -570,13 +541,20 @@ public class KafkaCaptureFactoryTest {
             1,
             topic,
             1024 * 1024,
-            Duration.ofDays(1)
+            Duration.ofDays(1),
+            failure -> {
+                captureFailure.set(failure);
+                captureFailureReported.countDown();
+            }
         );
 
         Assertions.assertThrows(
             ExecutionException.class,
             () -> factory.publisherReady().get(5, TimeUnit.SECONDS)
         );
+        Assertions.assertTrue(captureFailureReported.await(5, TimeUnit.SECONDS));
+        Assertions.assertEquals("membership initialization failed", captureFailure.get().getMessage());
+        Assertions.assertTrue(producerClosed.await(5, TimeUnit.SECONDS));
         Assertions.assertEquals(1, closeCalls.get());
 
         factory.close();
@@ -585,8 +563,60 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertTrue(membershipConsumer.closed());
     }
 
+    @Test
+    public void producerWriteFailurePermanentlyFailsCaptureAndReportsTheProcessFailure() throws Exception {
+        var writeFailure = new IllegalStateException("producer write failed");
+        var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
+        var topicPartitions = partitionInfo(topicName, 4);
+        var producer = new MockProducer<String, byte[]>(
+            new Cluster("test", List.of(), topicPartitions, Set.of(), Set.of()),
+            true,
+            null,
+            new StringSerializer(),
+            new ByteArraySerializer()
+        ) {
+            @Override
+            public synchronized java.util.concurrent.Future<RecordMetadata> send(
+                ProducerRecord<String, byte[]> record,
+                Callback callback
+            ) {
+                callback.onCompletion(null, writeFailure);
+                return CompletableFuture.failedFuture(writeFailure);
+            }
+        };
+        var captureFailure = new AtomicReference<Throwable>();
+        var factory = createFactory(producer, 1024 * 1024, captureFailure::set);
+        var offloader = factory.createOffloader(createCtx());
+        var payload = Unpooled.wrappedBuffer("captured".getBytes(StandardCharsets.UTF_8));
+
+        offloader.addReadEvent(Instant.EPOCH, payload);
+        var published = offloader.flushCommitAndResetStream(false);
+        payload.release();
+
+        var executionFailure = Assertions.assertThrows(
+            ExecutionException.class,
+            () -> published.get(5, TimeUnit.SECONDS)
+        );
+        Assertions.assertEquals(writeFailure, executionFailure.getCause());
+        Assertions.assertEquals(writeFailure, captureFailure.get());
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> factory.createOffloader(createCtx())
+        );
+        factory.close();
+    }
+
     @SneakyThrows
     private KafkaCaptureFactory createFactory(Producer<String, byte[]> producer, int messageSize) {
+        return createFactory(producer, messageSize, ignored -> {});
+    }
+
+    @SneakyThrows
+    private KafkaCaptureFactory createFactory(
+        Producer<String, byte[]> producer,
+        int messageSize,
+        Consumer<Throwable> captureFailureCallback
+    ) {
         var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         var partitionInfo = partitionInfo(topicName, 4);
         if (org.mockito.Mockito.mockingDetails(producer).isMock()) {
@@ -609,7 +639,8 @@ public class KafkaCaptureFactoryTest {
             1,
             topicName,
             messageSize,
-            Duration.ofDays(1)
+            Duration.ofDays(1),
+            captureFailureCallback
         );
         factory.publisherReady().get(5, TimeUnit.SECONDS);
         return factory;

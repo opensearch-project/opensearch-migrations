@@ -186,23 +186,12 @@ public final class CaptureRoutingState {
     }
 
     public synchronized List<SelfRelease> replaceAssignedPartitions(Collection<Integer> replacement) {
-        return replaceAssignedPartitions(replacement, !replacement.isEmpty());
-    }
-
-    public synchronized List<SelfRelease> replaceAssignedPartitions(
-        Collection<Integer> replacement,
-        boolean allowNewConnections
-    ) {
         if (shuttingDown) {
             return List.of();
         }
         var releases = applyAssignment(validateAndCapAssignment(replacement));
-        newConnectionsAllowed = allowNewConnections && !assignedPartitions.isEmpty();
+        newConnectionsAllowed = !assignedPartitions.isEmpty();
         return releases;
-    }
-
-    public synchronized void suspendNewConnections() {
-        newConnectionsAllowed = false;
     }
 
     public synchronized List<SelfRelease> revokePartitions(Collection<Integer> revokedPartitions) {

@@ -24,7 +24,7 @@ class CaptureKafkaMembershipTest {
     private static final String TOPIC = "traffic";
 
     @Test
-    void pollThreadPausesAssignmentsAndRevocationOnlyChangesNewAdmission() throws Exception {
+    void pollThreadPausesAssignmentsAndRevocationKeepsLastCompletedAssignment() throws Exception {
         var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var routingState = new CaptureRoutingState(3, List.of());
         var publisher = publisher();
@@ -53,11 +53,17 @@ class CaptureKafkaMembershipTest {
         assertEquals(List.of(0, 1), routingState.assignedPartitions());
         assertEquals(Set.of(partition0, partition1), consumer.paused());
         membership.onPartitionsRevoked(List.of(partition1));
+        assertEquals(List.of(0, 1), routingState.assignedPartitions());
+        int temporaryPartition = routingState.admitConnection("during-rebalance");
+        assertTrue(List.of(0, 1).contains(temporaryPartition));
+        routingState.remove("during-rebalance", temporaryPartition);
+        verify(publisher, org.mockito.Mockito.never())
+            .publishSelfNoMoreWrites(any(CaptureRoutingState.SelfRelease.class));
+
+        membership.onPartitionsAssigned(List.of());
+
         assertEquals(List.of(0), routingState.assignedPartitions());
-        org.junit.jupiter.api.Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> routingState.admitConnection("during-rebalance")
-        );
+        assertEquals(0, routingState.admitConnection("after-completed-rebalance"));
         verify(publisher).publishSelfNoMoreWrites(any(CaptureRoutingState.SelfRelease.class));
         assertEquals(null, failure.get());
         membership.close();
@@ -113,7 +119,7 @@ class CaptureKafkaMembershipTest {
     }
 
     @Test
-    void lostPartitionsSuspendAdmissionWithoutStoppingExistingCapture() {
+    void lostPartitionsKeepLastCompletedAssignmentUntilReplacementCompletes() {
         @SuppressWarnings("unchecked")
         var consumer = mock(org.apache.kafka.clients.consumer.Consumer.class);
         var routingState = new CaptureRoutingState(3, List.of(0, 1));
@@ -135,11 +141,8 @@ class CaptureKafkaMembershipTest {
 
         membership.onPartitionsLost(List.of(new TopicPartition(TOPIC, 1)));
 
-        assertEquals(List.of(0), routingState.assignedPartitions());
-        org.junit.jupiter.api.Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> routingState.admitConnection("while-membership-is-changing")
-        );
+        assertEquals(List.of(0, 1), routingState.assignedPartitions());
+        assertTrue(List.of(0, 1).contains(routingState.admitConnection("while-membership-is-changing")));
         assertEquals(null, terminalFailure.get());
         verify(publisher, org.mockito.Mockito.never()).failClosed(any());
 
@@ -150,14 +153,18 @@ class CaptureKafkaMembershipTest {
     }
 
     @Test
-    void surfacedPollFailureStopsAdmissionWithoutStoppingExistingCapture() throws Exception {
+    void surfacedPollFailureAfterInitialAssignmentKeepsAdmissionAndDoesNotReportStartupFailure()
+        throws Exception {
         var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
-        var routingState = new CaptureRoutingState(1, List.of(0));
+        var routingState = new CaptureRoutingState(1, List.of());
         var publisher = publisher();
         var writeGate = writeGate();
         var membershipFailure = new AtomicReference<Throwable>();
         var publisherFailure = new AtomicReference<Throwable>();
-        var failureReported = new CountDownLatch(1);
+        var initialAssignment = new CountDownLatch(1);
+        var partition = new TopicPartition(TOPIC, 0);
+        consumer.updateBeginningOffsets(Map.of(partition, 0L));
+        consumer.schedulePollTask(() -> consumer.rebalance(List.of(partition)));
         consumer.schedulePollTask(() -> {
             throw new IllegalStateException("membership failed");
         });
@@ -169,25 +176,66 @@ class CaptureKafkaMembershipTest {
             writeGate,
             assignmentTracker("node-a"),
             1,
-            () -> {},
-            failure -> {
-                membershipFailure.set(failure);
-                failureReported.countDown();
-            },
+            initialAssignment::countDown,
+            membershipFailure::set,
             publisherFailure::set
         );
 
         membership.start();
 
-        assertTrue(failureReported.await(1, TimeUnit.SECONDS));
-        org.junit.jupiter.api.Assertions.assertThrows(
-            IllegalStateException.class,
-            () -> routingState.admitConnection("after-membership-failure")
-        );
-        assertEquals("membership failed", membershipFailure.get().getMessage());
+        assertTrue(initialAssignment.await(1, TimeUnit.SECONDS));
+        long closeDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (!consumer.closed() && System.nanoTime() < closeDeadline) {
+            Thread.sleep(1);
+        }
+        assertTrue(consumer.closed());
+        membership.close();
+        assertEquals(0, routingState.admitConnection("after-membership-failure"));
+        assertEquals(null, membershipFailure.get());
         assertEquals(null, publisherFailure.get());
         assertEquals(null, writeGate.failureIfNotWritable());
         verify(publisher, org.mockito.Mockito.never()).failClosed(any());
+
+        var writeFailure = new IllegalStateException("producer failed");
+        writeGate.trip(writeFailure);
+
+        assertEquals(writeFailure, publisherFailure.get());
+        verify(publisher).failClosed(writeFailure);
+    }
+
+    @Test
+    void surfacedPollFailureBeforeInitialAssignmentReportsStartupFailure() throws Exception {
+        var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var routingState = new CaptureRoutingState(1, List.of());
+        var membershipFailure = new AtomicReference<Throwable>();
+        var failureReported = new CountDownLatch(1);
+        consumer.schedulePollTask(() -> {
+            throw new IllegalStateException("membership failed before assignment");
+        });
+        var membership = new CaptureKafkaMembership(
+            consumer,
+            TOPIC,
+            routingState,
+            publisher(),
+            writeGate(),
+            assignmentTracker("node-a"),
+            1,
+            () -> {},
+            failure -> {
+                membershipFailure.set(failure);
+                failureReported.countDown();
+            },
+            ignored -> {}
+        );
+
+        membership.start();
+
+        assertTrue(failureReported.await(1, TimeUnit.SECONDS));
+        assertEquals("membership failed before assignment", membershipFailure.get().getMessage());
+        org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> routingState.admitConnection("without-an-assignment")
+        );
         membership.close();
     }
 
@@ -212,6 +260,8 @@ class CaptureKafkaMembershipTest {
 
         membership.onPartitionsRevoked(List.of(new TopicPartition(TOPIC, 1)));
 
+        assertEquals(List.of(0, 1), routingState.assignedPartitions());
+        membership.onPartitionsAssigned(List.of());
         assertEquals(List.of(0), routingState.assignedPartitions());
         verify(publisher, org.mockito.Mockito.never())
             .publishSelfNoMoreWrites(any(CaptureRoutingState.SelfRelease.class));

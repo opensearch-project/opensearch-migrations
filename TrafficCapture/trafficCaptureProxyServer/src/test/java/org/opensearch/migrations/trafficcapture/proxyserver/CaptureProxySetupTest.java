@@ -56,6 +56,7 @@ public class CaptureProxySetupTest {
             "--listenPort", "80",
             "--noCapture",
             "--max-request-assembly-duration-seconds", "17",
+            "--max-connection-duration-seconds", "19",
             "--max-incomplete-request-header-bytes", "4096",
             "--max-incomplete-request-total-bytes", "8192"
         });
@@ -72,7 +73,12 @@ public class CaptureProxySetupTest {
             IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES,
             defaults.maximumIncompleteRequestTotalBytes
         );
+        Assertions.assertEquals(
+            Duration.ofMinutes(60),
+            Duration.ofSeconds(defaults.maximumConnectionDurationSeconds)
+        );
         Assertions.assertEquals(17, configured.maximumRequestAssemblyDurationSeconds);
+        Assertions.assertEquals(19, configured.maximumConnectionDurationSeconds);
         Assertions.assertEquals(4096, configured.maximumIncompleteRequestHeaderBytes);
         Assertions.assertEquals(8192, configured.maximumIncompleteRequestTotalBytes);
     }

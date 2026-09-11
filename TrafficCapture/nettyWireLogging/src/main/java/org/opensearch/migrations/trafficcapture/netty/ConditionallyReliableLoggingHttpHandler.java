@@ -17,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandler<T> {
     private final Predicate<HttpRequest> shouldBlockPredicate;
-    private final CaptureFailurePolicy captureFailurePolicy;
 
     public ConditionallyReliableLoggingHttpHandler(
         @NonNull IRootWireLoggingContext rootContext,
@@ -35,7 +34,8 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
             requestCapturePredicate,
             headerPredicateForWhenToBlock,
             IncompleteRequestLimits.DEFAULT,
-            CaptureFailurePolicy.FAIL_OPEN
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
         );
     }
 
@@ -60,7 +60,8 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
             ),
-            CaptureFailurePolicy.FAIL_OPEN
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
         );
     }
 
@@ -86,7 +87,8 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
             ),
-            captureFailurePolicy
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(captureFailurePolicy)
         );
     }
 
@@ -100,16 +102,41 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         @NonNull IncompleteRequestLimits incompleteRequestLimits,
         @NonNull CaptureFailurePolicy captureFailurePolicy
     ) throws IOException {
+        this(
+            rootContext,
+            nodeId,
+            connectionId,
+            trafficOffloaderFactory,
+            requestCapturePredicate,
+            headerPredicateForWhenToBlock,
+            incompleteRequestLimits,
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(captureFailurePolicy)
+        );
+    }
+
+    public ConditionallyReliableLoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        @NonNull String nodeId,
+        String connectionId,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        @NonNull Predicate<HttpRequest> headerPredicateForWhenToBlock,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
+        @NonNull Duration maximumConnectionDuration,
+        @NonNull CaptureProcessState captureProcessState
+    ) throws IOException {
         super(
             rootContext,
             nodeId,
             connectionId,
             trafficOffloaderFactory,
             requestCapturePredicate,
-            incompleteRequestLimits
+            incompleteRequestLimits,
+            maximumConnectionDuration,
+            captureProcessState
         );
         this.shouldBlockPredicate = headerPredicateForWhenToBlock;
-        this.captureFailurePolicy = captureFailurePolicy;
     }
 
     @Override
@@ -144,18 +171,19 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
     ) {
         if (failure != null) {
             messageContext.addCaughtException(failure);
-            if (captureFailurePolicy == CaptureFailurePolicy.FAIL_CLOSED) {
+            var resultingState = captureProcessState.requiredCaptureFailed(failure);
+            if (resultingState == CaptureProcessState.State.TERMINATING) {
                 log.atError()
                     .setCause(failure)
-                    .setMessage("Capture failed; refusing to forward the request")
+                    .setMessage("Capture failed; refusing to forward the request before process termination")
                     .log();
                 ReferenceCountUtil.release(msg);
                 ctx.close();
                 return;
             }
-            log.atWarn()
+            log.atError()
                 .setCause(failure)
-                .setMessage("Capture failed; forwarding the request under fail-open policy")
+                .setMessage("Capture failed; forwarding in irreversible process-wide pass-through mode")
                 .log();
         }
         try {

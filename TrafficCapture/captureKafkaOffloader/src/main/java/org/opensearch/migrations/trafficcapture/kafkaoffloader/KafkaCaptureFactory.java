@@ -18,7 +18,6 @@ import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSeriali
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
-import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -36,7 +35,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
 
     public static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
     public static final Duration DEFAULT_LIVENESS_SNAPSHOT_INTERVAL = Duration.ofSeconds(30);
-    static final Duration DEFAULT_ROUTING_DISCOVERY_RETRY_DELAY = Duration.ofSeconds(1);
+    static final Duration DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY = Duration.ofSeconds(1);
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes
     // and
     // general Kafka message overhead
@@ -45,23 +44,23 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
     private final String nodeId;
     private final String topicNameForTraffic;
     private final int bufferSize;
-    private final Object routingInitializationLock = new Object();
+    private final Object initializationLock = new Object();
     private final CompletableFuture<CaptureKafkaPublisher> publisherFuture;
     private final Producer<String, byte[]> producer;
     private final Consumer<String, byte[]> membershipConsumer;
     private final CaptureMembershipAssignmentTracker assignmentTracker;
     private final int minimumActiveProxyCount;
     private final Duration livenessSnapshotInterval;
-    private final Duration routingDiscoveryRetryDelay;
-    private final ScheduledThreadPoolExecutor routingInitializer;
+    private final Duration topicMetadataDiscoveryRetryDelay;
+    private final java.util.function.Consumer<Throwable> captureFailureCallback;
+    private final ScheduledThreadPoolExecutor initializer;
     private final AtomicBoolean closed = new AtomicBoolean();
     private volatile CaptureKafkaPublisher publisher;
     private volatile CaptureKafkaPublisher initializingPublisher;
     private volatile CaptureKafkaMembership membership;
     private final AtomicReference<CaptureKafkaWriteGate> writeGate = new AtomicReference<>();
-    private final AtomicReference<Throwable> routingInitializationFailure = new AtomicReference<>();
-    private final AtomicReference<Throwable> membershipFailure = new AtomicReference<>();
-    private int routingDiscoveryFailures;
+    private final AtomicReference<Throwable> initializationFailure = new AtomicReference<>();
+    private int topicMetadataDiscoveryFailures;
 
     public KafkaCaptureFactory(
         IRootKafkaOffloaderContext rootScope,
@@ -84,7 +83,35 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             topicNameForTraffic,
             messageSize,
             livenessSnapshotInterval,
-            DEFAULT_ROUTING_DISCOVERY_RETRY_DELAY
+            DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
+            ignored -> {}
+        );
+    }
+
+    public KafkaCaptureFactory(
+        IRootKafkaOffloaderContext rootScope,
+        String nodeId,
+        Producer<String, byte[]> producer,
+        Consumer<String, byte[]> membershipConsumer,
+        CaptureMembershipAssignmentTracker assignmentTracker,
+        int minimumActiveProxyCount,
+        String topicNameForTraffic,
+        int messageSize,
+        Duration livenessSnapshotInterval,
+        java.util.function.Consumer<Throwable> captureFailureCallback
+    ) {
+        this(
+            rootScope,
+            nodeId,
+            producer,
+            membershipConsumer,
+            assignmentTracker,
+            minimumActiveProxyCount,
+            topicNameForTraffic,
+            messageSize,
+            livenessSnapshotInterval,
+            DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
+            captureFailureCallback
         );
     }
 
@@ -98,7 +125,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         String topicNameForTraffic,
         int messageSize,
         Duration livenessSnapshotInterval,
-        Duration routingDiscoveryRetryDelay
+        Duration topicMetadataDiscoveryRetryDelay,
+        java.util.function.Consumer<Throwable> captureFailureCallback
     ) {
         this.rootScope = Objects.requireNonNull(rootScope);
         this.nodeId = Objects.requireNonNull(nodeId);
@@ -111,19 +139,20 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         this.minimumActiveProxyCount = minimumActiveProxyCount;
         this.topicNameForTraffic = Objects.requireNonNull(topicNameForTraffic);
         this.livenessSnapshotInterval = requirePositive(livenessSnapshotInterval, "livenessSnapshotInterval");
-        this.routingDiscoveryRetryDelay = requirePositive(
-            routingDiscoveryRetryDelay,
-            "routingDiscoveryRetryDelay"
+        this.topicMetadataDiscoveryRetryDelay = requirePositive(
+            topicMetadataDiscoveryRetryDelay,
+            "topicMetadataDiscoveryRetryDelay"
         );
+        this.captureFailureCallback = Objects.requireNonNull(captureFailureCallback);
         this.bufferSize = checkedPayloadSize(messageSize);
         this.publisherFuture = new CompletableFuture<>();
-        this.routingInitializer = new ScheduledThreadPoolExecutor(1, runnable -> {
-            var thread = new Thread(runnable, "capture-kafka-routing-initializer");
+        this.initializer = new ScheduledThreadPoolExecutor(1, runnable -> {
+            var thread = new Thread(runnable, "capture-kafka-initializer");
             thread.setDaemon(true);
             return thread;
         });
-        routingInitializer.setRemoveOnCancelPolicy(true);
-        routingInitializer.execute(this::discoverRoutingPlan);
+        initializer.setRemoveOnCancelPolicy(true);
+        initializer.execute(this::discoverTopicMetadata);
     }
 
     public CaptureKafkaPublisher getPublisher() {
@@ -140,26 +169,28 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             ctx.getConnectionId(),
             "connectionId must not be null - partition locality requires a stable key"
         );
-        synchronized (routingInitializationLock) {
+        CaptureKafkaPublisher readyPublisher;
+        IllegalStateException unavailableBeforeAssignment = null;
+        synchronized (initializationLock) {
             if (closed.get()) {
                 throw new IllegalStateException("Kafka capture factory is closed");
             }
-            var terminalFailure = routingInitializationFailure.get();
+            var terminalFailure = initializationFailure.get();
             if (terminalFailure != null) {
                 throw new IllegalStateException("Kafka capture is permanently unavailable", terminalFailure);
             }
-            var groupFailure = membershipFailure.get();
-            if (groupFailure != null) {
-                throw new IllegalStateException("Kafka membership is permanently unavailable", groupFailure);
-            }
-            var readyPublisher = publisher;
+            readyPublisher = publisher;
             if (readyPublisher == null) {
-                throw new IllegalStateException(
+                unavailableBeforeAssignment = new IllegalStateException(
                     "Kafka capture is not accepting new connections before its first group assignment"
                 );
             }
-            return createRoutedOffloader(ctx, connectionId, readyPublisher);
         }
+        if (unavailableBeforeAssignment != null) {
+            failCapture(unavailableBeforeAssignment);
+            throw unavailableBeforeAssignment;
+        }
+        return createRoutedOffloader(ctx, connectionId, readyPublisher);
     }
 
     private IChannelConnectionCaptureSerializer<RecordMetadata> createRoutedOffloader(
@@ -173,7 +204,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 nodeId,
                 connectionId,
                 partition,
-                readyPublisher.getRoutingPlan().getRoutingPlanId(),
                 new StreamManager(ctx, connectionId, partition)
             );
         } catch (RuntimeException | Error t) {
@@ -182,32 +212,32 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         }
     }
 
-    private void discoverRoutingPlan() {
+    private void discoverTopicMetadata() {
         if (closed.get()) {
             return;
         }
         try {
-            var routingPlan = PartitionRoutingPlan.discover(producer, topicNameForTraffic);
-            finishRoutingInitialization(routingPlan);
+            var topicMetadata = TrafficTopicMetadata.discover(producer, topicNameForTraffic);
+            finishTopicMetadataInitialization(topicMetadata);
         } catch (IllegalArgumentException e) {
-            failRoutingInitialization(e);
+            failCapture(e);
         } catch (RuntimeException e) {
-            retryRoutingDiscovery(e);
+            retryTopicMetadataDiscovery(e);
         }
     }
 
-    private void finishRoutingInitialization(PartitionRoutingPlan routingPlan) {
-        startMembershipInitialization(routingPlan);
+    private void finishTopicMetadataInitialization(TrafficTopicMetadata topicMetadata) {
+        startMembershipInitialization(topicMetadata);
     }
 
-    private void startMembershipInitialization(PartitionRoutingPlan routingPlan) {
+    private void startMembershipInitialization(TrafficTopicMetadata topicMetadata) {
         CaptureKafkaMembership initializedMembership;
-        synchronized (routingInitializationLock) {
-            if (closed.get() || routingInitializationFailure.get() != null) {
+        synchronized (initializationLock) {
+            if (closed.get() || initializationFailure.get() != null) {
                 return;
             }
             var routingState = new CaptureRoutingState(
-                routingPlan.getTopicPartitionCount(),
+                topicMetadata.getTopicPartitionCount(),
                 List.of()
             );
             var createdWriteGate = new CaptureKafkaWriteGate();
@@ -215,7 +245,6 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 producer,
                 topicNameForTraffic,
                 nodeId,
-                routingPlan,
                 routingState,
                 bufferSize + KAFKA_MESSAGE_OVERHEAD_BYTES,
                 livenessSnapshotInterval,
@@ -233,12 +262,12 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 assignmentTracker,
                 minimumActiveProxyCount,
                 this::finishMembershipInitialization,
-                this::handleMembershipFailure,
-                this::failRoutingInitialization
+                this::failCapture,
+                this::failCapture
             );
             membership = initializedMembership;
         }
-        routingInitializer.shutdown();
+        initializer.shutdown();
         initializedMembership.start();
         log.atInfo()
             .setMessage("Kafka capture metadata is ready; waiting for the first proxy-group assignment")
@@ -250,11 +279,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         try {
             var gateFailure = Objects.requireNonNull(writeGate.get()).failureIfNotWritable();
             if (gateFailure != null) {
-                failRoutingInitialization(gateFailure);
+                failCapture(gateFailure);
                 return;
             }
-            synchronized (routingInitializationLock) {
-                if (closed.get() || routingInitializationFailure.get() != null || publisher != null) {
+            synchronized (initializationLock) {
+                if (closed.get() || initializationFailure.get() != null || publisher != null) {
                     return;
                 }
                 initializedPublisher = Objects.requireNonNull(initializingPublisher);
@@ -267,69 +296,50 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
                 .addArgument(initializedPublisher.getRoutingState().assignedPartitions())
                 .log();
         } catch (RuntimeException e) {
-            failRoutingInitialization(e);
+            failCapture(e);
         }
     }
 
-    private void retryRoutingDiscovery(RuntimeException failure) {
+    private void retryTopicMetadataDiscovery(RuntimeException failure) {
         if (closed.get()) {
             return;
         }
-        routingDiscoveryFailures++;
-        if (routingDiscoveryFailures == 1) {
+        topicMetadataDiscoveryFailures++;
+        if (topicMetadataDiscoveryFailures == 1) {
             log.atWarn()
                 .setCause(failure)
-                .setMessage("Kafka routing metadata is unavailable; capture is buffering while discovery retries")
+                .setMessage("Kafka topic metadata is unavailable; capture initialization will retry")
                 .log();
         } else {
             log.atDebug()
                 .setCause(failure)
-                .setMessage("Kafka routing metadata remains unavailable; retry={}")
-                .addArgument(routingDiscoveryFailures)
+                .setMessage("Kafka topic metadata remains unavailable; retry={}")
+                .addArgument(topicMetadataDiscoveryFailures)
                 .log();
         }
-        if (!routingInitializer.isShutdown()) {
+        if (!initializer.isShutdown()) {
             try {
-                routingInitializer.schedule(
-                    this::discoverRoutingPlan,
-                    routingDiscoveryRetryDelay.toMillis(),
+                initializer.schedule(
+                    this::discoverTopicMetadata,
+                    topicMetadataDiscoveryRetryDelay.toMillis(),
                     TimeUnit.MILLISECONDS
                 );
             } catch (RejectedExecutionException e) {
-                if (!closed.get() && routingInitializationFailure.get() == null) {
+                if (!closed.get() && initializationFailure.get() == null) {
                     throw e;
                 }
             }
         }
     }
 
-    private void handleMembershipFailure(Throwable failure) {
-        if (!membershipFailure.compareAndSet(null, failure)) {
-            return;
-        }
-        var readyPublisher = publisher;
-        if (readyPublisher == null) {
-            failRoutingInitialization(failure);
-            return;
-        }
-        readyPublisher.getRoutingState().suspendNewConnections();
-        log.atError()
-            .setCause(failure)
-            .setMessage(
-                "Kafka group membership failed; new capture connections are disabled while existing "
-                    + "connections retain Kafka publishing"
-            )
-            .log();
-    }
-
-    private void failRoutingInitialization(Throwable failure) {
+    private void failCapture(Throwable failure) {
         CaptureKafkaPublisher publisherToFail;
         boolean closeInitializingPublisher;
-        synchronized (routingInitializationLock) {
-            if (routingInitializationFailure.get() != null) {
+        synchronized (initializationLock) {
+            if (initializationFailure.get() != null) {
                 return;
             }
-            routingInitializationFailure.set(failure);
+            initializationFailure.set(failure);
             publisherToFail = publisher == null ? initializingPublisher : publisher;
             closeInitializingPublisher = publisher == null && initializingPublisher != null;
             if (!closeInitializingPublisher) {
@@ -338,18 +348,24 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         }
         if (publisherToFail != null) {
             publisherToFail.failClosed(failure);
-            if (closeInitializingPublisher) {
-                publisherToFail.close();
-            }
         }
         publisherFuture.completeExceptionally(failure);
-        if (routingInitializer != null) {
-            routingInitializer.shutdownNow();
+        if (initializer != null) {
+            initializer.shutdownNow();
         }
         log.atError()
             .setCause(failure)
-            .setMessage("Kafka capture routing failed closed; no authoritative liveness snapshots will be emitted")
+            .setMessage("Kafka capture is permanently unavailable in this process")
             .log();
+        captureFailureCallback.accept(failure);
+        if (closeInitializingPublisher) {
+            var closeThread = new Thread(
+                publisherToFail::close,
+                "failed-capture-kafka-publisher-close"
+            );
+            closeThread.setDaemon(true);
+            closeThread.start();
+        }
     }
 
     private static int checkedPayloadSize(int messageSize) {
@@ -480,8 +496,8 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         if (!closed.compareAndSet(false, true)) {
             return;
         }
-        if (routingInitializer != null) {
-            routingInitializer.shutdownNow();
+        if (initializer != null) {
+            initializer.shutdownNow();
         }
         // Routing initialization decides whether to build a publisher while holding this lock and after
         // checking the flag set above, so close has to take the lock to read the result of that decision.
@@ -490,7 +506,7 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
         CaptureKafkaPublisher readyPublisher;
         CaptureKafkaPublisher publisherStillInitializing;
         CaptureKafkaMembership readyMembership;
-        synchronized (routingInitializationLock) {
+        synchronized (initializationLock) {
             readyPublisher = publisher;
             publisherStillInitializing = initializingPublisher;
             readyMembership = membership;
@@ -519,7 +535,11 @@ public class KafkaCaptureFactory implements IConnectionCaptureFactory<RecordMeta
             publisherStillInitializing.close();
             return;
         }
-        publisherFuture.completeExceptionally(new IllegalStateException("Kafka capture factory closed before routing"));
-        producer.close(Duration.ZERO);
+        publisherFuture.completeExceptionally(new IllegalStateException("Kafka capture factory closed before initialization"));
+        try {
+            membershipConsumer.close(Duration.ZERO);
+        } finally {
+            producer.close(Duration.ZERO);
+        }
     }
 }

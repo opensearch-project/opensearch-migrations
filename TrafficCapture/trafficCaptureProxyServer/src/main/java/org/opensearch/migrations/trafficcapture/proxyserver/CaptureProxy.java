@@ -38,6 +38,7 @@ import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFacto
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
 import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
@@ -65,9 +66,12 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.logging.log4j.LogManager;
 
 @Slf4j
 public class CaptureProxy {
+    static final int CAPTURE_FAILURE_EXIT_CODE = 78;
+    static final Duration CAPTURE_FAILURE_LOG_FLUSH_TIMEOUT = Duration.ofSeconds(5);
 
     public static class CaptureFailurePolicyConverter implements IStringConverter<CaptureFailurePolicy> {
         @Override
@@ -228,12 +232,19 @@ public class CaptureProxy {
             description = "Minimum Kafka group member count required before accepting new captured connections.")
         public int minimumActiveProxyCount = 1;
         @Parameter(required = false,
-            names = { "--max-request-assembly-duration-seconds", "--max-connection-duration-seconds" },
+            names = { "--max-request-assembly-duration-seconds" },
             arity = 1,
-            description = "Maximum duration for assembling one incomplete request. "
-                + "The legacy --max-connection-duration-seconds name has the same request-scoped behavior.")
+            description = "Maximum duration for assembling one incomplete request.")
         public long maximumRequestAssemblyDurationSeconds =
             IncompleteRequestLimits.DEFAULT_MAXIMUM_ASSEMBLY_DURATION.toSeconds();
+        @Parameter(required = false,
+            names = { "--max-connection-duration-seconds" },
+            arity = 1,
+            description = "Maximum lifetime of one source TCP connection.")
+        public long maximumConnectionDurationSeconds =
+            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler
+                .DEFAULT_MAXIMUM_CONNECTION_DURATION
+                .toSeconds();
         @Parameter(required = false,
             names = { "--max-incomplete-request-header-bytes" },
             arity = 1,
@@ -272,6 +283,9 @@ public class CaptureProxy {
             if (p.maximumRequestAssemblyDurationSeconds <= 0) {
                 throw new ParameterException("--max-request-assembly-duration-seconds must be positive");
             }
+            if (p.maximumConnectionDurationSeconds <= 0) {
+                throw new ParameterException("--max-connection-duration-seconds must be positive");
+            }
             if (p.maximumIncompleteRequestHeaderBytes <= 0
                 || p.maximumIncompleteRequestHeaderBytes > Integer.MAX_VALUE) {
                 throw new ParameterException(
@@ -302,12 +316,11 @@ public class CaptureProxy {
         }
     }
 
-    protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
-        System.err.println("No trace log directory specified.  Logging to /dev/null");
+    protected static <T> IConnectionCaptureFactory<T> getNullConnectionCaptureFactory() {
         return ctx -> new StreamChannelConnectionCaptureSerializer<>(
             null,
             ctx.getConnectionId(),
-            new StreamLifecycleManager<>() {
+            new StreamLifecycleManager<T>() {
                 @Override
                 public CodedOutputStreamHolder createStream() {
                     return new CodedOutputStreamHolder() {
@@ -328,7 +341,7 @@ public class CaptureProxy {
                 }
 
                 @Override
-                public CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+                public CompletableFuture<T> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
                     return CompletableFuture.completedFuture(null);
                 }
             }
@@ -342,17 +355,19 @@ public class CaptureProxy {
 
     protected static IConnectionCaptureFactory<?> getConnectionCaptureFactory(
         Parameters params,
-        RootCaptureContext rootContext
+        RootCaptureContext rootContext,
+        CaptureProcessState captureProcessState
     ) throws IOException {
         var nodeId = getNodeId();
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
         } else if (params.kafkaParameters.kafkaBrokers != null) {
-            var producer = new KafkaProducer<String, byte[]>(
-                KafkaConfig.buildKafkaProperties(params.kafkaParameters)
-            );
+            KafkaProducer<String, byte[]> producer = null;
             try {
+                producer = new KafkaProducer<>(
+                    KafkaConfig.buildKafkaProperties(params.kafkaParameters)
+                );
                 var assignmentTracker = new CaptureMembershipAssignmentTracker();
                 var membershipConsumer = new KafkaConsumer<String, byte[]>(
                     KafkaConfig.buildMembershipConsumerProperties(
@@ -371,13 +386,21 @@ public class CaptureProxy {
                     params.minimumActiveProxyCount,
                     params.kafakTopicName,
                     params.maximumTrafficStreamSize,
-                    Duration.ofSeconds(params.livenessSnapshotIntervalSeconds)
+                    Duration.ofSeconds(params.livenessSnapshotIntervalSeconds),
+                    captureProcessState::requiredCaptureFailed
                 );
             } catch (RuntimeException | IOException e) {
-                producer.close(Duration.ZERO);
+                if (producer != null) {
+                    producer.close(Duration.ZERO);
+                }
+                captureProcessState.requiredCaptureFailed(e);
+                if (captureProcessState.isPassThrough()) {
+                    return getNullConnectionCaptureFactory();
+                }
                 throw e;
             }
         } else if (params.noCapture) {
+            System.err.println("Capture is disabled.  Forwarding without a capture sink.");
             return getNullConnectionCaptureFactory();
         } else {
             throw new IllegalStateException("Must specify some connection capture factory options");
@@ -509,7 +532,16 @@ public class CaptureProxy {
 
         var sslEngineSupplier = buildSslEngineSupplier(params);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
-        var connectionCaptureFactory = getConnectionCaptureFactory(params, ctx);
+        var captureProcessState = new CaptureProcessState(params.captureFailurePolicy);
+        captureProcessState.addTerminationListener(
+            new CaptureFailureTerminator(
+                CAPTURE_FAILURE_EXIT_CODE,
+                CAPTURE_FAILURE_LOG_FLUSH_TIMEOUT,
+                LogManager::shutdown,
+                code -> Runtime.getRuntime().halt(code)
+            )
+        );
+        var connectionCaptureFactory = getConnectionCaptureFactory(params, ctx, captureProcessState);
         try {
             var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0
                 ? Duration.ZERO
@@ -535,7 +567,8 @@ public class CaptureProxy {
                         params.maximumIncompleteRequestHeaderBytes,
                         params.maximumIncompleteRequestTotalBytes
                     ),
-                    params.captureFailurePolicy);
+                    Duration.ofSeconds(params.maximumConnectionDurationSeconds),
+                    captureProcessState);
             proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
             closeCaptureFactory(connectionCaptureFactory);
@@ -646,6 +679,30 @@ public class CaptureProxy {
                                                                 IncompleteRequestLimits incompleteRequestLimits,
                                                                 CaptureFailurePolicy captureFailurePolicy)
     {
+        return buildProxyChannelInitializer(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            headerCapturePredicate,
+            headerOverridesArgs,
+            connectionFactory,
+            incompleteRequestLimits,
+            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler
+                .DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(captureFailurePolicy)
+        );
+    }
+
+    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
+                                                                BacksideConnectionPool backsideConnectionPool,
+                                                                Supplier<SSLEngine> sslEngineSupplier,
+                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
+                                                                List<String> headerOverridesArgs,
+                                                                IConnectionCaptureFactory<T> connectionFactory,
+                                                                IncompleteRequestLimits incompleteRequestLimits,
+                                                                Duration maximumConnectionDuration,
+                                                                CaptureProcessState captureProcessState)
+    {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
         final var addBufs = new ArrayList<ByteBuf>(headers.size());
@@ -662,9 +719,11 @@ public class CaptureProxy {
             backsideConnectionPool,
             sslEngineSupplier,
             connectionFactory,
+            getNullConnectionCaptureFactory(),
             headerCapturePredicate,
             incompleteRequestLimits,
-            captureFailurePolicy
+            maximumConnectionDuration,
+            captureProcessState
         ) {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {

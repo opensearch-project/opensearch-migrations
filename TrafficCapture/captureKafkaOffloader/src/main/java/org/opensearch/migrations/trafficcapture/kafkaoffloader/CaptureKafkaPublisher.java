@@ -50,8 +50,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
     @Getter
     private final String nodeId;
     @Getter
-    private final PartitionRoutingPlan routingPlan;
-    @Getter
     private final CaptureRoutingState routingState;
     private final CaptureKafkaWriteGate writeGate;
     private final int payloadSizeLimit;
@@ -70,7 +68,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         Producer<String, byte[]> producer,
         String topic,
         String nodeId,
-        PartitionRoutingPlan routingPlan,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration snapshotInterval
@@ -79,7 +76,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             producer,
             topic,
             nodeId,
-            routingPlan,
             routingState,
             maximumKafkaMessageSize,
             snapshotInterval,
@@ -92,7 +88,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         Producer<String, byte[]> producer,
         String topic,
         String nodeId,
-        PartitionRoutingPlan routingPlan,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration snapshotInterval,
@@ -102,7 +97,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
             producer,
             topic,
             nodeId,
-            routingPlan,
             routingState,
             maximumKafkaMessageSize,
             snapshotInterval,
@@ -115,7 +109,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         Producer<String, byte[]> producer,
         String topic,
         String nodeId,
-        PartitionRoutingPlan routingPlan,
         CaptureRoutingState routingState,
         int maximumKafkaMessageSize,
         Duration snapshotInterval,
@@ -125,11 +118,7 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         this.producer = Objects.requireNonNull(producer);
         this.topic = Objects.requireNonNull(topic);
         this.nodeId = Objects.requireNonNull(nodeId);
-        this.routingPlan = Objects.requireNonNull(routingPlan);
         this.routingState = Objects.requireNonNull(routingState);
-        if (routingState.topicPartitionCount() != routingPlan.getTopicPartitionCount()) {
-            throw new IllegalArgumentException("Routing state and routing plan describe different topics");
-        }
         this.clock = Objects.requireNonNull(clock);
         this.writeGate = Objects.requireNonNull(writeGate);
         if (maximumKafkaMessageSize <= KafkaCaptureFactory.KAFKA_MESSAGE_OVERHEAD_BYTES) {
@@ -390,7 +379,6 @@ public class CaptureKafkaPublisher implements AutoCloseable {
         return ProxyLivenessSnapshotChunk.newBuilder()
             .setNodeId(nodeId)
             .setPartition(partition)
-            .setRoutingPlanId(routingPlan.getRoutingPlanId())
             .setSnapshotSequence(sequence)
             .setEmittedAtMillis(emittedAtMillis);
     }

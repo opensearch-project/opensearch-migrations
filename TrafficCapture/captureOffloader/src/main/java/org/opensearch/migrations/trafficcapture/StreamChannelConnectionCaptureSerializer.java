@@ -71,7 +71,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
     private static final int MAX_ID_SIZE = 100;
-    private static final int MAX_ROUTING_STAMP_SIZE = 128;
+    private static final int MAX_PARTITION_STAMP_SIZE = 16;
 
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
@@ -84,7 +84,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private final String writerNodeIdString;
     private final String connectionIdString;
     private final Integer partition;
-    private final String routingPlanId;
     private final LongSupplier manifestCycleSupplier;
     private long nextConnectionObservationSequence = 1;
     private CodedOutputStreamHolder currentCodedOutputStreamHolderOrNull;
@@ -96,24 +95,22 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         String connectionId,
         @NonNull StreamLifecycleManager<T> streamLifecycleManager
     ) {
-        this(nodeId, connectionId, null, null, () -> 0, streamLifecycleManager);
+        this(nodeId, connectionId, null, () -> 0, streamLifecycleManager);
     }
 
     public StreamChannelConnectionCaptureSerializer(
         String nodeId,
         String connectionId,
         Integer partition,
-        String routingPlanId,
         @NonNull StreamLifecycleManager<T> streamLifecycleManager
     ) {
-        this(nodeId, connectionId, partition, routingPlanId, () -> 0, streamLifecycleManager);
+        this(nodeId, connectionId, partition, () -> 0, streamLifecycleManager);
     }
 
     public StreamChannelConnectionCaptureSerializer(
         String writerNodeId,
         String connectionId,
         Integer partition,
-        String routingPlanId,
         @NonNull LongSupplier manifestCycleSupplier,
         @NonNull StreamLifecycleManager<T> streamLifecycleManager
     ) {
@@ -122,16 +119,13 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             ? 0
             : CodedOutputStream.computeStringSize(TrafficRecord.WRITERNODEID_FIELD_NUMBER, writerNodeId))
             + CodedOutputStream.computeStringSize(TrafficRecord.CONNECTIONID_FIELD_NUMBER, connectionId) <= MAX_ID_SIZE;
-        assert (partition == null) == (routingPlanId == null);
         assert (partition == null
             ? 0
-            : CodedOutputStream.computeInt32Size(TrafficRecord.PARTITION_FIELD_NUMBER, partition)
-                + CodedOutputStream.computeStringSize(TrafficRecord.ROUTINGPLANID_FIELD_NUMBER, routingPlanId))
-            <= MAX_ROUTING_STAMP_SIZE;
+            : CodedOutputStream.computeInt32Size(TrafficRecord.PARTITION_FIELD_NUMBER, partition))
+            <= MAX_PARTITION_STAMP_SIZE;
         this.connectionIdString = connectionId;
         this.writerNodeIdString = writerNodeId;
         this.partition = partition;
-        this.routingPlanId = routingPlanId;
         this.manifestCycleSupplier = manifestCycleSupplier;
     }
 
@@ -162,12 +156,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             }
             if (partition != null) {
                 currentCodedOutputStream.writeInt32(TrafficRecord.PARTITION_FIELD_NUMBER, partition);
-            }
-            if (routingPlanId != null) {
-                currentCodedOutputStream.writeString(
-                    TrafficRecord.ROUTINGPLANID_FIELD_NUMBER,
-                    routingPlanId
-                );
             }
             if (eomsSoFar > 0) {
                 currentCodedOutputStream.writeInt32(TrafficRecord.PRIORREQUESTSRECEIVED_FIELD_NUMBER, eomsSoFar);

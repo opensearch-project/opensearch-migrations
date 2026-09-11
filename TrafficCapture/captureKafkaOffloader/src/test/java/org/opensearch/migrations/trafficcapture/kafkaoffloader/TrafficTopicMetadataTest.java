@@ -5,11 +5,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-class PartitionRoutingPlanTest {
+class TrafficTopicMetadataTest {
     @Test
-    void topicMetadataAndTemporaryPlanIdentityAreDeterministic() {
-        var first = PartitionRoutingPlan.forTopic(7);
-        var second = PartitionRoutingPlan.forTopic(7);
+    void topicMetadataContainsPartitionCount() {
+        var first = TrafficTopicMetadata.forTopic(7);
+        var second = TrafficTopicMetadata.forTopic(7);
 
         assertEquals(7, first.getTopicPartitionCount());
         assertEquals(first, second);
@@ -17,6 +17,6 @@ class PartitionRoutingPlanTest {
 
     @Test
     void invalidPartitionCountFailsAtStartup() {
-        assertThrows(IllegalArgumentException.class, () -> PartitionRoutingPlan.forTopic(0));
+        assertThrows(IllegalArgumentException.class, () -> TrafficTopicMetadata.forTopic(0));
     }
 }

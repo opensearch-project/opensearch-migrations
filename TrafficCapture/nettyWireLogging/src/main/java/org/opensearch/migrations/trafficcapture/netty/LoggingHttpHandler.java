@@ -37,6 +37,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
+    public static final Duration DEFAULT_MAXIMUM_CONNECTION_DURATION = Duration.ofMinutes(60);
 
     static class CaptureIgnoreState {
         static final byte CAPTURE = 0;
@@ -206,7 +207,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected IWireCaptureContexts.IHttpMessageContext messageContext;
     private final IncompleteRequestLimits incompleteRequestLimits;
+    protected final CaptureProcessState captureProcessState;
+    private final Duration maximumConnectionDuration;
     private CompletableFuture<T> captureCloseFuture;
+    private ScheduledFuture<?> connectionDeadline;
     private ScheduledFuture<?> requestAssemblyDeadline;
     private boolean contextsClosed;
 
@@ -223,7 +227,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             channelKey,
             trafficOffloaderFactory,
             httpHeadersCapturePredicate,
-            IncompleteRequestLimits.DEFAULT
+            IncompleteRequestLimits.DEFAULT,
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
         );
     }
 
@@ -245,7 +251,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                 maximumRequestAssemblyDuration,
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
                 IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES
-            )
+            ),
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
         );
     }
 
@@ -257,9 +265,36 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
         @NonNull IncompleteRequestLimits incompleteRequestLimits
     ) throws IOException {
+        this(
+            rootContext,
+            nodeId,
+            channelKey,
+            trafficOffloaderFactory,
+            httpHeadersCapturePredicate,
+            incompleteRequestLimits,
+            DEFAULT_MAXIMUM_CONNECTION_DURATION,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
+        );
+    }
+
+    public LoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        String nodeId,
+        String channelKey,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate httpHeadersCapturePredicate,
+        @NonNull IncompleteRequestLimits incompleteRequestLimits,
+        @NonNull Duration maximumConnectionDuration,
+        @NonNull CaptureProcessState captureProcessState
+    ) throws IOException {
         var parentContext = rootContext.createConnectionContext(channelKey, nodeId);
         this.messageContext = parentContext.createInitialRequestContext();
         this.incompleteRequestLimits = incompleteRequestLimits;
+        if (maximumConnectionDuration.isZero() || maximumConnectionDuration.isNegative()) {
+            throw new IllegalArgumentException("maximumConnectionDuration must be positive");
+        }
+        this.maximumConnectionDuration = maximumConnectionDuration;
+        this.captureProcessState = captureProcessState;
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext);
         var captureState = new CaptureState();
@@ -271,6 +306,21 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             ),
             new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
         );
+    }
+
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        connectionDeadline = ctx.executor().schedule(
+            () -> {
+                log.atWarn()
+                    .setMessage("Closing connection because it exceeded the maximum connection duration")
+                    .log();
+                ctx.close();
+            },
+            maximumConnectionDuration.toNanos(),
+            TimeUnit.NANOSECONDS
+        );
+        super.handlerAdded(ctx);
     }
 
     private IWireCaptureContexts.ICapturingConnectionContext getConnectionContext() {
@@ -322,7 +372,12 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         if (captureCloseFuture != null) {
             return captureCloseFuture;
         }
+        cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
+        if (!captureProcessState.shouldCapture()) {
+            captureCloseFuture = CompletableFuture.completedFuture(null);
+            return captureCloseFuture;
+        }
         try {
             trafficOffloader.addCloseEvent(timestamp);
             captureCloseFuture = trafficOffloader.flushCommitAndResetStream(true);
@@ -330,6 +385,13 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             captureCloseFuture = CompletableFuture.failedFuture(t);
         }
         return captureCloseFuture;
+    }
+
+    private void cancelConnectionDeadline() {
+        if (connectionDeadline != null) {
+            connectionDeadline.cancel(false);
+            connectionDeadline = null;
+        }
     }
 
     private synchronized void closeContextsOnce() {
@@ -388,13 +450,16 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         );
 
         var captureState = requestParsingHandler.captureState;
-        var shouldCapture = captureState.shouldCapture();
+        var processCaptureEnabled = captureProcessState.shouldCapture();
+        var shouldCapture = processCaptureEnabled && captureState.shouldCapture();
         if (shouldCapture) {
             captureState.liveReadObservationsInOffloader = true;
             trafficOffloader.addReadEvent(timestamp, bb);
         } else if (captureState.liveReadObservationsInOffloader) {
             requestContext.onCaptureSuppressed();
-            trafficOffloader.cancelCaptureForCurrentRequest(timestamp);
+            if (processCaptureEnabled) {
+                trafficOffloader.cancelCaptureForCurrentRequest(timestamp);
+            }
             captureState.liveReadObservationsInOffloader = false;
         }
 
@@ -490,7 +555,8 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
 
         var bb = (ByteBuf) msg;
-        if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
+        if (captureProcessState.shouldCapture()
+            && getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
             trafficOffloader.addWriteEvent(Instant.now(), bb);
         }
         responseContext.onBytesWritten(bb.readableBytes());
@@ -501,7 +567,9 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         try {
-            trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
+            if (captureProcessState.shouldCapture()) {
+                trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
+            }
             messageContext.addCaughtException(cause);
             httpDecoderChannel.close();
             super.exceptionCaught(ctx, cause);

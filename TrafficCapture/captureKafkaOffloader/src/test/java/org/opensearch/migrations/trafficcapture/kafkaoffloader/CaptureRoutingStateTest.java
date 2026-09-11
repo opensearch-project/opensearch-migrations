@@ -27,6 +27,18 @@ class CaptureRoutingStateTest {
     }
 
     @Test
+    void anAssignmentRemainsUsableUntilItIsExplicitlyReplaced() {
+        var state = new CaptureRoutingState(3, List.of(0, 1));
+
+        assertTrue(List.of(0, 1).contains(state.admitConnection("before-replacement")));
+        assertEquals(List.of(0, 1), state.assignedPartitions());
+
+        state.replaceAssignedPartitions(List.of(2));
+
+        assertEquals(2, state.admitConnection("after-replacement"));
+    }
+
+    @Test
     void revokedPartitionReleasesOnlyAfterItsLastConnectionCloses() {
         var state = new CaptureRoutingState(4, List.of(0, 1));
         state.register("first", 1);
