@@ -379,8 +379,7 @@ CaptureCapabilityProbe {
 The Kafka record header for `NoMoreWrites` carries the authoritative `writerNodeId`. A proxy may
 publish the record only through that writer identity's publisher lane. A missing or malformed
 writer header makes the record inert: the replayer warns and may commit the inert record, but it
-does not retire any writer or connection state. Compatibility fields inside the protobuf body do
-not override the Kafka header.
+does not retire any writer or connection state.
 
 `manifestCycle` is a monotonically increasing value scoped to one
 `(writerNodeId, partition)`. It is the logical boundary described in §5.1. It is not a wall-clock

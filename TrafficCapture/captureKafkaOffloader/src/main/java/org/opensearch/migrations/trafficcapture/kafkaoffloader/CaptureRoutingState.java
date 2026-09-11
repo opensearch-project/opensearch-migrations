@@ -21,8 +21,8 @@ import org.apache.kafka.common.utils.Utils;
  */
 public final class CaptureRoutingState {
     enum WriterStatus {
-        PENDING,
-        ACTIVE,
+        INITIALIZING,
+        CURRENT,
         DRAINING
     }
 
@@ -144,7 +144,7 @@ public final class CaptureRoutingState {
         private final int partition;
         private final AtomicLong manifestCycle = new AtomicLong();
         private final Set<String> connectionIds = new HashSet<>();
-        private WriterStatus status = WriterStatus.PENDING;
+        private WriterStatus status = WriterStatus.INITIALIZING;
 
         private WriterPartitionState(String writerNodeId, int partition) {
             this.writerNodeId = writerNodeId;
@@ -152,7 +152,7 @@ public final class CaptureRoutingState {
         }
     }
 
-    private record ActiveAssignment(String writerNodeId, List<Integer> partitions) {}
+    private record CurrentAssignment(String writerNodeId, List<Integer> partitions) {}
 
     private static final Comparator<WriterPartitionState> WRITER_PARTITION_ORDER =
         Comparator.comparing((WriterPartitionState state) -> state.writerNodeId)
@@ -162,7 +162,7 @@ public final class CaptureRoutingState {
     private final int topicPartitionCount;
     private final Map<WriterPartitionKey, WriterPartitionState> writerPartitions = new HashMap<>();
     private final Map<ConnectionKey, ConnectionRoute> connectionRoutes = new HashMap<>();
-    private ActiveAssignment activeAssignment;
+    private CurrentAssignment currentAssignment;
     private long assignmentSequence;
     private boolean shuttingDown;
 
@@ -204,25 +204,25 @@ public final class CaptureRoutingState {
         }
         for (var partition : assignment.partitions()) {
             var state = requireWriterPartition(assignment.writerNodeId(), partition);
-            if (state.status != WriterStatus.PENDING) {
+            if (state.status != WriterStatus.INITIALIZING) {
                 throw new IllegalStateException(
-                    "Writer partition is not pending activation: "
+                    "Writer partition is not initializing: "
                         + assignment.writerNodeId()
                         + "/"
                         + partition
                 );
             }
         }
-        if (activeAssignment != null) {
-            for (var partition : activeAssignment.partitions()) {
-                requireWriterPartition(activeAssignment.writerNodeId(), partition).status =
+        if (currentAssignment != null) {
+            for (var partition : currentAssignment.partitions()) {
+                requireWriterPartition(currentAssignment.writerNodeId(), partition).status =
                     WriterStatus.DRAINING;
             }
         }
         for (var partition : assignment.partitions()) {
-            requireWriterPartition(assignment.writerNodeId(), partition).status = WriterStatus.ACTIVE;
+            requireWriterPartition(assignment.writerNodeId(), partition).status = WriterStatus.CURRENT;
         }
-        activeAssignment = new ActiveAssignment(assignment.writerNodeId(), assignment.partitions());
+        currentAssignment = new CurrentAssignment(assignment.writerNodeId(), assignment.partitions());
     }
 
     public synchronized ConnectionRoute admitConnection(String connectionId) {
@@ -230,20 +230,20 @@ public final class CaptureRoutingState {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
-        if (activeAssignment == null) {
+        if (currentAssignment == null) {
             throw new IllegalStateException("Kafka capture has no usable assignment for new connections");
         }
-        int partition = activeAssignment.partitions().get(
-            positiveHash(connectionId) % activeAssignment.partitions().size()
+        int partition = currentAssignment.partitions().get(
+            positiveHash(connectionId) % currentAssignment.partitions().size()
         );
-        var state = requireWriterPartition(activeAssignment.writerNodeId(), partition);
-        var key = new ConnectionKey(activeAssignment.writerNodeId(), connectionId);
+        var state = requireWriterPartition(currentAssignment.writerNodeId(), partition);
+        var key = new ConnectionKey(currentAssignment.writerNodeId(), connectionId);
         if (connectionRoutes.containsKey(key)) {
             throw new IllegalStateException(
                 "Connection "
                     + connectionId
                     + " is already registered for writer "
-                    + activeAssignment.writerNodeId()
+                    + currentAssignment.writerNodeId()
             );
         }
         if (!state.connectionIds.add(connectionId)) {
@@ -284,9 +284,9 @@ public final class CaptureRoutingState {
         var manifests = new ArrayList<PreparedManifest>(assignment.partitions().size());
         for (var partition : assignment.partitions()) {
             var state = requireWriterPartition(assignment.writerNodeId(), partition);
-            if (state.status != WriterStatus.PENDING) {
+            if (state.status != WriterStatus.INITIALIZING) {
                 throw new IllegalStateException(
-                    "Initial manifest requested for a writer partition that is not pending"
+                    "Initial manifest requested for a writer partition that is not initializing"
                 );
             }
             manifests.add(prepareManifest(state));
@@ -297,7 +297,7 @@ public final class CaptureRoutingState {
     synchronized List<PreparedManifest> preparePeriodicManifests() {
         var states = writerPartitions.values()
             .stream()
-            .filter(state -> state.status != WriterStatus.PENDING)
+            .filter(state -> state.status != WriterStatus.INITIALIZING)
             .sorted(WRITER_PARTITION_ORDER)
             .toList();
         var manifests = new ArrayList<PreparedManifest>(states.size());
@@ -310,11 +310,11 @@ public final class CaptureRoutingState {
     }
 
     synchronized List<Integer> assignedPartitions() {
-        return activeAssignment == null ? List.of() : activeAssignment.partitions();
+        return currentAssignment == null ? List.of() : currentAssignment.partitions();
     }
 
-    synchronized String activeWriterNodeId() {
-        return activeAssignment == null ? null : activeAssignment.writerNodeId();
+    synchronized String currentWriterNodeId() {
+        return currentAssignment == null ? null : currentAssignment.writerNodeId();
     }
 
     synchronized Set<String> writerNodeIds() {
@@ -330,7 +330,7 @@ public final class CaptureRoutingState {
 
     synchronized void beginShutdown() {
         shuttingDown = true;
-        activeAssignment = null;
+        currentAssignment = null;
     }
 
     int topicPartitionCount() {

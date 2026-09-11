@@ -130,11 +130,7 @@ message ProxyNoMoreWrites {
 }
 
 message NoMoreWrites {
-  // The Kafka writer header is authoritative.
-  string writerNodeId = 1 [deprecated = true];
   int32 partition = 2;
-  string declaredBy = 3 [deprecated = true];
-  int64 emittedAtMillis = 4; // diagnostic only; Kafka offset defines the terminal boundary
 }
 
 message CaptureCapabilityProbe {

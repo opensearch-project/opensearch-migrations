@@ -78,7 +78,7 @@ class CaptureKafkaMembershipTest {
         membership.onPartitionsAssigned(List.of());
 
         assertEquals(List.of(0), routingState.assignedPartitions());
-        assertEquals("activation:2", routingState.activeWriterNodeId());
+        assertEquals("activation:2", routingState.currentWriterNodeId());
     }
 
     @Test
