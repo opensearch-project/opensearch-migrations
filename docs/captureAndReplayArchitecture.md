@@ -214,8 +214,7 @@ before that identity accepts a source connection. An empty manifest for a curren
 ordinary heartbeat and updates that same continuous baseline when timely; it never resets the
 baseline.
 
-The group has no application-defined member phase and requires no second rebalance before use. A
-process completes its Kafka capability probes before joining. Its first completed cooperative
+A process completes its Kafka capability probes before joining the group. A completed cooperative
 assignment may make partitions eligible for new connections after the initial manifests are
 acknowledged and the member-count gate is satisfied. Existing connections remain on their original
 proxy, writer identity, and Kafka partition during scale-up, scale-down, and rebalance.
@@ -869,8 +868,9 @@ capture-health check in §4 closes capture before those source bytes are submitt
 Loss of valid Kafka group membership immediately closes the new-connection gate but does not by
 itself stop capture for connections that the proxy already accepted. A clearly transient membership
 failure that has not compromised capture may retry. A permanent or ambiguous membership failure
-uses the strict or pass-through behavior above. Membership recovery does not use a second
-activation rebalance, debounce, jitter, or application-defined group member state.
+uses the strict or pass-through behavior above. After a recoverable interruption, Kafka's next
+completed group assignment is the assignment decision; the proxy applies the member-count and
+initial-manifest gates before accepting new connections.
 
 ## 13. Protocol violations
 

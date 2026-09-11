@@ -361,8 +361,9 @@ A healthy controller-requested suppression has a separate path:
 CAPTURE_AUTHORITATIVE -> SUPPRESSING -> CAPTURE_SUPPRESSED_AND_QUIESCENT
 ```
 
-`CAPTURE_AUTHORITATIVE` is a local process state, not Kafka group subscription metadata. The group
-has no `PROBATIONARY` or `ACTIVE` member phase and performs no activation rebalance.
+`CAPTURE_AUTHORITATIVE` is a local process state, not Kafka group subscription metadata. After
+capability probing succeeds, the process joins the group and uses Kafka's completed cooperative
+assignment as the assignment decision.
 
 Only the healthy suppression path may later create a fresh capture activation in the same process.
 A process that entered `CAPTURE_FAILURE_PENDING` or `PASS_THROUGH_COMPROMISED` because of manifest
@@ -1005,8 +1006,8 @@ processes to the new session and plan id and authorizes only session-fenced capa
 Each process creates a fresh `captureActivationId`, emits probes using
 `writerNodeId = captureActivationId + ":PROBE"` and carrying that `captureSessionId`, and joins the
 group only after every probe is acknowledged and its producer configuration is validated. There is
-no application-defined group member phase and no second rebalance before use. After the process
-receives an assignment, it increments `assignmentSequence`, creates
+one group join followed by Kafka's normal assignment. After the process receives an assignment, it
+increments `assignmentSequence`, creates
 `captureActivationId + ":" + assignmentSequence`, acknowledges that identity's initial
 complete manifests for its permitted partitions, and only then accepts new captured client
 connections.

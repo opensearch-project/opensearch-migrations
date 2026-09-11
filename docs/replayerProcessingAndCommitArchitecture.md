@@ -1519,8 +1519,7 @@ is not valid.
 Kafka metadata discovery and producer qualification happen in `PROBING` before the process joins
 the group. The proxy writes semantically inert capability probes using
 `writerNodeId = captureActivationId + ":PROBE"` to one representative traffic partition per current leader
-broker, waits for acknowledgement, refreshes metadata, and then joins the group. The group has no
-application-defined member phase and requires no second rebalance before use. The first completed
+broker, waits for acknowledgement, refreshes metadata, and then joins the group. A completed
 cooperative assignment may permit new captured connections after the assignment's initial
 manifests are acknowledged and the configured group-member threshold is satisfied. A probe creates no
 reconstruction, target-replay, writer-baseline, manifest, connection, or expiration state. If the
@@ -2858,8 +2857,8 @@ preserves per-connection ordering without redefining retry policy.
 The accepted routing design is
 [`proxyCaptureProtocol.md`](proxyCaptureProtocol.md). A custom
 cooperative assignor assigns partitions for accepting new captured client connections. The group
-has no application-defined member phase and requires no second rebalance before use. New
-connections choose once from the current assignment after its initial manifests are acknowledged
+uses Kafka's completed cooperative assignment as the assignment decision. New connections choose
+once from the current assignment after its initial manifests are acknowledged
 and the group-member threshold is satisfied. They store both the assignment-scoped `writerNodeId`
 and partition immutably. Existing connections retain that identity through later assignment
 changes.
@@ -2871,9 +2870,7 @@ writer identities continue periodic manifests until their connection sets drain,
 final empty manifest and valid `NoMoreWrites`. Empty manifests during an identity's active lifetime
 remain heartbeats and never reset its accepted broker-time baseline.
 
-No witness, peer-visibility, or writer-footprint contract is required. Therefore the old `nodeId`
-hash range and startup-only shard-width setting are migration residue, not the target architecture.
-Remove them after the group-aware assignor is active.
+New-connection routing comes only from the current cooperative group assignment.
 
 The manifest interval defaults to 30 seconds and must be positive. A complete listing manifest
 resolves continuity across its cycle; an applicable omission settles the covered incomplete

@@ -203,9 +203,8 @@ When the gate is not satisfied, no member accepts new captured connections.
 
 ### 3.2 Assignment and the new-connection gate
 
-The group has no application-defined member phase and requires no second rebalance before use.
-After a process completes §3.3, it joins the group normally. Each completed assignment creates the
-next assignment-scoped writer identity. The proxy may accept a new captured client connection only
+After a process completes §3.3, it joins the group. Each completed assignment creates the next
+assignment-scoped writer identity. The proxy may accept a new captured client connection only
 after:
 
 1. the assignment is installed;
@@ -957,8 +956,9 @@ ambiguous membership failure follows the configured mode:
 - pass-through mode makes a one-way transition to pass-through and never resumes authoritative
   capture in that process.
 
-Membership recovery requires no second activation rebalance, debounce, jitter, or application-level
-group member state. A normal successful group assignment is the only assignment step.
+After a recoverable interruption, Kafka's next completed group assignment is the assignment
+decision. The proxy applies the member-count and initial-manifest gates before accepting new
+connections.
 
 ---
 
@@ -992,7 +992,7 @@ regrant, and coverage restoration remain future work.
 
 | Area | Required change |
 |---|---|
-| Group assignor | Remove designated-witness graphs, peer visibility, partition-footprint dissemination, and group member phases. Retain cooperative ownership for accepting new captured client connections and publish enough assignment metadata to apply the configured member-count gate consistently. |
+| Group assignor | Use cooperative ownership for accepting new captured client connections and publish enough assignment metadata to apply the configured member-count gate consistently. |
 | Startup | Add out-of-group capability probes using `writerNodeId = captureActivationId + ":PROBE"` before joining the group; probes remain inert to replay. |
 | Routing | Increment `assignmentSequence` and create a new assignment-scoped `writerNodeId` after every new assignment; persist each connection's immutable writer identity and partition; move only eligibility to accept new captured client connections during rebalance. |
 | Registry | Maintain exact all-open connection sets and one atomic `manifestCycle` per `(writerNodeId, partition)`; retain older registries while their connections drain; remove a closed connection only after its terminal and all earlier observations are acknowledged. |
@@ -1001,22 +1001,9 @@ regrant, and coverage restoration remain future work.
 | Failure mode | Make capture abandonment irreversible per process; implement strict exit and permanent pass-through transitions. |
 | Record validation | Accept terminal self `NoMoreWrites` idempotently; reject peer completion; retain the poison record, log and metric at least once, alarm, and terminate the replayer process on protocol violations. |
 | Replayer | Apply omission only to the specific incomplete request or source-response accumulator whose earliest contributing observation is covered. Use the `E + S` broker-time proof to expire only already-known accumulators; treat a future first observation as fresh initialized state. |
-| Observability | Replace witness and peer-cutoff metrics with manifest-cycle reset, accepted manifest `LogAppendTime`, skew health, broker-time expiration, capture-gate, retained-incomplete-state, and capture-gap metrics. |
+| Observability | Emit manifest-cycle reset, accepted manifest `LogAppendTime`, skew health, broker-time expiration, capture-gate, retained-incomplete-state, and capture-gap metrics. |
 
-### 9.1 Removed concepts
-
-The standalone implementation no longer needs:
-
-- designated witnesses;
-- witness count or failure-domain placement;
-- `confirmedPeerVisibility`;
-- dynamic witness repair;
-- peer-emitted `NoMoreWrites`;
-- terminal peer cutoffs and zombie-record discard;
-- partition-set dissemination for peer completion; or
-- quiescence delays intended to make peer completion safer.
-
-### 9.2 Required status
+### 9.1 Required status
 
 Each proxy should expose:
 
