@@ -33,6 +33,7 @@ import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.CaptureMembershipAssignmentTracker;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
@@ -217,15 +218,15 @@ public class CaptureProxy {
             description = "Name of the topic to write captured traffic to.")
         public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         @Parameter(required = false,
-            names = { "--traffic-partition-shard-width" },
-            arity = 1,
-            description = "Number of traffic-topic partitions used by this proxy. Defaults to every partition.")
-        public Integer trafficPartitionShardWidth;
-        @Parameter(required = false,
             names = { "--liveness-snapshot-interval-seconds" },
             arity = 1,
             description = "Interval between complete proxy liveness declarations.")
         public int livenessSnapshotIntervalSeconds = 30;
+        @Parameter(required = false,
+            names = { "--minimum-active-proxy-count" },
+            arity = 1,
+            description = "Minimum Kafka group member count required before accepting new captured connections.")
+        public int minimumActiveProxyCount = 1;
         @Parameter(required = false,
             names = { "--max-request-assembly-duration-seconds", "--max-connection-duration-seconds" },
             arity = 1,
@@ -262,11 +263,11 @@ public class CaptureProxy {
             parser.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
             p.kafkaParameters.validateKafkaAuthFlags();
-            if (p.trafficPartitionShardWidth != null && p.trafficPartitionShardWidth <= 0) {
-                throw new ParameterException("--traffic-partition-shard-width must be positive");
-            }
             if (p.livenessSnapshotIntervalSeconds <= 0) {
                 throw new ParameterException("--liveness-snapshot-interval-seconds must be positive");
+            }
+            if (p.minimumActiveProxyCount <= 0) {
+                throw new ParameterException("--minimum-active-proxy-count must be positive");
             }
             if (p.maximumRequestAssemblyDurationSeconds <= 0) {
                 throw new ParameterException("--max-request-assembly-duration-seconds must be positive");
@@ -352,11 +353,13 @@ public class CaptureProxy {
                 KafkaConfig.buildKafkaProperties(params.kafkaParameters)
             );
             try {
+                var assignmentTracker = new CaptureMembershipAssignmentTracker();
                 var membershipConsumer = new KafkaConsumer<String, byte[]>(
                     KafkaConfig.buildMembershipConsumerProperties(
                         params.kafkaParameters,
                         nodeId,
-                        params.kafakTopicName
+                        params.kafakTopicName,
+                        assignmentTracker
                     )
                 );
                 return new KafkaCaptureFactory(
@@ -364,9 +367,10 @@ public class CaptureProxy {
                     nodeId,
                     producer,
                     membershipConsumer,
+                    assignmentTracker,
+                    params.minimumActiveProxyCount,
                     params.kafakTopicName,
                     params.maximumTrafficStreamSize,
-                    params.trafficPartitionShardWidth,
                     Duration.ofSeconds(params.livenessSnapshotIntervalSeconds)
                 );
             } catch (RuntimeException | IOException e) {

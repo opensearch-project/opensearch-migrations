@@ -21,7 +21,6 @@ import org.apache.kafka.common.errors.WakeupException;
 @Slf4j
 public final class CaptureKafkaMembership implements ConsumerRebalanceListener, AutoCloseable {
     static final Duration POLL_INTERVAL = Duration.ofMillis(100);
-    static final Duration DEFAULT_MAXIMUM_POLL_STALENESS = Duration.ofSeconds(30);
     private static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(30);
 
     private final org.apache.kafka.clients.consumer.Consumer<String, byte[]> consumer;
@@ -29,8 +28,11 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final CaptureRoutingState routingState;
     private final CaptureKafkaPublisher publisher;
     private final CaptureKafkaWriteGate writeGate;
+    private final CaptureMembershipAssignmentTracker assignmentTracker;
+    private final int minimumActiveProxyCount;
     private final Runnable initialAssignmentCallback;
-    private final Consumer<Throwable> terminalFailureCallback;
+    private final Consumer<Throwable> membershipFailureCallback;
+    private final Consumer<Throwable> publisherFailureCallback;
     private final Set<Integer> kafkaAssignment = new HashSet<>();
     private final AtomicBoolean initialAssignmentReported = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -44,8 +46,11 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         CaptureRoutingState routingState,
         CaptureKafkaPublisher publisher,
         CaptureKafkaWriteGate writeGate,
+        CaptureMembershipAssignmentTracker assignmentTracker,
+        int minimumActiveProxyCount,
         Runnable initialAssignmentCallback,
-        Consumer<Throwable> terminalFailureCallback
+        Consumer<Throwable> membershipFailureCallback,
+        Consumer<Throwable> publisherFailureCallback
     ) {
         this.consumer = Objects.requireNonNull(consumer);
         this.topic = Objects.requireNonNull(topic);
@@ -53,8 +58,14 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         kafkaAssignment.addAll(routingState.assignedPartitions());
         this.publisher = Objects.requireNonNull(publisher);
         this.writeGate = Objects.requireNonNull(writeGate);
+        this.assignmentTracker = Objects.requireNonNull(assignmentTracker);
+        if (minimumActiveProxyCount <= 0) {
+            throw new IllegalArgumentException("minimumActiveProxyCount must be positive");
+        }
+        this.minimumActiveProxyCount = minimumActiveProxyCount;
         this.initialAssignmentCallback = Objects.requireNonNull(initialAssignmentCallback);
-        this.terminalFailureCallback = Objects.requireNonNull(terminalFailureCallback);
+        this.membershipFailureCallback = Objects.requireNonNull(membershipFailureCallback);
+        this.publisherFailureCallback = Objects.requireNonNull(publisherFailureCallback);
         writeGate.addTerminalFailureListener(this::handleTerminalFailure);
         pollThread = new Thread(this::runPollLoop, "capture-kafka-membership");
         pollThread.setDaemon(true);
@@ -73,23 +84,25 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+        routingState.suspendNewConnections();
         kafkaAssignment.removeAll(partitionNumbers(partitions));
-        routingState.replaceAssignedPartitions(kafkaAssignment)
+        routingState.replaceAssignedPartitions(kafkaAssignment, false)
             .forEach(this::publishSelfRelease);
     }
 
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
         validateTopic(partitions);
-        writeGate.recordSuccessfulPoll();
         if (writeGate.failureIfNotWritable() != null) {
             return;
         }
         kafkaAssignment.addAll(partitionNumbers(partitions));
-        routingState.replaceAssignedPartitions(kafkaAssignment)
+        boolean minimumSatisfied = assignmentTracker.satisfiesMinimum(minimumActiveProxyCount);
+        routingState.replaceAssignedPartitions(kafkaAssignment, minimumSatisfied)
             .forEach(this::publishSelfRelease);
         consumer.pause(partitions);
-        if (!routingState.assignedPartitions().isEmpty()
+        if (minimumSatisfied
+            && !routingState.assignedPartitions().isEmpty()
             && initialAssignmentReported.compareAndSet(false, true)) {
             initialAssignmentCallback.run();
         }
@@ -97,8 +110,10 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
 
     @Override
     public void onPartitionsLost(Collection<TopicPartition> partitions) {
-        validateTopic(partitions);
-        writeGate.trip(new IllegalStateException("Kafka membership lost partitions: " + partitions));
+        routingState.suspendNewConnections();
+        kafkaAssignment.removeAll(partitionNumbers(partitions));
+        routingState.replaceAssignedPartitions(kafkaAssignment, false)
+            .forEach(this::publishSelfRelease);
     }
 
     private void runPollLoop() {
@@ -106,9 +121,8 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
             consumer.subscribe(List.of(topic), this);
             while (!closed.get()) {
                 var records = consumer.poll(POLL_INTERVAL);
-                writeGate.recordSuccessfulPoll();
                 if (!records.isEmpty()) {
-                    writeGate.trip(new IllegalStateException(
+                    handleMembershipFailure(new IllegalStateException(
                         "Paused capture membership consumer unexpectedly fetched traffic records"
                     ));
                     return;
@@ -116,11 +130,11 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
             }
         } catch (WakeupException e) {
             if (!closed.get()) {
-                writeGate.trip(e);
+                handleMembershipFailure(e);
             }
         } catch (Throwable t) {
             if (!closed.get()) {
-                writeGate.trip(t);
+                handleMembershipFailure(t);
             }
         } finally {
             try {
@@ -145,8 +159,15 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         if (closed.compareAndSet(false, true)) {
             routingState.replaceAssignedPartitions(List.of());
             publisher.failClosed(failure);
-            terminalFailureCallback.accept(failure);
+            publisherFailureCallback.accept(failure);
             consumer.wakeup();
+        }
+    }
+
+    private void handleMembershipFailure(Throwable failure) {
+        if (closed.compareAndSet(false, true)) {
+            routingState.suspendNewConnections();
+            membershipFailureCallback.accept(failure);
         }
     }
 

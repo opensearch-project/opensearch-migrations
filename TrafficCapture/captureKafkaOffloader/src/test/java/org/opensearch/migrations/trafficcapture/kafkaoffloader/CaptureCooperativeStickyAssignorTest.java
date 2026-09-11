@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.ConsumerPartitionAssignor;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
@@ -85,9 +86,37 @@ class CaptureCooperativeStickyAssignorTest {
         );
     }
 
+    @Test
+    void receivedAssignmentPublishesTheCompleteMembershipToTheLocalTracker() {
+        var tracker = new CaptureMembershipAssignmentTracker();
+        var assignor = assignor("node-a", tracker);
+
+        assignor.onAssignment(
+            new ConsumerPartitionAssignor.Assignment(
+                List.of(),
+                CaptureCooperativeStickyAssignor.encodeMembership(Set.of("node-a", "node-b"))
+            ),
+            new ConsumerGroupMetadata("capture-group")
+        );
+
+        assertEquals(Set.of("node-a", "node-b"), tracker.currentMembers());
+    }
+
     private static CaptureCooperativeStickyAssignor assignor(String nodeId) {
+        return assignor(nodeId, new CaptureMembershipAssignmentTracker());
+    }
+
+    private static CaptureCooperativeStickyAssignor assignor(
+        String nodeId,
+        CaptureMembershipAssignmentTracker tracker
+    ) {
         var assignor = new CaptureCooperativeStickyAssignor();
-        assignor.configure(Map.of(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG, nodeId));
+        assignor.configure(Map.of(
+            CaptureCooperativeStickyAssignor.NODE_ID_CONFIG,
+            nodeId,
+            CaptureCooperativeStickyAssignor.ASSIGNMENT_TRACKER_CONFIG,
+            tracker
+        ));
         return assignor;
     }
 

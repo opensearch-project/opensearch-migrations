@@ -80,32 +80,18 @@ public final class CaptureRoutingState {
     }
 
     private final int topicPartitionCount;
-    private final int maximumAssignedPartitions;
     private final Map<String, Integer> connectionPartitions = new HashMap<>();
     private final Map<Integer, Integer> connectionCounts = new HashMap<>();
     private final List<PartitionState> partitions;
     private List<Integer> assignedPartitions;
+    private boolean newConnectionsAllowed;
     private boolean shuttingDown;
 
     public CaptureRoutingState(int topicPartitionCount, Collection<Integer> assignedPartitions) {
-        this(topicPartitionCount, topicPartitionCount, assignedPartitions);
-    }
-
-    public CaptureRoutingState(
-        int topicPartitionCount,
-        int maximumAssignedPartitions,
-        Collection<Integer> assignedPartitions
-    ) {
         if (topicPartitionCount <= 0) {
             throw new IllegalArgumentException("topicPartitionCount must be positive");
         }
-        if (maximumAssignedPartitions <= 0 || maximumAssignedPartitions > topicPartitionCount) {
-            throw new IllegalArgumentException(
-                "maximumAssignedPartitions must be between 1 and " + topicPartitionCount
-            );
-        }
         this.topicPartitionCount = topicPartitionCount;
-        this.maximumAssignedPartitions = maximumAssignedPartitions;
         partitions = new ArrayList<>(topicPartitionCount);
         for (int partition = 0; partition < topicPartitionCount; ++partition) {
             partitions.add(new PartitionState());
@@ -113,12 +99,16 @@ public final class CaptureRoutingState {
         var initial = validateAndCapAssignment(assignedPartitions);
         initial.forEach(partition -> partitions.get(partition).assigned = true);
         this.assignedPartitions = initial;
+        this.newConnectionsAllowed = !initial.isEmpty();
     }
 
     public synchronized int admitConnection(String connectionId) {
         Objects.requireNonNull(connectionId);
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
+        }
+        if (!newConnectionsAllowed) {
+            throw new IllegalStateException("Kafka capture is not accepting new connections");
         }
         if (assignedPartitions.isEmpty()) {
             throw new IllegalStateException("No Kafka partitions are assigned for new capture connections");
@@ -196,10 +186,23 @@ public final class CaptureRoutingState {
     }
 
     public synchronized List<SelfRelease> replaceAssignedPartitions(Collection<Integer> replacement) {
+        return replaceAssignedPartitions(replacement, !replacement.isEmpty());
+    }
+
+    public synchronized List<SelfRelease> replaceAssignedPartitions(
+        Collection<Integer> replacement,
+        boolean allowNewConnections
+    ) {
         if (shuttingDown) {
             return List.of();
         }
-        return applyAssignment(validateAndCapAssignment(replacement));
+        var releases = applyAssignment(validateAndCapAssignment(replacement));
+        newConnectionsAllowed = allowNewConnections && !assignedPartitions.isEmpty();
+        return releases;
+    }
+
+    public synchronized void suspendNewConnections() {
+        newConnectionsAllowed = false;
     }
 
     public synchronized List<SelfRelease> revokePartitions(Collection<Integer> revokedPartitions) {
@@ -252,6 +255,7 @@ public final class CaptureRoutingState {
             );
         }
         shuttingDown = true;
+        newConnectionsAllowed = false;
         assignedPartitions = List.of();
         return java.util.stream.IntStream.range(0, topicPartitionCount).boxed().toList();
     }
@@ -305,7 +309,7 @@ public final class CaptureRoutingState {
                 throw new IllegalArgumentException("assignedPartitions must be unique");
             }
         }
-        return unique.stream().limit(maximumAssignedPartitions).toList();
+        return List.copyOf(unique);
     }
 
     private void validatePartition(int partition) {

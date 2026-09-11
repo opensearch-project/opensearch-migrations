@@ -78,6 +78,24 @@ public class CaptureProxySetupTest {
     }
 
     @Test
+    void minimumActiveProxyCountDefaultsToOneAndIsConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--minimum-active-proxy-count", "3"
+        });
+
+        Assertions.assertEquals(1, defaults.minimumActiveProxyCount);
+        Assertions.assertEquals(3, configured.minimumActiveProxyCount);
+    }
+
+    @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {
         CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(
             new String[] {

@@ -116,15 +116,6 @@ class CaptureRoutingStateTest {
     }
 
     @Test
-    void configuredWidthCapsEachLiveKafkaAssignment() {
-        var state = new CaptureRoutingState(8, 2, List.of(0, 1, 2, 3));
-
-        assertEquals(List.of(0, 1), state.assignedPartitions());
-        state.replaceAssignedPartitions(List.of(4, 5, 6));
-        assertEquals(List.of(4, 5), state.assignedPartitions());
-    }
-
-    @Test
     void duplicateOrInvalidTransitionsFailLoudly() {
         assertThrows(
             IllegalArgumentException.class,
@@ -134,11 +125,6 @@ class CaptureRoutingStateTest {
             IllegalArgumentException.class,
             () -> new CaptureRoutingState(2, List.of(2))
         );
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> new CaptureRoutingState(2, 3, List.of())
-        );
-
         var state = new CaptureRoutingState(2, List.of(0, 1));
         state.register("connection", 1);
         assertThrows(IllegalStateException.class, () -> state.register("connection", 1));

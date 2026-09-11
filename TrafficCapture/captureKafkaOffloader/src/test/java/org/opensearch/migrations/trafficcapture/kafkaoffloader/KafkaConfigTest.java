@@ -116,10 +116,12 @@ public class KafkaConfigTest {
         params.kafkaBrokers = "broker:9092";
         params.kafkaClientId = "capture";
 
+        var assignmentTracker = new CaptureMembershipAssignmentTracker();
         var properties = KafkaConfig.buildMembershipConsumerProperties(
             params,
             "node-a",
-            "traffic"
+            "traffic",
+            assignmentTracker
         );
 
         assertEquals("broker:9092", properties.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
@@ -130,6 +132,10 @@ public class KafkaConfigTest {
             properties.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG)
         );
         assertEquals("node-a", properties.get(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG));
+        assertEquals(
+            assignmentTracker,
+            properties.get(CaptureCooperativeStickyAssignor.ASSIGNMENT_TRACKER_CONFIG)
+        );
         assertEquals(false, properties.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
     }
 }

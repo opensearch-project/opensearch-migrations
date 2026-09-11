@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.Objects;
 import java.util.Properties;
 
 import com.beust.jcommander.Parameter;
@@ -137,7 +138,8 @@ public class KafkaConfig {
     public static Properties buildMembershipConsumerProperties(
         KafkaParameters params,
         String nodeId,
-        String topic
+        String topic,
+        CaptureMembershipAssignmentTracker assignmentTracker
     ) throws IOException {
         var kafkaProps = loadKafkaProperties(params.kafkaPropertyFile);
         kafkaProps.remove(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
@@ -165,6 +167,10 @@ public class KafkaConfig {
             CaptureCooperativeStickyAssignor.class.getName()
         );
         kafkaProps.put(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG, nodeId);
+        kafkaProps.put(
+            CaptureCooperativeStickyAssignor.ASSIGNMENT_TRACKER_CONFIG,
+            Objects.requireNonNull(assignmentTracker)
+        );
         applySaslAuthProperties(
             kafkaProps,
             params.getEffectiveKafkaAuthType(),
