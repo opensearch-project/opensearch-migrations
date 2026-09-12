@@ -50,7 +50,15 @@ public final class TrafficTopicMetadata {
     ) {
         Objects.requireNonNull(producer);
         Objects.requireNonNull(topic);
-        var partitionMetadata = producer.partitionsFor(topic)
+        return fromPartitionMetadata(topic, producer.partitionsFor(topic));
+    }
+
+    static TrafficTopicMetadata fromPartitionMetadata(
+        String topic,
+        List<PartitionInfo> discoveredPartitions
+    ) {
+        Objects.requireNonNull(topic);
+        var partitionMetadata = Objects.requireNonNull(discoveredPartitions)
             .stream()
             .sorted(java.util.Comparator.comparingInt(PartitionInfo::partition))
             .toList();
@@ -83,7 +91,7 @@ public final class TrafficTopicMetadata {
         );
     }
 
-    public static TrafficTopicMetadata forTopic(int topicPartitionCount) {
+    static TrafficTopicMetadata forTopic(int topicPartitionCount) {
         return new TrafficTopicMetadata(
             topicPartitionCount,
             IntStream.range(0, topicPartitionCount).boxed().toList(),

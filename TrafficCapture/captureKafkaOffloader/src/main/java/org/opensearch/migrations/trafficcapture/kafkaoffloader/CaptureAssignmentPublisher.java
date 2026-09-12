@@ -9,5 +9,5 @@ import java.util.concurrent.CompletableFuture;
 public interface CaptureAssignmentPublisher {
     CompletableFuture<String> installAssignment(Collection<Integer> partitions);
 
-    void failClosed(Throwable failure);
+    void stopAfterFailure(Throwable failure);
 }

@@ -14,6 +14,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -48,20 +49,11 @@ import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 
 @Slf4j
-@ExtendWith(MockitoExtension.class)
 public class KafkaCaptureFactoryTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
-    @Mock
-    private Producer<String, byte[]> mockProducer;
     private String connectionId = "0242c0fffea82008-0000000a-00000003-62993a3207f92af6-9093ce33";
     private String topic = "test_topic";
 
@@ -234,7 +226,8 @@ public class KafkaCaptureFactoryTest {
     @Test
     public void testLinearOffloadingIsSuccessful() throws IOException, InterruptedException, ExecutionException,
         TimeoutException {
-        KafkaCaptureFactory kafkaCaptureFactory = createFactory(mockProducer, 1024 * 1024);
+        var producer = createControllableProducer();
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, 1024 * 1024);
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
@@ -246,11 +239,7 @@ public class KafkaCaptureFactoryTest {
         );
 
         var latchIterator = latches.iterator();
-        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
-            Callback callback = (Callback) args[1];
-
+        producer.setSendHandler((record, callback) -> {
             var recordMetadata = generateRecordMetadata(record.topic(), 1);
             var future = new FutureTask<>(() -> {
                 callback.onCompletion(recordMetadata, null);
@@ -302,13 +291,14 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertEquals(true, cf2.isDone());
         Assertions.assertEquals(true, cf3.isDone());
 
-        mockProducer.close();
+        producer.close();
     }
 
     @Test
     public void testOffloaderFlushCommitIsNonBlockingOnKafkaProducer() throws IOException, InterruptedException,
         ExecutionException, TimeoutException {
-        KafkaCaptureFactory kafkaCaptureFactory = createFactory(mockProducer, 1024 * 1024);
+        var producer = createControllableProducer();
+        KafkaCaptureFactory kafkaCaptureFactory = createFactory(producer, 1024 * 1024);
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
@@ -319,12 +309,8 @@ public class KafkaCaptureFactoryTest {
         // Start with producer locked to ensure offloader api is non-blocking
         producerLock.lock();
 
-        when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
+        producer.setSendHandler((record, callback) -> {
             producerLock.lock();
-            Object[] args = invocation.getArguments();
-            ProducerRecord<String, byte[]> record = (ProducerRecord) args[0];
-            Callback callback = (Callback) args[1];
-
             var recordMetadata = generateRecordMetadata(record.topic(), 1);
             var future = new FutureTask<>(() -> {
                 callback.onCompletion(recordMetadata, null);
@@ -353,7 +339,7 @@ public class KafkaCaptureFactoryTest {
         cf1.get(1, TimeUnit.SECONDS);
 
         Assertions.assertEquals(true, cf1.isDone());
-        mockProducer.close();
+        producer.close();
     }
 
     private RecordMetadata generateRecordMetadata(String topicName, int partition) {
@@ -984,19 +970,6 @@ public class KafkaCaptureFactoryTest {
     ) {
         var topicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
         var partitionInfo = partitionInfo(topicName, 4);
-        if (org.mockito.Mockito.mockingDetails(producer).isMock()) {
-            when(producer.partitionsFor(topicName)).thenReturn(partitionInfo);
-            when(producer.send(any(), any())).thenAnswer(invocation -> {
-                ProducerRecord<String, byte[]> record = invocation.getArgument(0);
-                Callback callback = invocation.getArgument(1);
-                if (record == null || callback == null) {
-                    return null;
-                }
-                var metadata = generateRecordMetadata(record.topic(), record.partition());
-                callback.onCompletion(metadata, null);
-                return CompletableFuture.completedFuture(metadata);
-            });
-        }
         var membershipConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var topicPartitions = partitionInfo.stream()
             .map(info -> new TopicPartition(info.topic(), info.partition()))
@@ -1032,6 +1005,40 @@ public class KafkaCaptureFactoryTest {
             new StringSerializer(),
             new ByteArraySerializer()
         );
+    }
+
+    private ControllableProducer createControllableProducer() {
+        var partitionInfo = partitionInfo(KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC, 4);
+        var cluster = new Cluster("test", leaders(partitionInfo), partitionInfo, Set.of(), Set.of());
+        return new ControllableProducer(cluster);
+    }
+
+    @FunctionalInterface
+    private interface SendHandler {
+        Future<RecordMetadata> send(ProducerRecord<String, byte[]> record, Callback callback);
+    }
+
+    private static class ControllableProducer extends LogAppendTimeMockProducer {
+        private volatile SendHandler sendHandler;
+
+        private ControllableProducer(Cluster cluster) {
+            super(cluster, true, null, new StringSerializer(), new ByteArraySerializer());
+        }
+
+        private void setSendHandler(SendHandler sendHandler) {
+            this.sendHandler = sendHandler;
+        }
+
+        @Override
+        public synchronized Future<RecordMetadata> send(
+            ProducerRecord<String, byte[]> record,
+            Callback callback
+        ) {
+            var currentHandler = sendHandler;
+            return currentHandler == null
+                ? super.send(record, callback)
+                : currentHandler.send(record, callback);
+        }
     }
 
     private static class LogAppendTimeMockProducer extends MockProducer<String, byte[]> {

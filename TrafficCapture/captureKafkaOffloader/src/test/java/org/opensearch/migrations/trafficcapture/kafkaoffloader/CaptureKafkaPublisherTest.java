@@ -49,7 +49,7 @@ class CaptureKafkaPublisherTest {
 
         assertFalse(install.isDone());
         assertEquals(List.of(), routingState.assignedPartitions());
-        assertThrows(IllegalStateException.class, () -> routingState.admitConnection("too-early"));
+        assertThrows(IllegalStateException.class, () -> routingState.routeNewConnection("too-early"));
         var initialManifest = snapshotChunk(producer.history().get(0));
         assertEquals("activation:1", initialManifest.getWriterNodeId());
         assertEquals(0, initialManifest.getManifestCycle());
@@ -122,7 +122,7 @@ class CaptureKafkaPublisherTest {
         );
         publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
         for (int i = 0; i < 20; ++i) {
-            routingState.admitConnection("connection-" + i + "-" + "x".repeat(40));
+            routingState.routeNewConnection("connection-" + i + "-" + "x".repeat(40));
         }
 
         int beforeManifest = producer.history().size();
@@ -188,7 +188,7 @@ class CaptureKafkaPublisherTest {
         var assignment = routingState.prepareAssignment(List.of(0));
         routingState.prepareInitialManifests(assignment);
         routingState.activateAssignment(assignment);
-        var route = routingState.admitConnection("connection");
+        var route = routingState.routeNewConnection("connection");
         var unstableFailure = new AtomicReference<Throwable>();
         var publisher = publisher(producer, routingState, unstableFailure::set);
         var acknowledgement = new RecordMetadata(
@@ -215,11 +215,11 @@ class CaptureKafkaPublisherTest {
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var publisher = publisher(producer, routingState);
         installAndAcknowledge(producer, publisher, List.of(0));
-        var beforeReplacement = routingState.admitConnection("before");
+        var beforeReplacement = routingState.routeNewConnection("before");
 
         var replacement = publisher.installAssignment(List.of(0));
         awaitHistorySize(producer, 2);
-        var whileReplacementIsPending = routingState.admitConnection("during");
+        var whileReplacementIsPending = routingState.routeNewConnection("during");
 
         assertEquals("activation:1", beforeReplacement.writerNodeId());
         assertEquals("activation:1", whileReplacementIsPending.writerNodeId());
@@ -227,7 +227,7 @@ class CaptureKafkaPublisherTest {
 
         assertTrue(producer.completeNext());
         assertEquals("activation:2", replacement.get(1, TimeUnit.SECONDS));
-        assertEquals("activation:2", routingState.admitConnection("after").writerNodeId());
+        assertEquals("activation:2", routingState.routeNewConnection("after").writerNodeId());
         publisher.close();
     }
 
@@ -237,7 +237,7 @@ class CaptureKafkaPublisherTest {
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var publisher = publisher(producer, routingState);
         installAndAcknowledge(producer, publisher, List.of(0));
-        var route = routingState.admitConnection("connection");
+        var route = routingState.routeNewConnection("connection");
 
         var finalSend = publisher.publishTraffic(route, new byte[] { 1 }, true);
         awaitHistorySize(producer, 2);
@@ -292,9 +292,9 @@ class CaptureKafkaPublisherTest {
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var publisher = publisher(producer, routingState);
         publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
-        var oldRoute = routingState.admitConnection("old");
+        var oldRoute = routingState.routeNewConnection("old");
         publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
-        var newRoute = routingState.admitConnection("new");
+        var newRoute = routingState.routeNewConnection("new");
 
         publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
 
@@ -370,7 +370,7 @@ class CaptureKafkaPublisherTest {
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var publisher = publisher(producer, routingState);
         installAndAcknowledge(producer, publisher, List.of(0));
-        var oldRoute = routingState.admitConnection("old");
+        var oldRoute = routingState.routeNewConnection("old");
 
         var replacement = publisher.installAssignment(List.of(0));
         awaitHistorySize(producer, 2);
@@ -574,7 +574,7 @@ class CaptureKafkaPublisherTest {
         var publisher = publisher(producer, routingState);
         publisher.installAssignment(List.of(0)).get(1, TimeUnit.SECONDS);
         for (int i = 0; i < 40; ++i) {
-            routingState.admitConnection("connection-" + i + "-" + "x".repeat(30));
+            routingState.routeNewConnection("connection-" + i + "-" + "x".repeat(30));
         }
 
         publisher.publishLivenessSnapshotNow().get(1, TimeUnit.SECONDS);
@@ -596,12 +596,12 @@ class CaptureKafkaPublisherTest {
     }
 
     @Test
-    void trafficUsesTheImmutableRouteSelectedAtConnectionAdmission() throws Exception {
+    void trafficUsesTheImmutableRouteSelectedWhenTheConnectionStarts() throws Exception {
         var producer = producer(true);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 3);
         var publisher = publisher(producer, routingState);
         publisher.installAssignment(List.of(0, 2)).get(1, TimeUnit.SECONDS);
-        var route = routingState.admitConnection("connection");
+        var route = routingState.routeNewConnection("connection");
 
         publisher.publishTraffic(route, new byte[] { 1, 2 }, false)
             .get(1, TimeUnit.SECONDS);
@@ -621,7 +621,7 @@ class CaptureKafkaPublisherTest {
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
         var publisher = publisher(producer, routingState);
         installAndAcknowledge(producer, publisher, List.of(0));
-        var route = routingState.admitConnection("connection");
+        var route = routingState.routeNewConnection("connection");
 
         var finalSend = publisher.publishTraffic(route, new byte[] { 1 }, true);
         awaitHistorySize(producer, 2);
@@ -639,7 +639,7 @@ class CaptureKafkaPublisherTest {
         var unstableFailure = new AtomicReference<Throwable>();
         var publisher = publisher(producer, routingState, unstableFailure::set);
         installAndAcknowledge(producer, publisher, List.of(0));
-        var route = routingState.admitConnection("connection");
+        var route = routingState.routeNewConnection("connection");
 
         publisher.publishTraffic(route, new byte[] { 1 }, true);
         awaitHistorySize(producer, 2);

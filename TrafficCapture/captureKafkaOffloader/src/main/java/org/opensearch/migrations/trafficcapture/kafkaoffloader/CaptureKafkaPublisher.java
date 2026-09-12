@@ -904,12 +904,15 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
         log.atError()
             .setCause(throwable)
-            .setMessage("Capture Kafka publisher failed closed; no more manifests will be sent")
+            .setMessage(
+                "Capture Kafka publisher stopped permanently after failure; "
+                    + "no more records will be submitted"
+            )
             .log();
     }
 
     @Override
-    public void failClosed(Throwable throwable) {
+    public void stopAfterFailure(Throwable throwable) {
         failPublisher(Objects.requireNonNull(throwable));
     }
 

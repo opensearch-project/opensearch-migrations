@@ -50,14 +50,14 @@ class CaptureKafkaMembershipTest {
         assertEquals(Set.of(partition0, partition1), consumer.paused());
 
         membership.onPartitionsRevoked(List.of(partition1));
-        var duringRebalance = routingState.admitConnection("during-rebalance");
+        var duringRebalance = routingState.routeNewConnection("during-rebalance");
         assertEquals("activation:1", duringRebalance.writerNodeId());
         assertTrue(List.of(0, 1).contains(duringRebalance.partition()));
 
         membership.onPartitionsAssigned(List.of());
 
         assertEquals(List.of(0), routingState.assignedPartitions());
-        assertEquals("activation:2", routingState.admitConnection("after-replacement").writerNodeId());
+        assertEquals("activation:2", routingState.routeNewConnection("after-replacement").writerNodeId());
         assertEquals(null, failure.get());
         membership.close();
         assertTrue(consumer.closed());
@@ -105,17 +105,17 @@ class CaptureKafkaMembershipTest {
         assertEquals(0, initialAssignment.get());
         org.junit.jupiter.api.Assertions.assertThrows(
             IllegalStateException.class,
-            () -> routingState.admitConnection("too-early")
+            () -> routingState.routeNewConnection("too-early")
         );
 
         tracker.replaceMembers(Set.of("node-a", "node-b"));
         membership.onPartitionsAssigned(List.of());
 
         assertEquals(1, initialAssignment.get());
-        assertEquals(0, routingState.admitConnection("accepted").partition());
+        assertEquals(0, routingState.routeNewConnection("accepted").partition());
 
         tracker.replaceMembers(Set.of("node-a"));
-        assertEquals(0, routingState.admitConnection("member-count-later-dropped").partition());
+        assertEquals(0, routingState.routeNewConnection("member-count-later-dropped").partition());
     }
 
     @Test
@@ -139,7 +139,10 @@ class CaptureKafkaMembershipTest {
         membership.onPartitionsLost(List.of(new TopicPartition(TOPIC, 1)));
 
         assertEquals(List.of(0, 1), routingState.assignedPartitions());
-        assertEquals("activation:1", routingState.admitConnection("while-membership-is-changing").writerNodeId());
+        assertEquals(
+            "activation:1",
+            routingState.routeNewConnection("while-membership-is-changing").writerNodeId()
+        );
         assertEquals(null, membershipFailure.get());
         assertEquals(null, publisher.failure());
 
@@ -148,7 +151,7 @@ class CaptureKafkaMembershipTest {
         membership.onPartitionsAssigned(List.of(partition2));
 
         assertEquals(List.of(0, 2), routingState.assignedPartitions());
-        assertEquals("activation:2", routingState.admitConnection("after-normal-assignment").writerNodeId());
+        assertEquals("activation:2", routingState.routeNewConnection("after-normal-assignment").writerNodeId());
     }
 
     @Test
@@ -178,7 +181,7 @@ class CaptureKafkaMembershipTest {
     }
 
     @Test
-    void surfacedPollFailureAfterInitialAssignmentKeepsAdmissionAndDoesNotAffectThePublisher()
+    void surfacedPollFailureAfterInitialAssignmentKeepsRoutingAndDoesNotAffectThePublisher()
         throws Exception {
         var consumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
@@ -212,7 +215,7 @@ class CaptureKafkaMembershipTest {
         }
         assertTrue(consumer.closed());
         membership.close();
-        assertEquals(0, routingState.admitConnection("after-membership-failure").partition());
+        assertEquals(0, routingState.routeNewConnection("after-membership-failure").partition());
         assertEquals(null, membershipFailure.get());
         assertEquals(null, publisher.failure());
     }
@@ -291,7 +294,7 @@ class CaptureKafkaMembershipTest {
         assertEquals("membership failed before assignment", membershipFailure.get().getMessage());
         org.junit.jupiter.api.Assertions.assertThrows(
             IllegalStateException.class,
-            () -> routingState.admitConnection("without-an-assignment")
+            () -> routingState.routeNewConnection("without-an-assignment")
         );
         membership.close();
     }
@@ -377,7 +380,7 @@ class CaptureKafkaMembershipTest {
         }
 
         @Override
-        public void failClosed(Throwable failure) {
+        public void stopAfterFailure(Throwable failure) {
             this.failure.compareAndSet(null, failure);
         }
 
@@ -396,7 +399,7 @@ class CaptureKafkaMembershipTest {
         }
 
         @Override
-        public void failClosed(Throwable failure) {}
+        public void stopAfterFailure(Throwable failure) {}
 
         private Collection<Integer> assignment() {
             return assignment;

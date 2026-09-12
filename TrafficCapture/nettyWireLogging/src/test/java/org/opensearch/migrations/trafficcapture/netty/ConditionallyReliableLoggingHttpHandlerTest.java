@@ -21,7 +21,7 @@ import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
@@ -31,7 +31,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -94,11 +93,13 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                 "This would be null if the handler didn't block until the output was written"
             );
             // we wrote the correct data to the offloaded stream
-            var trafficStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead());
+            var trafficRecord = TrafficRecord.parseFrom(streamManager.byteBufferAtomicReference.get());
+            Assertions.assertTrue(
+                trafficRecord.getObservationsCount() > 0 && trafficRecord.getObservations(0).hasRead()
+            );
             var combinedTrafficPacketsStream = new SequenceInputStream(
                 Collections.enumeration(
-                    trafficStream.getSubStreamList()
+                    trafficRecord.getObservationsList()
                         .stream()
                         .filter(TrafficObservation::hasRead)
                         .map(to -> new ByteArrayInputStream(to.getRead().getData().toByteArray()))
@@ -422,8 +423,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         Assertions.assertTrue(channel.inboundMessages().isEmpty());
         Assertions.assertEquals(1, streamManager.flushCount.get());
 
-        var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-        var observations = finalStream.getSubStreamList();
+        var finalRecord = TrafficRecord.parseFrom(streamManager.byteBufferAtomicReference.get());
+        var observations = finalRecord.getObservationsList();
         Assertions.assertTrue(observations.stream().anyMatch(TrafficObservation::hasRead));
         Assertions.assertEquals(1, observations.stream().filter(TrafficObservation::hasClose).count());
         Assertions.assertTrue(observations.get(observations.size() - 1).hasClose());
@@ -448,8 +449,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         Assertions.assertTrue(forwardedBytes < completeRequestBytes);
         Assertions.assertEquals(1, streamManager.flushCount.get());
 
-        var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-        var observations = finalStream.getSubStreamList();
+        var finalRecord = TrafficRecord.parseFrom(streamManager.byteBufferAtomicReference.get());
+        var observations = finalRecord.getObservationsList();
         Assertions.assertTrue(observations.stream().anyMatch(TrafficObservation::hasRead));
         Assertions.assertEquals(1, observations.stream().filter(TrafficObservation::hasClose).count());
         Assertions.assertTrue(observations.get(observations.size() - 1).hasClose());
@@ -484,8 +485,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             Assertions.assertFalse(channel.isOpen());
             Assertions.assertEquals(1, streamManager.flushCount.get());
-            var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            var observations = finalStream.getSubStreamList();
+            var finalRecord = TrafficRecord.parseFrom(streamManager.byteBufferAtomicReference.get());
+            var observations = finalRecord.getObservationsList();
             Assertions.assertEquals(
                 1,
                 observations.stream().filter(TrafficObservation::hasConnectionException).count()
@@ -555,8 +556,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             channel.pipeline().fireExceptionCaught(new IllegalStateException());
             channel.runPendingTasks();
 
-            var finalStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            var diagnostic = finalStream.getSubStreamList()
+            var finalRecord = TrafficRecord.parseFrom(streamManager.byteBufferAtomicReference.get());
+            var diagnostic = finalRecord.getObservationsList()
                 .stream()
                 .filter(TrafficObservation::hasConnectionException)
                 .findFirst()
@@ -566,7 +567,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                 diagnostic.getConnectionException().getMessage()
             );
             Assertions.assertTrue(
-                finalStream.getSubStream(finalStream.getSubStreamCount() - 1).hasClose()
+                finalRecord.getObservations(finalRecord.getObservationsCount() - 1).hasClose()
             );
             channel.finishAndReleaseAll();
         }
@@ -745,51 +746,6 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
         };
     }
 
-    // This test doesn't work yet, but this is an optimization. Getting connections with only a
-    // close observation is already a common occurrence. This is nice to have, so it's good to
-    // keep this warm and ready, but we don't need the feature for correctness.
-    @Disabled("This is for an optimization that isn't functional yet")
-    @Test
-    @ValueSource(booleans = { false, true })
-    public void testThatSuppressedCaptureWorks() throws Exception {
-        try (var rootInstrumenter = new TestRootContext()) {
-            var streamMgr = new TestStreamManager();
-            var offloader = new StreamChannelConnectionCaptureSerializer("Test", "connection", streamMgr);
-
-
-            var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
-                .suppressCaptureHeaderPairs(Map.of("user-Agent", "uploader")).build();
-            EmbeddedChannel channel = new EmbeddedChannel(
-                new ConditionallyReliableLoggingHttpHandler(
-                    rootInstrumenter,
-                    "n",
-                    "c",
-                    ctx -> offloader,
-                    headerCapturePredicate,
-                    x -> true,
-                    failOpenCaptureState()
-                )
-            );
-            getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
-            channel.finishAndReleaseAll();
-            channel.close();
-            var requestBytes = SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8);
-
-            Assertions.assertEquals(0, streamMgr.flushCount.get());
-            // we wrote the correct data to the downstream handler/channel
-            var outputData = new SequenceInputStream(
-                Collections.enumeration(
-                    channel.inboundMessages()
-                        .stream()
-                        .map(m -> new ByteBufInputStream((ByteBuf) m, true))
-                        .collect(Collectors.toList())
-                )
-            ).readAllBytes();
-            log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
-            Assertions.assertArrayEquals(requestBytes, outputData);
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     public void testThatHealthCheckCaptureCanBeSuppressed(boolean singleBytes) throws Exception {
@@ -837,10 +793,12 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                 "This would be null if the handler didn't block until the output was written"
             );
             // we wrote the correct data to the offloaded stream
-            var trafficStream = TrafficStream.parseFrom(streamMgr.byteBufferAtomicReference.get());
-            Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead());
+            var trafficRecord = TrafficRecord.parseFrom(streamMgr.byteBufferAtomicReference.get());
+            Assertions.assertTrue(
+                trafficRecord.getObservationsCount() > 0 && trafficRecord.getObservations(0).hasRead()
+            );
             Assertions.assertEquals(1, streamMgr.flushCount.get());
-            var observations = trafficStream.getSubStreamList();
+            var observations = trafficRecord.getObservationsList();
             {
                 var readObservationStreamToUse = singleBytes
                     ? skipReadsBeforeDrop(observations)

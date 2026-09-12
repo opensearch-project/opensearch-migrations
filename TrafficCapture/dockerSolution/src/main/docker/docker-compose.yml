@@ -59,34 +59,6 @@ services:
       - kafka
       - elasticsearch
 
-  capture-proxy-2:
-    image: 'migrations/capture_proxy:latest'
-    networks:
-      - migrations
-    ports:
-      - "9201:9200"
-    command:
-      - "--kafkaConnection"
-      - "kafka:9092"
-      - "--kafkaTopic"
-      - "${KAFKA_TRAFFIC_TOPIC:-logging-traffic-topic}"
-      - "--destinationUri"
-      - "https://elasticsearch:9200"
-      - "--insecureDestination"
-      - "--listenPort"
-      - "9200"
-      - "--sslCertChainFile"
-      - "/usr/share/captureProxy/config/pub.pem"
-      - "--sslKeyFile"
-      - "/usr/share/captureProxy/config/key.pem"
-      - "--max-connection-duration-seconds"
-      - "130"
-      - "--liveness-snapshot-interval-seconds"
-      - "2"
-    depends_on:
-      - kafka
-      - elasticsearch
-
   opensearchtarget:
     image: 'mirror.gcr.io/opensearchproject/opensearch:2.15.0'
     environment:
@@ -126,7 +98,6 @@ services:
       - "${KAFKA_TRAFFIC_TOPIC:-logging-traffic-topic}"
       - "--kafka-traffic-group-id"
       - "${KAFKA_TRAFFIC_GROUP_ID:-logging-group-default}"
-      - "--disable-liveness-scanner"
       - "--request-filter-config"
       - >-
         {"JsonJMESPathPredicateProvider":{"script":"URI != '/_search/scroll'"}}

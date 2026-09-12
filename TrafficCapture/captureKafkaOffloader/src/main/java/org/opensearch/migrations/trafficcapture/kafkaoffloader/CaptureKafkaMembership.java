@@ -100,7 +100,7 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         publisher.installAssignment(assignmentSnapshot)
             .whenComplete((writerNodeId, failure) -> {
                 if (failure != null) {
-                    publisher.failClosed(failure);
+                    publisher.stopAfterFailure(failure);
                     return;
                 }
                 log.atInfo()

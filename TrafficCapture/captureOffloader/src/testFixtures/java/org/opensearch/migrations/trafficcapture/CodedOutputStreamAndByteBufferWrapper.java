@@ -3,14 +3,9 @@ package org.opensearch.migrations.trafficcapture;
 import java.nio.ByteBuffer;
 
 import com.google.protobuf.CodedOutputStream;
-import lombok.Getter;
-import lombok.NonNull;
 
-@Getter
 public class CodedOutputStreamAndByteBufferWrapper implements CodedOutputStreamHolder {
-    @NonNull
     private final CodedOutputStream outputStream;
-    @NonNull
     private final ByteBuffer byteBuffer;
 
     public CodedOutputStreamAndByteBufferWrapper(int bufferSize) {
@@ -18,6 +13,15 @@ public class CodedOutputStreamAndByteBufferWrapper implements CodedOutputStreamH
         outputStream = CodedOutputStream.newInstance(byteBuffer);
     }
 
+    public CodedOutputStream getOutputStream() {
+        return outputStream;
+    }
+
+    public ByteBuffer getByteBuffer() {
+        return byteBuffer;
+    }
+
+    @Override
     public int getOutputStreamBytesLimit() {
         return byteBuffer.limit();
     }

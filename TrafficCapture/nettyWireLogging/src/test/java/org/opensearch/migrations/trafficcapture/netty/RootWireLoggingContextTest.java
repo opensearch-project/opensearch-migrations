@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
@@ -82,11 +82,13 @@ public class RootWireLoggingContextTest {
             );
             Assertions.assertEquals(1, streamManager.flushCount.get());
 
-            var trafficStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
-            Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 && trafficStream.getSubStream(0).hasRead());
+            var trafficRecord = TrafficRecord.parseFrom(streamManager.byteBufferAtomicReference.get());
+            Assertions.assertTrue(
+                trafficRecord.getObservationsCount() > 0 && trafficRecord.getObservations(0).hasRead()
+            );
             var combinedTrafficPacketsStream = new SequenceInputStream(
                 Collections.enumeration(
-                    trafficStream.getSubStreamList()
+                    trafficRecord.getObservationsList()
                         .stream()
                         .filter(TrafficObservation::hasRead)
                         .map(to -> new ByteArrayInputStream(to.getRead().getData().toByteArray()))

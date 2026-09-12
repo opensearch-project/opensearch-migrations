@@ -18,7 +18,7 @@ import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
 
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.Unpooled;
@@ -69,7 +69,7 @@ public class ChunkedTransferEncodingCaptureTest {
      * A stream manager that accumulates all flushed buffers rather than
      * only keeping the last one. This is needed because the
      * ConditionallyReliableLoggingHttpHandler flushes between requests
-     * (when blocking is enabled), resulting in multiple TrafficStream
+     * (when blocking is enabled), resulting in multiple TrafficRecord
      * protobuf messages.
      */
     static class AccumulatingStreamManager extends OrderedStreamLifecyleManager implements AutoCloseable {
@@ -137,8 +137,8 @@ public class ChunkedTransferEncodingCaptureTest {
 
             List<TrafficObservation> allObservations = new ArrayList<>();
             for (var buf : streamManager.flushedBuffers) {
-                var trafficStream = TrafficStream.parseFrom(buf);
-                allObservations.addAll(trafficStream.getSubStreamList());
+                var trafficRecord = TrafficRecord.parseFrom(buf);
+                allObservations.addAll(trafficRecord.getObservationsList());
             }
             return allObservations;
         }

@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -19,12 +20,12 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     private final String nodeId;
 
     @AllArgsConstructor
-    public static class RecordedTrafficStream {
+    public static class RecordedTrafficRecord {
         public final byte[] data;
     }
 
     @Getter
-    ConcurrentLinkedQueue<RecordedTrafficStream> recordedStreams = new ConcurrentLinkedQueue<>();
+    ConcurrentLinkedQueue<RecordedTrafficRecord> recordedRecords = new ConcurrentLinkedQueue<>();
     Runnable onCaptureClosedCallback;
 
     public InMemoryConnectionCaptureFactory(String nodeId, int bufferSize, Runnable onCaptureClosedCallback) {
@@ -52,7 +53,7 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
             return CompletableFuture.runAsync(() -> {
                 var bb = osh.getByteBuffer();
                 byte[] filledBytes = Arrays.copyOfRange(bb.array(), 0, bb.position());
-                recordedStreams.add(new RecordedTrafficStream(filledBytes));
+                recordedRecords.add(new RecordedTrafficRecord(filledBytes));
             }).whenComplete((v, t) -> onCaptureClosedCallback.run()).thenApply(x -> null);
         }
     }
@@ -64,9 +65,19 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     }
 
     public Stream<TrafficStream> getRecordedTrafficStreamsStream() {
-        return recordedStreams.stream().map(rts -> {
+        return recordedRecords.stream().map(rts -> {
             try {
                 return TrafficStream.parseFrom(rts.data);
+            } catch (InvalidProtocolBufferException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+    }
+
+    public Stream<TrafficRecord> getRecordedTrafficRecordsStream() {
+        return recordedRecords.stream().map(record -> {
+            try {
+                return TrafficRecord.parseFrom(record.data);
             } catch (InvalidProtocolBufferException e) {
                 throw new IllegalStateException(e);
             }

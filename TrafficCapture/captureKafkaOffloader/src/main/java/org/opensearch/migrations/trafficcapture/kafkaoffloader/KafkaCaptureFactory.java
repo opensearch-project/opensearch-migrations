@@ -220,7 +220,7 @@ public class KafkaCaptureFactory implements
                 );
             } else {
                 try {
-                    route = readyPublisher.getRoutingState().admitConnection(connectionId);
+                    route = readyPublisher.getRoutingState().routeNewConnection(connectionId);
                 } catch (CorruptedCaptureStateException e) {
                     failUnstable(e);
                     throw e;
@@ -542,7 +542,7 @@ public class KafkaCaptureFactory implements
             membershipToClose = membership;
         }
         if (publisherToFail != null) {
-            publisherToFail.failClosed(failure);
+            publisherToFail.stopAfterFailure(failure);
         }
         publisherFuture.completeExceptionally(failure);
         if (initializer != null) {

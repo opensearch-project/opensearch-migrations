@@ -233,7 +233,7 @@ public final class CaptureRoutingState {
         currentAssignment = new CurrentAssignment(assignment.writerNodeId(), assignment.partitions());
     }
 
-    public synchronized ConnectionRoute admitConnection(String connectionId) {
+    public synchronized ConnectionRoute routeNewConnection(String connectionId) {
         Objects.requireNonNull(connectionId);
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");

@@ -30,7 +30,7 @@ public class CodedOutputStreamSizeUtil {
     /**
      * This function calculates the maximum bytes that would be needed to store a [Read/Write]SegmentObservation, if constructed
      * from the given ByteBuf and associated segment field numbers and values passed in. This estimate is essentially
-     * the max size needed in the CodedOutputStream to store the provided ByteBuf data and its associated TrafficStream
+     * the max size needed in the CodedOutputStream to store the provided ByteBuf data and its associated TrafficRecord
      * overhead. The actual required bytes could be marginally smaller.
      */
     public static int maxBytesNeededForASegmentedObservation(

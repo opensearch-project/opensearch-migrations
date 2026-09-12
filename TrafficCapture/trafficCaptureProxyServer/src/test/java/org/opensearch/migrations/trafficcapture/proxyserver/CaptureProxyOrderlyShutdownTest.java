@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CaptureProxyOrderlyShutdownTest {
     @Test
-    void plannedShutdownClosesCaptureAdmissionThenStopsConnectionsAndWaitsBeforeClosing()
+    void plannedShutdownStopsAcceptingCapturedConnectionsThenStopsConnectionsAndWaitsBeforeClosing()
         throws Exception {
         var events = Collections.synchronizedList(new ArrayList<String>());
         var proxy = new RecordingProxy(events);

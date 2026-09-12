@@ -25,7 +25,7 @@ class CaptureRoutingStateTest {
         var assignment = state.prepareAssignment(List.of(0, 2));
 
         assertEquals("activation:1", assignment.writerNodeId());
-        assertThrows(IllegalStateException.class, () -> state.admitConnection("too-early"));
+        assertThrows(IllegalStateException.class, () -> state.routeNewConnection("too-early"));
 
         var initialManifests = state.prepareInitialManifests(assignment);
         assertEquals(List.of(0, 2), initialManifests.stream()
@@ -35,7 +35,7 @@ class CaptureRoutingStateTest {
         assertTrue(initialManifests.stream().allMatch(manifest -> manifest.connectionIds().isEmpty()));
 
         state.activateAssignment(assignment);
-        var route = state.admitConnection("accepted");
+        var route = state.routeNewConnection("accepted");
         assertEquals("activation:1", route.writerNodeId());
         assertTrue(List.of(0, 2).contains(route.partition()));
         assertEquals(1, route.manifestCycle());
@@ -105,7 +105,7 @@ class CaptureRoutingStateTest {
         var initial = only(state.prepareInitialManifests(assignment));
         state.acceptManifestLogAppendTime(initial, 1_000L, Duration.ofSeconds(60));
         state.activateAssignment(assignment);
-        var route = state.admitConnection("connection");
+        var route = state.routeNewConnection("connection");
 
         state.validateCriticalMutationTrafficAcknowledgement(
             route,
@@ -130,12 +130,12 @@ class CaptureRoutingStateTest {
     @Test
     void replacementAssignmentChangesOnlyNewConnectionRoutes() {
         var state = activeState(4, List.of(0, 1));
-        var existing = state.admitConnection("same-local-id");
+        var existing = state.routeNewConnection("same-local-id");
 
         var replacement = state.prepareAssignment(List.of(2, 3));
         state.prepareInitialManifests(replacement);
         state.activateAssignment(replacement);
-        var later = state.admitConnection("same-local-id");
+        var later = state.routeNewConnection("same-local-id");
 
         assertEquals("activation:1", existing.writerNodeId());
         assertTrue(List.of(0, 1).contains(existing.partition()));
@@ -148,12 +148,12 @@ class CaptureRoutingStateTest {
     @Test
     void oldAndNewWriterRegistriesRemainIndependentOnTheSamePartition() {
         var state = activeState(1, List.of(0));
-        var oldRoute = state.admitConnection("connection");
+        var oldRoute = state.routeNewConnection("connection");
 
         var replacement = state.prepareAssignment(List.of(0));
         state.prepareInitialManifests(replacement);
         state.activateAssignment(replacement);
-        var newRoute = state.admitConnection("connection");
+        var newRoute = state.routeNewConnection("connection");
 
         assertEquals(List.of("connection"), state.snapshot(oldRoute.writerNodeId(), 0));
         assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
@@ -192,7 +192,7 @@ class CaptureRoutingStateTest {
     @Test
     void manifestCopyAndCycleAdvanceShareOneBoundary() {
         var state = activeState(1, List.of(0));
-        var first = state.admitConnection("first");
+        var first = state.routeNewConnection("first");
         assertEquals(1, first.manifestCycle());
 
         var manifest = only(state.preparePeriodicManifests());
@@ -200,7 +200,7 @@ class CaptureRoutingStateTest {
         assertEquals(List.of("first"), manifest.connectionIds());
         assertEquals(2, first.manifestCycle());
 
-        var second = state.admitConnection("second");
+        var second = state.routeNewConnection("second");
         assertEquals(2, second.manifestCycle());
         var nextManifest = only(state.preparePeriodicManifests());
         assertEquals(2, nextManifest.manifestCycle());
@@ -215,20 +215,20 @@ class CaptureRoutingStateTest {
         try {
             for (int iteration = 0; iteration < 500; ++iteration) {
                 var connectionId = "connection-" + iteration;
-                var admissionRace = race(
+                var registrationRace = race(
                     executor,
-                    () -> state.admitConnection(connectionId),
+                    () -> state.routeNewConnection(connectionId),
                     () -> only(state.preparePeriodicManifests())
                 );
-                var route = admissionRace.first();
-                var admissionManifest = admissionRace.second();
+                var route = registrationRace.first();
+                var registrationManifest = registrationRace.second();
 
                 assertTrue(
-                    admissionManifest.connectionIds().equals(List.of())
-                        || admissionManifest.connectionIds().equals(List.of(connectionId))
+                    registrationManifest.connectionIds().equals(List.of())
+                        || registrationManifest.connectionIds().equals(List.of(connectionId))
                 );
                 assertEquals(
-                    admissionManifest.manifestCycle() + 1,
+                    registrationManifest.manifestCycle() + 1,
                     route.manifestCycle()
                 );
 
@@ -262,7 +262,7 @@ class CaptureRoutingStateTest {
     @Test
     void removalRequiresTheExactImmutableConnectionRoute() {
         var state = activeState(1, List.of(0));
-        var route = state.admitConnection("connection");
+        var route = state.routeNewConnection("connection");
 
         state.acceptTrafficSubmission(route, true);
         state.removeAfterTerminalAcknowledgement(route);
@@ -277,7 +277,7 @@ class CaptureRoutingStateTest {
     @Test
     void terminalSubmissionRejectsEveryLaterTrafficSubmission() {
         var state = activeState(1, List.of(0));
-        var route = state.admitConnection("connection");
+        var route = state.routeNewConnection("connection");
 
         state.acceptTrafficSubmission(route, false);
         state.acceptTrafficSubmission(route, true);
@@ -293,10 +293,10 @@ class CaptureRoutingStateTest {
     @Test
     void onlyAnUnpublishedConnectionMayBeAbandoned() {
         var state = activeState(1, List.of(0));
-        var unpublished = state.admitConnection("unpublished");
+        var unpublished = state.routeNewConnection("unpublished");
         state.abandonUnpublishedConnection(unpublished);
 
-        var published = state.admitConnection("published");
+        var published = state.routeNewConnection("published");
         state.acceptTrafficSubmission(published, false);
 
         assertThrows(
@@ -311,13 +311,13 @@ class CaptureRoutingStateTest {
         state.beginShutdown();
 
         assertEquals(List.of(), state.assignedPartitions());
-        assertThrows(IllegalStateException.class, () -> state.admitConnection("new"));
+        assertThrows(IllegalStateException.class, () -> state.routeNewConnection("new"));
     }
 
     @Test
     void orderlyRetirementWaitsForConnectionsAndMakesCurrentWritersDraining() {
         var state = activeState(1, List.of(0));
-        var route = state.admitConnection("connection");
+        var route = state.routeNewConnection("connection");
         var noConnections = state.whenNoConnections();
 
         assertThrows(IllegalStateException.class, state::beginOrderlyRetirement);
@@ -333,7 +333,7 @@ class CaptureRoutingStateTest {
             CaptureRoutingState.WriterStatus.DRAINING,
             state.writerStatus(route.writerNodeId(), route.partition())
         );
-        assertThrows(IllegalStateException.class, () -> state.admitConnection("new"));
+        assertThrows(IllegalStateException.class, () -> state.routeNewConnection("new"));
     }
 
     @Test

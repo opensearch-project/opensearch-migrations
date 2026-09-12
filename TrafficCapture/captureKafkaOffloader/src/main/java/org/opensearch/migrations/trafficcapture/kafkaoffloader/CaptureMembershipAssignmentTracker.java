@@ -14,7 +14,7 @@ public final class CaptureMembershipAssignmentTracker {
         currentMembers.set(Set.copyOf(Objects.requireNonNull(members)));
     }
 
-    public Set<String> currentMembers() {
+    Set<String> currentMembers() {
         return currentMembers.get();
     }
 

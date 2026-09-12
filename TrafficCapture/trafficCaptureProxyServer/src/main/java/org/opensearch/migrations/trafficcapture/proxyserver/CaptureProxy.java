@@ -22,7 +22,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
@@ -33,7 +32,6 @@ import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
-import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IOrderlyRetirableCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
@@ -94,11 +92,6 @@ public class CaptureProxy {
 
     public static class Parameters {
         @Parameter(required = false,
-            names = { "--traceDirectory" },
-            arity = 1,
-            description = "Directory to store trace files in.")
-        public String traceDirectory;
-        @Parameter(required = false,
             names = { "--noCapture" },
             arity = 0,
             description = "If enabled, Does NOT capture traffic to ANY sink.")
@@ -133,7 +126,7 @@ public class CaptureProxy {
             names = { "--maxTrafficBufferSize" },
             arity = 1,
             description = "The maximum number of bytes that will be written to a single TrafficRecord.")
-        public int maximumTrafficStreamSize = 1024 * 1024;
+        public int maximumTrafficRecordSize = 1024 * 1024;
         @Parameter(required = false,
             names = { "--insecureDestination" },
             arity = 0,
@@ -230,7 +223,7 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--liveness-snapshot-interval-seconds" },
             arity = 1,
-            description = "Interval between complete proxy liveness declarations.")
+            description = "Interval between complete connection manifests.")
         public int livenessSnapshotIntervalSeconds =
             Math.toIntExact(KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL.toSeconds());
         @Parameter(required = false,
@@ -285,7 +278,6 @@ public class CaptureProxy {
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
             parser.parse(args);
-            // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
             p.kafkaParameters.validateKafkaAuthFlags();
             if (p.livenessSnapshotIntervalSeconds <= 0) {
                 throw new ParameterException("--liveness-snapshot-interval-seconds must be positive");
@@ -317,12 +309,9 @@ public class CaptureProxy {
                         + "--max-incomplete-request-header-bytes"
                 );
             }
-            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaBrokers, (p.noCapture ? "" : null))
-                .mapToInt(s -> s != null ? 1 : 0)
-                .sum() != 1) {
+            if ((p.kafkaParameters.kafkaBrokers != null) == p.noCapture) {
                 throw new ParameterException(
-                    "Expected exactly one of '--traceDirectory', '--kafkaBrokers'/'--kafkaConnection', or "
-                        + "'--noCapture' to be set"
+                    "Expected exactly one of '--kafkaBrokers'/'--kafkaConnection' or '--noCapture' to be set"
                 );
             }
             return p;
@@ -379,14 +368,7 @@ public class CaptureProxy {
         String captureActivationId
     ) throws IOException {
         Objects.requireNonNull(captureActivationId);
-        // Resist the urge for now though until it comes in as a request/need.
-        if (params.traceDirectory != null) {
-            return new FileConnectionCaptureFactory(
-                captureActivationId,
-                params.traceDirectory,
-                params.maximumTrafficStreamSize
-            );
-        } else if (params.kafkaParameters.kafkaBrokers != null) {
+        if (params.kafkaParameters.kafkaBrokers != null) {
             KafkaProducer<String, byte[]> producer = null;
             try {
                 producer = new KafkaProducer<>(
@@ -409,7 +391,7 @@ public class CaptureProxy {
                     assignmentTracker,
                     params.minimumActiveProxyCount,
                     params.kafakTopicName,
-                    params.maximumTrafficStreamSize,
+                    params.maximumTrafficRecordSize,
                     Duration.ofSeconds(params.livenessSnapshotIntervalSeconds),
                     Duration.ofSeconds(params.manifestExpirationIntervalSeconds),
                     captureProcessState::requiredCaptureFailed,
