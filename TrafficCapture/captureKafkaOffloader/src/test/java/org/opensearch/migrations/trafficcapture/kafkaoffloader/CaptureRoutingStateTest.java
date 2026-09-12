@@ -99,6 +99,35 @@ class CaptureRoutingStateTest {
     }
 
     @Test
+    void criticalMutationTrafficMustBeAcknowledgedWithinTheManifestExpirationInterval() {
+        var state = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var assignment = state.prepareAssignment(List.of(0));
+        var initial = only(state.prepareInitialManifests(assignment));
+        state.acceptManifestLogAppendTime(initial, 1_000L, Duration.ofSeconds(60));
+        state.activateAssignment(assignment);
+        var route = state.admitConnection("connection");
+
+        state.validateCriticalMutationTrafficAcknowledgement(
+            route,
+            60_999L,
+            Duration.ofSeconds(60)
+        );
+        state.validateCriticalMutationTrafficAcknowledgement(
+            route,
+            900L,
+            Duration.ofSeconds(60)
+        );
+        assertThrows(
+            IllegalStateException.class,
+            () -> state.validateCriticalMutationTrafficAcknowledgement(
+                route,
+                61_000L,
+                Duration.ofSeconds(60)
+            )
+        );
+    }
+
+    @Test
     void replacementAssignmentChangesOnlyNewConnectionRoutes() {
         var state = activeState(4, List.of(0, 1));
         var existing = state.admitConnection("same-local-id");

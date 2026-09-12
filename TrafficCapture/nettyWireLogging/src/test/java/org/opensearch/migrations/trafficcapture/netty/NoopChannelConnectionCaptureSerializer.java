@@ -17,6 +17,9 @@ abstract class NoopChannelConnectionCaptureSerializer<T>
     implements IChannelConnectionCaptureSerializer<T> {
 
     @Override
+    public void validateCriticalMutationTrafficAcknowledgement(T acknowledgement) {}
+
+    @Override
     public void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {}
 
     @Override

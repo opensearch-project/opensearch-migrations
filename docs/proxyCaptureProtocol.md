@@ -1,7 +1,7 @@
 # Proxy Capture Protocol
 
 **Status:** standalone design contract
-**Last revised:** 2026-09-11
+**Last revised:** 2026-09-12
 
 This document defines horizontal scaling and failure behavior for capture proxies that write traffic
 to Kafka for later replay. It covers the controller-less deployment. Managed-fleet terminal-failure
@@ -24,10 +24,11 @@ proxy instance finished.
 Five minutes is the default operational target for orderly retirement, not permission to terminate
 without attempting terminal self `NoMoreWrites`. Retirement continues after that target. Periodic
 manifests continue while existing connections retire. After the connection registry is empty, the
-proxy quiesces periodic manifests and keeps trying to publish the final empty manifest and
-`NoMoreWrites` until the most recently acknowledged complete manifest reaches the configured
-manifest expiration interval `E`. An acknowledged final empty manifest becomes that most recent
-manifest before the proxy attempts `NoMoreWrites`.
+proxy quiesces periodic manifests and submits the final empty manifest once. Kafka may continue its
+configured internal delivery attempts, but the proxy does not resubmit at the application layer.
+An application-visible Kafka failure or the current manifest acknowledgement deadline `E`,
+whichever occurs first, moves the process to its compromised state. If the final empty manifest is
+acknowledged in time, it renews that deadline before the proxy submits `NoMoreWrites` once.
 
 ---
 
@@ -66,6 +67,10 @@ The design accepts:
 - hard process death may prevent a final proxy-completion record;
 - pass-through mode may create a known interval in which source traffic is not replayable; and
 - restoring strict capture after such an interval requires a new capture and replay run; and
+- HTTP/1.x pipelined requests are outside the settled protocol contract. The protocol does not
+  define behavior when one source connection has multiple outstanding requests or one inbound read
+  contains bytes from more than one request. The current implementation behavior remains unchanged
+  and carries no correctness guarantee for those cases; and
 - this redesign supports only source request handling that cannot mutate state before the complete
   HTTP request arrives. Streaming source handlers that can act on an incomplete body remain out of
   scope; and
@@ -191,8 +196,9 @@ drain.
 - **`fail-open`** permanently abandons capture for the process. Existing and new TCP connections
   continue forwarding without capture, the process alarms continuously, and capture never resumes.
 
-A definite transient failure proven not to have compromised capture may retry without invoking
-either terminal policy.
+The Kafka client may retry internally while no failure has been exposed to the application. Once a
+Kafka failure, timeout, or ambiguous result is exposed, one of the terminal policies applies and
+the proxy does not resubmit the record.
 
 ---
 
@@ -257,9 +263,16 @@ While in `PROBING`, it:
 1. refreshes metadata for the traffic topic;
 2. chooses one representative traffic partition for every distinct current leader broker;
 3. emits a semantically inert `CaptureCapabilityProbe` carrying
-   `writerNodeId = captureActivationId + ":PROBE"` to each representative partition;
-4. waits for all probe acknowledgements; and
-5. refreshes metadata again before joining the group.
+   `writerNodeId = captureActivationId + ":PROBE"` and a producer timestamp of zero to each
+   representative partition;
+4. accepts each acknowledgement only when its Kafka record metadata reports a positive timestamp,
+   proving that the broker replaced the supplied timestamp with `LogAppendTime`;
+5. waits for all probe acknowledgements; and
+6. refreshes metadata again before joining the group.
+
+A topic configured with `CreateTime` either rejects the deliberately stale producer timestamp or
+returns it unchanged. Either result fails the probe. Workflow-managed capture topics set
+`message.timestamp.type=LogAppendTime`; unmanaged deployments must configure the same property.
 
 `CaptureCapabilityProbe` is not replay input. If the replayer later encounters the Kafka record, it
 performs no replay action and allows the record to become commit-eligible through ordinary
@@ -302,10 +315,12 @@ A planned process retirement first becomes `DRAINING`:
 
 This orderly retirement is performed only while capture and Kafka publication remain trustworthy.
 Its default completion target is five minutes. Missing the target emits a high-severity diagnostic
-and retirement continues through final empty manifests and `NoMoreWrites`. The proxy gives up only
-when the most recently acknowledged complete manifest reaches the configured manifest expiration
-interval `E`. This timing policy is not used for capture-compromise or unstable-process failures
-described in §7.
+and retirement continues through final empty manifests and `NoMoreWrites`. Each terminal record is
+submitted once. Kafka may continue its internal delivery attempts, but the proxy does not resubmit.
+An application-visible Kafka failure or expiration of the current manifest acknowledgement
+deadline `E`, whichever occurs first, makes retirement unsuccessful. The proxy exits without
+claiming that writer retirement completed. This timing policy is not used for unstable-process
+failures described in §7.
 
 ### 3.6 Later use of a partition
 
@@ -649,12 +664,20 @@ stop-the-world ordering across ordinary packets.
 ### 5.2 Manifest completeness
 
 Every current or still-draining `(writerNodeId, partition)` with an active publisher emits a
-complete manifest at `manifestInterval`, with a default operational target of 30 seconds.
+complete manifest at `manifestInterval`. The default interval is 30 seconds.
 
 Manifest publication is sequenced per partition. A later cycle is not prepared or submitted until
 the previous cycle's complete chunk set has been acknowledged. Overlapping periodic callbacks
 coalesce into the next run; they cannot submit M+1 before M. A failed or ambiguous manifest closes
 the capture gate, so no later cycle is submitted.
+
+Each `(writerNodeId, partition)` also has a local monotonic manifest acknowledgement deadline. The
+initial deadline starts when the initial complete manifest is submitted. Every accepted complete
+manifest renews the deadline for another `E`. If the deadline expires before the required
+acknowledgement is processed, the first expiration task atomically compromises the process. A
+later Kafka acknowledgement cannot update capture state, renew the deadline, activate an
+assignment, or complete writer retirement. This local deadline is independent of the broker
+`LogAppendTime` validation in §5.4.
 
 The manifest may be chunked. All chunks share one `manifestCycle`, `chunkCount`, `writerNodeId`,
 partition, and diagnostic emission time. Chunks are numbered exactly `0..chunkCount-1` and are
@@ -705,9 +728,12 @@ The initial complete manifest establishes `lastAcceptedManifestLogAppendTime`. T
 continuous for the lifetime of the `(writerNodeId, partition)`. Empty manifests, inactivity, and
 later assignments do not reset it.
 
-Let `E` be the configured manifest expiration interval. The proxy and replayer must receive the
-same `E` and `S` values for one capture-and-replay run; the managed orchestration requirement is
-defined in
+The default configured manifest expiration interval `E` is two full-manifest intervals, or 60
+seconds with the default 30-second interval. The interval and `E` are configurable, but
+`manifestInterval` must remain lower than `E`.
+
+The proxy and replayer must receive the same `E` and `S` values for one capture-and-replay run; the
+managed orchestration requirement is defined in
 [Managed Fleet Capture Recovery](managedFleetCaptureRecovery.md).
 Unmanaged deployment configuration must preserve the same agreement.
 
@@ -743,7 +769,10 @@ For every Critical Mutation Traffic request:
    observationLogAppendTime - lastAcceptedManifestLogAppendTime < E
    ```
 
-5. otherwise close the connection and irreversibly enter the compromised state.
+5. otherwise irreversibly enter the compromised state and apply `--capture-failure-policy`:
+   `fail-closed` does not forward the waiting request and closes the connection as the process
+   terminates; `fail-open` forwards the waiting request without authoritative capture and leaves the
+   connection open in permanent pass-through mode.
 
 The check and source-forwarding decision must share a one-way local capture gate. Once the gate
 closes, no thread may newly pass the check. This avoids a simple check-then-transition race inside
@@ -756,7 +785,8 @@ before that syscall was allowed.
 ### 5.6 Timing relationship
 
 The configured manifest publication interval remains lower than `E`, with margin for scheduling,
-Kafka publication, acknowledgement latency, retries, and the fleet's operational skew threshold:
+Kafka publication, acknowledgement latency, retries, and the fleet's operational skew threshold.
+The defaults are 30 seconds and 60 seconds respectively:
 
 ```text
 manifestInterval < E
@@ -900,16 +930,19 @@ incomplete state that has not reached a sound terminal disposition.
 
 ### 7.1 Shared transition rule
 
-Manifest staleness, an ambiguous producer outcome, or any other compromise of trustworthy capture
-closes the local capture gate permanently for that process.
+The first of these events closes the local capture gate permanently for the process:
 
-Capture never resumes within the same compromised process. A new assignment cannot restore
-capture authority to that process by creating another `writerNodeId`.
+- any Kafka failure, timeout, or ambiguous result exposed to the application;
+- expiration of a manifest acknowledgement deadline `E`; or
+- any other event proving that capture can no longer be trusted.
 
-A definite transient failure known not to have compromised capture may use a bounded retry path and
-return to capture-authoritative operation after producer reachability and every capture invariant
-are revalidated.
-Manifest lapse, ambiguous producer outcome, or any other compromise never uses that path; recovery
+The transition atomically closes every capture-authoritative gate and notifies the acceptor,
+connections, manifest scheduler, and publisher lane. Capture never resumes within the same
+compromised process. A new assignment and a later Kafka acknowledgement cannot restore capture
+authority to that process. Previously acknowledged traffic remains valid.
+
+The Kafka client may retry internally before exposing an outcome. Once a failure, timeout, or
+ambiguous result is exposed to the proxy, there is no application-level resubmission. Recovery
 requires a fresh process and fresh `captureActivationId`.
 
 The process emits a high-severity alarm containing at least:
@@ -939,6 +972,8 @@ the termination as a crash and does not fabricate completion.
 After the gate closes:
 
 - Kafka capture submission remains permanently closed;
+- the Critical Mutation Traffic request waiting at the pre-forward check is forwarded without
+  authoritative capture;
 - existing TCP connections remain open and switch to uncaptured forwarding;
 - new TCP connections use uncaptured forwarding;
 - the process emits a loud, persistent capture-gap alarm; and
@@ -1129,8 +1164,8 @@ settle state.
 ### 10.6 Managed-fleet addendum
 
 The managed-fleet addendum is realigned with this protocol. Its current-round Kubernetes rule is
-terminal: after bounded retry reaches a capture failure, the resource remains incomplete and the
-workflow starts over. Every managed fresh run already requires a controller-issued session, trusted
+terminal: after a capture failure, the resource remains incomplete and the workflow starts over.
+Every managed fresh run already requires a controller-issued session, trusted
 replay-boundary plan, and session-aware checkpoints. The addendum documents future automatic
 orchestration around:
 
@@ -1321,9 +1356,10 @@ orchestration around:
 - In `fail-open`, verify that existing and new TCP connections forward without capture and that
   Kafka recovery does not resume capture.
 - Verify that orderly trustworthy shutdown emits a high-severity diagnostic after its five-minute
-  target, continues trying to publish the final empty manifest and `NoMoreWrites`, and gives up only
-  when the most recently acknowledged complete manifest reaches `E`. Capture-compromise and
-  unstable-process failures do not enter retirement.
+  target, submits the final empty manifest and `NoMoreWrites` at most once each, and fails retirement
+  on the first application-visible Kafka failure or manifest acknowledgement deadline expiration.
+  Verify that later acknowledgements cannot activate an assignment or complete writer retirement.
+  Capture-compromise and unstable-process failures do not enter retirement.
 
 ### 11.5 Acceptance criteria
 

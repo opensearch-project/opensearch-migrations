@@ -245,7 +245,9 @@ public class KafkaCaptureFactory implements
                 route.connectionId(),
                 route.partition(),
                 route::manifestCycle,
-                new StreamManager(ctx, route)
+                new StreamManager(ctx, route),
+                acknowledgement ->
+                    readyPublisher.validateCriticalMutationTrafficAcknowledgement(route, acknowledgement)
             );
         } catch (Error t) {
             readyPublisher.abandonUnpublishedConnection(route);

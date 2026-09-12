@@ -127,7 +127,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, failure) ->
                 runOnEventLoop(
                     ctx,
-                    () -> finishBlockedRequest(ctx, msg, shouldCapture, httpRequest, failure),
+                    () -> finishBlockedRequest(ctx, msg, shouldCapture, httpRequest, result, failure),
                     msg
                 )
             );
@@ -142,16 +142,25 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
         Object msg,
         boolean shouldCapture,
         HttpRequest httpRequest,
+        T acknowledgement,
         Throwable failure
     ) {
-        if (failure != null) {
-            messageContext.addCaughtException(failure);
-            var resultingState = failure instanceof Error
-                ? captureProcessState.unstableProcessFailed(failure)
-                : captureProcessState.requiredCaptureFailed(failure);
+        var captureFailure = failure;
+        if (captureFailure == null) {
+            try {
+                trafficOffloader.validateCriticalMutationTrafficAcknowledgement(acknowledgement);
+            } catch (Throwable validationFailure) {
+                captureFailure = validationFailure;
+            }
+        }
+        if (captureFailure != null) {
+            messageContext.addCaughtException(captureFailure);
+            var resultingState = captureFailure instanceof Error
+                ? captureProcessState.unstableProcessFailed(captureFailure)
+                : captureProcessState.requiredCaptureFailed(captureFailure);
             if (resultingState == CaptureProcessState.State.TERMINATING) {
                 log.atError()
-                    .setCause(failure)
+                    .setCause(captureFailure)
                     .setMessage("Capture failed; refusing to forward the request before process termination")
                     .log();
                 ReferenceCountUtil.release(msg);
@@ -159,7 +168,7 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
                 return;
             }
             log.atError()
-                .setCause(failure)
+                .setCause(captureFailure)
                 .setMessage("Capture failed; forwarding in irreversible process-wide pass-through mode")
                 .log();
         }

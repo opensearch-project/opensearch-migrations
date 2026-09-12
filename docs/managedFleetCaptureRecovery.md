@@ -1,6 +1,6 @@
 # Managed Fleet Capture Recovery
 
-**Status: current terminal-failure contract plus future recovery design (2026-09-11).** The
+**Status: current terminal-failure contract plus future recovery design (2026-09-12).** The
 standalone contract is
 [Proxy Capture Protocol](proxyCaptureProtocol.md).
 That contract now uses exact manifest-cycle boundaries, terminal self-only `NoMoreWrites` for
@@ -114,10 +114,17 @@ The base protocol's broker-time expiration proof depends on an enforced bound `S
 permitted backward movement between Kafka `LogAppendTime` values at increasing offsets in one
 partition. This is an operational safety dependency, not merely a monitoring preference.
 
-The orchestration layer supplies one agreed manifest expiration interval `E` and one agreed
-clock-skew bound `S` to every proxy and replayer in the run, and configures the broker-node clock
-monitor against that same `S`. The timestamp proof is valid only while those process parameters
-agree.
+The orchestration layer supplies one agreed manifest publication interval, one agreed manifest
+expiration interval `E`, and one agreed clock-skew bound `S` to every proxy and replayer in the run.
+The default publication interval is 30 seconds and the default `E` is two full-manifest intervals,
+or 60 seconds. The orchestration layer configures the broker-node clock monitor against the same
+`S`. The timestamp proof is valid only while those process parameters agree.
+
+Every workflow-managed capture topic sets
+`message.timestamp.type=LogAppendTime`. The proxy independently verifies that requirement before
+joining its Kafka group: each per-leader capability probe supplies a producer timestamp of zero and
+requires the acknowledgement metadata to contain a positive broker-assigned timestamp. A rejected
+probe or an unchanged timestamp prevents capture startup.
 
 Every Kafka broker node must run a node-level clock monitor, preferably Node Problem Detector or an
 equivalent DaemonSet. The deployment must enforce all of the following:

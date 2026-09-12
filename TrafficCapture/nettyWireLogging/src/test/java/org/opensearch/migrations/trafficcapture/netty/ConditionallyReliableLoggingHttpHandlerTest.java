@@ -999,6 +999,109 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
     }
 
     @Test
+    void failOpenForwardsTheWaitingMutationWhenItsAcknowledgementFailsValidation() throws IOException {
+        byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
+
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer<>(
+                "Test",
+                "connection",
+                null,
+                () -> 0,
+                streamManager,
+                ignored -> {
+                    throw new IllegalStateException("manifest freshness expired");
+                }
+            );
+            var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler<>(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ignored -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            channel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            channel.runPendingTasks();
+
+            Assertions.assertTrue(captureProcessState.isPassThrough());
+            Assertions.assertTrue(channel.isOpen());
+            var firstForwardedMessage = (ByteBuf) channel.readInbound();
+            try {
+                Assertions.assertEquals(fullTrafficBytes.length, firstForwardedMessage.readableBytes());
+            } finally {
+                firstForwardedMessage.release();
+            }
+            Assertions.assertEquals(1, streamManager.flushCount.get());
+
+            channel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            channel.runPendingTasks();
+            var secondForwardedMessage = (ByteBuf) channel.readInbound();
+            try {
+                Assertions.assertEquals(fullTrafficBytes.length, secondForwardedMessage.readableBytes());
+            } finally {
+                secondForwardedMessage.release();
+            }
+            Assertions.assertEquals(
+                1,
+                streamManager.flushCount.get(),
+                "The connection must remain permanently uncaptured after entering pass-through"
+            );
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
+    void failClosedRejectsTheWaitingMutationWhenItsAcknowledgementFailsValidation() throws IOException {
+        byte[] fullTrafficBytes = SimpleRequests.SMALL_POST.getBytes(StandardCharsets.UTF_8);
+
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new TestStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer<>(
+                "Test",
+                "connection",
+                null,
+                () -> 0,
+                streamManager,
+                ignored -> {
+                    throw new IllegalStateException("manifest freshness expired");
+                }
+            );
+            var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+            var channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler<>(
+                    rootContext,
+                    "node",
+                    "connection",
+                    ignored -> offloader,
+                    new RequestCapturePredicate(),
+                    request -> true,
+                    IncompleteRequestLimits.DEFAULT,
+                    Duration.ofHours(1),
+                    captureProcessState
+                )
+            );
+
+            channel.writeInbound(Unpooled.wrappedBuffer(fullTrafficBytes));
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertTrue(channel.inboundMessages().isEmpty());
+            Assertions.assertEquals(1, streamManager.flushCount.get());
+            channel.finishAndReleaseAll();
+        }
+    }
+
+    @Test
     void maximumConnectionDurationClosesAndTerminallyCapturesAnAuthoritativeConnection() throws Exception {
         try (var rootContext = new TestRootContext()) {
             var offloader = new DelayedFinalAcknowledgementOffloader();

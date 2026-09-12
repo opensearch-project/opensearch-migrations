@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.GatheringByteChannel;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.stream.IntStream;
 
@@ -85,6 +86,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private final String connectionIdString;
     private final Integer partition;
     private final LongSupplier manifestCycleSupplier;
+    private final Consumer<? super T> criticalMutationTrafficAcknowledgementValidator;
     private long nextConnectionObservationSequence = 1;
     private CodedOutputStreamHolder currentCodedOutputStreamHolderOrNull;
 
@@ -114,6 +116,24 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         @NonNull LongSupplier manifestCycleSupplier,
         @NonNull StreamLifecycleManager<T> streamLifecycleManager
     ) {
+        this(
+            writerNodeId,
+            connectionId,
+            partition,
+            manifestCycleSupplier,
+            streamLifecycleManager,
+            ignored -> {}
+        );
+    }
+
+    public StreamChannelConnectionCaptureSerializer(
+        String writerNodeId,
+        String connectionId,
+        Integer partition,
+        @NonNull LongSupplier manifestCycleSupplier,
+        @NonNull StreamLifecycleManager<T> streamLifecycleManager,
+        @NonNull Consumer<? super T> criticalMutationTrafficAcknowledgementValidator
+    ) {
         this.streamManager = streamLifecycleManager;
         assert (writerNodeId == null
             ? 0
@@ -127,6 +147,13 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         this.writerNodeIdString = writerNodeId;
         this.partition = partition;
         this.manifestCycleSupplier = manifestCycleSupplier;
+        this.criticalMutationTrafficAcknowledgementValidator =
+            criticalMutationTrafficAcknowledgementValidator;
+    }
+
+    @Override
+    public void validateCriticalMutationTrafficAcknowledgement(T acknowledgement) {
+        criticalMutationTrafficAcknowledgementValidator.accept(acknowledgement);
     }
 
     private static int getWireTypeForFieldIndex(Descriptors.Descriptor d, int fieldNumber) {

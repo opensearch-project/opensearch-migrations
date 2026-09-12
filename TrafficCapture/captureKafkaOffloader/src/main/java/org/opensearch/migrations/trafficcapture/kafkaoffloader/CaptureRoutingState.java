@@ -469,6 +469,54 @@ public final class CaptureRoutingState {
         return requireWriterPartition(writerNodeId, partition).lastAcceptedManifestLogAppendTime;
     }
 
+    synchronized void validateCriticalMutationTrafficAcknowledgement(
+        ConnectionRoute route,
+        long observationLogAppendTime,
+        Duration expirationInterval
+    ) {
+        Objects.requireNonNull(route);
+        Objects.requireNonNull(expirationInterval);
+        if (expirationInterval.isZero() || expirationInterval.isNegative()) {
+            throw new IllegalArgumentException("expirationInterval must be positive");
+        }
+        if (observationLogAppendTime <= 0) {
+            throw new IllegalStateException(
+                "Kafka did not assign a positive LogAppendTime to Critical Mutation Traffic for "
+                    + route.writerNodeId()
+                    + "/"
+                    + route.partition()
+                    + "/"
+                    + route.connectionId()
+            );
+        }
+        var state = requireWriterPartition(route.writerNodeId(), route.partition());
+        var baseline = state.lastAcceptedManifestLogAppendTime;
+        if (baseline == null) {
+            throw new CorruptedCaptureStateException(
+                "Critical Mutation Traffic was acknowledged before the writer partition established "
+                    + "its initial manifest broker-time baseline"
+            );
+        }
+        var elapsed = Math.subtractExact(observationLogAppendTime, baseline);
+        if (elapsed >= expirationInterval.toMillis()) {
+            throw new IllegalStateException(
+                "Critical Mutation Traffic acknowledgement exceeded the configured manifest expiration "
+                    + "interval for "
+                    + route.writerNodeId()
+                    + "/"
+                    + route.partition()
+                    + "/"
+                    + route.connectionId()
+                    + ": manifest="
+                    + baseline
+                    + ", observation="
+                    + observationLogAppendTime
+                    + ", expirationMillis="
+                    + expirationInterval.toMillis()
+            );
+        }
+    }
+
     synchronized CompletableFuture<Void> whenNoConnections() {
         return noConnections;
     }

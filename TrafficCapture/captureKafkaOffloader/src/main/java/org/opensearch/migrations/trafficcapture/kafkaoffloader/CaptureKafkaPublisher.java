@@ -18,6 +18,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -63,6 +64,8 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         List<CompletableFuture<RecordMetadata>> chunkAcknowledgements
     ) {}
 
+    private record ManifestDeadline(long generation, ScheduledFuture<?> task) {}
+
     private final Producer<String, byte[]> producer;
     private final String topic;
     @Getter
@@ -76,6 +79,8 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     private final Map<WriterPartitionKey, Long> lastControlTimestamp = new HashMap<>();
     private final Map<WriterPartitionKey, CompletableFuture<Void>> writerRetirementResults =
         new HashMap<>();
+    private final Object manifestDeadlineLock = new Object();
+    private final Map<WriterPartitionKey, ManifestDeadline> manifestDeadlines = new HashMap<>();
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean unstableProcessFailureReported = new AtomicBoolean();
@@ -85,6 +90,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
     private final ArrayDeque<ManifestRequest> manifestRequests = new ArrayDeque<>();
     private final AtomicBoolean scheduledManifestPending = new AtomicBoolean();
     private boolean manifestPublicationActive;
+    private long nextManifestDeadlineGeneration;
     private final ScheduledFuture<?> scheduledSnapshots;
 
     public CaptureKafkaPublisher(
@@ -271,6 +277,30 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         return result;
     }
 
+    void validateCriticalMutationTrafficAcknowledgement(
+        CaptureRoutingState.ConnectionRoute route,
+        RecordMetadata acknowledgement
+    ) {
+        Objects.requireNonNull(route);
+        if (acknowledgement == null
+            || acknowledgement.partition() != route.partition()
+            || !acknowledgement.hasTimestamp()) {
+            throw new IllegalStateException(
+                "Kafka returned invalid acknowledgement metadata for Critical Mutation Traffic"
+            );
+        }
+        try {
+            routingState.validateCriticalMutationTrafficAcknowledgement(
+                route,
+                acknowledgement.timestamp(),
+                manifestExpirationInterval
+            );
+        } catch (CorruptedCaptureStateException e) {
+            failUnstableProcess(e);
+            throw e;
+        }
+    }
+
     CompletableFuture<Void> retireAllWriters() {
         var result = new CompletableFuture<Void>();
         executeOnPublisher(() -> {
@@ -322,6 +352,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         var publications = new ArrayList<ManifestPublication>();
         try {
             for (var manifest : manifests) {
+                ensureManifestDeadline(manifest);
                 var emittedAtMillis = allocateControlTimestamp(
                     manifest.writerNodeId(),
                     manifest.partition()
@@ -393,6 +424,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
                         manifestLogAppendTime,
                         manifestExpirationInterval
                     );
+                    renewManifestDeadline(publication.manifest());
                 }
                 if (request.orderlyRetirement()) {
                     beginOrderlyWriterRetirement(request);
@@ -475,7 +507,10 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         );
         sendFromPublisherThread(
             producerRecord,
-            () -> routingState.completeWriterRetirement(manifest)
+            () -> {
+                routingState.completeWriterRetirement(manifest);
+                cancelManifestDeadline(manifest);
+            }
         ).whenComplete((ignored, throwable) ->
             finishWriterRetirementOnPublisherThread(request, throwable)
         );
@@ -607,6 +642,75 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         var allocated = previous == null || observed > previous ? observed : Math.incrementExact(previous);
         lastControlTimestamp.put(key, allocated);
         return allocated;
+    }
+
+    private void ensureManifestDeadline(CaptureRoutingState.PreparedManifest manifest) {
+        var key = new WriterPartitionKey(manifest.writerNodeId(), manifest.partition());
+        synchronized (manifestDeadlineLock) {
+            if (!manifestDeadlines.containsKey(key)) {
+                scheduleManifestDeadline(key);
+            }
+        }
+    }
+
+    private void renewManifestDeadline(CaptureRoutingState.PreparedManifest manifest) {
+        var key = new WriterPartitionKey(manifest.writerNodeId(), manifest.partition());
+        synchronized (manifestDeadlineLock) {
+            var previous = manifestDeadlines.remove(key);
+            if (previous != null) {
+                previous.task().cancel(false);
+            }
+            scheduleManifestDeadline(key);
+        }
+    }
+
+    private void scheduleManifestDeadline(WriterPartitionKey key) {
+        if (closed.get() || failure.get() != null) {
+            return;
+        }
+        var generation = Math.incrementExact(nextManifestDeadlineGeneration);
+        var task = executor.schedule(
+            () -> expireManifestDeadline(key, generation),
+            manifestExpirationInterval.toNanos(),
+            TimeUnit.NANOSECONDS
+        );
+        manifestDeadlines.put(key, new ManifestDeadline(generation, task));
+    }
+
+    private void expireManifestDeadline(WriterPartitionKey key, long generation) {
+        synchronized (manifestDeadlineLock) {
+            var current = manifestDeadlines.get(key);
+            if (current == null || current.generation() != generation) {
+                return;
+            }
+            manifestDeadlines.remove(key);
+        }
+        if (closed.get() || failure.get() != null) {
+            return;
+        }
+        failPublisher(new TimeoutException(
+            "Manifest acknowledgement deadline expired for "
+                + key.writerNodeId()
+                + "/"
+                + key.partition()
+        ));
+    }
+
+    private void cancelManifestDeadline(CaptureRoutingState.PreparedManifest manifest) {
+        var key = new WriterPartitionKey(manifest.writerNodeId(), manifest.partition());
+        synchronized (manifestDeadlineLock) {
+            var deadline = manifestDeadlines.remove(key);
+            if (deadline != null) {
+                deadline.task().cancel(false);
+            }
+        }
+    }
+
+    private void cancelAllManifestDeadlines() {
+        synchronized (manifestDeadlineLock) {
+            manifestDeadlines.values().forEach(deadline -> deadline.task().cancel(false));
+            manifestDeadlines.clear();
+        }
     }
 
     private CompletableFuture<RecordMetadata> enqueueTrafficSend(
@@ -786,6 +890,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
         }
         pending.forEach(send -> send.completeExceptionally(throwable));
         scheduledSnapshots.cancel(false);
+        cancelAllManifestDeadlines();
         try {
             executor.execute(this::startNextManifestRequest);
         } catch (RejectedExecutionException e) {
@@ -871,6 +976,7 @@ public class CaptureKafkaPublisher implements CaptureAssignmentPublisher, AutoCl
             return;
         }
         scheduledSnapshots.cancel(false);
+        cancelAllManifestDeadlines();
         routingState.beginShutdown();
         try {
             var flush = new CompletableFuture<Void>();

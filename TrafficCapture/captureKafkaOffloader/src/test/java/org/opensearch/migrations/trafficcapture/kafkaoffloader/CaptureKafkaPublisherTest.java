@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongUnaryOperator;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,6 +58,45 @@ class CaptureKafkaPublisherTest {
         assertTrue(producer.completeNext());
         assertEquals("activation:1", install.get(1, TimeUnit.SECONDS));
         assertEquals(List.of(0), routingState.assignedPartitions());
+        publisher.close();
+    }
+
+    @Test
+    void manifestDeadlineCompromisesCaptureBeforeALateAcknowledgementCanActivateAssignment()
+        throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var writeGate = new CaptureKafkaWriteGate();
+        var terminalFailure = new AtomicReference<Throwable>();
+        writeGate.addTerminalFailureListener(terminalFailure::set);
+        var publisher = new CaptureKafkaPublisher(
+            producer,
+            TOPIC,
+            routingState,
+            MESSAGE_SIZE,
+            Duration.ofMillis(75),
+            Duration.ofMillis(100),
+            Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+            writeGate,
+            ignored -> {}
+        );
+
+        var install = publisher.installAssignment(List.of(0));
+        awaitHistorySize(producer, 1);
+
+        var failure = assertThrows(
+            ExecutionException.class,
+            () -> install.get(2, TimeUnit.SECONDS)
+        ).getCause();
+        assertTrue(failure instanceof TimeoutException);
+        assertSame(failure, terminalFailure.get());
+        assertEquals(List.of(), routingState.assignedPartitions());
+        assertEquals(1, producer.history().size(), "The proxy must not resubmit the manifest");
+
+        assertTrue(producer.completeNext(), "The original send may still acknowledge after the deadline");
+        Thread.sleep(25);
+        assertEquals(List.of(), routingState.assignedPartitions());
+        assertEquals(1, producer.history().size());
         publisher.close();
     }
 
@@ -137,6 +178,34 @@ class CaptureKafkaPublisherTest {
         assertThrows(ExecutionException.class, () -> manifest.get(1, TimeUnit.SECONDS));
 
         assertEquals(1_234L, routingState.lastAcceptedManifestLogAppendTime("activation:1", 0));
+        publisher.close();
+    }
+
+    @Test
+    void missingInitialManifestBaselineIsAnUnstableProcessFailure() {
+        var producer = producer(true);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var assignment = routingState.prepareAssignment(List.of(0));
+        routingState.prepareInitialManifests(assignment);
+        routingState.activateAssignment(assignment);
+        var route = routingState.admitConnection("connection");
+        var unstableFailure = new AtomicReference<Throwable>();
+        var publisher = publisher(producer, routingState, unstableFailure::set);
+        var acknowledgement = new RecordMetadata(
+            new TopicPartition(TOPIC, 0),
+            0,
+            0,
+            1_000L,
+            0,
+            0
+        );
+
+        var observed = assertThrows(
+            CorruptedCaptureStateException.class,
+            () -> publisher.validateCriticalMutationTrafficAcknowledgement(route, acknowledgement)
+        );
+
+        assertSame(observed, unstableFailure.get());
         publisher.close();
     }
 
@@ -445,6 +514,52 @@ class CaptureKafkaPublisherTest {
         assertTrue(producer.errorNext(new IllegalStateException("NoMoreWrites failed")));
 
         assertThrows(ExecutionException.class, () -> retirement.get(1, TimeUnit.SECONDS));
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        publisher.close();
+    }
+
+    @Test
+    void manifestDeadlineWhileNoMoreWritesIsPendingLeavesWriterUnretired() throws Exception {
+        var producer = producer(false);
+        var routingState = new CaptureRoutingState(ACTIVATION_ID, 1);
+        var writeGate = new CaptureKafkaWriteGate();
+        var terminalFailure = new AtomicReference<Throwable>();
+        writeGate.addTerminalFailureListener(terminalFailure::set);
+        var publisher = new CaptureKafkaPublisher(
+            producer,
+            TOPIC,
+            routingState,
+            MESSAGE_SIZE,
+            Duration.ofMillis(150),
+            Duration.ofMillis(200),
+            Clock.fixed(Instant.ofEpochMilli(1_234), ZoneOffset.UTC),
+            writeGate,
+            ignored -> {}
+        );
+        installAndAcknowledge(producer, publisher, List.of(0));
+
+        var retirement = publisher.retireAllWriters();
+        awaitHistorySize(producer, 2);
+        assertTrue(producer.completeNext());
+        awaitHistorySize(producer, 3);
+
+        var failure = assertThrows(
+            ExecutionException.class,
+            () -> retirement.get(2, TimeUnit.SECONDS)
+        ).getCause();
+        assertTrue(failure instanceof TimeoutException);
+        assertSame(failure, terminalFailure.get());
+        assertEquals(
+            CaptureRoutingState.WriterStatus.RETIRING,
+            routingState.writerStatus("activation:1", 0)
+        );
+        assertEquals(3, producer.history().size(), "The proxy must not resubmit NoMoreWrites");
+
+        assertTrue(producer.completeNext(), "The original NoMoreWrites may acknowledge after the deadline");
+        Thread.sleep(25);
         assertEquals(
             CaptureRoutingState.WriterStatus.RETIRING,
             routingState.writerStatus("activation:1", 0)
