@@ -208,6 +208,46 @@ describe('MigrationConfigTransformer validation', () => {
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
     });
 
+    it('should carry metadata memory overrides from user input into populated workflow resources', async () => {
+        const config = cloneBaseConfig();
+        const inputResources = {
+            requests: {
+                memory: "3Gi"
+            },
+            limits: {
+                memory: "4Gi"
+            }
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0] = {
+            metadataMigrationConfig: {
+                resources: inputResources
+            }
+        };
+
+        expect(
+            config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].metadataMigrationConfig.resources
+        ).toEqual(inputResources);
+
+        const normalized = normalizeUserConfig(config as any);
+        expect(
+            normalized.snapshotMigrationConfigs[0].perSnapshotConfig!.snap1[0].metadataMigrationConfig!.resources
+        ).toEqual(inputResources);
+
+        const result = await transformer.processFromObject(config);
+        const metadataConfig = result.snapshotMigrations?.[0]?.metadataMigrationConfig as any;
+
+        expect(metadataConfig?.resources).toEqual({
+            requests: {
+                cpu: "500m",
+                memory: "3Gi"
+            },
+            limits: {
+                cpu: "500m",
+                memory: "4Gi"
+            }
+        });
+    });
+
     it('should reject rogue key in nested object (snapshotInfo)', () => {
         const configWithRogueInNested = {
             ...baseConfig,
