@@ -364,6 +364,20 @@ jobs:
           terraform init -backend=false
           terraform test
 
+  aws-terraform-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+      - name: terraform test (AWS module)
+        # Plan-time tests only; no cloud credentials required.
+        working-directory: deployment/terraform/aws
+        run: |
+          terraform init -backend=false
+          terraform test
+
   codeql-analyze:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-22.04
@@ -510,6 +524,7 @@ jobs:
       - codeql-analyze
       - sonarqube-analysis
       - gcp-terraform-test
+      - aws-terraform-test
     if: always()
     runs-on: ubuntu-22.04
     steps:
