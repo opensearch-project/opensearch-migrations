@@ -1,43 +1,28 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
-import java.net.InetSocketAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
-import org.opensearch.migrations.trafficcapture.kafkaoffloader.CaptureKafkaPublisher;
-import org.opensearch.migrations.trafficcapture.kafkaoffloader.CaptureMembershipAssignmentTracker;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
-import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
-import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
-import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
-import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
-import org.opensearch.migrations.trafficcapture.protos.NoMoreWrites;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
-import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
-import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.KafkaContainerTestBase;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.annotations.KafkaContainerTest;
 
 import io.netty.buffer.Unpooled;
+import io.netty.util.concurrent.DefaultEventExecutor;
 import io.opentelemetry.api.OpenTelemetry;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -66,6 +51,9 @@ import org.junit.jupiter.api.Test;
 @KafkaContainerTest
 class KafkaMembershipRebalanceCaptureTest {
     private static final Duration WAIT_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration TEST_TRAFFIC_FLUSH_INTERVAL = Duration.ofMinutes(5);
+    private static final Duration TEST_HEARTBEAT_INTERVAL = Duration.ofSeconds(10);
+    private static final Duration TEST_HEARTBEAT_EXPIRATION = Duration.ofSeconds(30);
     private static final KafkaContainerTestBase KAFKA = new KafkaContainerTestBase();
 
     @BeforeAll
@@ -79,14 +67,12 @@ class KafkaMembershipRebalanceCaptureTest {
     }
 
     @Test
-    void rebalanceChangesOnlyNewConnectionRoutingAndDoesNotCompromiseCapture() throws Exception {
+    void rebalanceChangesOnlyNewConnectionRoutingAndPreservesExistingConnectionRoute()
+        throws Exception {
         var topic = "proxy-membership-" + UUID.randomUUID();
         var bootstrapServers = KAFKA.getContainer().getBootstrapServers();
         createTopic(bootstrapServers, topic);
-        var rootContext = new RootCaptureContext(
-            OpenTelemetry.noop(),
-            IContextTracker.DO_NOTHING_TRACKER
-        );
+        var rootContext = rootContext();
         var first = startFactory(rootContext, bootstrapServers, topic, "activation-a");
         try (
             first;
@@ -96,41 +82,75 @@ class KafkaMembershipRebalanceCaptureTest {
 
             var initialConnection = "initial-" + UUID.randomUUID();
             closeConnection(first.factory(), rootContext, initialConnection);
-            var initialWriter = readWriter(reader, initialConnection);
+            var initialTraffic = readTraffic(reader, initialConnection);
+            var initialWriter = initialTraffic.trafficStream().getNodeId();
             Assertions.assertEquals("activation-a:1", initialWriter);
 
-            var connectionOpenedBeforeRebalance = "open-before-rebalance-" + UUID.randomUUID();
-            var oldConnection = first.factory().createOffloader(
-                rootContext.createConnectionContext(connectionOpenedBeforeRebalance, "proxy-a")
+            var connectionOpenedBeforeRebalance =
+                "open-before-rebalance-" + UUID.randomUUID();
+            var existingConnection = OpenConnection.open(
+                first.factory(),
+                rootContext,
+                connectionOpenedBeforeRebalance
             );
-
-            var second = startFactory(rootContext, bootstrapServers, topic, "activation-b");
-            try (second) {
-                String replacementWriter = null;
-                for (int attempt = 0; attempt < 30 && replacementWriter == null; ++attempt) {
-                    var connectionId = "after-second-member-" + attempt + "-" + UUID.randomUUID();
-                    closeConnection(first.factory(), rootContext, connectionId);
-                    var observedWriter = readWriter(reader, connectionId);
-                    if (!initialWriter.equals(observedWriter)) {
-                        replacementWriter = observedWriter;
-                    } else {
-                        Thread.sleep(100);
-                    }
-                }
-
-                Assertions.assertTrue(replacementWriter.startsWith("activation-a:"), replacementWriter);
-                Assertions.assertNotEquals(initialWriter, replacementWriter);
-                Assertions.assertNull(first.captureFailure().get());
-                Assertions.assertNull(first.unstableFailure().get());
-                Assertions.assertNull(second.captureFailure().get());
-                Assertions.assertNull(second.unstableFailure().get());
-
-                closeOffloader(oldConnection);
+            try (existingConnection) {
+                existingConnection.addReadByteAndFlush();
+                var existingTrafficBeforeRebalance = readTraffic(
+                    reader,
+                    connectionOpenedBeforeRebalance
+                );
                 Assertions.assertEquals(
                     initialWriter,
-                    readWriter(reader, connectionOpenedBeforeRebalance),
-                    "A connection must retain the writer identity selected when it opened"
+                    existingTrafficBeforeRebalance.trafficStream().getNodeId()
                 );
+
+                var second = startFactory(
+                    rootContext,
+                    bootstrapServers,
+                    topic,
+                    "activation-b"
+                );
+                try (second) {
+                    String replacementWriter = null;
+                    for (int attempt = 0; attempt < 30 && replacementWriter == null; ++attempt) {
+                        var connectionId =
+                            "after-second-member-" + attempt + "-" + UUID.randomUUID();
+                        closeConnection(first.factory(), rootContext, connectionId);
+                        var observedWriter = readTraffic(reader, connectionId)
+                            .trafficStream()
+                            .getNodeId();
+                        if (!initialWriter.equals(observedWriter)) {
+                            replacementWriter = observedWriter;
+                        } else {
+                            Thread.sleep(100);
+                        }
+                    }
+
+                    Assertions.assertNotNull(replacementWriter);
+                    Assertions.assertTrue(
+                        replacementWriter.startsWith("activation-a:"),
+                        replacementWriter
+                    );
+                    Assertions.assertNotEquals(initialWriter, replacementWriter);
+
+                    existingConnection.closeCapture();
+                    var oldTrafficAfterRebalance = readTraffic(
+                        reader,
+                        connectionOpenedBeforeRebalance
+                    );
+                    Assertions.assertEquals(
+                        initialWriter,
+                        oldTrafficAfterRebalance.trafficStream().getNodeId(),
+                        "A connection retains the writer identity selected when it opened"
+                    );
+                    Assertions.assertEquals(
+                        existingTrafficBeforeRebalance.record().partition(),
+                        oldTrafficAfterRebalance.record().partition(),
+                        "A connection retains the Kafka partition selected when it opened"
+                    );
+                    assertNoFailures(first);
+                    assertNoFailures(second);
+                }
             }
         } finally {
             deleteTopic(bootstrapServers, topic);
@@ -138,14 +158,12 @@ class KafkaMembershipRebalanceCaptureTest {
     }
 
     @Test
-    void coordinatorOutageDoesNotCompromiseCaptureAfterTheFirstAssignment() throws Exception {
+    void coordinatorOutageAndEmptyPollsDoNotInvalidateTheLastUsableAssignment()
+        throws Exception {
         var topic = "proxy-membership-outage-" + UUID.randomUUID();
         var bootstrapServers = KAFKA.getContainer().getBootstrapServers();
         createTopic(bootstrapServers, topic);
-        var rootContext = new RootCaptureContext(
-            OpenTelemetry.noop(),
-            IContextTracker.DO_NOTHING_TRACKER
-        );
+        var rootContext = rootContext();
         var first = startFactoryWithRealMembership(
             rootContext,
             bootstrapServers,
@@ -155,61 +173,81 @@ class KafkaMembershipRebalanceCaptureTest {
         try (first) {
             var initialConnection = "before-outage-" + UUID.randomUUID();
             closeConnection(first.factory(), rootContext, initialConnection);
-            var initialWriter = writerFromMockProducer(first.producer(), initialConnection);
+            var initialTraffic = trafficFromMockProducer(first.producer(), initialConnection);
+            var initialWriter = initialTraffic.trafficStream().getNodeId();
             Assertions.assertEquals("activation-outage-a:1", initialWriter);
 
-            var connectionOpenedBeforeOutage = "open-before-outage-" + UUID.randomUUID();
-            var oldConnection = first.factory().createOffloader(
-                rootContext.createConnectionContext(connectionOpenedBeforeOutage, "proxy-a")
+            Thread.sleep(350);
+            var afterEmptyPolls = "after-empty-polls-" + UUID.randomUUID();
+            closeConnection(first.factory(), rootContext, afterEmptyPolls);
+            Assertions.assertEquals(
+                initialWriter,
+                trafficFromMockProducer(first.producer(), afterEmptyPolls)
+                    .trafficStream()
+                    .getNodeId(),
+                "Empty membership polls must not change or invalidate capture routing"
             );
 
-            var containerId = KAFKA.getContainer().getContainerId();
-            KAFKA.getContainer().getDockerClient().pauseContainerCmd(containerId).exec();
-            try {
-                // This exceeds the test consumer's Kafka group session timeout. It is not a
-                // proxy membership-health deadline; capture must continue with the last assignment.
-                Thread.sleep(TimeUnit.SECONDS.toMillis(9));
-                var duringOutage = "during-outage-" + UUID.randomUUID();
-                closeConnection(first.factory(), rootContext, duringOutage);
-                Assertions.assertEquals(
-                    initialWriter,
-                    writerFromMockProducer(first.producer(), duringOutage)
-                );
-                Assertions.assertNull(first.captureFailure().get());
-                Assertions.assertNull(first.unstableFailure().get());
-            } finally {
-                KAFKA.getContainer().getDockerClient().unpauseContainerCmd(containerId).exec();
-            }
-
-            var second = startFactoryWithRealMembership(
+            var connectionOpenedBeforeOutage =
+                "open-before-outage-" + UUID.randomUUID();
+            var existingConnection = OpenConnection.open(
+                first.factory(),
                 rootContext,
-                bootstrapServers,
-                topic,
-                "activation-outage-b"
+                connectionOpenedBeforeOutage
             );
-            try (second) {
-                var replacementWriter = awaitReplacementWriter(
-                    first.factory(),
-                    first.producer(),
-                    rootContext,
-                    initialWriter
-                );
-                Assertions.assertTrue(
-                    replacementWriter.startsWith("activation-outage-a:"),
-                    replacementWriter
-                );
-                Assertions.assertNotEquals(initialWriter, replacementWriter);
-                Assertions.assertNull(first.captureFailure().get());
-                Assertions.assertNull(first.unstableFailure().get());
-                Assertions.assertNull(second.captureFailure().get());
-                Assertions.assertNull(second.unstableFailure().get());
+            try (existingConnection) {
+                var containerId = KAFKA.getContainer().getContainerId();
+                KAFKA.getContainer().getDockerClient().pauseContainerCmd(containerId).exec();
+                try {
+                    // This exceeds the test consumer's Kafka group session timeout. Membership
+                    // health is not a capture gate; the last usable assignment remains valid.
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(9));
+                    var duringOutage = "during-outage-" + UUID.randomUUID();
+                    closeConnection(first.factory(), rootContext, duringOutage);
+                    Assertions.assertEquals(
+                        initialWriter,
+                        trafficFromMockProducer(first.producer(), duringOutage)
+                            .trafficStream()
+                            .getNodeId()
+                    );
+                    assertNoFailures(first);
+                } finally {
+                    KAFKA.getContainer().getDockerClient()
+                        .unpauseContainerCmd(containerId)
+                        .exec();
+                }
 
-                closeOffloader(oldConnection);
-                Assertions.assertEquals(
-                    initialWriter,
-                    writerFromMockProducer(first.producer(), connectionOpenedBeforeOutage),
-                    "A connection must retain its writer identity across membership loss and recovery"
+                var second = startFactoryWithRealMembership(
+                    rootContext,
+                    bootstrapServers,
+                    topic,
+                    "activation-outage-b"
                 );
+                try (second) {
+                    var replacementWriter = awaitReplacementWriter(
+                        first.factory(),
+                        first.producer(),
+                        rootContext,
+                        initialWriter
+                    );
+                    Assertions.assertTrue(
+                        replacementWriter.startsWith("activation-outage-a:"),
+                        replacementWriter
+                    );
+                    Assertions.assertNotEquals(initialWriter, replacementWriter);
+
+                    existingConnection.closeCapture();
+                    Assertions.assertEquals(
+                        initialWriter,
+                        trafficFromMockProducer(
+                            first.producer(),
+                            connectionOpenedBeforeOutage
+                        ).trafficStream().getNodeId(),
+                        "A connection retains its route across membership loss and recovery"
+                    );
+                    assertNoFailures(first);
+                    assertNoFailures(second);
+                }
             }
         } finally {
             deleteTopic(bootstrapServers, topic);
@@ -217,219 +255,58 @@ class KafkaMembershipRebalanceCaptureTest {
     }
 
     @Test
-    void orderlyRetirementAcknowledgesTerminalTrafficBeforeFinalManifestAndNoMoreWrites()
-        throws Exception {
-        var topic = "proxy-retirement-" + UUID.randomUUID();
+    void staleAssignmentOverlapChangesLoadBalancingOnly() throws Exception {
+        var topic = "proxy-stale-assignment-overlap-" + UUID.randomUUID();
         var bootstrapServers = KAFKA.getContainer().getBootstrapServers();
         createTopic(bootstrapServers, topic);
-        var rootContext = new RootCaptureContext(
-            OpenTelemetry.noop(),
-            IContextTracker.DO_NOTHING_TRACKER
-        );
-        var harness = startFactory(rootContext, bootstrapServers, topic, "activation-retirement");
+        var rootContext = rootContext();
+        var first = startFactory(rootContext, bootstrapServers, topic, "activation-stale");
         try (
-            harness;
+            first;
             var reader = new KafkaConsumer<String, byte[]>(readerProperties(bootstrapServers))
         ) {
             assignAllPartitions(reader, topic);
-            var connectionId = "retiring-" + UUID.randomUUID();
-            var offloader = harness.factory().createOffloader(
-                rootContext.createConnectionContext(connectionId, "proxy")
+
+            first.membershipConsumer().wakeup();
+            var second = startFactory(
+                rootContext,
+                bootstrapServers,
+                topic,
+                "activation-current"
             );
-            var payload = Unpooled.wrappedBuffer(new byte[] { 1 });
-            try {
-                offloader.addReadEvent(Instant.now(), payload);
-            } finally {
-                payload.release();
+            try (second) {
+                var sharedConnectionId = "same-routing-key-" + UUID.randomUUID();
+                closeConnection(first.factory(), rootContext, sharedConnectionId);
+                closeConnection(second.factory(), rootContext, sharedConnectionId);
+
+                var records = readTraffic(reader, sharedConnectionId, 2);
+                var stale = records.stream()
+                    .filter(record -> record.trafficStream().getNodeId().startsWith(
+                        "activation-stale:"
+                    ))
+                    .findFirst()
+                    .orElseThrow();
+                var current = records.stream()
+                    .filter(record -> record.trafficStream().getNodeId().startsWith(
+                        "activation-current:"
+                    ))
+                    .findFirst()
+                    .orElseThrow();
+
+                Assertions.assertEquals(
+                    stale.record().partition(),
+                    current.record().partition(),
+                    "The same routing key may be accepted by a stale and a current assignment; "
+                        + "distinct writer identities preserve capture correctness"
+                );
+                Assertions.assertNotEquals(
+                    stale.trafficStream().getNodeId(),
+                    current.trafficStream().getNodeId()
+                );
+                assertNoFailures(first);
+                assertNoFailures(second);
             }
-
-            var retirement = CompletableFuture.runAsync(
-                () -> harness.factory().retireForOrderlyShutdown().join()
-            );
-            Thread.sleep(100);
-            Assertions.assertFalse(
-                retirement.isDone(),
-                "Orderly retirement must wait for the open connection's terminal acknowledgement"
-            );
-
-            closeOffloader(offloader);
-            retirement.get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-
-            var records = readThroughCurrentEnd(reader);
-            var trafficStream = records.stream()
-                .filter(record -> connectionId.equals(record.key()))
-                .filter(record -> CaptureKafkaPublisher.isRecordType(
-                    record.headers(),
-                    CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-                ))
-                .findFirst()
-                .orElseThrow();
-            var traffic = TrafficStream.parseFrom(trafficStream.value());
-            var writerNodeId = traffic.getNodeId();
-            Assertions.assertEquals("activation-retirement:1", writerNodeId);
-
-            for (int partition = 0; partition < 4; ++partition) {
-                assertTerminalWriterOrdering(records, writerNodeId, partition);
-            }
-            var finalManifest = records.stream()
-                .filter(record -> record.partition() == traffic.getPartition())
-                .filter(record -> CaptureKafkaPublisher.isRecordType(
-                    record.headers(),
-                    CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
-                ))
-                .filter(record -> {
-                    try {
-                        return writerNodeId.equals(
-                            LivenessSnapshotChunk.parseFrom(record.value()).getWriterNodeId()
-                        );
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
-                })
-                .max(java.util.Comparator.comparingLong(ConsumerRecord::offset))
-                .orElseThrow();
-            Assertions.assertTrue(trafficStream.offset() < finalManifest.offset());
-            Assertions.assertNull(harness.captureFailure().get());
-            Assertions.assertNull(harness.unstableFailure().get());
         } finally {
-            deleteTopic(bootstrapServers, topic);
-        }
-    }
-
-    @Test
-    void productionProxyStopDrivesTerminalCaptureAndWriterRetirement() throws Exception {
-        var topic = "proxy-composed-retirement-" + UUID.randomUUID();
-        var bootstrapServers = KAFKA.getContainer().getBootstrapServers();
-        createTopic(bootstrapServers, topic);
-        var rootContext = new RootCaptureContext(
-            OpenTelemetry.noop(),
-            IContextTracker.DO_NOTHING_TRACKER
-        );
-        var harness = startFactory(
-            rootContext,
-            bootstrapServers,
-            topic,
-            "activation-composed-retirement"
-        );
-        var backendAccepted = new CountDownLatch(1);
-        var backendSocket = new AtomicReference<Socket>();
-        var backendExecutor = Executors.newSingleThreadExecutor();
-        try (
-            harness;
-            var reader = new KafkaConsumer<String, byte[]>(readerProperties(bootstrapServers));
-            var backendServer = new ServerSocket(0);
-            var proxy = new BoundPortProxy(harness.unstableFailure()::set);
-            var client = new Socket()
-        ) {
-            assignAllPartitions(reader, topic);
-            var acceptedBackend = backendExecutor.submit(() -> {
-                var accepted = backendServer.accept();
-                backendSocket.set(accepted);
-                backendAccepted.countDown();
-                return accepted;
-            });
-            var processState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
-            var connectionPool = new BacksideConnectionPool(
-                URI.create("http://127.0.0.1:" + backendServer.getLocalPort()),
-                null,
-                0,
-                Duration.ZERO
-            );
-            proxy.start(
-                new ProxyChannelInitializer<>(
-                    rootContext,
-                    connectionPool,
-                    null,
-                    harness.factory(),
-                    new RequestCapturePredicate(),
-                    processState
-                ),
-                1
-            );
-
-            client.connect(new InetSocketAddress("127.0.0.1", proxy.boundPort()));
-            Assertions.assertTrue(backendAccepted.await(5, TimeUnit.SECONDS));
-            client.getOutputStream().write('G');
-            client.getOutputStream().flush();
-
-            var retirementExceededWarningTarget = new AtomicBoolean();
-            CaptureProxy.performOrderlyShutdown(
-                proxy,
-                harness.factory(),
-                Duration.ofSeconds(5),
-                () -> retirementExceededWarningTarget.set(true)
-            );
-
-            acceptedBackend.get(5, TimeUnit.SECONDS).close();
-            Assertions.assertFalse(
-                retirementExceededWarningTarget.get(),
-                "Composed proxy retirement exceeded its warning target"
-            );
-            var records = readThroughCurrentEnd(reader);
-            var activationTraffic = records.stream()
-                .filter(record -> CaptureKafkaPublisher.isRecordType(
-                    record.headers(),
-                    CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-                ))
-                .map(record -> {
-                    try {
-                        return Map.entry(record, TrafficStream.parseFrom(record.value()));
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
-                })
-                .filter(entry -> entry.getValue().getNodeId().startsWith(
-                    "activation-composed-retirement:"
-                ))
-                .toList();
-            Assertions.assertEquals(
-                1,
-                activationTraffic.stream()
-                    .flatMap(entry -> entry.getValue().getSubStreamList().stream())
-                    .filter(observation -> observation.hasClose())
-                    .count()
-            );
-            var terminalTraffic = activationTraffic.stream()
-                .filter(entry -> entry.getValue().getSubStreamList()
-                    .stream()
-                    .anyMatch(observation -> observation.hasClose()))
-                .findFirst()
-                .orElseThrow();
-            var trafficStream = terminalTraffic.getKey();
-            var traffic = terminalTraffic.getValue();
-            Assertions.assertTrue(
-                traffic.getSubStream(traffic.getSubStreamCount() - 1).hasClose()
-            );
-
-            for (int partition = 0; partition < 4; ++partition) {
-                assertTerminalWriterOrdering(records, traffic.getNodeId(), partition);
-            }
-            var finalManifest = records.stream()
-                .filter(record -> record.partition() == traffic.getPartition())
-                .filter(record -> CaptureKafkaPublisher.isRecordType(
-                    record.headers(),
-                    CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
-                ))
-                .filter(record -> {
-                    try {
-                        return traffic.getNodeId().equals(
-                            LivenessSnapshotChunk.parseFrom(record.value()).getWriterNodeId()
-                        );
-                    } catch (Exception e) {
-                        throw new IllegalStateException(e);
-                    }
-                })
-                .max(java.util.Comparator.comparingLong(ConsumerRecord::offset))
-                .orElseThrow();
-            Assertions.assertTrue(trafficStream.offset() < finalManifest.offset());
-            Assertions.assertNull(harness.captureFailure().get());
-            Assertions.assertNull(harness.unstableFailure().get());
-        } finally {
-            var accepted = backendSocket.get();
-            if (accepted != null) {
-                accepted.close();
-            }
-            backendExecutor.shutdownNow();
             deleteTopic(bootstrapServers, topic);
         }
     }
@@ -440,27 +317,19 @@ class KafkaMembershipRebalanceCaptureTest {
         String topic,
         String captureActivationId
     ) throws Exception {
-        var producerProperties = KafkaConfig.buildKafkaProperties(
-            null,
-            bootstrapServers,
-            captureActivationId + "-producer",
-            KafkaConfig.AUTH_TYPE_NONE,
-            null,
-            null
-        );
-        var producer = new KafkaProducer<String, byte[]>(producerProperties);
-        var assignmentTracker = new CaptureMembershipAssignmentTracker();
-        var parameters = new KafkaConfig.KafkaParameters();
-        parameters.kafkaBrokers = bootstrapServers;
-        parameters.kafkaClientId = captureActivationId;
-        parameters.kafkaAuthType = KafkaConfig.AUTH_TYPE_NONE;
-        var membershipConsumer = new KafkaConsumer<String, byte[]>(
-            KafkaConfig.buildMembershipConsumerProperties(
-                parameters,
-                captureActivationId,
-                topic,
-                assignmentTracker
+        var producer = new KafkaProducer<String, byte[]>(
+            KafkaConfig.buildKafkaProperties(
+                null,
+                bootstrapServers,
+                captureActivationId + "-producer",
+                KafkaConfig.AUTH_TYPE_NONE,
+                null,
+                null
             )
+        );
+        var parameters = membershipParameters(bootstrapServers, captureActivationId);
+        var membershipConsumer = new KafkaConsumer<String, byte[]>(
+            KafkaConfig.buildMembershipConsumerProperties(parameters, topic)
         );
         var captureFailure = new AtomicReference<Throwable>();
         var unstableFailure = new AtomicReference<Throwable>();
@@ -469,17 +338,21 @@ class KafkaMembershipRebalanceCaptureTest {
             captureActivationId,
             producer,
             membershipConsumer,
-            assignmentTracker,
-            1,
             topic,
             1024 * 1024,
-            Duration.ofSeconds(1),
+            TEST_TRAFFIC_FLUSH_INTERVAL,
+            TEST_HEARTBEAT_INTERVAL,
+            TEST_HEARTBEAT_EXPIRATION,
             captureFailure::set,
             unstableFailure::set
         );
-        CompletableFuture.supplyAsync(factory::getPublisher)
-            .get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        return new FactoryHarness(factory, captureFailure, unstableFailure);
+        factory.readyForConnections().get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        return new FactoryHarness(
+            factory,
+            membershipConsumer,
+            captureFailure,
+            unstableFailure
+        );
     }
 
     private static MockFactoryHarness startFactoryWithRealMembership(
@@ -489,17 +362,8 @@ class KafkaMembershipRebalanceCaptureTest {
         String captureActivationId
     ) throws Exception {
         var producer = mockProducer(topic, 4);
-        var assignmentTracker = new CaptureMembershipAssignmentTracker();
-        var parameters = new KafkaConfig.KafkaParameters();
-        parameters.kafkaBrokers = bootstrapServers;
-        parameters.kafkaClientId = captureActivationId;
-        parameters.kafkaAuthType = KafkaConfig.AUTH_TYPE_NONE;
-        var consumerProperties = KafkaConfig.buildMembershipConsumerProperties(
-            parameters,
-            captureActivationId,
-            topic,
-            assignmentTracker
-        );
+        var parameters = membershipParameters(bootstrapServers, captureActivationId);
+        var consumerProperties = KafkaConfig.buildMembershipConsumerProperties(parameters, topic);
         consumerProperties.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 6000);
         consumerProperties.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 1000);
         var membershipConsumer = new KafkaConsumer<String, byte[]>(consumerProperties);
@@ -510,17 +374,32 @@ class KafkaMembershipRebalanceCaptureTest {
             captureActivationId,
             producer,
             membershipConsumer,
-            assignmentTracker,
-            1,
             topic,
             1024 * 1024,
-            Duration.ofSeconds(1),
+            TEST_TRAFFIC_FLUSH_INTERVAL,
+            TEST_HEARTBEAT_INTERVAL,
+            TEST_HEARTBEAT_EXPIRATION,
             captureFailure::set,
             unstableFailure::set
         );
-        CompletableFuture.supplyAsync(factory::getPublisher)
-            .get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        return new MockFactoryHarness(factory, producer, captureFailure, unstableFailure);
+        factory.readyForConnections().get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        return new MockFactoryHarness(
+            factory,
+            producer,
+            captureFailure,
+            unstableFailure
+        );
+    }
+
+    private static KafkaConfig.KafkaParameters membershipParameters(
+        String bootstrapServers,
+        String captureActivationId
+    ) {
+        var parameters = new KafkaConfig.KafkaParameters();
+        parameters.kafkaBrokers = bootstrapServers;
+        parameters.kafkaClientId = captureActivationId;
+        parameters.kafkaAuthType = KafkaConfig.AUTH_TYPE_NONE;
+        return parameters;
     }
 
     private static void closeConnection(
@@ -528,43 +407,37 @@ class KafkaMembershipRebalanceCaptureTest {
         RootCaptureContext rootContext,
         String connectionId
     ) throws Exception {
-        var offloader = factory.createOffloader(
-            rootContext.createConnectionContext(connectionId, "proxy")
-        );
-        var payload = Unpooled.wrappedBuffer(new byte[] { 1 });
-        try {
-            offloader.addReadEvent(Instant.now(), payload);
-        } finally {
-            payload.release();
+        try (var connection = OpenConnection.open(factory, rootContext, connectionId)) {
+            connection.addReadByte();
+            connection.closeCapture();
         }
-        closeOffloader(offloader);
     }
 
-    private static void closeOffloader(
-        IChannelConnectionCaptureSerializer<RecordMetadata> offloader
-    ) throws Exception {
-        offloader.addCloseEvent(Instant.now());
-        offloader.flushCommitAndResetStream(true)
-            .get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-    }
-
-    private static String readWriter(
+    private static TrafficRecord readTraffic(
         KafkaConsumer<String, byte[]> reader,
         String connectionId
     ) throws Exception {
+        return readTraffic(reader, connectionId, 1).getFirst();
+    }
+
+    private static List<TrafficRecord> readTraffic(
+        KafkaConsumer<String, byte[]> reader,
+        String connectionId,
+        int expectedCount
+    ) throws Exception {
+        var matching = new java.util.ArrayList<TrafficRecord>();
         var deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
-        while (System.nanoTime() < deadline) {
+        while (matching.size() < expectedCount && System.nanoTime() < deadline) {
             for (var record : reader.poll(Duration.ofMillis(250))) {
-                if (connectionId.equals(record.key())
-                    && CaptureKafkaPublisher.isRecordType(
-                        record.headers(),
-                        CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-                    )) {
-                    return TrafficStream.parseFrom(record.value()).getNodeId();
+                assertNoHeadersAndValidEnvelope(record);
+                var envelope = CaptureRecord.parseFrom(record.value());
+                if (connectionId.equals(record.key()) && envelope.hasTrafficStream()) {
+                    matching.add(new TrafficRecord(record, envelope.getTrafficStream()));
                 }
             }
         }
-        throw new AssertionError("Timed out waiting for TrafficStream for " + connectionId);
+        Assertions.assertEquals(expectedCount, matching.size());
+        return List.copyOf(matching);
     }
 
     private static String awaitReplacementWriter(
@@ -576,9 +449,12 @@ class KafkaMembershipRebalanceCaptureTest {
         var deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
         int attempt = 0;
         while (System.nanoTime() < deadline) {
-            var connectionId = "after-membership-recovery-" + attempt++ + "-" + UUID.randomUUID();
+            var connectionId =
+                "after-membership-recovery-" + attempt++ + "-" + UUID.randomUUID();
             closeConnection(factory, rootContext, connectionId);
-            var writer = writerFromMockProducer(producer, connectionId);
+            var writer = trafficFromMockProducer(producer, connectionId)
+                .trafficStream()
+                .getNodeId();
             if (!previousWriter.equals(writer)) {
                 return writer;
             }
@@ -587,21 +463,48 @@ class KafkaMembershipRebalanceCaptureTest {
         throw new AssertionError("Timed out waiting for a replacement Kafka assignment");
     }
 
-    private static String writerFromMockProducer(
+    private static TrafficRecord trafficFromMockProducer(
         MockProducer<String, byte[]> producer,
         String connectionId
     ) throws Exception {
         for (int index = producer.history().size() - 1; index >= 0; --index) {
             var record = producer.history().get(index);
-            if (connectionId.equals(record.key())
-                && CaptureKafkaPublisher.isRecordType(
-                    record.headers(),
-                    CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-                )) {
-                return TrafficStream.parseFrom(record.value()).getNodeId();
+            assertNoHeadersAndValidEnvelope(record);
+            var envelope = CaptureRecord.parseFrom(record.value());
+            if (connectionId.equals(record.key()) && envelope.hasTrafficStream()) {
+                return new TrafficRecord(
+                    new ConsumerRecord<>(
+                        record.topic(),
+                        record.partition(),
+                        index,
+                        record.key(),
+                        record.value()
+                    ),
+                    envelope.getTrafficStream()
+                );
             }
         }
         throw new AssertionError("No TrafficStream was published for " + connectionId);
+    }
+
+    private static void assertNoHeadersAndValidEnvelope(
+        ConsumerRecord<String, byte[]> record
+    ) throws Exception {
+        Assertions.assertEquals(0, record.headers().toArray().length);
+        Assertions.assertNotEquals(
+            CaptureRecord.PayloadCase.PAYLOAD_NOT_SET,
+            CaptureRecord.parseFrom(record.value()).getPayloadCase()
+        );
+    }
+
+    private static void assertNoHeadersAndValidEnvelope(
+        ProducerRecord<String, byte[]> record
+    ) throws Exception {
+        Assertions.assertEquals(0, record.headers().toArray().length);
+        Assertions.assertNotEquals(
+            CaptureRecord.PayloadCase.PAYLOAD_NOT_SET,
+            CaptureRecord.parseFrom(record.value()).getPayloadCase()
+        );
     }
 
     private static void assignAllPartitions(KafkaConsumer<String, byte[]> reader, String topic) {
@@ -613,118 +516,6 @@ class KafkaMembershipRebalanceCaptureTest {
         reader.seekToBeginning(partitions);
     }
 
-    private static List<ConsumerRecord<String, byte[]>> readThroughCurrentEnd(
-        KafkaConsumer<String, byte[]> reader
-    ) {
-        var partitions = reader.assignment();
-        var endOffsets = reader.endOffsets(partitions);
-        var records = new ArrayList<ConsumerRecord<String, byte[]>>();
-        var deadline = System.nanoTime() + WAIT_TIMEOUT.toNanos();
-        while (System.nanoTime() < deadline) {
-            reader.poll(Duration.ofMillis(250)).forEach(records::add);
-            if (partitions.stream().allMatch(partition ->
-                reader.position(partition) >= endOffsets.get(partition))) {
-                return records;
-            }
-        }
-        throw new AssertionError("Timed out reading the terminal proxy records");
-    }
-
-    private static void assertTerminalWriterOrdering(
-        List<ConsumerRecord<String, byte[]>> records,
-        String writerNodeId,
-        int partition
-    ) throws Exception {
-        var partitionRecords = records.stream()
-            .filter(record -> record.partition() == partition)
-            .sorted(java.util.Comparator.comparingLong(ConsumerRecord::offset))
-            .toList();
-        var noMoreWritesRecords = partitionRecords.stream()
-            .filter(record -> CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
-            ))
-            .filter(record -> writerNodeId.equals(
-                new String(
-                    record.headers().lastHeader(CaptureKafkaPublisher.WRITER_NODE_ID_HEADER).value(),
-                    java.nio.charset.StandardCharsets.UTF_8
-                )
-            ))
-            .toList();
-        Assertions.assertEquals(1, noMoreWritesRecords.size());
-        var noMoreWritesRecord = noMoreWritesRecords.getFirst();
-        Assertions.assertEquals(
-            partition,
-            NoMoreWrites.parseFrom(noMoreWritesRecord.value()).getPartition()
-        );
-
-        var finalManifestRecord = partitionRecords.stream()
-            .filter(record -> record.offset() < noMoreWritesRecord.offset())
-            .filter(record -> CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
-            ))
-            .filter(record -> {
-                try {
-                    return writerNodeId.equals(
-                        LivenessSnapshotChunk.parseFrom(record.value()).getWriterNodeId()
-                    );
-                } catch (Exception e) {
-                    throw new IllegalStateException(e);
-                }
-            })
-            .max(java.util.Comparator.comparingLong(ConsumerRecord::offset))
-            .orElseThrow();
-        var finalManifest = LivenessSnapshotChunk.parseFrom(finalManifestRecord.value());
-        Assertions.assertEquals(0, finalManifest.getChunkIndex());
-        Assertions.assertEquals(1, finalManifest.getChunkCount());
-        Assertions.assertEquals(0, finalManifest.getConnectionIdsCount());
-        Assertions.assertTrue(finalManifestRecord.offset() < noMoreWritesRecord.offset());
-        Assertions.assertTrue(
-            partitionRecords.stream().noneMatch(record ->
-                record.offset() > noMoreWritesRecord.offset()
-                    && recordBelongsToWriter(record, writerNodeId)
-            ),
-            "A writer must publish no traffic or manifests after its terminal NoMoreWrites"
-        );
-    }
-
-    private static boolean recordBelongsToWriter(
-        ConsumerRecord<String, byte[]> record,
-        String writerNodeId
-    ) {
-        try {
-            if (CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
-            )) {
-                return writerNodeId.equals(TrafficStream.parseFrom(record.value()).getNodeId());
-            }
-            if (CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureKafkaPublisher.LIVENESS_RECORD_TYPE
-            )) {
-                return writerNodeId.equals(
-                    LivenessSnapshotChunk.parseFrom(record.value()).getWriterNodeId()
-                );
-            }
-            if (CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureKafkaPublisher.NO_MORE_WRITES_RECORD_TYPE
-            )) {
-                var writerHeader = record.headers().lastHeader(
-                    CaptureKafkaPublisher.WRITER_NODE_ID_HEADER
-                );
-                return writerHeader != null && writerNodeId.equals(
-                    new String(writerHeader.value(), java.nio.charset.StandardCharsets.UTF_8)
-                );
-            }
-            return false;
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
     private static Properties readerProperties(String bootstrapServers) {
         var properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
@@ -734,6 +525,71 @@ class KafkaMembershipRebalanceCaptureTest {
         properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         return properties;
+    }
+
+    private static MockProducer<String, byte[]> mockProducer(String topic, int partitionCount) {
+        var leaders = List.of(
+            new Node(0, "broker-0", 9092),
+            new Node(1, "broker-1", 9093)
+        );
+        var partitionInfo = IntStream.range(0, partitionCount)
+            .mapToObj(partition -> {
+                var leader = leaders.get(partition % leaders.size());
+                return new PartitionInfo(
+                    topic,
+                    partition,
+                    leader,
+                    new Node[] { leader },
+                    new Node[] { leader }
+                );
+            })
+            .toList();
+        var cluster = new Cluster(
+            "membership-test",
+            leaders,
+            partitionInfo,
+            Set.of(),
+            Set.of()
+        );
+        var brokerTimestamp = new AtomicLong(1_000);
+        return new MockProducer<>(
+            cluster,
+            true,
+            null,
+            new StringSerializer(),
+            new ByteArraySerializer()
+        ) {
+            @Override
+            public synchronized java.util.concurrent.Future<RecordMetadata> send(
+                ProducerRecord<String, byte[]> record,
+                Callback callback
+            ) {
+                return super.send(record, (metadata, failure) -> {
+                    if (failure != null || metadata == null) {
+                        callback.onCompletion(metadata, failure);
+                        return;
+                    }
+                    callback.onCompletion(
+                        new RecordMetadata(
+                            new TopicPartition(metadata.topic(), metadata.partition()),
+                            metadata.offset(),
+                            0,
+                            brokerTimestamp.getAndIncrement(),
+                            metadata.serializedKeySize(),
+                            metadata.serializedValueSize()
+                        ),
+                        null
+                    );
+                });
+            }
+        };
+    }
+
+    private static RootCaptureContext rootContext() {
+        return new RootCaptureContext(
+            OpenTelemetry.noop(),
+            IContextTracker.DO_NOTHING_TRACKER
+        );
     }
 
     private static void createTopic(String bootstrapServers, String topic) throws Exception {
@@ -761,68 +617,24 @@ class KafkaMembershipRebalanceCaptureTest {
         return properties;
     }
 
-    private static MockProducer<String, byte[]> mockProducer(String topic, int partitionCount) {
-        var leaders = List.of(
-            new Node(0, "broker-0", 9092),
-            new Node(1, "broker-1", 9093)
-        );
-        var partitionInfo = IntStream.range(0, partitionCount)
-            .mapToObj(partition -> {
-                var leader = leaders.get(partition % leaders.size());
-                return new PartitionInfo(
-                    topic,
-                    partition,
-                    leader,
-                    new Node[] { leader },
-                    new Node[] { leader }
-                );
-            })
-            .toList();
-        var cluster = new Cluster(
-            "membership-test",
-            leaders,
-            partitionInfo,
-            java.util.Set.of(),
-            java.util.Set.of()
-        );
-        return new MockProducer<>(
-            cluster,
-            true,
-            null,
-            new StringSerializer(),
-            new ByteArraySerializer()
-        ) {
-            @Override
-            public synchronized java.util.concurrent.Future<RecordMetadata> send(
-                ProducerRecord<String, byte[]> record,
-                Callback callback
-            ) {
-                return super.send(record, (metadata, failure) -> {
-                    if (failure != null || metadata == null) {
-                        callback.onCompletion(metadata, failure);
-                        return;
-                    }
-                    var brokerTimestamp = record.timestamp() != null && record.timestamp() > 0
-                        ? record.timestamp()
-                        : 1L;
-                    callback.onCompletion(
-                        new RecordMetadata(
-                            new TopicPartition(metadata.topic(), metadata.partition()),
-                            metadata.offset(),
-                            0,
-                            brokerTimestamp,
-                            metadata.serializedKeySize(),
-                            metadata.serializedValueSize()
-                        ),
-                        null
-                    );
-                });
-            }
-        };
+    private static void assertNoFailures(FactoryHarness harness) {
+        Assertions.assertNull(harness.captureFailure().get());
+        Assertions.assertNull(harness.unstableFailure().get());
     }
+
+    private static void assertNoFailures(MockFactoryHarness harness) {
+        Assertions.assertNull(harness.captureFailure().get());
+        Assertions.assertNull(harness.unstableFailure().get());
+    }
+
+    private record TrafficRecord(
+        ConsumerRecord<String, byte[]> record,
+        TrafficStream trafficStream
+    ) {}
 
     private record FactoryHarness(
         KafkaCaptureFactory factory,
+        KafkaConsumer<String, byte[]> membershipConsumer,
         AtomicReference<Throwable> captureFailure,
         AtomicReference<Throwable> unstableFailure
     ) implements AutoCloseable {
@@ -844,30 +656,90 @@ class KafkaMembershipRebalanceCaptureTest {
         }
     }
 
-    private static final class BoundPortProxy
-        extends NettyScanningHttpProxy
-        implements AutoCloseable {
-        private boolean stopped;
+    private static final class OpenConnection implements AutoCloseable {
+        private final IChannelConnectionCaptureSerializer<RecordMetadata> capture;
+        private final DefaultEventExecutor eventLoop;
+        private final AtomicReference<Throwable> asynchronousFailure = new AtomicReference<>();
+        private boolean captureClosed;
 
-        private BoundPortProxy(java.util.function.Consumer<Throwable> unstableFailureHandler) {
-            super(0, unstableFailureHandler);
+        private OpenConnection(
+            IChannelConnectionCaptureSerializer<RecordMetadata> capture,
+            DefaultEventExecutor eventLoop
+        ) {
+            this.capture = capture;
+            this.eventLoop = eventLoop;
         }
 
-        private int boundPort() {
-            return ((InetSocketAddress) mainChannel.localAddress()).getPort();
+        static OpenConnection open(
+            KafkaCaptureFactory factory,
+            RootCaptureContext rootContext,
+            String connectionId
+        ) throws Exception {
+            var eventLoop = new DefaultEventExecutor();
+            var connection = new OpenConnection(
+                factory.createOffloader(
+                    rootContext.createConnectionContext(connectionId, "proxy")
+                ),
+                eventLoop
+            );
+            eventLoop.submit(() ->
+                connection.capture.bindToConnectionEventLoop(
+                    eventLoop,
+                    connection.asynchronousFailure::set
+                )
+            ).get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            return connection;
         }
 
-        @Override
-        public void stop() throws InterruptedException {
-            if (!stopped && mainChannel != null) {
-                stopped = true;
-                super.stop();
+        void addReadByte() throws Exception {
+            eventLoop.submit(() -> {
+                var payload = Unpooled.wrappedBuffer(new byte[] { 1 });
+                try {
+                    capture.addReadEvent(Instant.now(), payload);
+                } finally {
+                    payload.release();
+                }
+                return null;
+            }).get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        void addReadByteAndFlush() throws Exception {
+            var publication = eventLoop.submit(() -> {
+                var payload = Unpooled.wrappedBuffer(new byte[] { 1 });
+                try {
+                    capture.addReadEvent(Instant.now(), payload);
+                } finally {
+                    payload.release();
+                }
+                return capture.flushCommitAndResetStream(false);
+            }).get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            publication.get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            Assertions.assertNull(asynchronousFailure.get());
+        }
+
+        void closeCapture() throws Exception {
+            if (captureClosed) {
+                return;
             }
+            captureClosed = true;
+            var publication = eventLoop.submit(() -> {
+                capture.addCloseEvent(Instant.now());
+                return capture.flushCommitAndResetStream(true);
+            }).get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            publication.get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            Assertions.assertNull(asynchronousFailure.get());
         }
 
         @Override
-        public void close() throws InterruptedException {
-            stop();
+        public void close() throws Exception {
+            try {
+                closeCapture();
+            } finally {
+                eventLoop.shutdownGracefully().get(
+                    WAIT_TIMEOUT.toMillis(),
+                    TimeUnit.MILLISECONDS
+                );
+            }
         }
     }
 }
