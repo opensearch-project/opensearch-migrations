@@ -129,9 +129,13 @@ The protocol uses two independent timestamp domains:
   capture-before-forward validation, heartbeat baselines, broker-time expiration, and the
   deterministic source-response boundary used by retry policy.
 
-Kafka pause and resume decisions do not use either timestamp. Target scheduling uses
-`TrafficObservation.ts`, while the capture and retry rules named above use `LogAppendTime`.
-Neither timestamp substitutes for the other.
+Target scheduling uses `TrafficObservation.ts`, while the capture and retry rules named above use
+`LogAppendTime`. Kafka pause and resume are driven by request supply, target-connection-turn state,
+partition-generation cleanup, and lifecycle state. The Kafka source does not compare a timestamp
+with its current read position to decide whether to pause. `LogAppendTime` can still change that
+decision indirectly: crossing a request's deterministic retry boundary resolves that request's
+source-response input and can remove its reason for keeping the partition readable. Neither
+timestamp substitutes for the other.
 
 The proxy also has a local monotonic connection-record interval `F`. `F` is not a third event
 timestamp and is never interpreted by the replayer. The first observation in a nonempty
@@ -145,27 +149,51 @@ record. It creates no empty records, changes no HTTP meaning, and does not use
 `WriterPartitionHeartbeat` to flush connection traffic. [Proxy Capture Protocol §4.2](proxyCaptureProtocol.md#42-publisher-ordering-and-acknowledgement)
 defines the exact proxy algorithm, ordering, acknowledgement, and failure requirements.
 
-Kafka input is demand-driven per partition. The Kafka source owner maintains only whether each
-assigned partition is currently readable or paused. After replay intake applies a poll result, it
-recomputes whether it needs more records from each partition and sends the corresponding state to
-the Kafka source owner.
+Kafka input is demand-driven per partition. The Kafka source owner tracks three independent
+conditions for each assigned partition:
 
-Let `N`, where `N >= 1`, be the configured request-supply target per partition. A partition remains
-readable while either:
+1. replay intake currently requests more records;
+2. no prior local assignment generation for the partition is still cleaning up; and
+3. neither revocation nor shutdown prohibits new intake.
+
+The Kafka consumer may read the partition only while all three conditions permit it. Clearing one
+pause reason cannot clear another.
+
+Let:
+
+- `P` be the configured request-supply target per target Netty event-loop thread, defaulting to
+  `2`;
+- `T` be the target Netty event-loop thread count fixed at replayer startup; and
+- `N = P * T` be the resulting request-supply target for each Kafka partition.
+
+Startup requires `P >= 1` and `T >= 1`.
+
+Replay intake requests records while either:
 
 - fewer than `N` reconstituted requests from that partition remain available for or active in
   target replay; or
 - at least one request from that partition still has an active target connection turn and has not
   yet received its deterministic source-response input for retry policy.
 
-A target request leaves the first count when its connection turn finishes. The second condition
-proactively reads for any still-active target turn because the eventual target result may require
-the source response to decide whether to retry. It ends when replay intake supplies either a
-complete source response for retry, an explicit result that no source response is available to
-that retry decision, or connection-turn completion proves that no later retry decision exists.
-Tuple-only work does not keep a request in either condition. Kafka may return records beyond the
-point at which demand becomes satisfied; replay intake applies the entire returned poll result
-before recomputing demand.
+A target-connection owner sends `ConnectionRequestStarted` when the request actually begins its
+turn on the target connection and `ConnectionRequestFinished` when that request will make no more
+target attempts on the connection. `ConnectionRequestFinished` does not mean that tuple output or
+all processing for the request has finished.
+
+A target request leaves the first count when replay intake accepts `ConnectionRequestFinished`.
+The second condition proactively reads for a target turn that has actually started because the
+eventual target result may require the source response to decide whether to retry. It ends when
+replay intake supplies either a complete source response for retry, an explicit result that no
+source response is available to that retry decision, or accepts `ConnectionRequestFinished`.
+Tuple-only work does not keep a request in either condition. Treating every unfinished request as
+an active target turn would keep a steady partition readable continuously, so only
+`ConnectionRequestStarted` establishes the second condition.
+
+Replay intake recomputes demand after every input that can change these conditions: a poll result,
+including an empty result; `ConnectionRequestStarted`; `ConnectionRequestFinished`; resolution of
+a retry source-response input; a finalized-archive partition end; cancellation; or
+partition-generation cleanup. Kafka may return records beyond the point at which demand becomes
+satisfied; replay intake applies the entire returned poll result before recomputing demand.
 The Kafka source owner continues the polls required for group membership while every partition is
 paused.
 
@@ -289,9 +317,10 @@ For every archived record, the exporter preserves:
 - the record's position within its source partition.
 
 The archive also preserves the protocol/build version, source partition count, fixed exported
-offset range for every partition, capture parameters `E` and `S`, and integrity information that
-detects omitted, duplicated, reordered, or corrupted records. Export reads exactly the recorded
-partition ranges. It does not use a timeout as an implicit successful end boundary.
+offset range for every partition, capture parameters `E` and `S`, an explicit `archiveEndMode`,
+and integrity information that detects omitted, duplicated, reordered, or corrupted records.
+Export reads exactly the recorded partition ranges. It does not use a timeout as an implicit
+successful end boundary.
 
 Import creates one Kafka application record for every archived record, writes it to the archived
 partition, preserves partition-local order, and restores its binary key, value, and headers.
@@ -316,8 +345,24 @@ The timestamp policy has two modes:
   the source-response retry boundary, but never for the original capture run's expiration proof.
 
 No mode may use newly assigned import-broker time to perform the original capture run's `E + S`
-expiration proof. An archive ending at an open writer or incomplete connection is not completion
-evidence merely because the file ended.
+expiration proof.
+
+`archiveEndMode` distinguishes two uses:
+
+- **`finalized`** certifies that capture producers were stopped or quiesced before the fixed
+  partition end offsets were selected. After replay intake processes a partition's declared final
+  record, the import workflow supplies an explicit partition-end input. That input is not a Kafka
+  record, has no Kafka offset or timestamp, and cannot by itself advance a commit. It resolves
+  unresolved retry source-response input as unavailable and expires incomplete request and
+  source-response assembly known at that boundary. Already-reconstituted target and tuple work
+  continues normally, and its supporting Kafka records remain uncommitted until that work
+  finishes.
+- **`range`** represents an arbitrary finite range from a capture that may continue outside the
+  archive. End of the range is not completion evidence. Open reconstruction and retry waits may
+  remain unresolved without later records.
+
+The importer and replayer require the mode explicitly; there is no implicit default. Reprocessing
+the same archive delivers the same partition-end inputs at the same declared offsets.
 
 ## 3. Proxy group membership and connection routing
 
@@ -977,7 +1022,7 @@ The source response used by retry policy has a finite, deterministic Kafka-recor
 
 - `B` be the `LogAppendTime` of the Kafka record containing the final `TrafficObservation` needed
   to reconstitute the complete source request; and
-- `W` be the configured source-response retry window.
+- `W` be the positive configured source-response retry window, defaulting to five seconds.
 
 Replay intake examines every later record on that partition in increasing offset order. If the
 complete captured source response is reconstituted before the boundary is crossed, replay intake
@@ -998,6 +1043,20 @@ same `TrafficStream` as the request-completing observation is applied before any
 record can cross the boundary and is therefore available to retry policy. `W` does not compare
 `TrafficObservation.ts` values and does not exclude a same-record response based on source elapsed
 time.
+
+`W` is a capture Kafka broker-time window used only to decide whether retry policy may consult the
+captured source response. It is not replay wall-clock waiting and does not tell the Kafka consumer
+how far to read. The five-second default does not conflict with the proxy's five-second `F`
+default: `F` limits how long observations may enter one proxy-local record before detachment,
+whereas `W` compares the `LogAppendTime` values of separate Kafka records. A response in the
+request-completing record remains available, and the first later record crossing the boundary may
+arrive more than five source seconds after request completion because of record granularity,
+publication latency, heartbeat cadence, and permitted skew.
+
+`W` is also independent of the 10-second heartbeat interval `H` and 30-second writer-expiration
+interval `E`. A heartbeat may be the first later record that crosses `B + W`, so `H` can affect how
+coarsely the five-second boundary is observed on an otherwise quiet partition, but no correctness
+rule requires an inequality between `W`, `H`, and `E`.
 
 The proxy interval `F` limits which observations may share the request-bearing record. It therefore
 limits record coalescing across long periods of connection activity. The effective elapsed time
@@ -1367,13 +1426,13 @@ real-Kafka tests.
 | Clean connection retirement | Terminal observation is last; removal waits for acknowledgements | Producer retry and ambiguous-send tests |
 | Multi-observation `TrafficStream` | Separate observation processing; whole-record commit only after all finish | Testcontainers redelivery of an uncommitted multi-observation record |
 | Connection expiration | Agreed `E` and `S`; heartbeat-baseline `E + S`; first-traffic-record fallback `E + 2S`; expire only known accumulators; fresh reconstruction uses TrafficStream continuity metadata and accepts its first connection sequence as the local baseline; an observed backward timestamp movement greater than `S` terminates replay before that record authorizes expiration or commit | Testcontainers restart or expiration in the middle of a request and response, restart after the preceding heartbeat was committed, multi-writer partition progress, leadership changes, configuration agreement, delayed observations, and a higher-offset record whose timestamp is more than `S` below the partition's greatest observed timestamp |
-| Kafka input demand and target replay time | Each partition remains readable while its reconstituted-request supply is below `N` or one of its active target turns still has unresolved source-response input for retry; Kafka pause/resume does not use time; `TrafficObservation.ts` independently schedules target work; `LogAppendTime` supplies the irreversible retry boundary | Testcontainers per-partition pause/resume, poll-batch overshoot, mixed-record requests, overdue target schedules, source response before and after the boundary, backward timestamps after the boundary, and target-permit release during a source-response wait |
+| Kafka input demand and target replay time | With `N = P * T`, where `P` defaults to two requests per target Netty event-loop thread and `T` is fixed at startup, each partition requests records while its reconstituted-request supply is below `N` or one of its started target turns still has unresolved source-response input for retry; `ConnectionRequestStarted` and `ConnectionRequestFinished` make that turn state explicit; demand, generation-cleanup, and lifecycle pause reasons are independent; `TrafficObservation.ts` schedules target work; `LogAppendTime` resolves the irreversible retry boundary and can thereby change demand | Testcontainers per-partition pause/resume, every demand-recompute trigger including empty polls, independent pause reasons, poll-batch overshoot, mixed-record requests, overdue target schedules, source response before and after the boundary, backward timestamps after the boundary, and target-permit release during a source-response wait |
 | Writer-partition publisher retirement | New connections are gated off; every connection closes and its observations are acknowledged; the registry becomes empty; heartbeats quiesce; remaining sends finish; the lane retires without a terminal Kafka record; the identity never resumes | Deterministic lane-state tests and Testcontainers producer retry, callback quiescence, rapid-rebalance, and clean-shutdown tests |
 | Replayer reassignment | Cancel and clean one partition generation before processing its successor; unrelated partitions proceed | Testcontainers partition transfer during target and tuple operations |
 | Event-loop death | Fatal signal and no ownership transfer | Process-level fault injection; live container restart |
 | Process-wide capture failure policy | Required Kafka publication failure or capture compromise causes immediate `fail-closed` termination or irreversible `fail-open`; managed fail-open forwards no uncaptured source traffic until the controller durably records incomplete capture and acknowledges that exact activation; membership events do neither after startup | Producer failure and ambiguous-outcome fault injection in both modes, lost and duplicate compromise notifications, controller failover before and after durable recording, and acknowledgement timeout |
 | Protocol violations | Immediate `Retain`, intake pause, bounded drain of admitted target/tuple work, and process termination | Corrupt and out-of-order Kafka records with in-flight target and tuple work; redelivery after exit |
-| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, exact application-record boundaries, `E`, `S`, checksums, and timestamp mode | Export/import round trip with periodically flushed traffic records, heartbeats, multi-observation records, multiple partitions, corruption, and missing-record injection |
+| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, exact application-record boundaries, `E`, `S`, checksums, timestamp mode, and explicit finalized-versus-range end mode | Export/import round trip with periodically flushed traffic records, heartbeats, multi-observation records, multiple partitions, corruption, missing-record injection, deterministic finalized partition-end inputs, and unresolved arbitrary-range endings |
 
 The full acceptance suite must also prove:
 
@@ -1397,14 +1456,19 @@ The full acceptance suite must also prove:
   partition;
 - after restart without the preceding heartbeat, the first traffic record plus the `E + 2S` fallback
   safely establishes later expiration;
-- a partition remains readable whenever it has fewer than `N` reconstituted requests available for
-  or active in target replay;
+- `N` equals the configured requests per target Netty event-loop thread multiplied by the fixed
+  event-loop thread count, and a partition requests records whenever it has fewer than `N`
+  reconstituted requests available for or active in target replay;
 - every nonempty connection record has one fixed `F` deadline, continuous activity does not extend
   it, an observation at or after the deadline enters only a successor record, a scheduled callback
   publishes an otherwise-idle record, and inactive connections create no empty records;
-- a request with an active target connection turn and unresolved retry source-response input keeps
+- `ConnectionRequestStarted` and `ConnectionRequestFinished` cause demand to be recomputed, and a
+  request with an active target connection turn and unresolved retry source-response input keeps
   its partition readable until the complete response, connection close or expiration, the first
   higher-offset record crossing `B + W`, or terminal connection-turn completion settles that need;
+- demand is also recomputed after empty and nonempty poll results, retry-input resolution,
+  cancellation, and generation cleanup, and clearing demand pause never clears generation-cleanup
+  or lifecycle pause;
 - crossing `B + W` closes the retry window before the crossing record's payload is applied, and a
   later lower timestamp or complete response cannot change the retry decision;
 - a complete response in the request-completing Kafka record is available to retry policy
@@ -1427,7 +1491,9 @@ The full acceptance suite must also prove:
 - a `preserve` archive replay produces the same protocol decisions as the original partition logs
   while using newly assigned imported offsets for commits;
 - `rebase-without-expiration` never applies broker-time expiration; and
-- archive end-of-file alone never completes an open writer or incomplete connection.
+- a `finalized` archive supplies deterministic partition-end inputs that resolve only the
+  documented finite-capture state, while a `range` archive's end-of-file never completes an open
+  writer, incomplete connection, or retry wait.
 
 ## 16. Companion documents
 

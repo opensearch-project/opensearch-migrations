@@ -472,6 +472,16 @@ indefinitely for a lower sequence. Truly incidental packet diagnostics that cann
 request completion, expiration, source forwarding, or target replay are outside this sequence and
 may be best effort.
 
+The acknowledgement wait is intentionally stronger than producer submission ordering or Kafka
+producer idempotence. Those features preserve the order of records that Kafka successfully
+appends, but they do not guarantee that every earlier application record succeeds. If record N
+fails or has an ambiguous outcome after record N+1 has already been submitted, Kafka may append
+N+1 without N. The replayer would then encounter a permanent
+`connectionObservationSequence` gap and correctly treat the retained record as a protocol
+violation on every restart. Waiting for N's acknowledgement prevents the proxy from submitting
+N+1 in that situation. If N fails or is ambiguous, the proxy enters the compromised workflow and
+never submits the successor record for that connection.
+
 `CloseObservation` is the final sequence value for a connection. `DisconnectObservation` and
 `ConnectionExceptionObservation` are non-terminal. Once the replayer consumes
 `CloseObservation`, any later `TrafficObservation` for that connection is a protocol violation,
@@ -1240,6 +1250,8 @@ addendum also specifies:
 - A late deadline callback records timer lateness and immediately detaches and enqueues the record
   without changing its contents or sequence. If the eventual write succeeds, timer lateness alone
   does not compromise capture.
+- With record N detached and record N+1 already waiting behind it, inject a failed and an ambiguous
+  outcome for N and verify that N+1 is never passed to `KafkaProducer.send()`.
 - A local serialization, finalization, timer, enqueue, lifecycle-chain, or asynchronous publication
   failure is observed by the process-wide failure path even when no caller awaits the returned
   future.

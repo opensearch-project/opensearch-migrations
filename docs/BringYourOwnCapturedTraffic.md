@@ -41,7 +41,8 @@ The exporter must preserve every field that can affect replay behavior. The arch
 - every Kafka header, preserving duplicate headers and header order;
 - the order of records within each source partition;
 - the proxy heartbeat-expiration interval `E`;
-- the permitted Kafka `LogAppendTime` backward-movement allowance `S`; and
+- the permitted Kafka `LogAppendTime` backward-movement allowance `S`;
+- the explicit archive end mode, `finalized` or `range`; and
 - integrity information that detects omitted, duplicated, reordered, or corrupted archive records.
 
 Source Kafka offsets are retained as archive validation and diagnostic data. Importing creates a
@@ -60,6 +61,16 @@ archive format defines the endpoint convention unambiguously.
 
 Reaching the current end of a Kafka partition is not protocol completion evidence. The selected end
 offsets define the export boundary.
+
+The archive also declares one end mode:
+
+- `finalized` means that all capture producers were stopped or quiesced before the fixed end
+  offsets were selected. The archive is intended to represent the finite end of that capture.
+- `range` means that the fixed offsets delimit an arbitrary range from a capture that may continue
+  outside the archive.
+
+The exporter must not infer `finalized` from a quiet topic, a timeout, or the current partition end.
+The workflow or operator must certify it explicitly. The format has no implicit default.
 
 The exporter must not silently skip a record it cannot decode. The value is archived as raw bytes;
 protocol decoding and validation can occur separately.
@@ -130,9 +141,9 @@ expiration under the original `E + S` proof, because the rebased values do not d
 capture timeline. The destination timestamps drive the source-response boundary used by retry
 policy, but not source-run expiration.
 
-Choosing this mode also accepts that an archive ending with an incomplete connection and no
-terminal `CloseObservation` may remain unresolved indefinitely. End of archive is not completion
-evidence.
+For a `range` archive, choosing this mode also accepts that an archive ending with an incomplete
+connection and no terminal `CloseObservation` may remain unresolved indefinitely. End of a range
+is not completion evidence. A `finalized` archive uses the explicit partition-end rule below.
 
 The selected timestamp mode is immutable for one imported capture and is passed explicitly to the
 replayer. Proxy and replayer configuration must agree about the applicable protocol parameters.
@@ -147,7 +158,23 @@ record-accounting paths used for live capture:
 - record headers are preserved exactly, but they do not identify the capture-record payload type;
 - `WriterPartitionHeartbeat` retains its protocol meaning;
 - records may be replayed more than once after restart or reassignment; and
-- end of archive does not complete unresolved HTTP assembly or other work.
+- for a `range` archive, end of archive does not complete unresolved HTTP assembly or other work.
+
+A `finalized` archive has an explicit finite-input rule:
+
+1. After replay intake processes the declared final Kafka record for a partition, the import
+   workflow supplies one partition-end input for that partition.
+2. The partition-end input is not a Kafka record. It has no Kafka offset or timestamp and cannot
+   itself make a Kafka record committable.
+3. It resolves unresolved source-response input for retry policy as unavailable.
+4. It expires incomplete source-request and source-response assembly known at that boundary.
+5. Target replay and tuple output for already-reconstituted requests continue normally.
+6. Every Kafka record remains associated with its unfinished request, tuple, or cleanup work until
+   that work reaches its ordinary final state.
+
+The same finalized archive produces the same partition-end inputs after restart. A `range` archive
+does not produce them; its final request, response, or retry wait may remain unresolved without
+later records.
 
 The importer preserves records exactly rather than recreating the proxy's periodic connection
 flush schedule. A request or response split across archived records reconstructs from the same
@@ -169,6 +196,7 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
   kafka: z.string().optional(),
   kafkaTopic: z.string().optional(),
   sourceLabel: z.string(),
+  archiveEndMode: z.enum(["finalized", "range"]),
   timestampMode: z
       .enum(["preserve", "rebase-without-expiration"])
       .default("preserve")
@@ -182,7 +210,7 @@ created it. Names for live and imported sources must not collide.
 For an imported source:
 
 1. Reconcile the `CapturedTraffic` resource and destination topic.
-2. Reject a changed archive identity or timestamp mode for an existing load.
+2. Reject a changed archive identity, end mode, or timestamp mode for an existing load.
 3. Validate the archive identity and structural metadata.
 4. Stream, validate, and publish the destination records.
 5. Record load statistics and archive identity.
@@ -239,3 +267,9 @@ The following tests are required:
     retry policy.
 12. Export and import preserve the complete `CaptureRecord` envelope and each of its three recognized
     `payload` cases without relying on Kafka headers for record-type discrimination.
+13. A `finalized` archive produces one deterministic partition-end input after each partition's
+    declared final record. That input resolves retry waiting and incomplete assembly without
+    bypassing target replay, tuple durability, or whole-record accounting.
+14. A `range` archive produces no partition-end input. End of file alone does not resolve an open
+    reconstruction or retry wait.
+15. Import rejects a missing, unsupported, or changed `archiveEndMode`.
