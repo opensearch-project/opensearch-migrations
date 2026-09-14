@@ -1,6 +1,6 @@
 # Replayer Processing and Commit Architecture
 
-**Status:** medium-level design contract with one unresolved backpressure decision
+**Status:** medium-level design contract; implementation conformance is incomplete
 
 **Date:** 2026-09-14
 
@@ -13,10 +13,8 @@ replay and tuple output are required, and when a Kafka record may be committed. 
 defines the ownership, ordering, asynchronous-completion, cancellation, and accounting structure
 that makes those behaviors implementable and provable.
 
-Before implementation begins, §8 must settle which request milestone releases a request from the
-global source-time progress floor and what read-ahead relationship is sufficient to guarantee that
-replay intake can reach a record proving heartbeat expiration. This document does not choose that
-policy yet.
+Section 8 separates Kafka-record input progress from source-event replay timing and defines when a
+request stops constraining normal Kafka read-ahead.
 
 ## 1. Goals and boundaries
 
@@ -92,7 +90,7 @@ These are logical ownership domains, not four required threads.
 flowchart LR
     Kafka["Kafka source owner<br/>consumer, assignments, commits"]
     Intake["Replay-intake owner<br/>decode, HTTP assembly, liveness,<br/>record completion"]
-    Actor["Target-connection owner<br/>channel, request registry, and<br/>two ordered queues"]
+    Actor["Connection owner<br/>channel, request registry, and<br/>two ordered queues"]
     Request["Request-replay owner<br/>preparation, target attempts,<br/>source response, tuple"]
     Target["Target server"]
     Tuple["Tuple writer"]
@@ -112,12 +110,12 @@ flowchart LR
 
 The captured opening observation establishes source-side connection state but does not create a
 target connection by itself. The first complete reconstituted request creates the
-target-connection owner if one does not already exist. Reconstituted requests and a captured close
-enter that owner's ordered queues. Source-response messages use the target-connection owner only to
+connection owner if one does not already exist. Reconstituted requests and a captured close
+enter that owner's ordered queues. Source-response messages use the connection owner only to
 locate the request-replay owner; they do not enter either queue or wait behind target execution.
 
 The request-replay owner is a distinct logical owner because it has its own exhaustive lifecycle.
-It executes on the same Netty event loop as its target-connection owner and therefore adds no thread,
+It executes on the same Netty event loop as its connection owner and therefore adds no thread,
 executor, or cross-thread synchronization.
 
 Request transformation runs on the same Netty event loop as its request-replay owner. The tuple
@@ -146,7 +144,7 @@ returns as another input.
 Another thread may send an immutable message to an owner, but only the owner may change its own
 mutable state.
 
-Construction of a target-connection owner may occur off its selected event loop using only immutable
+Construction of a connection owner may occur off its selected event loop using only immutable
 identity and configuration. Runtime code first uses that owner through a task submitted to the
 selected event loop. All access to its mutable runtime state occurs on that event loop.
 Owner-affinity assertions fail immediately if code violates this rule.
@@ -158,12 +156,12 @@ request is finished.
 
 **Connection-turn completion** means that the request will make no more target attempts on this
 connection and has released resources needed only by those attempts. The request-replay owner
-reports this milestone to the target-connection owner. The target-connection owner may then begin
+reports this milestone to the connection owner. The connection owner may then begin
 the next ready request.
 
 **Request-processing completion** means that the request's terminal target result, captured
 source-response result, and durable tuple output are all complete. The request-replay owner reports
-this milestone to the target-connection owner. That owner removes the request from its registry and
+this milestone to the connection owner. That owner removes the request from its registry and
 forwards the completion to replay intake. Replay intake then releases the request's Kafka-record
 associations.
 
@@ -173,13 +171,13 @@ The normal paths are:
 request admitted
     -> preparation and target attempts
     -> connection turn finished
-    -> target-connection owner may advance
+    -> connection owner may advance
 
 terminal target result + source-response result
     -> start one tuple write
     -> tuple becomes durable
     -> request processing finished
-    -> target-connection owner removes the request
+    -> connection owner removes the request
     -> replay intake releases the request's Kafka-record associations
 ```
 
@@ -211,13 +209,13 @@ Replay intake is the sole producer of source-derived target commands for a captu
 sends reconstituted requests and the captured close in their source order. Each command carries its
 captured ordinal and replay time.
 
-The target-connection owner maintains two queues:
+The connection owner maintains two queues:
 
 1. The **admission queue** holds requests and the captured close in captured order.
 2. The **execution queue** holds commands that have reached their preparation point but must still
    wait for their captured execution time.
 
-For a request scheduled to begin at time `T`, the target-connection owner removes the request from
+For a request scheduled to begin at time `T`, the connection owner removes the request from
 the admission queue at approximately `T - preparationLead`, asks its request-replay owner to begin
 transformation, and adds a waiting entry to the execution queue. `preparationLead` is an
 implementation parameter whose initial value is one second. The owner can then schedule
@@ -225,24 +223,24 @@ preparation for the next admission-queue entry without waiting for the first tra
 finish.
 
 The request-replay owner receives the transformation result and reports an immutable preparation
-result to the target-connection owner. Only the target-connection owner changes the corresponding
+result to the connection owner. Only the connection owner changes the corresponding
 execution-queue entry from waiting to ready.
 
 The close command requires no transformation. When it reaches the admission-queue head, the
-target-connection owner
+connection owner
 moves it to the execution queue already prepared. At its replay time, and after every earlier
-target turn has finished, the target-connection owner closes the target channel. The captured open is source-side
+target turn has finished, the connection owner closes the target channel. The captured open is source-side
 state and necessarily precedes a complete request; request and close ordering uses the same
 captured ordinal and replay-time rules without inventing a separate close path.
 
-At time `T`, the target-connection owner considers only the execution-queue head. It begins that
+At time `T`, the connection owner considers only the execution-queue head. It begins that
 request's target turn when the head is prepared and the target connection is available. Immediately
 before the first target send, it obtains one target-concurrency permit. The permit remains with the
 request through its target turn and is released with connection-turn completion. If preparation or
 permit acquisition is still pending, the Netty event loop does not block; the owner waits for the
 corresponding result input. A later prepared entry cannot pass the head.
 
-The target-connection owner has separate scheduling needs for moving the next admission entry into
+The connection owner has separate scheduling needs for moving the next admission entry into
 preparation and for starting the execution-queue head. If a scheduled time has already passed when
 an entry becomes eligible, the owner acts immediately.
 
@@ -252,7 +250,7 @@ may be added if measurement shows that transformed requests consume too much mem
 part of the current correctness model. Per-packet pacing and retries after a target turn starts
 remain part of the request-replay and target-send path.
 
-The target-connection owner advances to the next execution-queue entry after connection-turn
+The connection owner advances to the next execution-queue entry after connection-turn
 completion. It does not wait for tuple durability or request-processing completion.
 
 The first request observed after the replayer starts from a nonzero Kafka cursor may have a nonzero
@@ -281,9 +279,9 @@ A complete source response and a later connection close or expiration are not co
 keepalive connection may produce a complete response and remain open until it later closes or
 expires. The later connection event does not undo the complete response.
 
-Replay intake sends source-response results to the target-connection owner for immediate routing to
+Replay intake sends source-response results to the connection owner for immediate routing to
 the matching request-replay owner. These results do not enter the admission or execution queue.
-The target-connection owner does not interpret or accumulate the response; it only uses its request
+The connection owner does not interpret or accumulate the response; it only uses its request
 registry to route
 the typed message.
 
@@ -293,15 +291,15 @@ without waiting for the close event to reach the head of either connection queue
 
 Broker-time expiration ends the current process-local reconstruction for every affected connection
 known to replay intake. Replay intake removes that reconstruction from its active source-side
-registry. If a target-connection owner exists, replay intake notifies it that broker-time
+registry. If a connection owner exists, replay intake notifies it that broker-time
 expiration ended the current reconstruction after sending any resulting
-`SourceResponseIncomplete` messages. The target-connection owner admits no later input from that expired
+`SourceResponseIncomplete` messages. The connection owner admits no later input from that expired
 reconstruction, lets every already-admitted complete request and tuple finish, closes its target
 channel after its target turns finish, and removes itself after its request registry becomes
 empty.
 
 A later observation for the same captured connection identity starts new reconstruction state. If
-that later state produces a complete request, it creates a new target-connection owner and replays
+that later state produces a complete request, it creates a new connection owner and replays
 normally. This is consistent with the accepted possibility that Kafka contains a complete request
 that never reached the source. If the later state remains incomplete, a later broker-time horizon
 expires it independently. By contrast, any observation after an explicit `CloseObservation` is a
@@ -355,7 +353,7 @@ owner without scanning unrelated work.
 Expected outcomes are represented by sealed types or equivalently exhaustive value types. Examples
 include:
 
-- request accepted by its target-connection owner, or the partition generation cancelled before
+- request accepted by its connection owner, or the partition generation cancelled before
   acceptance;
 - source response complete or incomplete;
 - target response obtained or no response obtained;
@@ -485,13 +483,13 @@ Replay intake:
 - validates that each connection's `connectionObservationSequence` follows the protocol's required
   progression;
 - owns all incomplete source-request and source-response assembly;
-- processes `WriterPartitionHeartbeat` and `NoMoreWrites` records;
+- processes `WriterPartitionHeartbeat` records;
 - applies broker-time expiration after missed heartbeats;
 - associates processing with the Kafka records that supplied it;
-- creates and registers a target-connection owner when it reconstitutes the first complete request
-  for a connection that has no current target-connection owner;
-- routes later source-derived inputs to that registered target-connection owner; and
-- receives request-processing completion forwarded by target-connection owners.
+- creates and registers a connection owner when it reconstitutes the first complete request
+  for a connection that has no current connection owner;
+- routes later source-derived inputs to that registered connection owner; and
+- receives request-processing completion forwarded by connection owners.
 
 Only `CloseObservation` terminates a captured connection in the capture protocol.
 `ConnectionExceptionObservation` is diagnostic and does not reset or terminate source
@@ -505,10 +503,19 @@ It creates no downstream request, connection, or tuple work. After replay intake
 update, a Kafka record containing only `WriterPartitionHeartbeat` has no unfinished association and
 follows the immediate commit-eligibility rule in §6.1.
 
-When replay intake has no heartbeat baseline for a `(writerNodeId, partition)`, it accepts the first
-`WriterPartitionHeartbeat` encountered for that key. Subsequent heartbeats update the baseline only
-when they satisfy the configured `E` rule. Accepting the first heartbeat unconditionally is
-conservative: it may delay expiration but cannot authorize expiration earlier.
+When replay intake has no broker-time state for a `(writerNodeId, partition)`, the first non-probe
+Kafka record encountered for that key establishes its process-local starting point:
+
+- If the record is `WriterPartitionHeartbeat`, replay intake accepts its `LogAppendTime` as the
+  process-local heartbeat baseline used by the ordinary `E + S` rule.
+- If the record is `TrafficStream`, replay intake records its `LogAppendTime` as `T` and applies the
+  top-level design's conservative `E + 2S` fallback. A later heartbeat replaces that fallback with
+  its exact `LogAppendTime`.
+
+Subsequent heartbeats update an exact heartbeat baseline only when they satisfy the configured `E`
+rule. Accepting the first encountered heartbeat unconditionally is conservative: if the proxy did
+not accept that heartbeat, using its later timestamp can delay expiration but cannot authorize
+expiration earlier.
 
 `WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Replay intake does not derive
 expiration authority from it; the replayer uses its separately configured `E` and `S` values.
@@ -519,19 +526,27 @@ Ending that incomplete assembly allows its associated Kafka-record processing to
 When a source response becomes complete, replay intake sends `SourceResponseComplete` for the
 reconstituted request. When a connection close or expiration ends an incomplete source response,
 replay intake sends `SourceResponseIncomplete`. No partial source-response bytes are represented
-as a complete response. The target-connection owner routes either result immediately to the matching
+as a complete response. The connection owner routes either result immediately to the matching
 request-replay owner without placing it in a connection-order queue.
 
 Broker-time expiration closes and releases only the current process-local reconstruction state
 known to replay intake. It does not permanently retire the writer, partition, or connection
 identity. A later observation begins fresh source-reconstruction state, exactly as it would if the
-replayer had restarted at that observation.
+replayer had restarted at that observation. Replay intake does not reuse the expired
+reconstruction's heartbeat baseline for that fresh state. The first later traffic record supplies a
+new `T` for the conservative `E + 2S` fallback; a heartbeat encountered first supplies the new
+process-local heartbeat baseline.
 
 ### 5.3 Heartbeat expiration
 
 `WriterPartitionHeartbeat` contains no connection identities and never completes, omits, reopens,
 or retires a connection. Replay intake records the accepted heartbeat `LogAppendTime` for its
 `(writerNodeId, partition)`.
+
+Replay intake also tracks the greatest `LogAppendTime` observed for each partition. Before applying
+a record at a higher offset, it verifies that the record timestamp is not more than `S` below that
+greatest value. A larger backward movement directly violates the configured broker-time bound and
+is process-fatal; the violating record does not authorize expiration or commit.
 
 When the broker-time proof in the top-level protocol establishes that the writer has missed its
 heartbeat interval, replay intake ends the current reconstruction for each connection it knows for
@@ -559,7 +574,7 @@ that depends on them. A single record may therefore be associated with:
 - an incomplete request and a complete earlier request;
 - source-response assembly for one request and target replay for another;
 - a heartbeat baseline update; or
-- connection or writer terminal processing.
+- terminal connection processing.
 
 The record is closed to new associations only after every observation in it has been applied.
 When applying the record creates no unfinished association, the closed record is immediately
@@ -602,7 +617,7 @@ When a record is closed to new associations and none remain unfinished, its trac
 one immutable commit request to the Kafka source owner.
 
 Replay intake is the sole authority that decides that the record has completed all required
-processing. Target-connection owners, request-replay owners, and the tuple writer only return the
+processing. Connection owners, request-replay owners, and the tuple writer only return the
 completion evidence that replay intake was waiting for.
 
 The Kafka source owner performs the Kafka operation because it owns the consumer. After required
@@ -640,18 +655,18 @@ advance past offset 40.
 ### 7.1 Connection assignment
 
 When replay intake reconstitutes the first complete request for a captured connection that has no
-current target-connection owner:
+current connection owner:
 
 1. it selects a Netty event loop through the configured connection-pool policy;
-2. it constructs the target-connection owner from immutable identity and configuration;
+2. it constructs the connection owner from immutable identity and configuration;
 3. it submits the owner and the reconstituted request to the selected event loop; and
 4. it stores an immutable reference used to enqueue every later message for that connection.
 
-The first complete request creates the target-connection owner regardless of whether replay intake observed the
+The first complete request creates the connection owner regardless of whether replay intake observed the
 connection's opening observation in this process. This preserves the existing distinction between
 capture ordinals and process-local replay ordinals after restart.
 
-The target-connection owner owns a registry of the request-replay owners created for that
+The connection owner owns a registry of the request-replay owners created for that
 connection. The registry is used only on that owner's Netty event loop. It allows the owner to route a
 source-response result to the matching request without placing that result in either ordered
 connection queue. It removes a request from this registry only after request-processing completion,
@@ -663,7 +678,7 @@ completion.
 
 ### 7.2 Admission, preparation, and target execution
 
-Replay intake sends reconstituted-request and close commands to the target-connection owner in
+Replay intake sends reconstituted-request and close commands to the connection owner in
 captured order. On its event loop, the owner:
 
 1. appends each command to its admission queue;
@@ -676,14 +691,14 @@ captured order. On its event loop, the owner:
 
 Transformation results may return out of order. They can only update their existing
 execution-queue entries; they cannot change queue order. If the head is not prepared at its
-captured execution time, the event loop remains free and the target-connection owner resumes the
+captured execution time, the event loop remains free and the connection owner resumes the
 decision when the preparation result arrives.
 
-Only one request owns the target-connection turn at a time. The target-connection owner releases
+Only one request owns the target-connection turn at a time. The connection owner releases
 that turn after the request-replay owner reports connection-turn completion. Source-response and
 tuple work for an earlier request may remain active while a later request uses the connection.
 
-The target-connection owner obtains the target-concurrency permit only for the prepared
+The connection owner obtains the target-concurrency permit only for the prepared
 execution-queue head, immediately before its first target send. It never obtains permits for
 requests waiting behind the head.
 
@@ -704,7 +719,7 @@ It does not own:
 
 - source HTTP accumulators;
 - Kafka consumer state;
-- the target-connection owner;
+- the connection owner;
 - a whole Kafka record; or
 - Kafka commit policy.
 
@@ -719,8 +734,8 @@ It emits two independent results:
 2. exactly one request-processing completion after its tuple is durable and request-specific
    resources that remained after the target turn are released.
 
-The first result goes to the target-connection owner and allows it to advance its execution queue.
-The second also goes to the target-connection owner. That owner removes the request from its
+The first result goes to the connection owner and allows it to advance its execution queue.
+The second also goes to the connection owner. That owner removes the request from its
 registry and forwards the result to replay intake, allowing replay intake to finish the request's
 Kafka-record associations. The first result never stands in for the second.
 
@@ -777,15 +792,15 @@ request-replay owner determines that tuple inputs are available
     -> the required link delivers tuple-durable to the request-replay owner
     -> the request-replay owner releases request-specific resources
     -> emits one request-processing-finished result
-    -> the required link delivers it to the target-connection owner
-    -> the target-connection owner removes the request from its registry
+    -> the required link delivers it to the connection owner
+    -> the connection owner removes the request from its registry
     -> the required link forwards request-processing-finished to replay intake
 ```
 
 Starting tuple output and reporting request-processing completion are different steps. The first
 starts one logical output operation whose writer may make many physical attempts. The second occurs
 only after durable output and request-specific cleanup have completed. It passes through the
-target-connection owner so that the owner and replay intake cannot disagree about whether the
+connection owner so that the owner and replay intake cannot disagree about whether the
 request still exists. Neither result is implied by connection-turn completion.
 
 The request-replay owner retains the state needed to finish this chain until the required next
@@ -795,9 +810,22 @@ owner accepts each result. It never calls Kafka commit code.
 
 The replayer retains three distinct backpressure controls:
 
-1. **Source-time read-ahead.** The global minimum replay progress limits how far ahead Kafka input
-   may run relative to target replay. The Kafka source owner implements the stop by pausing normal
-   record delivery and continues group-maintenance polls while paused.
+1. **Kafka-time read-ahead.** The Kafka source owner measures input progress with each Kafka
+   record's `LogAppendTime`. `TrafficObservation.ts` never controls Kafka pause, resume, or
+   read-ahead. For a reconstituted request, its Kafka input time is the greatest `LogAppendTime`
+   among all Kafka records whose observations were required to reconstitute that request. This is
+   the time, in the Kafka consumer's time domain, by which all captured request data had become
+   available in the Kafka log. If one Kafka record contributes to several requests, its timestamp
+   participates independently in each request's Kafka input time.
+
+   The normal Kafka read-ahead floor is the earliest Kafka input time among reconstituted requests
+   whose first target send has not yet been issued. The configured read-ahead allowance is measured
+   from that floor. When no such request exists, request-based read-ahead imposes no pause. Issuing
+   a request's first target send removes that request from this calculation. Target response
+   handling, retries, source-response accumulation, tuple output, and Kafka commit continue
+   independently and do not reintroduce that request into the read-ahead calculation. The Kafka
+   source owner implements the stop by pausing normal record delivery and continues
+   group-maintenance polls while paused.
 2. **Target request-count limit.** The configured `--max-concurrent-requests` value is implemented
    by target-concurrency permits acquired immediately before a prepared head request is sent.
 3. **Partition-generation pause.** Kafka pauses a newly assigned partition while cleanup from its
@@ -805,17 +833,32 @@ The replayer retains three distinct backpressure controls:
 
 These controls solve different problems and do not replace one another.
 
-The exact interaction between the source-time progress floor and heartbeat expiration is
-unresolved. A request whose progress token remains active until full request-processing completion
-may need a later broker-time record before its source response can expire. If that request also
-pins the source-time floor, a finite read-ahead window can prevent replay intake from reaching the
-record that would release it. Comparing the read-ahead window only with the heartbeat publication
-interval does not resolve this problem and also compares source event time with broker time.
+`TrafficObservation.ts` remains the source event time used by the time shifter and connection owner
+to schedule the target send. If that scheduled time has already passed when the request becomes
+ready, the connection owner acts immediately. The request's Kafka-time read-ahead contribution and
+its source-time target schedule are separate values.
 
-Before implementation, the design must choose which request milestone releases the source-time
-progress constraint and prove that the resulting read gate can always reach required expiration
-evidence. The Kafka source owner must continue the polls or touches required for consumer-group
-membership while normal record delivery is paused.
+Heartbeat baselines and expiration use only Kafka `LogAppendTime`. Proxy-recorded source event time
+does not participate in `E + S` or the conservative `E + 2S` fallback. The Kafka source owner must
+continue the polls or touches required for consumer-group membership while normal record delivery
+is paused.
+
+Normal request-based read-ahead must not prevent replay intake from reaching the later Kafka record
+needed to resolve known incomplete reconstruction state. For each partition:
+
+- incomplete state with an accepted heartbeat baseline `M` requires ordered intake until replay
+  intake encounters a later record with `LogAppendTime` `R` satisfying `R - M >= E + S`; and
+- incomplete state using the first-traffic fallback `T` requires ordered intake until replay intake
+  encounters a later record satisfying `R - T >= E + 2S`.
+
+The Kafka source owner therefore continues delivering that partition even when the normal
+request-based rule would pause it. It processes every intervening record in increasing offset order
+and buffers the resulting work; it does not scan past, skip, or separately fetch a later record. An
+intervening accepted heartbeat replaces or advances the baseline, so the required expiration
+predicate is evaluated from that heartbeat. If the partition has no later record, the replayer has
+no expiration proof and the incomplete state remains unresolved. This override changes Kafka
+intake only. It never allows a target request to run before the schedule derived from
+`TrafficObservation.ts`.
 
 The replayer does not impose a hard cap on owned Kafka records or bytes. A large request or a large
 set of dead connections may need a later heartbeat from the same partition before their state can
@@ -986,7 +1029,7 @@ The architecture deliberately avoids overlapping mechanisms:
 | Source reconstruction and liveness | Replay intake |
 | Per-connection order and timing | Admission and execution queues owned by the connection's Netty event loop |
 | Target-connection progress | One connection-turn completion per normally completed request |
-| Full request completion | Request-replay completion routed through its target-connection owner after tuple durability |
+| Full request completion | Request-replay completion routed through its connection owner after tuple durability |
 | Whole-record completion | One replay-intake record tracker |
 | Kafka commit order | One contiguous-prefix tracker in the Kafka source owner |
 | Cross-owner continuation | Typed asynchronous result and required receiver |
@@ -1008,7 +1051,7 @@ and mutate source assembly directly.
 
 ### 12.2 Target requests cannot overtake
 
-Replay intake sends reconstituted requests and the captured close in order. The target-connection owner
+Replay intake sends reconstituted requests and the captured close in order. The connection owner
 appends them to its admission queue in that order and moves them to the execution queue without
 changing their order. Preparation completion can only mark an existing execution-queue entry
 ready. Since only the ready execution-queue head can begin its target turn, a later request cannot
@@ -1025,13 +1068,13 @@ Runtime single-completion and owner-affinity checks complement compile-time exha
 handling.
 
 The tuple path applies this rule twice: the write-tuple request must reach the tuple writer, and
-tuple-durable must return through the request-replay and target-connection owners before
+tuple-durable must return through the request-replay and connection owners before
 request-processing-finished reaches replay intake.
 
 ### 12.4 Tuple durability does not block the connection
 
 The request-replay owner reports connection-turn completion separately from
-request-processing-finished. The target-connection owner advances only on the first result and has no
+request-processing-finished. The connection owner advances only on the first result and has no
 dependency on the tuple writer before advancing its execution queue. It retains the request in its
 registry until the second result, then forwards that result to replay intake. Therefore a slow tuple
 cannot delay the next target request, and advancing the connection cannot release Kafka work before
@@ -1103,24 +1146,30 @@ anything not known to have committed.
 - Requests transform out of order but execute in captured order.
 - Source-response results reach their request-replay owners without waiting behind either
   connection queue.
-- The target-connection owner advances after connection-turn completion without waiting for tuple
+- The connection owner advances after connection-turn completion without waiting for tuple
   durability.
 - Exactly one write-tuple request is sent when tuple inputs become available. The writer may make
   multiple attempts, and exactly one request-processing completion reaches replay intake through
-  the target-connection owner after tuple durability.
+  the connection owner after tuple durability.
 - A record containing only `WriterPartitionHeartbeat` or `CaptureCapabilityProbe` becomes
   immediately commit-eligible after replay intake applies it.
-- The first `WriterPartitionHeartbeat` encountered for a writer and partition establishes the
-  process-local baseline; a later timely heartbeat advances it and a later late heartbeat does not.
+- The first non-probe Kafka record encountered for a writer and partition establishes its
+  process-local broker-time starting point. A first heartbeat supplies the exact baseline; a first
+  traffic record supplies `T` for the conservative `E + 2S` fallback until a heartbeat is
+  encountered. A later timely heartbeat advances the exact baseline and a later late heartbeat
+  does not.
 - Different informational `heartbeatIntervalMillis` values do not change the replayer's configured
   expiration rule.
+- A higher-offset record whose `LogAppendTime` is more than `S` below the greatest value previously
+  observed for that partition terminates the process before that record authorizes expiration or
+  commit.
 - Broker-time expiration ends the current reconstruction, lets already-admitted target and tuple
   work finish, and allows a later observation for the same connection identity to start fresh
   reconstruction.
 - An observation following an explicit `CloseObservation` is a protocol violation.
 - Starting from a nonzero Kafka cursor, with a nonzero first captured request index, preserves
   later request order.
-- Target-connection-owner construction off-loop followed by Netty submission exposes no mutable
+- Connection-owner construction off-loop followed by Netty submission exposes no mutable
   state off-loop.
 - Duplicate completion, release, or commit-request emission fails immediately.
 
@@ -1144,9 +1193,20 @@ anything not known to have committed.
 
 ### 13.4 Backpressure and Kafka tests
 
-- Source-time backpressure uses Kafka pause/resume and preserves group membership. Its release
-  milestone and safe read-ahead relationship receive proof and dedicated tests after the unresolved
-  §8 decision is settled.
+- A request's Kafka input time is the greatest `LogAppendTime` among all records required to
+  reconstitute it. The earliest Kafka input time among requests that have not issued their first
+  target send controls normal read-ahead.
+- A Kafka record contributing to multiple requests participates independently in each request's
+  Kafka input-time calculation.
+- Issuing the first target send releases that request's normal read-ahead constraint. Target
+  response handling, retries, source-response accumulation, tuple output, and Kafka commit do not
+  restore it.
+- Kafka-time backpressure uses Kafka pause/resume and continued group-maintenance polling.
+  `TrafficObservation.ts` remains exclusively responsible for target scheduling.
+- A partition remains readable past the normal request-based pause point when replay intake needs a
+  later ordered record to satisfy `E + S` or the first-traffic `E + 2S` expiration rule. Every
+  intervening record is processed in offset order, and an intervening heartbeat updates the
+  predicate.
 - Target permits saturate and recover without losing completion.
 - A very large request does not prevent the replayer from reaching later protocol records.
 - A very large set of dead connections does not prevent intake from reaching the heartbeat that
@@ -1178,7 +1238,7 @@ A later class-level design may define:
 - the exact sealed message and outcome types;
 - the replay-intake input queue and its wakeup/pump mechanism;
 - the record-completion tracker and its processing-association handles;
-- the target-connection owner's admission-queue and execution-queue entries;
+- the connection owner's admission-queue and execution-queue entries;
 - the request-replay transition table;
 - owner adapters for the Kafka executor and Netty event loops;
 - reference-counted data-lifetime contracts and single-completion guards; and

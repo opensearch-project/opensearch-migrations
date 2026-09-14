@@ -1,6 +1,6 @@
 # Capture and Replay Architecture
 
-**Status:** top-level design contract
+**Status:** top-level design contract; implementation conformance is incomplete
 
 This document defines the observable protocol shared by the capture proxy, Kafka, and the traffic
 replayer. It states what each component guarantees, which failures are tolerated, when the replayer
@@ -9,10 +9,6 @@ may commit a Kafka record, and why the protocol is safe under its stated assumpt
 Companion documents provide the lower-level proxy algorithms, replayer behavior, replayer
 asynchronous-work accounting, and managed-fleet orchestration. Implementation class names, thread
 names, and callback graphs belong in those lower-level documents.
-
-This is the target protocol contract. The current implementation must not be assumed to implement
-the wire records or runtime behavior below until the component conformance requirements and tests
-are complete.
 
 Capture and replay provides representative source traffic for target validation, load, and mutation
 replay. It does not promise that two distributed clusters will produce identical internal execution
@@ -27,7 +23,7 @@ The protocol in this document is complete for:
 - routing newly opened source connections across a horizontally scaled proxy fleet;
 - capturing source traffic into Kafka;
 - preserving the connection-local order needed to reconstruct HTTP;
-- detecting clean connection and proxy completion;
+- performing clean connection and proxy shutdown;
 - handling proxy scale changes, shutdown, hard failure, and long inactivity;
 - reconstructing requests and source responses;
 - replaying requests against a target;
@@ -46,16 +42,26 @@ Managed-fleet recovery after an interval of uncaptured source traffic must satis
 1. Missing source traffic cannot be reconstructed later.
 2. A replay run must never silently cross an uncaptured interval.
 3. A new run after an uncaptured interval requires a fresh source snapshot.
-4. The new run requires a durable Kafka input boundary fixed before proxies may publish captured
-   traffic for that run.
+4. The new run requires a new immutable Kafka topic. Its replay start offsets must be fixed before
+   proxies may publish captured traffic for that run.
 5. Before the fresh snapshot is accepted, processes and source requests from the ended run must be
    proven unable to complete additional mutations against the source service.
 
-The managed-fleet companion specifies session identity, the `FleetCaptureReset` boundary required
-when a fresh run reuses a Kafka topic, and constraints on `CaptureCoverageEstablished`. Automated
+The managed-fleet companion specifies the new-topic boundary and constraints on
+`CaptureCoverageEstablished`. Reusing the ended run's Kafka topic is prohibited. Automated
 same-resource recovery is unsupported. The source-specific proof that ended-run operations cannot
 complete is deployment-defined and must satisfy the managed-fleet contract. No implementation may
 claim automatic recovery until the companion document authorizes it.
+
+A capture-compromised proxy process never captures again. If no source traffic was forwarded
+without capture, a fresh process may replace it in the existing Kafka topic and replay run. Records
+already submitted by the ended process remain valid in that run. If source traffic was forwarded
+without capture, the current run ends and the five requirements above apply.
+
+The managed controller may select same-run replacement only when its durable state proves that the
+ended process was never authorized to forward without capture. If that fact is missing or
+ambiguous, the workflow cannot claim uninterrupted capture; restoring a complete guarantee
+requires the full new-run procedure above.
 
 ## 2. System model
 
@@ -71,7 +77,7 @@ flowchart LR
 
     Client -->|"HTTP connection"| Proxy
     Proxy -->|"Forwarded source traffic"| Source
-    Proxy -->|"TrafficStream, WriterPartitionHeartbeat,<br/>NoMoreWrites"| Kafka
+    Proxy -->|"TrafficStream,<br/>WriterPartitionHeartbeat"| Kafka
     Kafka -->|"Partition records"| Replayer
     Replayer -->|"Reconstituted HTTP request"| Target
     Replayer -->|"Source and target results"| Tuples
@@ -91,7 +97,7 @@ acknowledgement callbacks for its writer and partition.
 
 **Replay intake** is the replayer state owner that applies Kafka records, reconstructs source HTTP,
 tracks heartbeat expiration, and determines when all processing associated with a Kafka record is
-finished. A **target-connection owner** maintains one target connection and the captured order of
+finished. A **connection owner** maintains one target connection and the captured order of
 requests using it.
 
 The proxy sits on the source traffic path. When source clients use TLS, the proxy terminates TLS and
@@ -105,19 +111,46 @@ results.
 Kafka provides ordered records within each partition and assigns partitions to replayer group
 members. Kafka does not provide ordering across partitions.
 
+The protocol uses two independent timestamp domains:
+
+- `TrafficObservation.ts` is the proxy-recorded source event time. The replayer uses it to preserve
+  relative source timing when scheduling target operations.
+- Each Kafka record's broker-assigned `LogAppendTime` is the Kafka source owner's input-progress
+  time and the only time used for capture-before-forward validation, heartbeat baselines, and
+  broker-time expiration.
+
+Kafka pause, resume, and read-ahead decisions use record `LogAppendTime`, not
+`TrafficObservation.ts`. Target scheduling uses `TrafficObservation.ts`, not `LogAppendTime`.
+Neither timestamp substitutes for the other.
+
+For a reconstituted request, its Kafka input time is the greatest `LogAppendTime` among all Kafka
+records required to reconstitute it. Normal read-ahead is constrained by the earliest Kafka input
+time among reconstituted requests whose first target send has not yet been issued. Issuing that
+first target send releases the request's normal read-ahead constraint; later target processing,
+source-response accumulation, tuple output, and Kafka commit do not restore it.
+
+This normal read-ahead rule must not prevent the replayer from reaching broker-time evidence needed
+to expire known incomplete reconstruction state. A partition remains readable until ordered intake
+encounters the record satisfying the applicable `E + S` rule or first-traffic `E + 2S` fallback.
+The replayer processes every intervening record in offset order and buffers the resulting work. It
+does not skip forward to inspect a later record, and this Kafka-intake override does not change
+target scheduling from `TrafficObservation.ts`.
+
 ### 2.1 Identities
 
 `captureActivationId` identifies one capture-authoritative lifetime of a proxy process.
-`assignmentSequence` is a process-local, strictly increasing value. The proxy increments it when
-Kafka supplies a replacement group assignment, before accepting any connection under that
-assignment. The writer identity used for newly opened connections is:
+`assignmentSequence` is a process-local identifier that is unique and never reused within one
+`captureActivationId`. The proxy chooses a new value when Kafka supplies a replacement group
+assignment, before accepting any connection under that assignment. The writer identity used for
+newly opened connections is:
 
 ```text
 writerNodeId = captureActivationId + ":" + assignmentSequence
 ```
 
-The initial numeric value has no protocol meaning. Only strict increase and non-reuse within one
-`captureActivationId` are required.
+Its numeric value and ordering have no protocol meaning. The proxy may generate it by incrementing
+a process-local counter, but only uniqueness and non-reuse within one `captureActivationId` are
+required.
 
 Every new assignment therefore creates a writer identity that cannot be reused within the
 `captureActivationId`. Existing connections permanently retain the `writerNodeId` under which they
@@ -154,11 +187,10 @@ for the life of the connection:
 
 A proxy may publish connections to a partition, later drain all of them, and receive new-connection
 eligibility for that partition in a future assignment. The future connections use the future
-assignment's `writerNodeId`; the earlier identity never resumes. After `NoMoreWrites` retires a
-`(writerNodeId, partition)`, that writer identity may never use that partition again.
+assignment's `writerNodeId`; the earlier identity never resumes.
 
-Every local connection registry, publisher lane, broker-time baseline, and `NoMoreWrites` lifecycle
-is keyed by `(writerNodeId, partition)`, not by one process-global current writer identity.
+Every local connection registry, publisher lane, and broker-time baseline is keyed by
+`(writerNodeId, partition)`, not by one process-global current writer identity.
 
 ### 2.2 Protocol records
 
@@ -166,22 +198,22 @@ The protocol uses these records:
 
 - `TrafficStream` contains one or more `TrafficObservation` values for one connection.
 - `TrafficObservation` records captured network or connection-lifecycle activity. Each observation
-  carries the connection-local sequence needed by this protocol.
+  carries `ts`, the proxy-recorded source event time retained for replay scheduling, and the
+  connection-local sequence needed by this protocol.
 - `WriterPartitionHeartbeat` periodically proves that one `(writerNodeId, partition)` can still
   publish acknowledged records. It identifies the writer and partition and carries no connection
   state. Its `heartbeatIntervalMillis` field reports the configured publication interval for
   diagnostics and future sanity checks; it does not configure replayer expiration.
-- `NoMoreWrites` permanently states that one `writerNodeId` will publish no more records to one
-  Kafka partition. Its Kafka record carries `writerNodeId` in a required header, and Kafka record
-  metadata supplies the partition. Neither value is repeated in the protobuf body.
 
-`TrafficStream`, `TrafficObservation`, `WriterPartitionHeartbeat`, and `NoMoreWrites` are fixed
-protobuf names. The component documents define exact fields and the wire-compatibility plan; they
-may not change the observable meanings defined here.
+`TrafficStream`, `TrafficObservation`, and `WriterPartitionHeartbeat` are fixed protobuf names. The
+component documents define exact fields and the wire-compatibility plan; they may not change the
+observable meanings defined here.
 
-Capture-group members using incompatible capture-protocol wire versions must not coexist. A
-wire-incompatible rollout enters an explicit no-capture interval, empties the old group, rolls the
-complete capture and replay cohort, and starts the new cohort cold.
+A Kafka topic must never contain records written under mutually wire-incompatible capture-protocol
+formats. Reusing an existing topic for a wire-incompatible format is explicitly prohibited, even
+after the old consumer group is empty or the deployment has entered a no-capture interval. A
+wire-incompatible format requires a new Kafka topic, and the complete capture and replay cohort
+using that format must use the new topic.
 
 ### 2.3 Imported capture archives
 
@@ -216,10 +248,14 @@ The timestamp policy has two modes:
 - **`preserve`**, the default, imports each archived original `LogAppendTime` as the record timestamp
   on a dedicated bring-your-own topic configured to preserve producer-supplied timestamps. The user
   asserts that the original broker clock-skew bound `S` was healthy. The replayer may apply the
-  ordinary `E + S` expiration proof using the archived timestamp and archived `E` and `S`.
+  ordinary `E + S` expiration proof using the archived timestamp and archived `E` and `S`. That
+  archived timestamp is also the record time used for Kafka input progress and read-ahead; the
+  import broker's append time is not substituted for it.
 - **`rebase-without-expiration`**, an expert mode, accepts newly assigned import-broker timestamps
   and automatically disables broker-time expiration for that input. Terminal connection
-  observations and valid `NoMoreWrites` records still resolve incomplete state.
+  observations still resolve incomplete state. The replayer may
+  use the newly assigned record timestamps for Kafka input progress and read-ahead, but never for
+  the original capture run's expiration proof.
 
 No mode may use newly assigned import-broker time to perform the original capture run's `E + S`
 expiration proof. An archive ending at an open writer or incomplete connection is not completion
@@ -263,7 +299,8 @@ old member gone. That overlap affects load distribution only: each proxy uses a 
 
 When Kafka supplies a replacement assignment, the proxy:
 
-1. increments `assignmentSequence` and creates the replacement assignment's `writerNodeId`;
+1. chooses a new, previously unused `assignmentSequence` and creates the replacement assignment's
+   `writerNodeId`;
 2. publishes and receives acknowledgement for that identity's initial heartbeats on every
    partition it may use;
 3. begins assigning new source connections with the replacement assignment only after those
@@ -279,15 +316,10 @@ The initial heartbeat establishes the new assignment-scoped writer identity's br
 before that identity accepts a source connection. Later timely heartbeats update that same
 continuous baseline; they never create a new writer lifetime or reset a lapsed identity.
 
-After an older identity's connections on a partition drain, it publishes self `NoMoreWrites`,
-permanently retiring that identity and partition.
+After an older identity's connections on a partition drain, the proxy retires that identity's
+publisher lane locally. An unused writer-partition identity is already drained and may begin local
+publisher retirement immediately when that assignment is replaced or the process retires.
 
-Every `(writerNodeId, partition)` for which an initial heartbeat was acknowledged must eventually
-publish `NoMoreWrites`, including an identity and partition that never accepted a connection. An
-unused writer-partition identity is already drained and may begin retirement immediately when that
-assignment is replaced or the process retires.
-
-Only a writer identity's own publisher emits `NoMoreWrites` for that writer and partition.
 Heartbeats carry no connection inventory, and group stability does not authorize replay
 settlement.
 
@@ -382,9 +414,10 @@ This proof assumes that the source cannot mutate state before receiving the comp
 Deployments whose source handlers apply mutations while an incomplete request body is still
 arriving require full request buffering or another separately specified protocol.
 
-The broker timestamp is not used to order HTTP observations. Connection-local
-`connectionObservationSequence` supplies that order. Kafka `LogAppendTime` supplies only the
-capture-before-forward and broker-time expiration proofs.
+The broker timestamp is not used to order HTTP observations or schedule target operations.
+Connection-local `connectionObservationSequence` supplies observation order, and
+`TrafficObservation.ts` supplies source event time for replay scheduling. Kafka `LogAppendTime`
+supplies capture-before-forward validation, Kafka input progress, and broker-time expiration.
 
 ### 4.1 Denial-of-service bounds for incomplete requests
 
@@ -425,9 +458,9 @@ identities. It states only that this writer identity can still publish acknowled
 partition within the protocol's time bound.
 
 The proxy still maintains an exact local connection registry. That registry is required to route
-existing connections, wait for connection retirement, prove that the registry is empty before
-`NoMoreWrites`, and retain older writer identities while their connections close. The registry is
-not transmitted to Kafka.
+existing connections, wait for connection retirement, prove that the registry is empty before its
+publisher lane retires, and retain older writer identities while their connections close. The
+registry is not transmitted to Kafka.
 
 A heartbeat does not open, close, list, omit, or permanently retire a connection. Normal connection
 completion is represented by the connection's durable terminal `TrafficObservation`. Failure to
@@ -466,12 +499,15 @@ when, for each `(writerNodeId, partition)`:
 - a handoff waits for every submission and callback from the previous owner to finish before the
   next owner begins.
 
+If one producer becomes a measured throughput bottleneck, the proxy may add producer instances and
+assign each producer a mutually exclusive set of Kafka partitions.
+
 Different proxy writers may concurrently publish existing connections to the same Kafka partition.
 The single-owner requirement is within one writer and partition.
 
-This preserves one submission order for that writer's connection observations, heartbeats, and
-`NoMoreWrites`. Non-overlapping ownership and a fully drained handoff prevent a previous producer
-from publishing a late record after its successor begins.
+This preserves one submission order for that writer's connection observations and heartbeats.
+Non-overlapping ownership and a fully drained handoff prevent a previous producer from publishing a
+late record after its successor begins.
 
 ## 6. Connection opening and retirement
 
@@ -522,13 +558,12 @@ produce the normal terminal `CloseObservation`. `DisconnectObservation` and
 - requires no tuple when no request was reconstituted; and
 - makes the affected Kafka records eligible for commit after all associated processing finishes.
 
-## 7. `NoMoreWrites` and writer-partition retirement
+## 7. Writer-partition publisher retirement
 
-`NoMoreWrites` permanently retires one `(writerNodeId, partition)`. The required Kafka record
-header identifies the writer, and Kafka record metadata identifies the partition. A correctly
-wired proxy publishes `NoMoreWrites` only for itself.
+Writer-partition retirement is local proxy lifecycle management. It does not publish a terminal
+Kafka control record and does not directly settle replayer state.
 
-Before publishing `NoMoreWrites`, the proxy:
+Before retiring one `(writerNodeId, partition)` publisher lane, the proxy:
 
 1. stops accepting new connections using the routing and acceptance gate;
 2. disconnects and fully retires existing connections, including Kafka acknowledgement of every
@@ -536,24 +571,19 @@ Before publishing `NoMoreWrites`, the proxy:
 3. verifies that the local connection registry is empty;
 4. moves the publisher lane to `RETIRING` and quiesces periodic heartbeats;
 5. waits for every remaining previously accepted send;
-6. publishes and receives acknowledgement for `NoMoreWrites`; and
-7. moves the publisher lane to `RETIRED`.
+6. moves the publisher lane to `RETIRED`.
 
-The Kafka offset occupied by `NoMoreWrites` is the terminal cutoff. It supplies the terminal
-outcome for remaining incomplete state already known for that writer and partition. Each affected
-whole Kafka record becomes eligible for commit only after every other operation associated with
-that record has also finished. An exact duplicate `NoMoreWrites` is inert and eligible for commit.
+During clean process shutdown, the shared producer closes only after every publisher lane using it
+has retired.
 
-The replayer treats the required header as the authoritative writer identity. If the header is
-missing or malformed, the replayer logs a warning, treats the `NoMoreWrites` record as inert, and
-permits its commit. It does not retire any writer or connection state.
+Each acknowledged `CloseObservation` resolves its connection independently. If a proxy crashes or
+stops publishing before a connection closes cleanly, §8 defines how later broker-time evidence may
+expire only the incomplete connection state already known to the replayer. If no current
+connection state depends on an old writer-partition heartbeat baseline, the replayer may discard
+that process-local baseline. A later observation starts fresh state under the normal restart rules.
 
-No `TrafficStream` or `WriterPartitionHeartbeat` record may appear at a Kafka offset above the
-valid `NoMoreWrites` cutoff for that `(writerNodeId, partition)`. Such a record is a protocol
-violation that causes retain, high-severity diagnostics and an alarm, and termination of the
-replayer process.
-
-A hard crash may emit no `NoMoreWrites`. Group departure does not replace it.
+The proxy must never resume a locally retired writer identity. A future assignment uses a new
+`writerNodeId`.
 
 Unexpected death of any proxy event loop terminates the proxy process. The process is considered
 unstable, and no cross-thread recovery transfers ownership of its connections or publication state.
@@ -567,16 +597,32 @@ still publish acknowledged records within the capture deadline. It keeps every i
 accumulator already known for that writer and partition from expiring merely because an individual
 connection is idle. It does not enumerate those connections.
 
-The replayer tracks `lastAcceptedHeartbeatLogAppendTime` for each writer and partition. When this
-process has no baseline for a `(writerNodeId, partition)`, it accepts the first heartbeat that it
-encounters for that key. Subsequent heartbeats update the value only when the difference from the
-previous accepted value is less than `E`.
+A replayer may begin reading after earlier heartbeat records for a writer and partition have
+already been committed. The first non-probe Kafka record that replay intake processes for a
+`(writerNodeId, partition)` establishes that key's process-local broker-time starting point.
 
-Unconditional first acceptance is conservative. If the first encountered heartbeat was accepted
-by the proxy, it establishes the same or a later baseline than any relevant unseen heartbeat. If
-the proxy considered it late, accepting it can only delay replayer expiration, and the proxy
-invariant in §4 prevents subsequent authoritative traffic from that compromised process. The
-replayer does not maintain an additional sticky-lapse state.
+If that first record is a `WriterPartitionHeartbeat`, replay intake records the heartbeat's
+`LogAppendTime` as its process-local heartbeat baseline and applies the `E` comparison to every
+heartbeat encountered afterward. If the proxy accepted that heartbeat, the process-local value
+equals the proxy's baseline. If the proxy rejected it as late, the process-local value is later and
+therefore only delays expiration.
+
+If that first record is a `TrafficStream`, replay intake records the record's `LogAppendTime` as
+`T`. The exact preceding heartbeat is unavailable, so §8.1 supplies the conservative expiration
+reference derived from `T`. A later heartbeat replaces that fallback with its exact
+`LogAppendTime`.
+
+If the proxy adopted the acknowledged `LogAppendTime` of that first encountered heartbeat, the
+proxy and replayer now use the same baseline. If the difference from the proxy's previous accepted
+heartbeat was at least `E`, the proxy left its earlier baseline unchanged and permanently abandoned
+capture-authoritative operation. The replayer cannot observe that local decision, so it records the
+heartbeat record's later `LogAppendTime` as its process-local baseline. This can only make the
+replayer wait longer before expiring known incomplete state; it cannot cause premature expiration.
+The proxy publishes no later heartbeat after detecting the lapse, so the replayer needs no
+additional state recording that the writer previously missed its heartbeat deadline.
+
+The replayer's baseline is therefore never earlier than the proxy baseline used in the Critical
+Mutation Traffic forwarding check for a later `TrafficObservation`.
 
 Let:
 
@@ -584,15 +630,9 @@ Let:
 - `S` be the maximum permitted backward movement between Kafka `LogAppendTime` values at increasing
   offsets in one partition and configured identically in the proxy, replayer, and fleet clock
   monitor;
-- `M` be a writer and partition's `lastAcceptedHeartbeatLogAppendTime`; and
+- `M` be the replayer's accepted heartbeat baseline for that writer and partition; and
 - `R` be the `LogAppendTime` of any later record at a higher offset in that partition, regardless of
   which proxy wrote it.
-
-For the ordinary rule, let `Mp` be the proxy's last accepted heartbeat baseline relevant to a
-subsequent observation. Ordered processing and the identical `E` configuration ensure `Mp <= M`:
-the replayer accepts every timely proxy-accepted heartbeat that it encounters before `R`, while
-unconditional first acceptance may only make `M` later. Expiring against `M` is therefore no
-earlier than expiring against the proxy's own baseline.
 
 The replayer may expire the incomplete connection state that it already knows for that writer and
 partition when:
@@ -618,16 +658,17 @@ The proxy's forwarding rule in §4 rejects that observation and enters the compr
 the corresponding Critical Mutation Traffic can reach the source. It is therefore safe for the
 replayer to release the incomplete state known at offset R.
 
-### 8.1 Restart when the preceding heartbeat is before the committed cursor
+### 8.1 First traffic record when the preceding heartbeat is unavailable
 
-A replayer may restart at an uncommitted `TrafficObservation` after the heartbeat that authorized
-the proxy to publish it has already been committed. The replayer does not need to scan backward or
-retain process-local heartbeat state across that restart.
+A replayer may first encounter a `TrafficStream` after the heartbeat that authorized the proxy to
+publish it has already been committed. This commonly occurs after restart at an uncommitted traffic
+record. The replayer does not need to scan backward or retain process-local heartbeat state across
+that restart.
 
 Let:
 
-- `T` be the `LogAppendTime` of the first `TrafficObservation` encountered for that writer and
-  partition after the restart; and
+- `T` be the `LogAppendTime` of the first `TrafficStream` record encountered for that writer and
+  partition; and
 - `H` be the latest accepted heartbeat before `T`, which is in the already committed prefix.
 
 The proxy could not have accepted the connection without an earlier acknowledged heartbeat. Since
@@ -667,7 +708,7 @@ Expiration:
 
 Expiration releases only those known accumulators and closes only their current process-local
 reconstruction. It does not retire the writer, partition, connection identity, or future
-reconstruction state. Any already-created target-connection owner finishes its admitted complete
+reconstruction state. Any already-created connection owner finishes its admitted complete
 requests and tuple output, closes its target channel, and is then removed.
 
 The first later `TrafficObservation` for that connection is handled exactly as it would be after a
@@ -693,10 +734,16 @@ each whole record has also finished. Leaving an expired accumulator's records pe
 uncommitted would create a poison pill.
 
 Kafka backlog does not itself cause expiration because the rule uses durable broker timestamps
-rather than consumer wall-clock time. If the declared `S` bound is violated or the fleet cannot
-attest that it is healthy, the timestamp proof is unavailable. The replayer stops making affected
-expiration decisions, retains the unresolved records, and raises a high-severity alarm. Ordinary
-record processing that does not depend on this timestamp proof may continue.
+rather than consumer wall-clock time. For each partition, the replayer tracks the greatest
+`LogAppendTime` it has observed. If a record at a higher offset has a `LogAppendTime` more than `S`
+below that greatest value, the Kafka record stream directly demonstrates that the declared bound
+was violated. The replayer emits high-severity diagnostics and terminates immediately without
+making an expiration or commit decision from that record.
+
+External attestation of broker clock health is a managed-workflow responsibility. Loss of that
+attestation does not need to be inferred or handled by the replayer. The explicitly selected
+`rebase-without-expiration` archive mode in §2.3 does not claim the broker-time expiration proof and
+accepts that incomplete hard-crash state may remain unresolved.
 
 ## 9. Replayer processing and whole-record commit
 
@@ -765,9 +812,8 @@ A later invalid observation does not retroactively undo a target request already
 valid observations. The invalid containing record is retained and replay halts according to §13.
 
 `WriterPartitionHeartbeat` records finish after the replayer updates the writer-partition
-broker-time baseline. A valid `NoMoreWrites` record finishes after its terminal effect in §7 has
-been applied. These control records are whole Kafka records and follow the same contiguous-offset
-commit rule.
+broker-time baseline. These control records are whole Kafka records and follow the same
+contiguous-offset commit rule.
 
 Retaining one record prevents the replayer from committing a later Kafka offset past it. This
 preserves redelivery of the retained record.
@@ -922,7 +968,7 @@ Cancellation never causes a Kafka commit.
 An orderly shutdown is a planned operation performed while capture and Kafka publication remain
 trustworthy. Its normative timing and failure behavior are defined in
 [Proxy Capture Protocol §3.5](proxyCaptureProtocol.md#35-scale-down). Connection and
-writer-retirement ordering remain defined in §§6–7 of this document.
+publisher-retirement ordering remain defined in §§6–7 of this document.
 
 ### 12.4 Proxy capture failure modes
 
@@ -942,7 +988,8 @@ capture. Previously acknowledged traffic remains valid; the transition does not 
 invalidate it.
 
 - `fail-closed` emits high-severity diagnostics and terminates immediately. It does not attempt
-  connection or writer retirement because Kafka acknowledgements are no longer trustworthy.
+  orderly connection or publisher retirement because Kafka acknowledgements are no longer
+  trustworthy.
 - `fail-open` permanently abandons capture. In an unmanaged deployment it makes the configured
   one-way transition to process-wide pass-through. In a controller-managed deployment, the proxy
   first enters a compromised state in which no new source-bound traffic is forwarded. The
@@ -966,14 +1013,10 @@ process-wide policy before those source bytes are submitted.
 The following are protocol violations:
 
 - a `TrafficObservation` after the terminal observation for the same connection identity;
-- a `TrafficStream` or `WriterPartitionHeartbeat` record after `NoMoreWrites` for the same writer
-  and partition;
 - a connection-local observation sequence that regresses, conflicts, or has an unexplained gap;
 - malformed input for which the replayer cannot determine the required processing safely.
 
-The explicitly inert cases are an exact duplicate `NoMoreWrites` and a `NoMoreWrites` record with a
-missing or malformed writer header as specified in §7. For other protocol violations, the replayer
-response is:
+For a protocol violation, the replayer response is:
 
 1. immediately mark the whole Kafka record `Retain`, making it permanently ineligible for commit
    in this process;
@@ -1059,8 +1102,8 @@ the replayer's currently known incomplete accumulators cannot hide a future sour
 
 The expiration does not retire the writer or partition. A future first observation creates fresh
 state. Legitimate newly opened connections after rebalance use the new assignment's
-`writerNodeId`; older identities continue only their already-open connections until
-`NoMoreWrites`.
+`writerNodeId`; older identities continue only their already-open connections until those
+connections retire and the proxy closes the old publisher lane.
 
 ### 14.8 Hard failure is conservative
 
@@ -1075,10 +1118,10 @@ is publishing records to it or when publication itself has failed.
 
 ### 14.9 Restart without the preceding heartbeat is conservative
 
-When the exact preceding heartbeat is before the committed cursor, the first observation's
-`LogAppendTime` plus `S` is an upper bound on that unseen heartbeat. Waiting for `E + S` beyond that
-upper bound produces the `E + 2S` rule in §8.1. The fallback may delay expiration but cannot
-authorize it earlier than the exact-heartbeat proof.
+When the exact preceding heartbeat is before the committed cursor, the first `TrafficStream`
+record's `LogAppendTime` plus `S` is an upper bound on that unseen heartbeat. Waiting for `E + S`
+beyond that upper bound produces the `E + 2S` rule in §8.1. The fallback may delay expiration but
+cannot authorize it earlier than the exact-heartbeat proof.
 
 ## 15. Verification requirements
 
@@ -1092,16 +1135,17 @@ real-Kafka tests.
 | Capture-before-forward | Initial heartbeat baseline; heartbeat and observation `LogAppendTime`; irreversible compromise | Kafka delay, timestamp, and failure injection; live source verification |
 | Incomplete-request denial-of-service limits | Absolute duration is not reset by progress; request/header limits close the connection; whole connections default to a 60-minute maximum lifetime | Slow one-byte-at-a-time request, oversized-header, and maximum-connection-lifetime tests |
 | Connection-local ordering | Sequence assignment and publication remain ordered while other connections run concurrently | Testcontainers interleaving across connections while the replayer applies each partition in Kafka order |
-| Heartbeat semantics | The first heartbeat encountered for a writer and partition establishes the process-local baseline; later heartbeats use `E`; heartbeats carry no connection identities; `heartbeatIntervalMillis` is informational; an idle connection remains live while its writer heartbeat is timely | Testcontainers restart before a writer's first process-local heartbeat, heartbeat delay, writer silence, differing informational interval values, and multi-writer partition progress |
+| Heartbeat semantics | The first non-probe record encountered for a writer and partition establishes its process-local broker-time starting point; a first heartbeat supplies the replayer's baseline, while a first traffic record uses the conservative `E + 2S` fallback until a heartbeat is encountered; later heartbeats use `E`; heartbeats carry no connection identities; `heartbeatIntervalMillis` is informational; an idle connection remains live while its writer heartbeat is timely | Testcontainers restart with a first heartbeat, restart with a first traffic record whose preceding heartbeat was committed, heartbeat delay, writer silence, differing informational interval values, and multi-writer partition progress |
 | Clean connection retirement | Terminal observation is last; removal waits for acknowledgements | Producer retry and ambiguous-send tests |
 | Multi-observation `TrafficStream` | Separate observation processing; whole-record commit only after all finish | Testcontainers redelivery of an uncommitted multi-observation record |
-| Connection expiration | Agreed `E` and `S`; exact-heartbeat `E + S`; restart fallback `E + 2S`; expire only known accumulators; fresh reconstruction uses TrafficStream continuity metadata and accepts its first connection sequence as the local baseline; skew-bound failure retains | Testcontainers restart or expiration in the middle of a request and response, restart after the preceding heartbeat was committed, multi-writer partition progress, leadership changes, configuration agreement, and delayed observations |
-| `NoMoreWrites` | Every initialized writer-partition identity retires, including one that never accepted a connection; prior sends are acknowledged first; writer identity comes from the required header and partition from Kafka record metadata; duplicates and records with missing or malformed writer headers are inert | Testcontainers never-used writer-partition retirement, terminal ordering, duplicate delivery, record-partition routing, and header validation |
+| Connection expiration | Agreed `E` and `S`; heartbeat-baseline `E + S`; first-traffic-record fallback `E + 2S`; expire only known accumulators; fresh reconstruction uses TrafficStream continuity metadata and accepts its first connection sequence as the local baseline; an observed backward timestamp movement greater than `S` terminates replay before that record authorizes expiration or commit | Testcontainers restart or expiration in the middle of a request and response, restart after the preceding heartbeat was committed, multi-writer partition progress, leadership changes, configuration agreement, delayed observations, and a higher-offset record whose timestamp is more than `S` below the partition's greatest observed timestamp |
+| Kafka input progress and target replay time | Request Kafka input time is the greatest contributing-record `LogAppendTime`; the earliest unsent request constrains normal read-ahead; first target send releases that request; `TrafficObservation.ts` independently schedules target work | Testcontainers pause/resume with mixed-record requests, overdue target schedules, and per-partition `E + S` and `E + 2S` expiration progress overriding the normal pause point without skipping records |
+| Writer-partition publisher retirement | New connections are gated off; every connection closes and its observations are acknowledged; the registry becomes empty; heartbeats quiesce; remaining sends finish; the lane retires without a terminal Kafka record; the identity never resumes | Deterministic lane-state tests and Testcontainers producer retry, callback quiescence, rapid-rebalance, and clean-shutdown tests |
 | Replayer reassignment | Cancel and clean one partition generation before processing its successor; unrelated partitions proceed | Testcontainers partition transfer during target and tuple operations |
 | Event-loop death | Fatal signal and no ownership transfer | Process-level fault injection; live container restart |
 | Process-wide capture failure policy | Required Kafka publication failure or capture compromise causes immediate `fail-closed` termination or irreversible `fail-open`; managed fail-open forwards no uncaptured source traffic until the controller durably records incomplete capture and acknowledges that exact activation; membership events do neither after startup | Producer failure and ambiguous-outcome fault injection in both modes, lost and duplicate compromise notifications, controller failover before and after durable recording, and acknowledgement timeout |
 | Protocol violations | Immediate `Retain`, intake pause, bounded drain of admitted target/tuple work, and process termination | Corrupt and out-of-order Kafka records with in-flight target and tuple work; redelivery after exit |
-| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, `E`, `S`, checksums, and timestamp mode | Export/import round trip with heartbeats, `NoMoreWrites` headers, multi-observation records, multiple partitions, corruption, and missing-record injection |
+| Bring-your-own archive fidelity | Version, partition ranges, binary key/value, ordered headers, source offsets, original timestamps, `E`, `S`, checksums, and timestamp mode | Export/import round trip with heartbeats, multi-observation records, multiple partitions, corruption, and missing-record injection |
 
 The full acceptance suite must also prove:
 
@@ -1123,10 +1167,16 @@ The full acceptance suite must also prove:
   draining independently;
 - a record from another writer can establish `E + S` progress for a silent writer on the same
   partition;
-- after restart without the preceding heartbeat, the first observation plus the `E + 2S` fallback
+- after restart without the preceding heartbeat, the first traffic record plus the `E + 2S` fallback
   safely establishes later expiration;
-- violating the declared clock-skew bound disables broker-time expiration and retains affected
+- the first target send removes a request from the normal Kafka read-ahead calculation, while later
+  target, source-response, tuple, and commit work do not restore that constraint;
+- a partition continues ordered intake beyond its normal read-ahead pause point when required to
+  reach heartbeat-expiration evidence, without changing target scheduling or skipping intervening
   records;
+- a higher-offset record whose `LogAppendTime` is more than `S` below the greatest previously
+  observed value for that partition immediately terminates the replayer before that record
+  authorizes expiration or commit;
 - a crash after target execution or tuple output but before Kafka commit may produce accepted
   at-least-once duplicates;
 - cancellation never creates a Kafka commit;
@@ -1135,9 +1185,7 @@ The full acceptance suite must also prove:
   cleanup finishes;
 - retained records prevent committing later offsets past them;
 - a semantic violation in a later record does not prevent an earlier complete request from reaching
-  the target; and
-- a `NoMoreWrites` record with a missing or malformed writer header is inert, warned, and
-  committed;
+  the target;
 - a `preserve` archive replay produces the same protocol decisions as the original partition logs
   while using newly assigned imported offsets for commits;
 - `rebase-without-expiration` never applies broker-time expiration; and

@@ -100,11 +100,9 @@ Netty or tuple completion
     -> Kafka executor, as the sole consumer, applies queued inputs one at a time
 ```
 
-Ordinary replay-intake submission does not call `Consumer.wakeup()`. Completion-handling latency is
-therefore bounded by the Kafka call timeout. During a revocation or shutdown grace interval, the
-Kafka executor pumps the restricted completion and control queue directly as defined by the
-replayer design. A future implementation that introduces `Consumer.wakeup()` must account for its
-effect on every Kafka call, including commit calls, and requires a separate reviewed design.
+Producers enqueue immutable replay-intake inputs. The Kafka thread drains that queue between
+bounded Kafka client calls and while servicing revocation or shutdown. Submission never
+mutates replay-intake state directly.
 
 The concurrent queue makes submission thread-safe. It does not permit producers to mutate replay
 intake state. If inputs require a total order, the component design must establish that order
