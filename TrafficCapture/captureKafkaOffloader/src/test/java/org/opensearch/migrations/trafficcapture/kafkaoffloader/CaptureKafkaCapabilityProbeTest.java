@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
@@ -9,8 +8,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
-import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
@@ -29,7 +27,7 @@ class CaptureKafkaCapabilityProbeTest {
     private static final String TOPIC = "traffic";
 
     @Test
-    void publishesOneReplayInertProbePerRepresentativeLeaderPartition() throws Exception {
+    void publishesOneCaptureRecordProbePerRepresentativePartition() throws Exception {
         var producer = producer(101L, 102L);
         var probeIds = List.of("probe-a", "probe-b").iterator();
 
@@ -44,17 +42,15 @@ class CaptureKafkaCapabilityProbeTest {
         assertEquals(List.of(1, 3), producer.history().stream().map(record -> record.partition()).toList());
         for (int i = 0; i < producer.history().size(); ++i) {
             var record = producer.history().get(i);
-            var probe = CaptureCapabilityProbe.parseFrom(record.value());
+            var envelope = CaptureRecord.parseFrom(record.value());
+            assertEquals(
+                CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE,
+                envelope.getPayloadCase()
+            );
+            var probe = envelope.getCaptureCapabilityProbe();
             assertEquals("activation:PROBE", probe.getWriterNodeId());
             assertEquals(i == 0 ? "probe-a" : "probe-b", probe.getProbeId());
-            assertTrue(CaptureKafkaPublisher.isRecordType(
-                record.headers(),
-                CaptureRecordTypes.CAPABILITY_PROBE_RECORD_TYPE
-            ));
-            assertEquals(
-                "activation:PROBE:" + probe.getProbeId(),
-                record.key()
-            );
+            assertEquals("activation:PROBE:" + probe.getProbeId(), record.key());
             assertEquals(0L, record.timestamp());
         }
 
@@ -66,6 +62,7 @@ class CaptureKafkaCapabilityProbeTest {
         var producer = producer();
         var failure = new IllegalStateException("broker unavailable");
         producer.nextFailure = failure;
+
         var completion = CaptureKafkaCapabilityProbe.publish(
             producer,
             TOPIC,
@@ -82,37 +79,9 @@ class CaptureKafkaCapabilityProbeTest {
     }
 
     @Test
-    void probeWriterAndRecordTypeAreExplicit() throws Exception {
-        var producer = producer(101L);
+    void zeroLogAppendTimeRejectsStartupQualification() {
         var completion = CaptureKafkaCapabilityProbe.publish(
-            producer,
-            TOPIC,
-            "activation",
-            List.of(0),
-            () -> "probe"
-        );
-        var record = producer.history().get(0);
-
-        assertEquals(
-            CaptureRecordTypes.CAPABILITY_PROBE_RECORD_TYPE,
-            new String(
-                record.headers().lastHeader(CaptureRecordTypes.RECORD_TYPE_HEADER).value(),
-                StandardCharsets.UTF_8
-            )
-        );
-        assertEquals(
-            "activation:PROBE",
-            CaptureCapabilityProbe.parseFrom(record.value()).getWriterNodeId()
-        );
-
-        completion.get(1, TimeUnit.SECONDS);
-    }
-
-    @Test
-    void unchangedProducerTimestampRejectsCreateTimeTopic() {
-        var producer = producer(0L);
-        var completion = CaptureKafkaCapabilityProbe.publish(
-            producer,
+            producer(0L),
             TOPIC,
             "activation",
             List.of(0),
@@ -123,24 +92,25 @@ class CaptureKafkaCapabilityProbeTest {
             ExecutionException.class,
             () -> completion.get(1, TimeUnit.SECONDS)
         );
+        assertTrue(observed.getCause().getMessage().contains("positive broker-assigned timestamp"));
         assertTrue(observed.getCause().getMessage().contains("message.timestamp.type=LogAppendTime"));
     }
 
     @Test
-    void missingBrokerTimestampRejectsStartup() {
-        var producer = producer(-1L);
+    void missingLogAppendTimeRejectsStartupQualification() {
         var completion = CaptureKafkaCapabilityProbe.publish(
-            producer,
+            producer(-1L),
             TOPIC,
             "activation",
             List.of(0),
             () -> "probe"
         );
 
-        assertThrows(
+        var observed = assertThrows(
             ExecutionException.class,
             () -> completion.get(1, TimeUnit.SECONDS)
         );
+        assertTrue(observed.getCause().getMessage().contains("positive broker-assigned timestamp"));
     }
 
     private static TimestampingProducer producer(long... timestamps) {
