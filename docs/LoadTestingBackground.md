@@ -66,7 +66,7 @@ conflict with the current design contracts linked above, the design contracts ar
                   │  │ memory: LOW while Kafka     │                                 │
                   │  │ keeps up                    │                                 │
                   │  └─────────────┬───────────────┘                                 │
-                  │                │ TrafficRecord protobufs (observed HTTP bytes)  │
+                  │                │ TrafficStream protobufs (observed HTTP bytes)  │
                   └────────────────┼─────────────────────────────────────────────────┘
                                    │  KafkaCaptureFactory (captureKafkaOffloader)
                                    ▼
@@ -189,7 +189,7 @@ Specifically:
 | Failure | How to induce | What to assert |
 |---|---|---|
 | Slow Kafka writes | Underscale Kafka brokers / throttle broker network | Critical Mutation Traffic latency rises while awaiting acknowledgement; in-flight state stays bounded; no unbounded buffering |
-| Kafka outage | Stop / partition brokers mid-test | Proxy behavior follows its configured capture mode; recovery does not lose acknowledged `TrafficRecord` data |
+| Kafka outage | Stop / partition brokers mid-test | Proxy behavior follows its configured capture mode; recovery does not lose acknowledged `TrafficStream` data |
 
 ### Traffic Replayer ↔ Target cluster
 

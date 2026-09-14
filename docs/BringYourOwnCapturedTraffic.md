@@ -40,12 +40,13 @@ The exporter must preserve every field that can affect replay behavior. The arch
 - its raw nullable binary value;
 - every Kafka header, preserving duplicate headers and header order;
 - the order of records within each source partition;
-- the proxy manifest-expiration interval `E`;
+- the proxy heartbeat-expiration interval `E`;
 - the permitted Kafka `LogAppendTime` backward-movement allowance `S`; and
 - integrity information that detects omitted, duplicated, reordered, or corrupted archive records.
 
-The authoritative `writerNodeId` for records such as `NoMoreWrites` is carried in Kafka record
-headers. Preserving only the protobuf value is therefore insufficient.
+The authoritative `writerNodeId` for `NoMoreWrites` is carried in Kafka record headers, and its
+authoritative partition is the archived Kafka record's partition. Preserving only the protobuf
+value is therefore insufficient.
 
 Source Kafka offsets are retained as archive validation and diagnostic data. Importing creates a
 new Kafka log, so it cannot recreate the physical source offsets or leader epochs. The replayer
@@ -116,7 +117,7 @@ capture was produced.
 cannot be preserved or trusted. The destination Kafka broker supplies the imported records'
 timestamps.
 
-In this mode, broker-time manifest expiration is disabled. Rebasing timestamps must never authorize
+In this mode, broker-time heartbeat expiration is disabled. Rebasing timestamps must never authorize
 expiration under the original `E + S` proof, because the rebased values do not describe the source
 capture timeline.
 
@@ -130,7 +131,7 @@ record-accounting paths used for live capture:
 
 - the destination offsets control `Commit` and `Retain`;
 - record headers retain their protocol meaning;
-- manifests and `NoMoreWrites` retain their protocol meaning;
+- `WriterPartitionHeartbeat` and `NoMoreWrites` retain their protocol meaning;
 - records may be replayed more than once after restart or reassignment; and
 - end of archive does not complete unresolved HTTP assembly or other work.
 
@@ -202,7 +203,8 @@ The following tests are required:
    `S`.
 5. `rebase-without-expiration` uses destination timestamps and cannot perform broker-time
    expiration.
-6. A header-carried `writerNodeId`, including for `NoMoreWrites`, survives export and import.
+6. A header-carried `writerNodeId` and record-metadata partition for `NoMoreWrites` survive export
+   and import.
 7. Imported mixed records retain the same per-observation processing and whole-record commit
    behavior as live records.
 8. Restart and partition reassignment demonstrate at-least-once behavior without introducing an
