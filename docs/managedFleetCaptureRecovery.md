@@ -589,7 +589,6 @@ Managed and unmanaged modes use the same capture records:
 TrafficStream {
     nodeId = writerNodeId
     connectionId
-    partition
     subStream[] {
         connectionObservationSequence
         ...
@@ -598,7 +597,6 @@ TrafficStream {
 
 WriterPartitionHeartbeat {
     writerNodeId
-    partition
     heartbeatIntervalMillis
     emittedAtMillis?  // optional, diagnostic only
 }
@@ -609,10 +607,12 @@ CaptureCapabilityProbe {
 }
 ```
 
-`WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Managed orchestration still
-configures the proxy and replayer expiration rules separately.
+No record body carries a partition; the partition is always the Kafka partition containing the
+record. `WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Managed orchestration
+still configures the proxy and replayer expiration rules separately.
 
-One traffic record is homogeneous in writer identity, partition, and connection. It may contain
+One traffic record is homogeneous in writer identity and connection, and its partition is the one
+that holds it. It may contain
 several ordered
 `TrafficObservation` values. The replayer processes those observations separately, but for the
 replayer Kafka can commit only the whole record. The record therefore remains uncommitted until all
@@ -636,7 +636,10 @@ Each control record is written independently to every traffic partition and ackn
 partition before the controller advances. Timestamps may be included for diagnostics, but they do
 not establish ordering or authority. The replayer commits a valid control record only after its
 validation and semantic effect are complete. The Kafka offset remains indivisible and follows the
-ordinary whole-record disposition rules.
+ordinary whole-record disposition rules. Because the base protocol treats an unrecognized record
+type as a protocol violation, a deployment that writes control records into the traffic topic must
+run a replayer build that recognizes them; a base replayer encountering `CaptureCoverageEstablished`
+halts under the top-level architecture's §13.
 
 `CaptureCoverageEstablished` is a record name. “Coverage marker” is informal shorthand and should
 not appear in protocol APIs.
@@ -926,6 +929,14 @@ neither is part of one connection's retirement lifecycle.
 Healthy suppression and other planned administrative shutdowns use the base protocol's orderly
 retirement timing policy. Capture compromise, event-loop death, out-of-memory-like failure, and
 corrupted internal ownership do not use this retirement path.
+
+With the base protocol's default 300-second internal hard-stop deadline, a managed Kubernetes
+deployment configures `terminationGracePeriodSeconds` to at least 330 seconds. The extra 30 seconds
+lets the proxy's own watchdog produce diagnostics, flush logs, and halt the JVM before Kubernetes
+forces container termination. Deployments that change the proxy's configurable retirement
+intervals must keep the Kubernetes grace period longer than their resulting internal hard-stop
+deadline. This grace period enables orderly local retirement; it is not the source-side retirement
+proof required by §§8.3–8.4.
 
 ### 8.2 Failed or ambiguous producer
 
@@ -1231,7 +1242,7 @@ re-establishment and same-resource replacement-snapshot automation are not speci
 | Kubernetes workload identity | Required | Track Pod UID, container ID, node UID, and process identity; never retire by Pod name or replacement readiness. |
 | Kubernetes fencing | Required | Prove traffic retirement through trusted healthy quiescence, runtime-confirmed termination, or infrastructure fencing that cuts existing connectivity; force deletion and node timeout are insufficient. |
 | Controller command fence | Required | Allocate a domain fence token, persist immutable command intents, target immutable Pod and process identity, and reject stale same-recovery commands independently of leader election. |
-| Record schema | Required | Carry informational `heartbeatIntervalMillis` on `WriterPartitionHeartbeat`; keep each traffic record homogeneous in writer identity, partition, and connection; and commit a Kafka record only after all required processing for every contained observation finishes. |
+| Record schema | Required | Carry informational `heartbeatIntervalMillis` on `WriterPartitionHeartbeat`; carry no partition in any record body; keep each traffic record homogeneous in writer identity and connection; and commit a Kafka record only after all required processing for every contained observation finishes. |
 | Proxy state machine | Required | Implement immediate `fail-closed` termination, managed `fail-open` waiting for durable controller acknowledgement before uncaptured forwarding, acknowledgement-timeout termination, healthy suppression, permanent failed-activation rules, last-usable-assignment routing, fresh-process replacement, and concurrent draining of assignment-scoped writer identities. |
 | Topic-bound replayer | Required | Consume only the immutable topic in the trusted replay plan and reject bootstrap or checkpoint state for another topic or plan. |
 | Snapshot replay plan | Required | Persist the capture domain, recovery sequence, immutable Kafka IDs, and partition start offsets fixed before capture grants. |

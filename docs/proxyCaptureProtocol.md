@@ -16,9 +16,11 @@ The design deliberately separates three concerns:
 3. The capture-before-forward contract prevents a strict-mode proxy from completing a source
    request that Kafka cannot later replay.
 
-Group departure causes a rebalance among the remaining members. The proxy that Kafka considers
-departed continues using its last usable assignment until it receives a replacement. Departure is
-not capture-health or replay evidence and does not authorize another proxy to declare the departed
+Group departure causes a rebalance among the remaining members. A proxy that Kafka considers
+departed involuntarily continues using its last usable assignment until it receives a replacement;
+a proxy that leaves deliberately while draining (§3.5) has already stopped accepting connections
+and continues publishing under its existing writer identities. In neither case is departure
+capture-health or replay evidence, and it never authorizes another proxy to declare the departed
 proxy instance finished.
 
 ---
@@ -227,16 +229,24 @@ connection-acceptance gate.
 
 After a process completes §3.3, it joins the group. Before it has ever received a usable
 assignment, it cannot accept a captured source connection because it has no Kafka partition for
-that connection. A startup failure or attempted source connection before the first usable
-assignment invokes the process-wide `--capture-failure-policy`. After either terminal policy is
-applied, that process does not later resume capture when membership supplies an assignment.
+that connection. The proxy therefore does not open its source listener until its first assignment
+is usable; a client that connects earlier is refused by the operating system rather than accepted.
+A startup failure before the listener opens invokes the process-wide `--capture-failure-policy`.
+After either terminal policy is applied, that process does not later resume capture when
+membership supplies an assignment.
 
 The first assignment becomes usable only after:
 
 1. the assignment is installed;
 2. the proxy's capture-authoritative mode remains valid; and
-3. the initial heartbeats for that assignment's writer identity and usable partitions are
-   acknowledged.
+3. the initial heartbeats for that assignment's writer identity are acknowledged on every
+   partition the assignment permits it to use.
+
+The assignment has one acceptance gate. If any permitted partition cannot acknowledge and accept
+its initial heartbeat, the proxy does not route around that partition or accept connections on the
+others. The assignment never becomes usable, and the first failed, ambiguous, late, or
+deadline-expired initial heartbeat irreversibly enters the process-wide compromised workflow in
+§7.
 
 Afterward, the proxy retains the last usable assignment until Kafka supplies a replacement.
 Revocation, partition-loss callbacks, stale or failed polling, empty polls, delayed heartbeats,
@@ -291,8 +301,10 @@ When member B joins:
 4. Existing member A stops opening connections under its preceding writer identity when the
    replacement assignment becomes usable. Existing connections keep that preceding identity and
    their original partitions.
-5. Each member acknowledges an initial heartbeat for its new writer identity on every
-   partition that the assignment permits it to use before accepting a connection there.
+5. Each member acknowledges and accepts an initial heartbeat for its new writer identity on every
+   partition that the assignment permits it to use before accepting any connection under that
+   identity. Failure on any one partition makes the entire assignment unusable and enters the
+   process-wide compromised workflow; the member does not continue with only the other partitions.
 6. A continues traffic and periodic heartbeats for every older writer identity that still has
    connections.
 7. After an older `(writerNodeId, partition)` has no connections, A retires that identity's
@@ -305,28 +317,63 @@ Existing connections never migrate between processes or partitions.
 
 A planned process retirement first becomes `DRAINING`:
 
-1. it stops accepting new connections;
-2. another member becomes the member accepting new captured client connections for its partitions;
-3. existing connections continue in place;
-4. the proxy continues traffic and heartbeat publication for every draining writer identity;
-5. after each `(writerNodeId, partition)` connection set is empty, it follows §4.3 and retires that
-   identity's publisher lane; and
-6. it leaves the group and exits after every publisher lane is retired and the producer is closed.
+1. it closes its source listener and stops accepting new connections;
+2. it leaves the Kafka consumer group so that Kafka redistributes new-connection eligibility for
+   its partitions to the remaining members. Membership is load balancing only, so leaving does not
+   affect publication under the proxy's existing writer identities, and remaining members that
+   receive a replacement assignment follow §3.4;
+3. existing connections continue in place for a bounded natural-drain interval while the proxy
+   continues traffic and heartbeat publication for every draining writer identity;
+4. after that interval, or as soon as a `(writerNodeId, partition)` connection set is empty, it
+   applies §4.3 to that lane; §4.3 step 2 disconnects any connection that remains, so a
+   connection's 60-minute maximum lifetime never governs how long retirement takes;
+5. every publisher lane reaches `RETIRED`; and
+6. it exits after every publisher lane is retired and the producer is closed.
 
 This orderly retirement is performed only while capture and Kafka publication remain trustworthy.
-Its default completion target is five minutes. Missing the target emits a high-severity diagnostic
-and retirement continues through terminal connection observations, publisher callback quiescence,
-and producer closure. An application-visible Kafka failure or expiration of the current heartbeat
-acknowledgement deadline `E`, whichever occurs first, makes retirement unsuccessful. The proxy
-exits without claiming that orderly retirement completed. This timing policy is not used for
-unstable-process failures described in §7.
+Its default timing is:
+
+- 60 seconds for connections to close naturally;
+- 180 additional seconds after the remaining connections are force-closed for terminal
+  observations, Kafka acknowledgements, publisher callback quiescence, and producer closure;
+- 30 seconds for a high-severity diagnostic, thread dump, and explicit log flushing if orderly
+  retirement is still incomplete;
+- `System.exit` at 270 seconds; and
+- a watchdog `Runtime.halt` at 300 seconds if shutdown hooks do not finish.
+
+Each interval is independently configurable, but their configured sum must fit within the
+deployment's process-termination grace period. The natural-drain interval, forced-retirement
+interval, diagnostic interval, and shutdown-hook interval must all be finite. Managed Kubernetes
+deployments should provide at least 30 seconds of external margin beyond the internal hard-stop
+deadline.
+
+```mermaid
+flowchart LR
+    T0["t0<br/>close listener, leave group<br/>begin natural drain"]
+    T60["t0 + 60s<br/>force-close remaining connections"]
+    T240["t0 + 240s<br/>retirement deadline missed<br/>ERROR, thread dump, flush logs"]
+    T270["t0 + 270s<br/>System.exit"]
+    T300["t0 + 300s<br/>Runtime.halt if still alive"]
+
+    T0 -->|"natural drain"| T60
+    T60 -->|"connection retirement and Kafka quiescence"| T240
+    T240 -->|"bounded diagnostics"| T270
+    T270 -->|"bounded shutdown hooks"| T300
+```
+
+If retirement finishes before `System.exit`, the proxy closes the producer and exits normally.
+Missing the 240-second orderly-retirement deadline is a high-severity failure even if cleanup
+finishes during the diagnostic interval. An application-visible Kafka failure or expiration of the
+current heartbeat acknowledgement deadline `E`, whichever occurs first, makes retirement
+unsuccessful immediately. The proxy exits without claiming that orderly retirement completed.
+This timing policy is not used for unstable-process failures described in §7.
 
 ### 3.6 Later use of a partition
 
 A live proxy process may become eligible to accept new connections on a partition that it used in
 an earlier assignment. Those new connections use the last usable assignment's `writerNodeId`. A
-replacement identity acknowledges its own initial heartbeat before
-accepting its first connection on that partition.
+replacement identity acknowledges its initial heartbeats on every permitted partition, including
+that one, before accepting any connection.
 
 The earlier writer identity never resumes. Heartbeats for an active identity update its continuous
 broker-time baseline; they do not end or reset it. After the earlier identity's connections drain,
@@ -362,7 +409,6 @@ The traffic topic carries:
 TrafficStream {
     nodeId = writerNodeId
     connectionId
-    partition
     subStream[] {
         connectionObservationSequence
         ts
@@ -373,7 +419,6 @@ TrafficStream {
 
 WriterPartitionHeartbeat {
     writerNodeId
-    partition
     heartbeatIntervalMillis
     emittedAtMillis?  // optional, diagnostic only
 }
@@ -383,6 +428,11 @@ CaptureCapabilityProbe {
     probeId
 }
 ```
+
+No record body carries a partition. The partition of every `(writerNodeId, partition)` key is the
+Kafka partition that contains the record, read from Kafka record metadata. The proxy still binds
+each connection to one partition for its lifetime (§2.3); that binding is proxy-local routing state
+and is expressed on the wire only by which partition the connection's records are published to.
 
 `WriterPartitionHeartbeat` is the fixed protobuf name. One record proves only that one
 `(writerNodeId, partition)` can still publish acknowledged records within the configured interval.
@@ -587,11 +637,19 @@ interpretation.
 
 ### 5.3 Initial heartbeat
 
-For the first assignment and each replacement assignment, before accepting the first captured
-client connection for a partition permitted by that assignment, the proxy must choose a new,
-previously unused `assignmentSequence`, create the assignment's `writerNodeId`, and acknowledge an
-initial heartbeat for that identity and partition. This establishes the first accepted broker-time
-baseline before the writer can publish connection traffic.
+For the first assignment and each replacement assignment, before accepting any captured client
+connection under that assignment, the proxy must choose a new, previously unused
+`assignmentSequence`, create the assignment's `writerNodeId`, and acknowledge an initial heartbeat
+for that identity on every partition the assignment permits it to use. This establishes the first
+accepted broker-time baseline for each such `(writerNodeId, partition)` before the writer can
+publish connection traffic. A single acceptance gate for the whole assignment is deliberate: it
+avoids routing around partitions whose baseline is not yet established.
+
+Every initial heartbeat must both receive a successful acknowledgement and pass the same timestamp
+acceptance check as a later heartbeat. If any permitted partition fails, times out, has an ambiguous
+producer result, or returns a late timestamp, the gate remains closed for every partition in the
+assignment and the process follows §7. A later acknowledgement or a new group event cannot make
+that assignment usable again.
 
 ### 5.4 Acknowledged heartbeat broker time
 
@@ -724,7 +782,9 @@ not retire the writer, partition, or connection identity. A later first observat
 state. Already-started target work continues, and every reconstituted request still requires
 durable tuple output. Consumer wall-clock time is not commit authority. A higher-offset record whose
 `LogAppendTime` is more than `S` below the greatest previously observed value for that partition is
-an immediate fatal replayer condition.
+an immediate fatal replayer condition. That check detects a violated bound after the fact; it does
+not make an expiration already decided under the violated bound safe. The proof depends on the
+deployment actually enforcing `S` on the brokers.
 
 ### 6.4 Long gaps
 
@@ -739,14 +799,14 @@ The protocol intentionally contains independent values with different meanings:
 - `WriterPartitionHeartbeat.heartbeatIntervalMillis` reports configured publication cadence for
   information only;
 - optional `WriterPartitionHeartbeat.emittedAtMillis` is diagnostic only;
-- Kafka `LogAppendTime` is used for capture-before-forward validation, Kafka-consumer input
-  progress and read-ahead, and the skew-adjusted expiration proof in §5.4 and the top-level
-  architecture's §§8–8.1; and
+- Kafka `LogAppendTime` is used for capture-before-forward validation, the deterministic
+  source-response boundary supplied to retry policy, and the skew-adjusted expiration proof in
+  §5.4 and the top-level architecture's §§8–8.1; and
 - Kafka offsets order records within a partition.
 
-Kafka-consumer pause, resume, and read-ahead decisions do not use `TrafficObservation.ts`. Target
-replay scheduling does not use `LogAppendTime`. No conversion between source event time and broker
-time is part of expiration correctness.
+Kafka-consumer pause and resume decisions do not use either timestamp. Target replay scheduling
+does not use `LogAppendTime`. No conversion between source event time and broker time is part of
+expiration correctness.
 
 ### 6.6 Commit behavior
 
@@ -953,8 +1013,9 @@ The replayer should expose:
 Before implementation is declared complete:
 
 - `TrafficObservation` carries the connection-local observation sequence defined in §4.1;
-- `WriterPartitionHeartbeat` carries the writer identity, partition, informational
-  `heartbeatIntervalMillis`, and optional diagnostic `emittedAtMillis`;
+- `WriterPartitionHeartbeat` carries the writer identity, informational
+  `heartbeatIntervalMillis`, and optional diagnostic `emittedAtMillis`; neither it nor
+  `TrafficStream` carries a partition, which the replayer reads from Kafka record metadata;
 - connection addition to the local registry precedes acceptance of its first
   `TrafficObservation`;
 - Netty's terminal connection observation is the final contiguous
@@ -997,10 +1058,11 @@ allowlist.
 The replayer must implement
 [Capture and Replay Architecture §§8–8.1](captureAndReplayArchitecture.md#8-broker-time-expiration-of-known-connection-state).
 For each partition, it tracks the greatest observed `LogAppendTime` and terminates if a
-higher-offset record is more than `S` below that value. Otherwise, it expires only already-known
-incomplete accumulators. It does not retire the writer or partition, and a future first observation
-initializes fresh state. External clock-health attestation is enforced by the managed workflow, not
-by the replayer.
+higher-offset record is more than `S` below that value; that termination is a detector for a
+violated bound, not a guard that makes earlier expirations safe. Otherwise, it expires only
+already-known incomplete accumulators. It does not retire the writer or partition, and a future
+first observation initializes fresh state under the key's retained baseline. External clock-health
+attestation is enforced by the managed workflow, not by the replayer.
 
 ### 10.5 Managed-fleet addendum
 
@@ -1120,9 +1182,10 @@ addendum also specifies:
 - A later observation for a connection whose previous process-local reconstruction expired starts
   fresh reconstruction and never joins the expired state. Fresh reconstruction uses
   `priorRequestsReceived` and `lastObservationWasUnterminatedRead` to discard an incomplete
-  preceding HTTP message, and its first `connectionObservationSequence` establishes the local
-  sequence baseline. A complete request from that fresh state replays normally; an incomplete one
-  may expire independently.
+  preceding HTTP message, its first `connectionObservationSequence` establishes the local
+  sequence baseline, and it continues to use the `(writerNodeId, partition)` key's retained
+  broker-time baseline rather than a new `T` fallback. A complete request from that fresh state
+  replays normally; an incomplete one may expire independently.
 - A higher-offset record whose `LogAppendTime` is more than `S` below the greatest value previously
   observed for that partition immediately terminates the replayer.
 - Source event time, proxy monotonic time, Kafka offset, and Kafka timestamp remain separate
@@ -1146,8 +1209,20 @@ addendum also specifies:
 - Every new assignment uses a new, previously unused `assignmentSequence` and creates a new
   `writerNodeId` for new connections.
 - Existing connections keep their original writer identities across rebalance.
-- Every new assignment identity acknowledges an initial heartbeat before accepting a
-  connection on a permitted partition.
+- Every new assignment identity acknowledges an initial heartbeat on every permitted partition
+  before accepting any connection under that identity.
+- One failed, ambiguous, timed-out, or late initial heartbeat keeps the whole assignment unusable,
+  accepts no connection on any of its partitions, and enters the process-wide compromised
+  workflow.
+- The source listener is not open before the first usable assignment; a client connecting earlier
+  is refused, and no capture-failure policy is invoked by that refusal.
+- A draining proxy leaves the group before its connection set drains, remaining members receive
+  the redistributed partitions and open new writer identities, and the draining proxy continues
+  publishing and heartbeating under its existing identities without membership.
+- A draining proxy allows 60 seconds by default for natural close, then force-closes remaining
+  connections and allows 180 seconds for retirement and publisher quiescence. If still incomplete,
+  it emits and flushes an error and thread dump, calls `System.exit` at 270 seconds, and is halted by
+  a watchdog at 300 seconds if shutdown hooks hang. Every interval is configurable.
 - An older writer identity emits periodic heartbeats until its connections drain, then retires its
   publisher lane locally.
 - Rapid rebalances may leave several writer identities draining concurrently without sharing
@@ -1181,9 +1256,11 @@ addendum also specifies:
   acknowledging; a matching acknowledgement enables whole-process pass-through; lost and duplicate
   notifications and acknowledgements are idempotent; controller failover reconstructs the durable
   acknowledgement; and deadline expiration terminates without forwarding the blocked traffic.
-- Verify that orderly trustworthy shutdown emits a high-severity diagnostic after its five-minute
-  target and fails retirement on the first application-visible Kafka failure or heartbeat
-  acknowledgement deadline expiration.
+- Verify the 60-second natural drain, force-close transition, 240-second orderly-retirement
+  deadline, bounded diagnostic flush, `System.exit` at 270 seconds, and watchdog
+  `Runtime.halt` at 300 seconds. Verify that each interval is configurable and that orderly
+  retirement fails on the first application-visible Kafka failure or heartbeat acknowledgement
+  deadline expiration.
   Verify that later acknowledgements cannot activate an assignment or complete publisher
   retirement.
   Capture-compromise and unstable-process failures do not enter retirement.
@@ -1263,8 +1340,10 @@ The design is complete when:
   and acknowledged the exact capture activation; acknowledgement timeout terminates the process.
 - Group-member departure only causes group rebalance; it has no replay meaning.
 - The maximum whole-connection lifetime defaults to 60 minutes.
-- Orderly shutdown while capture and Kafka remain trustworthy uses a five-minute default retirement
-  bound; capture-compromise and unstable-process failures do not use that retirement path.
+- Orderly shutdown while capture and Kafka remain trustworthy uses a 60-second natural drain,
+  force-closes remaining connections, calls `System.exit` at 270 seconds if retirement is still
+  incomplete, and has a five-minute internal watchdog hard stop; capture-compromise and
+  unstable-process failures do not use that retirement path.
 - Recovery after a capture gap starts a new capture and replay run.
 - In managed Kubernetes, a compromised process never captures again. A `fail-closed` process may
   be replaced in the current run because it forwarded no uncaptured traffic. Once uncaptured

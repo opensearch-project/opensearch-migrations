@@ -105,8 +105,9 @@ rather than replacing them with the destination broker's current time.
 
 The replayer uses the archived `E` and `S` values and applies the normal broker-time expiration
 rules. This mode assumes the source Kafka brokers satisfied the declared skew bound while the
-capture was produced. The archived record timestamps also drive Kafka input progress and
-read-ahead; the import broker's append time does not replace them.
+capture was produced. The archived record timestamps also reproduce the deterministic
+source-response boundary used by retry policy; the import broker's append time does not replace
+them.
 
 ### `rebase-without-expiration`
 
@@ -116,8 +117,8 @@ timestamps.
 
 In this mode, broker-time heartbeat expiration is disabled. Rebasing timestamps must never authorize
 expiration under the original `E + S` proof, because the rebased values do not describe the source
-capture timeline. The destination timestamps may drive Kafka input progress and read-ahead, but
-not source-run expiration.
+capture timeline. The destination timestamps drive the source-response boundary used by retry
+policy, but not source-run expiration.
 
 Choosing this mode also accepts that an archive ending with an incomplete connection and no
 terminal `CloseObservation` may remain unresolved indefinitely. End of archive is not completion

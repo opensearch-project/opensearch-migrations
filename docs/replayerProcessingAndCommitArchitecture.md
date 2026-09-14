@@ -13,8 +13,8 @@ replay and tuple output are required, and when a Kafka record may be committed. 
 defines the ownership, ordering, asynchronous-completion, cancellation, and accounting structure
 that makes those behaviors implementable and provable.
 
-Section 8 separates Kafka-record input progress from source-event replay timing and defines when a
-request stops constraining normal Kafka read-ahead.
+Section 8 separates demand-driven Kafka input from source-event replay timing and the deterministic
+Kafka-timestamp boundary used when retry policy waits for a captured source response.
 
 ## 1. Goals and boundaries
 
@@ -29,9 +29,9 @@ The replayer architecture must make these properties straightforward to reason a
 5. A request has two explicit milestones: its turn on the target connection is finished, and all
    processing for the request is finished after its tuple is durable. The second milestone does not
    prevent the connection from beginning a later request.
-6. A complete captured source response, an incomplete captured source response, a captured
-   connection close, and captured-connection expiration are distinct inputs. None is inferred from
-   another.
+6. The source-response input frozen for retry policy, the final captured source-response result
+   used for tuple output, a captured connection close, and captured-connection expiration are
+   distinct inputs. A retry decision may stop waiting while tuple accumulation continues.
 7. One Kafka record may contribute to several requests, and no request may release that record
    before every other dependency of the record is finished.
 8. Partition revocation cancels only work belonging to the revoked partition generation.
@@ -39,8 +39,9 @@ The replayer architecture must make these properties straightforward to reason a
    partitions continue.
 10. Expected outcomes are explicit typed values. An unexpected exception escaping an owner is a
    process failure.
-11. Backpressure cannot prevent the replayer from reaching a later heartbeat needed to release
-    already-read traffic.
+11. Kafka input is demand-driven per partition. A partition is always readable when its
+    reconstituted-request supply is below the configured target, and remains readable while an
+    active target connection turn has unresolved source-response input for retry policy.
 12. Correctness-relevant asynchronous work has a required typed return path to the owner that must
     act on its result.
 
@@ -91,15 +92,15 @@ flowchart LR
     Kafka["Kafka source owner<br/>consumer, assignments, commits"]
     Intake["Replay-intake owner<br/>decode, HTTP assembly, liveness,<br/>record completion"]
     Actor["Connection owner<br/>channel, request registry, and<br/>two ordered queues"]
-    Request["Request-replay owner<br/>preparation, target attempts,<br/>source response, tuple"]
+    Request["Request-replay owner<br/>preparation, target attempts,<br/>retry source-response input,<br/>final source response, tuple"]
     Target["Target server"]
     Tuple["Tuple writer"]
 
     Kafka -->|"record batches and<br/>partition control"| Intake
     Intake -->|"reconstituted requests and close<br/>in captured order"| Actor
-    Intake -->|"complete or incomplete<br/>source-response result"| Actor
+    Intake -->|"retry source-response input;<br/>final source-response result"| Actor
     Actor -->|"begin preparation;<br/>begin target turn"| Request
-    Actor -->|"route source-response<br/>message immediately"| Request
+    Actor -->|"route both source-response<br/>messages immediately"| Request
     Request -->|"preparation ready;<br/>connection turn finished;<br/>request processing finished"| Actor
     Request --> Target
     Request -->|"start tuple write"| Tuple
@@ -133,8 +134,8 @@ one ordered sequence so that two inputs never change that owner's state at the s
 | --- | --- | --- |
 | Kafka consumer, assignment, positions, pause state, and commit staging | Kafka source | Polls; pause and resume requests; assignment and revocation callbacks; seeks; completed-record commit requests; commit callbacks |
 | Record decoding, source HTTP assembly, heartbeat expiration, and Kafka-record completion | Replay intake | Kafka record batches, including heartbeat handling; request-processing-finished messages; partition-cleanup completion messages; partition revocation; shutdown |
-| Target channel, request registry, admission queue, execution queue, active target turn, and ordered close | Target connection | Request and close admission; preparation completion; replay-time timer events; connection-turn completion; request-processing completion; channel events; routed source-response messages; partition cancellation |
-| One request's preparation, target attempts, retry state, captured source-response state, tuple output, and cleanup | Request replay | Begin preparation; begin target turn; target-attempt results; source-response complete or incomplete; retry timers; tuple durability; cancellation |
+| Target channel, request registry, admission queue, execution queue, active target turn, and ordered close | Target connection | Request and close admission; preparation completion; replay-time timer events; connection-turn completion; request-processing completion; channel events; routed retry and final source-response messages; partition cancellation |
+| One request's preparation, target attempts, retry state, frozen source-response input for retry, final captured source-response result, tuple output, and cleanup | Request replay | Begin preparation; begin target turn; target-attempt results; source response available or unavailable for retry; final source response complete or incomplete; retry timers; tuple durability; cancellation |
 
 The Kafka source owner may block in Kafka calls. Replay intake performs bounded synchronous CPU
 work but does not wait for target or tuple I/O. The target-connection and request-replay owners run
@@ -160,10 +161,10 @@ reports this milestone to the connection owner. The connection owner may then be
 the next ready request.
 
 **Request-processing completion** means that the request's terminal target result, captured
-source-response result, and durable tuple output are all complete. The request-replay owner reports
-this milestone to the connection owner. That owner removes the request from its registry and
-forwards the completion to replay intake. Replay intake then releases the request's Kafka-record
-associations.
+source-response result for tuple output, and durable tuple output are all complete. The
+request-replay owner reports this milestone to the connection owner. That owner removes the request
+from its registry and forwards the completion to replay intake. Replay intake then releases the
+request's Kafka-record associations.
 
 The normal paths are:
 
@@ -173,7 +174,7 @@ request admitted
     -> connection turn finished
     -> connection owner may advance
 
-terminal target result + source-response result
+terminal target result + final source-response result
     -> start one tuple write
     -> tuple becomes durable
     -> request processing finished
@@ -187,7 +188,8 @@ finishes even if replay intake has not yet completed or expired the captured sou
 
 If the configured retry policy requires captured source-response information before deciding
 whether to retry, the connection turn remains active until the request-replay owner receives either
-a complete or an incomplete source-response result and can make that decision.
+the complete response frozen for retry or an explicit source-response-unavailable result and can
+make that decision. The final source-response result used for tuple output may arrive later.
 
 ### 3.3 Ordered input; overlapping asynchronous work
 
@@ -235,10 +237,12 @@ captured ordinal and replay-time rules without inventing a separate close path.
 
 At time `T`, the connection owner considers only the execution-queue head. It begins that
 request's target turn when the head is prepared and the target connection is available. Immediately
-before the first target send, it obtains one target-concurrency permit. The permit remains with the
-request through its target turn and is released with connection-turn completion. If preparation or
-permit acquisition is still pending, the Netty event loop does not block; the owner waits for the
-corresponding result input. A later prepared entry cannot pass the head.
+before the first target send, it obtains one target-concurrency permit. The permit is held only
+while a target attempt is in progress. It is released with connection-turn completion, and it is
+also released whenever the request-replay owner has a target outcome but must wait for its captured
+source-response input for retry policy; a permit is acquired again before any further attempt. If
+preparation or permit acquisition is still pending, the Netty event loop does not block; the owner
+waits for the corresponding result input. A later prepared entry cannot pass the head.
 
 The connection owner has separate scheduling needs for moving the next admission entry into
 preparation and for starting the execution-queue head. If a scheduled time has already passed when
@@ -259,35 +263,48 @@ assuming that every replayer begins with request index zero.
 
 ### 3.5 Source-response and connection-lifecycle inputs
 
-Replay intake owns mutable captured source-request and source-response assembly. It sends an
-immutable result when a response becomes complete or when incomplete response assembly ends because
-the connection closes or expires.
+Replay intake owns mutable captured source-request and source-response assembly. One request has two
+separate source-response milestones:
+
+1. the immutable source-response input used by retry policy; and
+2. the final captured source-response result used by tuple output.
+
+The retry input becomes either the complete response or explicitly unavailable. The final tuple
+result becomes either complete or incomplete. A complete response observed before the retry
+boundary may satisfy both milestones at once. If the retry boundary is crossed first, retry policy
+receives unavailable while replay intake continues accumulating the response for the tuple.
 
 The messages are distinct:
 
-- `SourceResponseComplete` identifies one request and carries its complete captured response.
+- `SourceResponseComplete` identifies one request and carries its complete captured response. If
+  retry input is still unresolved, it freezes the same complete response for every retry decision.
+  It always supplies the final complete source-response result for tuple output.
+- `SourceResponseUnavailableForRetry` identifies one request and carries no partial response. It
+  freezes retry policy's source-response input as unavailable without ending final source-response
+  accumulation.
 - `SourceResponseIncomplete` identifies one request and carries no partial response represented as
-  complete.
+  complete. It supplies the final incomplete source-response result for tuple output and, when
+  retry input is still unresolved, also freezes that retry input as unavailable.
 - `CapturedConnectionClose` is the ordered close event for the captured connection.
 - Broker-time expiration is an internal replay-intake action. It is not a Kafka record.
 
-A request receives exactly one source-response result: complete, or incomplete. The incomplete
-result need not distinguish an observed close from heartbeat-based expiration. A later
-connection-lifecycle observation does not replace or reverse that request's source-response result.
+A request receives exactly one retry source-response input and exactly one final source-response
+result. The final incomplete result does not distinguish whether captured close or broker-time
+expiration ended the accumulation. That distinction changes no replay, tuple, or Kafka-record
+decision. Neither milestone can be replaced or reversed.
 
 A complete source response and a later connection close or expiration are not contradictory. A
 keepalive connection may produce a complete response and remain open until it later closes or
 expires. The later connection event does not undo the complete response.
 
-Replay intake sends source-response results to the connection owner for immediate routing to
-the matching request-replay owner. These results do not enter the admission or execution queue.
+Replay intake sends all source-response messages to the connection owner for immediate routing to
+the matching request-replay owner. These messages do not enter the admission or execution queue.
 The connection owner does not interpret or accumulate the response; it only uses its request
-registry to route
-the typed message.
+registry to route the typed message.
 
-The ordered close event still enters the admission queue. If close or heartbeat expiration also ends an
-incomplete source response, replay intake sends the separate `SourceResponseIncomplete` result
-without waiting for the close event to reach the head of either connection queue.
+The ordered close event still enters the admission queue. If close or heartbeat expiration also
+ends an incomplete source response, replay intake sends the separate `SourceResponseIncomplete`
+result without waiting for the close event to reach the head of either connection queue.
 
 Broker-time expiration ends the current process-local reconstruction for every affected connection
 known to replay intake. Replay intake removes that reconstruction from its active source-side
@@ -483,6 +500,8 @@ Replay intake:
 - validates that each connection's `connectionObservationSequence` follows the protocol's required
   progression;
 - owns all incomplete source-request and source-response assembly;
+- tracks each reconstituted request's deterministic source-response boundary for retry policy;
+- determines per-partition Kafka input demand after each accepted poll result;
 - processes `WriterPartitionHeartbeat` records;
 - applies broker-time expiration after missed heartbeats;
 - associates processing with the Kafka records that supplied it;
@@ -509,8 +528,8 @@ Kafka record encountered for that key establishes its process-local starting poi
 - If the record is `WriterPartitionHeartbeat`, replay intake accepts its `LogAppendTime` as the
   process-local heartbeat baseline used by the ordinary `E + S` rule.
 - If the record is `TrafficStream`, replay intake records its `LogAppendTime` as `T` and applies the
-  top-level design's conservative `E + 2S` fallback. A later heartbeat replaces that fallback with
-  its exact `LogAppendTime`.
+  top-level design's conservative `E + 2S` fallback. The first heartbeat encountered afterward is
+  accepted unconditionally and replaces that fallback with its exact `LogAppendTime`.
 
 Subsequent heartbeats update an exact heartbeat baseline only when they satisfy the configured `E`
 rule. Accepting the first encountered heartbeat unconditionally is conservative: if the proxy did
@@ -524,18 +543,32 @@ An incomplete request that closes or expires before it can be reconstituted prod
 Ending that incomplete assembly allows its associated Kafka-record processing to finish.
 
 When a source response becomes complete, replay intake sends `SourceResponseComplete` for the
-reconstituted request. When a connection close or expiration ends an incomplete source response,
-replay intake sends `SourceResponseIncomplete`. No partial source-response bytes are represented
-as a complete response. The connection owner routes either result immediately to the matching
-request-replay owner without placing it in a connection-order queue.
+reconstituted request. If that request's retry input is unresolved, the message resolves both retry
+input and the final tuple result. If the retry boundary already supplied
+`SourceResponseUnavailableForRetry`, the complete response resolves only the final tuple result.
+
+Before applying the payload of each higher-offset Kafka record, replay intake compares that
+record's `LogAppendTime` with every unresolved retry boundary on the partition. Crossing a boundary
+sends `SourceResponseUnavailableForRetry` before any observation in the crossing record can
+complete the response. The result is irreversible even if a still-later record has a lower
+timestamp.
+
+When a connection close or expiration ends an incomplete source response, replay intake sends
+`SourceResponseIncomplete`. No partial source-response bytes are represented as a complete
+response. If retry input is unresolved, the same transition also makes it unavailable. The
+connection owner routes every result immediately to the matching request-replay owner without
+placing it in a connection-order queue.
 
 Broker-time expiration closes and releases only the current process-local reconstruction state
 known to replay intake. It does not permanently retire the writer, partition, or connection
 identity. A later observation begins fresh source-reconstruction state, exactly as it would if the
-replayer had restarted at that observation. Replay intake does not reuse the expired
-reconstruction's heartbeat baseline for that fresh state. The first later traffic record supplies a
-new `T` for the conservative `E + 2S` fallback; a heartbeat encountered first supplies the new
-process-local heartbeat baseline.
+replayer had restarted at that observation, with one difference: the broker-time baseline belongs
+to the `(writerNodeId, partition)` key rather than to any reconstruction, so fresh state under a key
+that still has a baseline continues to use that exact value. Replay intake may discard a key's
+baseline only when no incomplete state for that key remains; a later record for the key then
+establishes a new starting point under the first-record rule above. Keeping the exact baseline is
+both simpler and tighter than the `T` fallback, since `T + S` is never earlier than the retained
+value.
 
 ### 5.3 Heartbeat expiration
 
@@ -668,13 +701,16 @@ capture ordinals and process-local replay ordinals after restart.
 
 The connection owner owns a registry of the request-replay owners created for that
 connection. The registry is used only on that owner's Netty event loop. It allows the owner to route a
-source-response result to the matching request without placing that result in either ordered
-connection queue. It removes a request from this registry only after request-processing completion,
-which includes durable tuple output.
+retry or final source-response message to the matching request without placing that message in
+either ordered connection queue. It removes a request from this registry only after
+request-processing completion, which includes durable tuple output.
 
 The owner itself remains until either the captured close or broker-time expiration has caused its
 target channel to close and every request in the registry has reached request-processing
-completion.
+completion. A target-initiated channel closure, such as a keepalive timeout between requests or a
+reset during an attempt, does not end the owner; the owner reconnects for its next target send
+according to the configured target-connection policy, and the affected attempt is handled by the
+request-replay owner's target-outcome rules in §7.4.
 
 ### 7.2 Admission, preparation, and target execution
 
@@ -711,7 +747,8 @@ One request-replay owner exists for each reconstituted request. It owns:
 - any target-concurrency permit assigned to the request;
 - its current target attempt and retry timer;
 - its terminal target outcome;
-- its complete or incomplete captured source-response result;
+- its immutable source-response input for retry policy;
+- its final complete or incomplete captured source-response result for tuple output;
 - its complete tuple and tuple-durability result; and
 - request-specific tracing and cleanup.
 
@@ -724,8 +761,9 @@ It does not own:
 - Kafka commit policy.
 
 The request-replay owner is an exhaustive state machine. Inputs such as preparation completion,
-target-attempt completion, source-response completion, source-response incompleteness, tuple
-durability, and cancellation produce typed transitions. An impossible transition is process-fatal.
+target-attempt completion, source response available or unavailable for retry, final source
+response complete or incomplete, tuple durability, and cancellation produce typed transitions. An
+impossible transition is process-fatal.
 
 It emits two independent results:
 
@@ -752,8 +790,12 @@ Target processing distinguishes:
 Some retry decisions require only the target result. When such a decision is terminal, the
 request-replay owner reports connection-turn completion immediately. Other configured retry
 decisions may require captured source-response information. In that case the request-replay owner
-keeps the connection turn until it receives `SourceResponseComplete` or
-`SourceResponseIncomplete` and can decide whether another target attempt is required.
+keeps the connection turn until it receives either the complete source response frozen for retry
+or `SourceResponseUnavailableForRetry`, then runs the retry policy with that immutable input. It
+does not wait for the final tuple source-response result. It does not keep its target-concurrency
+permit during that wait: the permit is released when the target outcome arrives and acquired again
+before any further attempt. The connection turn preserves per-connection order; the permit bounds
+only attempts in progress.
 
 An unsuccessful response does not by itself require Kafka redelivery. Source-versus-target status
 comparison remains critical tuple and metric output, not Kafka commit policy.
@@ -765,8 +807,10 @@ signature.
 
 ### 7.5 Tuple output
 
-Every reconstituted request produces one tuple after both the terminal target result and the
-complete or incomplete captured source-response result are available.
+Every reconstituted request produces one tuple after both the terminal target result and the final
+complete or incomplete captured source-response result are available. A
+`SourceResponseUnavailableForRetry` result is not a final tuple input and does not start tuple
+output.
 
 A complete tuple may record:
 
@@ -810,61 +854,147 @@ owner accepts each result. It never calls Kafka commit code.
 
 The replayer retains three distinct backpressure controls:
 
-1. **Kafka-time read-ahead.** The Kafka source owner measures input progress with each Kafka
-   record's `LogAppendTime`. `TrafficObservation.ts` never controls Kafka pause, resume, or
-   read-ahead. For a reconstituted request, its Kafka input time is the greatest `LogAppendTime`
-   among all Kafka records whose observations were required to reconstitute that request. This is
-   the time, in the Kafka consumer's time domain, by which all captured request data had become
-   available in the Kafka log. If one Kafka record contributes to several requests, its timestamp
-   participates independently in each request's Kafka input time.
-
-   The normal Kafka read-ahead floor is the earliest Kafka input time among reconstituted requests
-   whose first target send has not yet been issued. The configured read-ahead allowance is measured
-   from that floor. When no such request exists, request-based read-ahead imposes no pause. Issuing
-   a request's first target send removes that request from this calculation. Target response
-   handling, retries, source-response accumulation, tuple output, and Kafka commit continue
-   independently and do not reintroduce that request into the read-ahead calculation. The Kafka
-   source owner implements the stop by pausing normal record delivery and continues
-   group-maintenance polls while paused.
-2. **Target request-count limit.** The configured `--max-concurrent-requests` value is implemented
-   by target-concurrency permits acquired immediately before a prepared head request is sent.
+1. **Per-partition Kafka input demand.** Kafka pause and resume do not use time. Replay intake
+   decides whether it needs more records after applying each poll result. The Kafka source owner
+   applies the requested readable or paused state to each assigned partition and continues
+   group-maintenance polls while partitions are paused.
+2. **Target-attempt limit.** The configured `--max-concurrent-target-attempts` value is implemented
+   by target-concurrency permits, the top-level architecture's concurrency slots, held only while a
+   target attempt is in progress. A permit is
+   acquired immediately before a prepared head request is sent and released when the attempt's
+   outcome arrives or the connection turn completes, whichever is first. A request waiting for its
+   captured source-response input for retry holds no permit.
 3. **Partition-generation pause.** Kafka pauses a newly assigned partition while cleanup from its
    prior local generation remains unfinished.
 
 These controls solve different problems and do not replace one another.
 
+### 8.1 Kafka input demand
+
+Let `N`, where `N >= 1`, be the configured request-supply target for each partition. Replay intake
+counts reconstituted requests from that partition that are available for or active in target replay
+and whose connection turn has not completed.
+
+A partition is readable while either:
+
+1. its count is less than `N`; or
+2. at least one request from that partition still has an active target connection turn and has not
+   received its immutable source-response input for retry policy.
+
+The second condition is proactive: replay intake continues reading before the target result is
+known because that result may need the captured source response to decide whether to retry. The
+condition ends when replay intake supplies either the complete source response for retry or
+`SourceResponseUnavailableForRetry`, or when connection-turn completion proves that no later retry
+decision exists. Final source-response accumulation for tuple output does not keep the condition
+true.
+
+Replay intake applies the complete poll result that the Kafka source has already delivered before
+recomputing demand. It does not discard the remainder of a batch, skip offsets, or ask the Kafka
+source to stop in the middle of an accepted batch. Poll-batch overshoot may therefore increase the
+request count beyond `N`.
+
+```mermaid
+flowchart TD
+    A["Replay intake finishes applying an accepted poll result for partition P"]
+    B{"Fewer than N reconstituted requests<br/>remain in target replay?"}
+    C{"Any active target connection turn from P<br/>with unresolved retry source-response input?"}
+    D["Request READABLE for P"]
+    E["Request PAUSED for P"]
+    F["Kafka source applies pause or resume<br/>and continues group-maintenance polls"]
+
+    A --> B
+    B -->|"yes"| D
+    B -->|"no"| C
+    C -->|"yes"| D
+    C -->|"no"| E
+    D --> F
+    E --> F
+```
+
 `TrafficObservation.ts` remains the source event time used by the time shifter and connection owner
-to schedule the target send. If that scheduled time has already passed when the request becomes
-ready, the connection owner acts immediately. The request's Kafka-time read-ahead contribution and
-its source-time target schedule are separate values.
+to schedule target operations. Neither `TrafficObservation.ts` nor `LogAppendTime` controls the
+readable-versus-paused decision.
 
-Heartbeat baselines and expiration use only Kafka `LogAppendTime`. Proxy-recorded source event time
-does not participate in `E + S` or the conservative `E + 2S` fallback. The Kafka source owner must
-continue the polls or touches required for consumer-group membership while normal record delivery
-is paused.
+### 8.2 Deterministic source-response input for retry
 
-Normal request-based read-ahead must not prevent replay intake from reaching the later Kafka record
-needed to resolve known incomplete reconstruction state. For each partition:
+Some retry decisions compare the target result with the captured source response. That comparison
+must not make one slow captured source response hold a connection's target turn indefinitely.
 
-- incomplete state with an accepted heartbeat baseline `M` requires ordered intake until replay
-  intake encounters a later record with `LogAppendTime` `R` satisfying `R - M >= E + S`; and
-- incomplete state using the first-traffic fallback `T` requires ordered intake until replay intake
-  encounters a later record satisfying `R - T >= E + 2S`.
+For each reconstituted request:
 
-The Kafka source owner therefore continues delivering that partition even when the normal
-request-based rule would pause it. It processes every intervening record in increasing offset order
-and buffers the resulting work; it does not scan past, skip, or separately fetch a later record. An
-intervening accepted heartbeat replaces or advances the baseline, so the required expiration
-predicate is evaluated from that heartbeat. If the partition has no later record, the replayer has
-no expiration proof and the incomplete state remains unresolved. This override changes Kafka
-intake only. It never allows a target request to run before the schedule derived from
-`TrafficObservation.ts`.
+- `B` is the `LogAppendTime` of the Kafka record containing the final observation required to
+  reconstitute the complete source request;
+- `W` is the configured source-response retry window; and
+- `R` is the `LogAppendTime` of a later record at a higher offset in the same partition.
 
-The replayer does not impose a hard cap on owned Kafka records or bytes. A large request or a large
-set of dead connections may need a later heartbeat from the same partition before their state can
-be released. Stopping intake at a finite ownership cap could prevent reaching that heartbeat and
-deadlock permanently. Memory exhaustion is preferable to a correctness design that can enter that
-cycle by construction.
+If replay intake completes the captured source response before the boundary is crossed, it freezes
+that response as the source-response input for every retry decision for the request. Otherwise, the
+first later record satisfying:
+
+```text
+R - B >= W
+```
+
+closes the retry window. Replay intake emits `SourceResponseUnavailableForRetry` before applying
+the crossing record's payload. A captured close or broker-time expiration that ends the incomplete
+response may make the retry input unavailable earlier.
+
+```mermaid
+flowchart LR
+    B["offset b<br/>complete request reconstructed<br/>LogAppendTime B"]
+    M["higher offsets are applied in order"]
+    C["complete source response<br/>freeze it for retry"]
+    R["first offset r with R - B >= W"]
+    U["before applying r's payload<br/>freeze unavailable for retry"]
+    L["later response data may still<br/>complete the tuple source response"]
+
+    B --> M
+    M -->|"response completes first"| C
+    M -->|"timestamp boundary first"| R
+    R --> U
+    U --> L
+```
+
+The first boundary crossing is irreversible. A later record with a lower timestamp does not reopen
+the window. A complete source response reconstructed after the crossing may supply the final tuple
+input, but it cannot change the response supplied to retry policy. Every record type can establish
+`R`; its payload is irrelevant to the timestamp comparison.
+
+Because `LogAppendTime` may move backward by at most `S`, the boundary may include or exclude a
+response within approximately `S` of `W`. This is an accepted timing tolerance, not nondeterminism:
+the same partition offsets and preserved timestamps always produce the same crossing record and the
+same retry input. A movement greater than `S` follows the fatal validation rule in §5.3 before that
+record can establish the boundary.
+
+The retry boundary does not finalize source-response accumulation for the tuple, finish a
+Kafka-record association, or authorize commit. It only prevents source-response waiting from
+blocking the target retry decision. A target attempt that obtains no target response continues to
+follow the existing indefinite-retry policy.
+
+### 8.3 Progress and capacity
+
+The two readable conditions remove the circular wait from the previous design:
+
+- when a partition has no usable request supply, it remains readable; and
+- while a target connection turn could still need later Kafka input for retry policy, its partition
+  remains readable until that need is settled.
+
+Consequently, a Kafka pause cannot withhold the input needed for an active target replay to decide
+whether to retry. After the retry boundary, the connection can advance according to target policy
+even while tuple source-response accumulation remains unfinished.
+
+This is not a hard memory ceiling. Reading through one request's retry window may encounter many
+other connections and requests, and Kafka may return a large batch before a pause takes effect.
+`N` limits ordinary reconstituted-request supply; it does not bound bytes, records, incomplete
+source accumulators, or tuple-only work. A hard count or byte cap can still deadlock if it stops
+intake before a record needed to complete, close, or expire retained state. The design therefore
+accepts that extreme traffic density or record size may exhaust memory rather than introducing
+such a deadlock by construction.
+
+The deterministic boundary requires a later record. In normal live operation, periodic
+`WriterPartitionHeartbeat` records provide progress even when application traffic is idle. A
+completely quiet partition cannot establish a record-based retry boundary or broker-time
+expiration.
 
 ## 9. Partition reassignment
 
@@ -900,6 +1030,22 @@ intake. That input identifies the revoked partition generation and the grace dea
    then returns; and
 8. process-local cleanup continues after the callback returns, while a successor generation of
    that partition remains paused until cleanup finishes.
+
+The grace interval and cleanup overlap as follows:
+
+```mermaid
+flowchart LR
+    T0["t0: revocation begins<br/>graceful cancellation accepted<br/>unsent work cancels"]
+    G["during grace<br/>already-started target and tuple work<br/>may finish and submit commit requests"]
+    D["t0 + grace<br/>force cancellation accepted<br/>onPartitionsRevoked returns"]
+    C["forced cleanup continues<br/>after the callback"]
+    N["successor generation resumes<br/>only after old-generation cleanup"]
+
+    T0 --> G
+    G --> D
+    D --> C
+    C --> N
+```
 
 If the generation has no unfinished work, the callback returns immediately.
 
@@ -1105,6 +1251,17 @@ An unexpected failure terminates the process. No fallback owner adopts mutable s
 owner, and no missing callback is interpreted as successful processing. Kafka therefore redelivers
 anything not known to have committed.
 
+### 12.9 Kafka input demand cannot withhold retry evidence
+
+A partition with fewer than `N` reconstituted requests remains readable. A request with an active
+target connection turn and unresolved source-response input for retry also keeps its partition
+readable. Replay intake therefore cannot pause a partition while an active target replay could
+need the later record that either completes its source response or crosses its deterministic retry
+boundary.
+
+Crossing the boundary releases only the retry wait. Final source-response accumulation, tuple
+output, and Kafka-record completion remain independent and may continue afterward.
+
 ## 13. Verification strategy
 
 ### 13.1 Compile-time and component proofs
@@ -1130,7 +1287,13 @@ anything not known to have committed.
 - A target result whose retry decision does not require the source response releases the connection
   turn before the source response finishes.
 - A retry decision that requires source-response information keeps the connection turn until
-  `SourceResponseComplete` or `SourceResponseIncomplete` arrives.
+  `SourceResponseComplete` or `SourceResponseUnavailableForRetry` supplies its immutable retry
+  input.
+- Crossing the retry boundary before a complete response sends
+  `SourceResponseUnavailableForRetry`, lets target policy proceed, and leaves final source-response
+  accumulation active for tuple output.
+- A complete source response arriving after retry input was frozen as unavailable may appear in the
+  tuple but never changes an earlier or later retry decision for that request.
 - An unsuccessful target response follows the configured retry policy, appears in the tuple, and can
   commit.
 - A target that never returns a response keeps retrying until cancellation.
@@ -1165,7 +1328,11 @@ anything not known to have committed.
   commit.
 - Broker-time expiration ends the current reconstruction, lets already-admitted target and tuple
   work finish, and allows a later observation for the same connection identity to start fresh
-  reconstruction.
+  reconstruction that continues to use the key's retained broker-time baseline.
+- A key's baseline is discarded only when no incomplete state for the key remains, and a later
+  record for the key then re-establishes a starting point under the first-record rule.
+- An incomplete source-response result does not represent partial bytes as complete and does not
+  require the tuple to distinguish captured close from broker-time expiration.
 - An observation following an explicit `CloseObservation` is a protocol violation.
 - Starting from a nonzero Kafka cursor, with a nonzero first captured request index, preserves
   later request order.
@@ -1183,6 +1350,11 @@ anything not known to have committed.
 - A request whose transformation is incomplete at its scheduled target time does not block its
   Netty event-loop thread.
 - Requests waiting behind one connection's execution-queue head hold no target-concurrency permit.
+- A request waiting for `SourceResponseComplete` or `SourceResponseUnavailableForRetry` before a
+  retry decision holds no target-concurrency permit and acquires one again before any further
+  attempt.
+- A target-initiated channel closure between requests does not remove the connection owner; the
+  next request reconnects under the configured target-connection policy.
 - Revoking one partition cancels only its work.
 - Unsent work cancels immediately on revocation; already-sent work may complete during the bounded
   grace interval.
@@ -1193,24 +1365,28 @@ anything not known to have committed.
 
 ### 13.4 Backpressure and Kafka tests
 
-- A request's Kafka input time is the greatest `LogAppendTime` among all records required to
-  reconstitute it. The earliest Kafka input time among requests that have not issued their first
-  target send controls normal read-ahead.
-- A Kafka record contributing to multiple requests participates independently in each request's
-  Kafka input-time calculation.
-- Issuing the first target send releases that request's normal read-ahead constraint. Target
-  response handling, retries, source-response accumulation, tuple output, and Kafka commit do not
-  restore it.
-- Kafka-time backpressure uses Kafka pause/resume and continued group-maintenance polling.
-  `TrafficObservation.ts` remains exclusively responsible for target scheduling.
-- A partition remains readable past the normal request-based pause point when replay intake needs a
-  later ordered record to satisfy `E + S` or the first-traffic `E + 2S` expiration rule. Every
-  intervening record is processed in offset order, and an intervening heartbeat updates the
-  predicate.
+- Kafka input demand uses per-partition pause/resume and continued group-maintenance polling.
+  Neither `TrafficObservation.ts` nor `LogAppendTime` controls pause and resume.
+- A partition remains readable whenever fewer than `N` reconstituted requests from it remain
+  available for or active in target replay.
+- A request with an active target connection turn and unresolved retry source-response input keeps
+  its partition readable even when the request-supply count is already at or above `N`.
+- Replay intake applies an entire accepted poll result before recomputing demand; overshoot beyond
+  `N` does not discard or reorder records.
+- `B` is taken from the record containing the final observation needed to reconstruct the request.
+- A complete response before the first higher-offset record satisfying `R - B >= W` is frozen for
+  every retry decision.
+- The crossing record sends `SourceResponseUnavailableForRetry` before its payload is applied.
+- A lower timestamp after the crossing does not reopen the retry window.
+- A complete response after the crossing can finish the tuple source response but cannot change
+  retry input.
+- `WriterPartitionHeartbeat`, `CaptureCapabilityProbe`, and `TrafficStream` records can each
+  establish `R`.
+- Preserved archive timestamps reproduce the same crossing offset and retry input.
 - Target permits saturate and recover without losing completion.
-- A very large request does not prevent the replayer from reaching later protocol records.
-- A very large set of dead connections does not prevent intake from reaching the heartbeat that
-  expires them.
+- A very large poll batch can exceed `N` but remains ordered and fully processed.
+- No hard record or byte cap prevents a readable partition from reaching the record that resolves
+  retry input, connection completion, or broker-time expiration.
 - Completed offsets advance only across the contiguous prefix.
 - A record with no downstream work participates in the same contiguous-prefix commit rule.
 - Commits completed during revocation grace are attempted; broker rejection after ownership loss
