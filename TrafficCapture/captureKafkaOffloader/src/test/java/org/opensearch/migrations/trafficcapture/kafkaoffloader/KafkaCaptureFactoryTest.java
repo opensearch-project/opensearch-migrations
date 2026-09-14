@@ -25,7 +25,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
 import io.netty.buffer.Unpooled;
@@ -528,7 +528,7 @@ public class KafkaCaptureFactoryTest {
         Assertions.assertEquals("test", trafficRecords.get(0).key(),
             "Single-fragment record key should be the connectionId");
         var record = trafficRecords.get(0);
-        var stream = TrafficRecord.parseFrom(record.value());
+        var stream = TrafficStream.parseFrom(record.value());
         Assertions.assertTrue(stream.hasPartition());
         Assertions.assertEquals(record.partition(), stream.getPartition());
 

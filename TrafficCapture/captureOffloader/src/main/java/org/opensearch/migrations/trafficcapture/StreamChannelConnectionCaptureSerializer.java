@@ -19,7 +19,7 @@ import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
@@ -35,12 +35,12 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,
  * serialize it into the Protobuf format as defined by
- * {@link org.opensearch.migrations.trafficcapture.protos.TrafficRecord}, and then output
+ * {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream}, and then output
  * the formatted data to a given CodedOutputStream.
  * <p>
  * Within the class, example markers are commented (e.g., 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2").
  * These markers correspond to the textual representation of the Protobuf format and serve as a guide
- * for field serialization. Below is a visual representation of an example `TrafficRecord` for further reference:
+ * for field serialization. Below is a visual representation of an example `TrafficStream` for further reference:
  * <pre>{@code
  * 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2"
  * 5: "5ae27fca-0ac4-11ee-be56-0242ac120002"
@@ -137,11 +137,11 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         this.streamManager = streamLifecycleManager;
         assert (writerNodeId == null
             ? 0
-            : CodedOutputStream.computeStringSize(TrafficRecord.WRITERNODEID_FIELD_NUMBER, writerNodeId))
-            + CodedOutputStream.computeStringSize(TrafficRecord.CONNECTIONID_FIELD_NUMBER, connectionId) <= MAX_ID_SIZE;
+            : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, writerNodeId))
+            + CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId) <= MAX_ID_SIZE;
         assert (partition == null
             ? 0
-            : CodedOutputStream.computeInt32Size(TrafficRecord.PARTITION_FIELD_NUMBER, partition))
+            : CodedOutputStream.computeInt32Size(TrafficStream.PARTITION_FIELD_NUMBER, partition))
             <= MAX_PARTITION_STAMP_SIZE;
         this.connectionIdString = connectionId;
         this.writerNodeIdString = writerNodeId;
@@ -176,20 +176,20 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             currentCodedOutputStreamHolderOrNull = streamManager.createStream();
             var currentCodedOutputStream = currentCodedOutputStreamHolderOrNull.getOutputStream();
             // e.g. <pre> 1: "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2" </pre>
-            currentCodedOutputStream.writeString(TrafficRecord.CONNECTIONID_FIELD_NUMBER, connectionIdString);
+            currentCodedOutputStream.writeString(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionIdString);
             if (writerNodeIdString != null) {
                 // e.g. <pre> 5: "5ae27fca-0ac4-11ee-be56-0242ac120002" </pre>
-                currentCodedOutputStream.writeString(TrafficRecord.WRITERNODEID_FIELD_NUMBER, writerNodeIdString);
+                currentCodedOutputStream.writeString(TrafficStream.NODEID_FIELD_NUMBER, writerNodeIdString);
             }
             if (partition != null) {
-                currentCodedOutputStream.writeInt32(TrafficRecord.PARTITION_FIELD_NUMBER, partition);
+                currentCodedOutputStream.writeInt32(TrafficStream.PARTITION_FIELD_NUMBER, partition);
             }
             if (eomsSoFar > 0) {
-                currentCodedOutputStream.writeInt32(TrafficRecord.PRIORREQUESTSRECEIVED_FIELD_NUMBER, eomsSoFar);
+                currentCodedOutputStream.writeInt32(TrafficStream.PRIORREQUESTSRECEIVED_FIELD_NUMBER, eomsSoFar);
             }
             if (readObservationsAreWaitingForEom) {
                 currentCodedOutputStream.writeBool(
-                    TrafficRecord.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
+                    TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
                     readObservationsAreWaitingForEom
                 );
             }
@@ -200,8 +200,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     public int currentOutputStreamWriteableSpaceLeft() throws IOException {
         // Writeable bytes is the space left minus the space needed to complete the next flush
         var maxFieldTagNumberToBeWrittenUponStreamFlush = Math.max(
-            TrafficRecord.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
-            TrafficRecord.NUMBER_FIELD_NUMBER
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            TrafficStream.NUMBER_FIELD_NUMBER
         );
         var spaceNeededForRecordCreationDuringNextFlush = CodedOutputStream.computeInt32Size(
             maxFieldTagNumberToBeWrittenUponStreamFlush,
@@ -231,10 +231,10 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         return CompletableFuture.completedFuture(null);
     }
 
-    private void writeTrafficRecordTag(int fieldNumber) throws IOException {
+    private void writeTrafficStreamTag(int fieldNumber) throws IOException {
         getOrCreateCodedOutputStream().writeTag(
             fieldNumber,
-            getWireTypeForFieldIndex(TrafficRecord.getDescriptor(), fieldNumber)
+            getWireTypeForFieldIndex(TrafficStream.getDescriptor(), fieldNumber)
         );
     }
 
@@ -248,7 +248,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     /**
      * Will write the beginning fields for a TrafficObservation after first checking if sufficient space exists in the
      * CodedOutputStream and flushing if space does not exist. This should be called before writing any observation to
-     * the TrafficRecord.
+     * the TrafficStream.
      */
     private void beginSubstreamObservation(
         Instant timestamp,
@@ -305,7 +305,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             )
         );
         // e.g. <pre> 2 { </pre>
-        writeTrafficRecordTag(TrafficRecord.OBSERVATIONS_FIELD_NUMBER);
+        writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         // Write observation content length
         getOrCreateCodedOutputStream().writeUInt32NoTag(observationContentSize);
         // e.g. <pre> 1 { 1: 1234 2: 1234 } </pre>
@@ -404,8 +404,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         try {
             CodedOutputStream currentStream = getOrCreateCodedOutputStream();
             var fieldNum = isFinal
-                ? TrafficRecord.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER
-                : TrafficRecord.NUMBER_FIELD_NUMBER;
+                ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER
+                : TrafficStream.NUMBER_FIELD_NUMBER;
             // e.g. 3: 1
             currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
             log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
@@ -502,10 +502,10 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             ordering.connectionObservationSequence()
         );
         var dataSize = CodedOutputStreamSizeUtil.computeByteBufRemainingSizeNoTag(bufToRead);
-        var trafficRecordOverhead = messageAndOverheadBytesLeft - dataSize;
+        var trafficStreamOverhead = messageAndOverheadBytesLeft - dataSize;
 
         // Writing one data byte requires two bytes to account for its length prefix.
-        flushIfNeeded(trafficRecordOverhead + 2);
+        flushIfNeeded(trafficStreamOverhead + 2);
         var spaceLeft = currentOutputStreamWriteableSpaceLeft();
 
         // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can
@@ -529,11 +529,11 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                     ordering.connectionObservationSequence()
                 );
                 dataSize = CodedOutputStreamSizeUtil.computeByteBufRemainingSizeNoTag(bufToRead);
-                trafficRecordOverhead = messageAndOverheadBytesLeft - dataSize;
-                flushIfNeeded(trafficRecordOverhead + 2);
+                trafficStreamOverhead = messageAndOverheadBytesLeft - dataSize;
+                flushIfNeeded(trafficStreamOverhead + 2);
                 spaceLeft = currentOutputStreamWriteableSpaceLeft();
                 var bytesToRead = computeMaxLengthDelimitedFieldSizeForSpace(
-                    spaceLeft - trafficRecordOverhead,
+                    spaceLeft - trafficStreamOverhead,
                     bufToRead.readableBytes()
                 );
                 if (bytesToRead <= 0) {
