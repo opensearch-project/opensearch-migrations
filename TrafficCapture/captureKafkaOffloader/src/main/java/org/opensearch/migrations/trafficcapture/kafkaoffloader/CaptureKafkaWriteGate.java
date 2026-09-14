@@ -6,7 +6,8 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * Process-lifetime gate that linearizes Kafka submission against a terminal publisher failure.
+ * Process-lifetime gate that linearizes admission to the Kafka publisher against a terminal
+ * publisher failure.
  */
 final class CaptureKafkaWriteGate {
     private Throwable terminalFailure;
@@ -28,20 +29,15 @@ final class CaptureKafkaWriteGate {
         }
     }
 
-    /**
-     * Runs {@code submission} while holding the same lock used to trip the gate.
-     *
-     * @return the terminal cause when submission was rejected, otherwise {@code null}
-     */
+    /** @return the terminal cause when submission was rejected, otherwise {@code null} */
     Throwable submitIfWritable(Runnable submission) {
-        Throwable rejection;
         synchronized (this) {
-            rejection = terminalFailure;
-            if (rejection == null) {
-                submission.run();
+            if (terminalFailure != null) {
+                return terminalFailure;
             }
         }
-        return rejection;
+        submission.run();
+        return null;
     }
 
     Throwable failureIfNotWritable() {

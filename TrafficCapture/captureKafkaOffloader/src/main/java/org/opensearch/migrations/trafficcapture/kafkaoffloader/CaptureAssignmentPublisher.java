@@ -4,7 +4,7 @@ import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Publishes the initial manifests that make a proxy assignment usable.
+ * Publishes the initial heartbeats that make a proxy assignment usable.
  */
 public interface CaptureAssignmentPublisher {
     CompletableFuture<String> installAssignment(Collection<Integer> partitions);

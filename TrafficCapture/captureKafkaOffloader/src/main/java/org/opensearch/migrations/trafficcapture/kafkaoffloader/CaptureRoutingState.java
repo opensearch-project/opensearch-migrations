@@ -13,13 +13,12 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.kafka.common.utils.Utils;
 
 /**
- * Owns assignment-scoped writer identities, immutable connection routes, and the exact
- * connection registry for every writer and partition.
+ * Owns assignment-scoped writer identities, immutable connection routes, local connection
+ * registries, and accepted heartbeat broker-time baselines.
  */
 public final class CaptureRoutingState {
     enum WriterStatus {
@@ -30,24 +29,19 @@ public final class CaptureRoutingState {
         RETIRED
     }
 
+    record WriterPartition(String writerNodeId, int partition) {}
+
     static final class ConnectionRoute {
         private final String writerNodeId;
         private final String connectionId;
         private final int partition;
-        private final AtomicLong manifestCycle;
         private boolean trafficSubmissionAccepted;
         private boolean terminalSubmissionAccepted;
 
-        private ConnectionRoute(
-            String writerNodeId,
-            String connectionId,
-            int partition,
-            AtomicLong manifestCycle
-        ) {
+        private ConnectionRoute(String writerNodeId, String connectionId, int partition) {
             this.writerNodeId = writerNodeId;
             this.connectionId = connectionId;
             this.partition = partition;
-            this.manifestCycle = manifestCycle;
         }
 
         String writerNodeId() {
@@ -62,8 +56,8 @@ public final class CaptureRoutingState {
             return partition;
         }
 
-        long manifestCycle() {
-            return manifestCycle.get();
+        WriterPartition writerPartition() {
+            return new WriterPartition(writerNodeId, partition);
         }
 
         @Override
@@ -104,58 +98,30 @@ public final class CaptureRoutingState {
         List<Integer> partitions() {
             return partitions;
         }
-    }
 
-    static final class PreparedManifest {
-        private final String writerNodeId;
-        private final int partition;
-        private final long manifestCycle;
-        private final List<String> connectionIds;
-
-        private PreparedManifest(
-            String writerNodeId,
-            int partition,
-            long manifestCycle,
-            List<String> connectionIds
-        ) {
-            this.writerNodeId = writerNodeId;
-            this.partition = partition;
-            this.manifestCycle = manifestCycle;
-            this.connectionIds = connectionIds;
-        }
-
-        String writerNodeId() {
-            return writerNodeId;
-        }
-
-        int partition() {
-            return partition;
-        }
-
-        long manifestCycle() {
-            return manifestCycle;
-        }
-
-        List<String> connectionIds() {
-            return connectionIds;
+        List<WriterPartition> writerPartitions() {
+            return partitions.stream()
+                .map(partition -> new WriterPartition(writerNodeId, partition))
+                .toList();
         }
     }
-
-    private record WriterPartitionKey(String writerNodeId, int partition) {}
 
     private record ConnectionKey(String writerNodeId, String connectionId) {}
 
     private static final class WriterPartitionState {
         private final String writerNodeId;
         private final int partition;
-        private final AtomicLong manifestCycle = new AtomicLong();
         private final Set<String> connectionIds = new HashSet<>();
         private WriterStatus status = WriterStatus.INITIALIZING;
-        private Long lastAcceptedManifestLogAppendTime;
+        private Long lastAcceptedHeartbeatLogAppendTime;
 
         private WriterPartitionState(String writerNodeId, int partition) {
             this.writerNodeId = writerNodeId;
             this.partition = partition;
+        }
+
+        private WriterPartition key() {
+            return new WriterPartition(writerNodeId, partition);
         }
     }
 
@@ -167,7 +133,7 @@ public final class CaptureRoutingState {
 
     private final String captureActivationId;
     private final int topicPartitionCount;
-    private final Map<WriterPartitionKey, WriterPartitionState> writerPartitions = new HashMap<>();
+    private final Map<WriterPartition, WriterPartitionState> writerPartitions = new HashMap<>();
     private final Map<ConnectionKey, ConnectionRoute> connectionRoutes = new HashMap<>();
     private CompletableFuture<Void> noConnections = CompletableFuture.completedFuture(null);
     private CurrentAssignment currentAssignment;
@@ -193,7 +159,7 @@ public final class CaptureRoutingState {
         assignmentSequence = Math.incrementExact(assignmentSequence);
         var writerNodeId = captureActivationId + ":" + assignmentSequence;
         for (var partition : validatedPartitions) {
-            var key = new WriterPartitionKey(writerNodeId, partition);
+            var key = new WriterPartition(writerNodeId, partition);
             var previous = writerPartitions.putIfAbsent(
                 key,
                 new WriterPartitionState(writerNodeId, partition)
@@ -210,25 +176,30 @@ public final class CaptureRoutingState {
         if (shuttingDown) {
             throw new IllegalStateException("Kafka capture routing is shutting down");
         }
-        for (var partition : assignment.partitions()) {
-            var state = requireWriterPartition(assignment.writerNodeId(), partition);
-            if (state.status != WriterStatus.INITIALIZING) {
+        for (var writerPartition : assignment.writerPartitions()) {
+            var state = requireWriterPartition(writerPartition);
+            if (state.status != WriterStatus.INITIALIZING
+                || state.lastAcceptedHeartbeatLogAppendTime == null) {
                 throw new CorruptedCaptureStateException(
-                    "Writer partition is not initializing: "
-                        + assignment.writerNodeId()
-                        + "/"
-                        + partition
+                    "Writer partition is not ready for assignment activation: " + writerPartition
                 );
             }
         }
         if (currentAssignment != null) {
             for (var partition : currentAssignment.partitions()) {
-                requireWriterPartition(currentAssignment.writerNodeId(), partition).status =
-                    WriterStatus.DRAINING;
+                var oldState = requireWriterPartition(
+                    new WriterPartition(currentAssignment.writerNodeId(), partition)
+                );
+                if (oldState.status != WriterStatus.CURRENT) {
+                    throw new CorruptedCaptureStateException(
+                        "Current assignment contains a non-current writer partition: " + oldState.key()
+                    );
+                }
+                oldState.status = WriterStatus.DRAINING;
             }
         }
-        for (var partition : assignment.partitions()) {
-            requireWriterPartition(assignment.writerNodeId(), partition).status = WriterStatus.CURRENT;
+        for (var writerPartition : assignment.writerPartitions()) {
+            requireWriterPartition(writerPartition).status = WriterStatus.CURRENT;
         }
         currentAssignment = new CurrentAssignment(assignment.writerNodeId(), assignment.partitions());
     }
@@ -244,9 +215,15 @@ public final class CaptureRoutingState {
         int partition = currentAssignment.partitions().get(
             positiveHash(connectionId) % currentAssignment.partitions().size()
         );
-        var state = requireWriterPartition(currentAssignment.writerNodeId(), partition);
+        var writerPartition = new WriterPartition(currentAssignment.writerNodeId(), partition);
+        var state = requireWriterPartition(writerPartition);
+        if (state.status != WriterStatus.CURRENT) {
+            throw new CorruptedCaptureStateException(
+                "New connection routed to a writer partition that is not current: " + writerPartition
+            );
+        }
         var key = new ConnectionKey(currentAssignment.writerNodeId(), connectionId);
-        if (connectionRoutes.containsKey(key)) {
+        if (connectionRoutes.containsKey(key) || !state.connectionIds.add(connectionId)) {
             throw new CorruptedCaptureStateException(
                 "Connection "
                     + connectionId
@@ -254,25 +231,10 @@ public final class CaptureRoutingState {
                     + currentAssignment.writerNodeId()
             );
         }
-        if (!state.connectionIds.add(connectionId)) {
-            throw new CorruptedCaptureStateException(
-                "Connection "
-                    + connectionId
-                    + " is already present for writer "
-                    + state.writerNodeId
-                    + " and partition "
-                + partition
-            );
-        }
         if (connectionRoutes.isEmpty()) {
             noConnections = new CompletableFuture<>();
         }
-        var route = new ConnectionRoute(
-            state.writerNodeId,
-            connectionId,
-            partition,
-            state.manifestCycle
-        );
+        var route = new ConnectionRoute(state.writerNodeId, connectionId, partition);
         connectionRoutes.put(key, route);
         return route;
     }
@@ -282,6 +244,12 @@ public final class CaptureRoutingState {
         var key = new ConnectionKey(route.writerNodeId(), route.connectionId());
         if (connectionRoutes.get(key) != route) {
             throw new CorruptedCaptureStateException("Connection route is not active: " + route);
+        }
+        var writerState = requireWriterPartition(route.writerPartition());
+        if (writerState.status == WriterStatus.RETIRING || writerState.status == WriterStatus.RETIRED) {
+            throw new CorruptedCaptureStateException(
+                "Traffic submission reached a retired writer partition: " + route.writerPartition()
+            );
         }
         if (route.terminalSubmissionAccepted) {
             throw new CorruptedCaptureStateException(
@@ -314,159 +282,57 @@ public final class CaptureRoutingState {
 
     private void removeRegisteredRoute(ConnectionRoute route) {
         var key = new ConnectionKey(route.writerNodeId(), route.connectionId());
-        if (connectionRoutes.remove(key, route)) {
-            var state = requireWriterPartition(route.writerNodeId(), route.partition());
-            if (!state.connectionIds.remove(route.connectionId())) {
-                throw new CorruptedCaptureStateException("Connection registry is inconsistent for " + route);
-            }
-            if (connectionRoutes.isEmpty()) {
-                noConnections.complete(null);
-            }
-            return;
+        if (!connectionRoutes.remove(key, route)) {
+            throw new CorruptedCaptureStateException("Connection route was not registered: " + route);
         }
-        throw new CorruptedCaptureStateException("Connection route was not registered: " + route);
-    }
-
-    synchronized List<PreparedManifest> prepareInitialManifests(PendingAssignment assignment) {
-        Objects.requireNonNull(assignment);
-        var manifests = new ArrayList<PreparedManifest>(assignment.partitions().size());
-        for (var partition : assignment.partitions()) {
-            var state = requireWriterPartition(assignment.writerNodeId(), partition);
-            if (state.status != WriterStatus.INITIALIZING) {
-                throw new CorruptedCaptureStateException(
-                    "Initial manifest requested for a writer partition that is not initializing"
-                );
-            }
-            manifests.add(prepareManifest(state));
+        var state = requireWriterPartition(route.writerPartition());
+        if (!state.connectionIds.remove(route.connectionId())) {
+            throw new CorruptedCaptureStateException("Connection registry is inconsistent for " + route);
         }
-        return List.copyOf(manifests);
-    }
-
-    synchronized List<PreparedManifest> preparePeriodicManifests() {
-        var states = writerPartitions.values()
-            .stream()
-            .filter(state ->
-                state.status == WriterStatus.CURRENT || state.status == WriterStatus.DRAINING
-            )
-            .sorted(WRITER_PARTITION_ORDER)
-            .toList();
-        var manifests = new ArrayList<PreparedManifest>(states.size());
-        states.forEach(state -> manifests.add(prepareManifest(state)));
-        return List.copyOf(manifests);
-    }
-
-    synchronized List<PreparedManifest> prepareDrainedWriterRetirements() {
-        var states = writerPartitions.values()
-            .stream()
-            .filter(state ->
-                state.status == WriterStatus.DRAINING && state.connectionIds.isEmpty()
-            )
-            .sorted(WRITER_PARTITION_ORDER)
-            .toList();
-        var manifests = new ArrayList<PreparedManifest>(states.size());
-        for (var state : states) {
-            state.status = WriterStatus.RETIRING;
-            manifests.add(prepareManifest(state));
+        if (connectionRoutes.isEmpty()) {
+            noConnections.complete(null);
         }
-        return List.copyOf(manifests);
     }
 
-    synchronized void completeWriterRetirement(PreparedManifest finalManifest) {
-        Objects.requireNonNull(finalManifest);
-        var state = requireWriterPartition(
-            finalManifest.writerNodeId(),
-            finalManifest.partition()
-        );
-        if (state.status != WriterStatus.RETIRING) {
-            throw new CorruptedCaptureStateException(
-                "Writer partition is not retiring: "
-                    + finalManifest.writerNodeId()
-                    + "/"
-                    + finalManifest.partition()
-            );
-        }
-        if (!state.connectionIds.isEmpty()) {
-            throw new CorruptedCaptureStateException(
-                "Writer partition still has connections: "
-                    + finalManifest.writerNodeId()
-                    + "/"
-                    + finalManifest.partition()
-            );
-        }
-        state.status = WriterStatus.RETIRED;
-    }
-
-    synchronized int size() {
-        return connectionRoutes.size();
-    }
-
-    synchronized List<Integer> assignedPartitions() {
-        return currentAssignment == null ? List.of() : currentAssignment.partitions();
-    }
-
-    synchronized String currentWriterNodeId() {
-        return currentAssignment == null ? null : currentAssignment.writerNodeId();
-    }
-
-    synchronized Set<String> writerNodeIds() {
-        return writerPartitions.keySet()
-            .stream()
-            .map(WriterPartitionKey::writerNodeId)
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
-    }
-
-    synchronized List<String> snapshot(String writerNodeId, int partition) {
-        return sortedConnections(requireWriterPartition(writerNodeId, partition));
-    }
-
-    synchronized WriterStatus writerStatus(String writerNodeId, int partition) {
-        return requireWriterPartition(writerNodeId, partition).status;
-    }
-
-    synchronized void acceptManifestLogAppendTime(
-        PreparedManifest manifest,
-        long manifestLogAppendTime,
+    synchronized void acceptHeartbeatLogAppendTime(
+        WriterPartition writerPartition,
+        long heartbeatLogAppendTime,
         Duration expirationInterval
     ) {
-        Objects.requireNonNull(manifest);
-        Objects.requireNonNull(expirationInterval);
-        if (expirationInterval.isZero() || expirationInterval.isNegative()) {
-            throw new IllegalArgumentException("expirationInterval must be positive");
-        }
-        if (manifestLogAppendTime <= 0) {
+        Objects.requireNonNull(writerPartition);
+        var expirationMillis = requirePositive(expirationInterval, "expirationInterval").toMillis();
+        if (heartbeatLogAppendTime <= 0) {
             throw new IllegalStateException(
-                "Kafka did not assign a positive LogAppendTime to manifest "
-                    + manifest.writerNodeId()
-                    + "/"
-                    + manifest.partition()
-                    + "/"
-                    + manifest.manifestCycle()
+                "Kafka did not assign a positive LogAppendTime to heartbeat " + writerPartition
             );
         }
-        var state = requireWriterPartition(manifest.writerNodeId(), manifest.partition());
-        var previous = state.lastAcceptedManifestLogAppendTime;
+        var state = requireWriterPartition(writerPartition);
+        if (state.status == WriterStatus.RETIRED) {
+            throw new CorruptedCaptureStateException(
+                "Heartbeat acknowledgement followed writer-partition retirement: " + writerPartition
+            );
+        }
+        var previous = state.lastAcceptedHeartbeatLogAppendTime;
         if (previous != null) {
-            var elapsed = Math.subtractExact(manifestLogAppendTime, previous);
-            if (elapsed >= expirationInterval.toMillis()) {
+            var elapsed = Math.subtractExact(heartbeatLogAppendTime, previous);
+            if (elapsed >= expirationMillis) {
                 throw new IllegalStateException(
-                    "Manifest broker time exceeded the configured expiration interval for "
-                        + manifest.writerNodeId()
-                        + "/"
-                        + manifest.partition()
+                    "Heartbeat broker time exceeded the configured expiration interval for "
+                        + writerPartition
                         + ": previous="
                         + previous
                         + ", candidate="
-                        + manifestLogAppendTime
+                        + heartbeatLogAppendTime
                         + ", expirationMillis="
-                        + expirationInterval.toMillis()
+                        + expirationMillis
                 );
             }
         }
-        state.lastAcceptedManifestLogAppendTime = manifestLogAppendTime;
+        state.lastAcceptedHeartbeatLogAppendTime = heartbeatLogAppendTime;
     }
 
-    synchronized Long lastAcceptedManifestLogAppendTime(String writerNodeId, int partition) {
-        return requireWriterPartition(writerNodeId, partition).lastAcceptedManifestLogAppendTime;
+    synchronized Long lastAcceptedHeartbeatLogAppendTime(WriterPartition writerPartition) {
+        return requireWriterPartition(writerPartition).lastAcceptedHeartbeatLogAppendTime;
     }
 
     synchronized void validateCriticalMutationTrafficAcknowledgement(
@@ -475,46 +341,60 @@ public final class CaptureRoutingState {
         Duration expirationInterval
     ) {
         Objects.requireNonNull(route);
-        Objects.requireNonNull(expirationInterval);
-        if (expirationInterval.isZero() || expirationInterval.isNegative()) {
-            throw new IllegalArgumentException("expirationInterval must be positive");
-        }
+        var expirationMillis = requirePositive(expirationInterval, "expirationInterval").toMillis();
         if (observationLogAppendTime <= 0) {
             throw new IllegalStateException(
-                "Kafka did not assign a positive LogAppendTime to Critical Mutation Traffic for "
-                    + route.writerNodeId()
-                    + "/"
-                    + route.partition()
-                    + "/"
-                    + route.connectionId()
+                "Kafka did not assign a positive LogAppendTime to Critical Mutation Traffic for " + route
             );
         }
-        var state = requireWriterPartition(route.writerNodeId(), route.partition());
-        var baseline = state.lastAcceptedManifestLogAppendTime;
+        var state = requireWriterPartition(route.writerPartition());
+        var baseline = state.lastAcceptedHeartbeatLogAppendTime;
         if (baseline == null) {
             throw new CorruptedCaptureStateException(
                 "Critical Mutation Traffic was acknowledged before the writer partition established "
-                    + "its initial manifest broker-time baseline"
+                    + "its initial heartbeat broker-time baseline"
             );
         }
         var elapsed = Math.subtractExact(observationLogAppendTime, baseline);
-        if (elapsed >= expirationInterval.toMillis()) {
+        if (elapsed >= expirationMillis) {
             throw new IllegalStateException(
-                "Critical Mutation Traffic acknowledgement exceeded the configured manifest expiration "
+                "Critical Mutation Traffic acknowledgement exceeded the configured heartbeat expiration "
                     + "interval for "
-                    + route.writerNodeId()
-                    + "/"
-                    + route.partition()
-                    + "/"
-                    + route.connectionId()
-                    + ": manifest="
+                    + route
+                    + ": heartbeat="
                     + baseline
                     + ", observation="
                     + observationLogAppendTime
                     + ", expirationMillis="
-                    + expirationInterval.toMillis()
+                    + expirationMillis
             );
         }
+    }
+
+    synchronized List<WriterPartition> prepareDrainedWriterRetirements() {
+        var states = writerPartitions.values()
+            .stream()
+            .filter(state ->
+                state.status == WriterStatus.DRAINING && state.connectionIds.isEmpty()
+            )
+            .sorted(WRITER_PARTITION_ORDER)
+            .toList();
+        var retiring = new ArrayList<WriterPartition>(states.size());
+        for (var state : states) {
+            state.status = WriterStatus.RETIRING;
+            retiring.add(state.key());
+        }
+        return List.copyOf(retiring);
+    }
+
+    synchronized void completeWriterRetirement(WriterPartition writerPartition) {
+        var state = requireWriterPartition(writerPartition);
+        if (state.status != WriterStatus.RETIRING || !state.connectionIds.isEmpty()) {
+            throw new CorruptedCaptureStateException(
+                "Writer partition cannot complete retirement: " + writerPartition
+            );
+        }
+        state.status = WriterStatus.RETIRED;
     }
 
     synchronized CompletableFuture<Void> whenNoConnections() {
@@ -530,13 +410,12 @@ public final class CaptureRoutingState {
         shuttingDown = true;
         if (currentAssignment != null) {
             for (var partition : currentAssignment.partitions()) {
-                var state = requireWriterPartition(currentAssignment.writerNodeId(), partition);
+                var state = requireWriterPartition(
+                    new WriterPartition(currentAssignment.writerNodeId(), partition)
+                );
                 if (state.status != WriterStatus.CURRENT) {
                     throw new CorruptedCaptureStateException(
-                        "Current writer partition is not current: "
-                            + currentAssignment.writerNodeId()
-                            + "/"
-                            + partition
+                        "Current writer partition is not current: " + state.key()
                     );
                 }
                 state.status = WriterStatus.DRAINING;
@@ -556,18 +435,39 @@ public final class CaptureRoutingState {
         currentAssignment = null;
     }
 
-    int topicPartitionCount() {
-        return topicPartitionCount;
+    synchronized int size() {
+        return connectionRoutes.size();
     }
 
-    private PreparedManifest prepareManifest(WriterPartitionState state) {
-        var cycle = state.manifestCycle.getAndIncrement();
-        return new PreparedManifest(
-            state.writerNodeId,
-            state.partition,
-            cycle,
-            sortedConnections(state)
-        );
+    synchronized List<Integer> assignedPartitions() {
+        return currentAssignment == null ? List.of() : currentAssignment.partitions();
+    }
+
+    synchronized String currentWriterNodeId() {
+        return currentAssignment == null ? null : currentAssignment.writerNodeId();
+    }
+
+    synchronized Set<String> writerNodeIds() {
+        return writerPartitions.keySet()
+            .stream()
+            .map(WriterPartition::writerNodeId)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    synchronized List<String> snapshot(String writerNodeId, int partition) {
+        return sortedConnections(requireWriterPartition(new WriterPartition(writerNodeId, partition)));
+    }
+
+    synchronized WriterStatus writerStatus(String writerNodeId, int partition) {
+        return requireWriterPartition(new WriterPartition(writerNodeId, partition)).status;
+    }
+
+    synchronized boolean hasConnections(WriterPartition writerPartition) {
+        return !requireWriterPartition(writerPartition).connectionIds.isEmpty();
+    }
+
+    int topicPartitionCount() {
+        return topicPartitionCount;
     }
 
     private List<String> sortedConnections(WriterPartitionState state) {
@@ -576,13 +476,11 @@ public final class CaptureRoutingState {
         return List.copyOf(connections);
     }
 
-    private WriterPartitionState requireWriterPartition(String writerNodeId, int partition) {
-        validatePartition(partition);
-        var state = writerPartitions.get(new WriterPartitionKey(writerNodeId, partition));
+    private WriterPartitionState requireWriterPartition(WriterPartition writerPartition) {
+        validatePartition(writerPartition.partition());
+        var state = writerPartitions.get(writerPartition);
         if (state == null) {
-            throw new CorruptedCaptureStateException(
-                "Unknown writer partition " + writerNodeId + "/" + partition
-            );
+            throw new CorruptedCaptureStateException("Unknown writer partition " + writerPartition);
         }
         return state;
     }
@@ -609,6 +507,14 @@ public final class CaptureRoutingState {
         Objects.requireNonNull(value);
         if (value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value;
+    }
+
+    private static Duration requirePositive(Duration value, String name) {
+        Objects.requireNonNull(value);
+        if (value.isZero() || value.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive");
         }
         return value;
     }

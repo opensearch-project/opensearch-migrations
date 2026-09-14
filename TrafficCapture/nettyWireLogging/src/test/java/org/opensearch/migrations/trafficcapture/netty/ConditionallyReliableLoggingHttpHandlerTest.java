@@ -965,11 +965,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             var offloader = new StreamChannelConnectionCaptureSerializer<>(
                 "Test",
                 "connection",
-                null,
-                () -> 0,
                 streamManager,
+                Duration.ZERO,
                 ignored -> {
-                    throw new IllegalStateException("manifest freshness expired");
+                    throw new IllegalStateException("heartbeat freshness expired");
                 }
             );
             var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN);
@@ -1026,11 +1025,10 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             var offloader = new StreamChannelConnectionCaptureSerializer<>(
                 "Test",
                 "connection",
-                null,
-                () -> 0,
                 streamManager,
+                Duration.ZERO,
                 ignored -> {
-                    throw new IllegalStateException("manifest freshness expired");
+                    throw new IllegalStateException("heartbeat freshness expired");
                 }
             );
             var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);

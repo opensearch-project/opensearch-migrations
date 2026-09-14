@@ -495,9 +495,11 @@ state.
 
 Separately from broker timestamps, the proxy maintains one local monotonic acknowledgement
 deadline for each `(writerNodeId, partition)`. The initial deadline starts when the initial
-heartbeat is submitted. When a heartbeat acknowledgement is processed and accepted, the proxy sets
-the next deadline to `E` after that local monotonic acceptance time. If the deadline expires before
-the required acknowledgement is processed, the process
+heartbeat is submitted. Kafka's acknowledgement callback and a separate deadline scheduler
+atomically determine whether acknowledgement arrival or deadline expiration happened first;
+publisher-lane backlog cannot change that result. When a heartbeat acknowledgement is processed
+and accepted, the proxy sets the next deadline to `E` after that local monotonic acceptance time. If
+the deadline expires before Kafka invokes the required acknowledgement callback, the process
 irreversibly enters its compromised state. A later acknowledgement is ignored for capture
 authority and cannot renew the deadline. This local deadline does not replace the `LogAppendTime`
 checks above.
@@ -1235,10 +1237,11 @@ trustworthy. Its normative timing and failure behavior are defined in
 [Proxy Capture Protocol §3.5](proxyCaptureProtocol.md#35-scale-down). Connection and
 publisher-retirement ordering remain defined in §§6–7 of this document. The default timeline
 allows 60 seconds for natural drain, force-closes remaining connections, reserves the interval
-through 240 seconds for connection and publisher retirement, calls `System.exit` at 270 seconds
-after bounded diagnostics, and invokes `Runtime.halt` at 300 seconds if shutdown hooks hang. Every
-interval is configurable. Managed orchestration provides an external termination grace period
-longer than the configured internal hard-stop deadline.
+through 240 seconds for connection and publisher retirement, expects the shutdown hook to return by
+270 seconds after bounded diagnostics, and invokes `Runtime.halt` from an independent watchdog at
+300 seconds if the hook hangs. The hook does not call `System.exit` after JVM shutdown has already
+begun. Every interval is configurable. Managed orchestration provides an external termination grace
+period longer than the configured internal hard-stop deadline.
 
 ### 12.4 Proxy capture failure modes
 

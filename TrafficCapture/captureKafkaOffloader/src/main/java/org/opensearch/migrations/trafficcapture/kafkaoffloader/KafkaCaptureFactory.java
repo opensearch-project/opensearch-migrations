@@ -15,6 +15,7 @@ import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureReadiness;
 import org.opensearch.migrations.trafficcapture.IOrderlyRetirableCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
@@ -33,12 +34,14 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 @Slf4j
 public class KafkaCaptureFactory implements
     IConnectionCaptureFactory<RecordMetadata>,
+    IConnectionCaptureReadiness,
     IOrderlyRetirableCaptureFactory,
     AutoCloseable {
 
     public static final String DEFAULT_TOPIC_NAME_FOR_TRAFFIC = "logging-traffic-topic";
-    public static final Duration DEFAULT_LIVENESS_SNAPSHOT_INTERVAL = Duration.ofSeconds(30);
-    public static final Duration DEFAULT_MANIFEST_EXPIRATION_INTERVAL = Duration.ofSeconds(60);
+    public static final Duration DEFAULT_TRAFFIC_STREAM_FLUSH_INTERVAL = Duration.ofSeconds(5);
+    public static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(10);
+    public static final Duration DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL = Duration.ofSeconds(30);
     static final Duration DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY = Duration.ofSeconds(1);
     // This value encapsulates overhead we should reserve for a given Producer record to account for record key bytes
     // and
@@ -52,10 +55,9 @@ public class KafkaCaptureFactory implements
     private final CompletableFuture<CaptureKafkaPublisher> publisherFuture;
     private final Producer<String, byte[]> producer;
     private final Consumer<String, byte[]> membershipConsumer;
-    private final CaptureMembershipAssignmentTracker assignmentTracker;
-    private final int minimumActiveProxyCount;
-    private final Duration livenessSnapshotInterval;
-    private final Duration manifestExpirationInterval;
+    private final Duration trafficStreamFlushInterval;
+    private final Duration heartbeatInterval;
+    private final Duration heartbeatExpirationInterval;
     private final Duration topicMetadataDiscoveryRetryDelay;
     private final java.util.function.Consumer<Throwable> captureFailureCallback;
     private final java.util.function.Consumer<Throwable> unstableProcessFailureCallback;
@@ -77,11 +79,11 @@ public class KafkaCaptureFactory implements
         String captureActivationId,
         Producer<String, byte[]> producer,
         Consumer<String, byte[]> membershipConsumer,
-        CaptureMembershipAssignmentTracker assignmentTracker,
-        int minimumActiveProxyCount,
         String topicNameForTraffic,
         int messageSize,
-        Duration livenessSnapshotInterval,
+        Duration trafficStreamFlushInterval,
+        Duration heartbeatInterval,
+        Duration heartbeatExpirationInterval,
         java.util.function.Consumer<Throwable> captureFailureCallback,
         java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
@@ -90,12 +92,11 @@ public class KafkaCaptureFactory implements
             captureActivationId,
             producer,
             membershipConsumer,
-            assignmentTracker,
-            minimumActiveProxyCount,
             topicNameForTraffic,
             messageSize,
-            livenessSnapshotInterval,
-            DEFAULT_MANIFEST_EXPIRATION_INTERVAL,
+            trafficStreamFlushInterval,
+            heartbeatInterval,
+            heartbeatExpirationInterval,
             DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
             captureFailureCallback,
             unstableProcessFailureCallback
@@ -107,12 +108,8 @@ public class KafkaCaptureFactory implements
         String captureActivationId,
         Producer<String, byte[]> producer,
         Consumer<String, byte[]> membershipConsumer,
-        CaptureMembershipAssignmentTracker assignmentTracker,
-        int minimumActiveProxyCount,
         String topicNameForTraffic,
         int messageSize,
-        Duration livenessSnapshotInterval,
-        Duration manifestExpirationInterval,
         java.util.function.Consumer<Throwable> captureFailureCallback,
         java.util.function.Consumer<Throwable> unstableProcessFailureCallback
     ) {
@@ -121,12 +118,11 @@ public class KafkaCaptureFactory implements
             captureActivationId,
             producer,
             membershipConsumer,
-            assignmentTracker,
-            minimumActiveProxyCount,
             topicNameForTraffic,
             messageSize,
-            livenessSnapshotInterval,
-            manifestExpirationInterval,
+            DEFAULT_TRAFFIC_STREAM_FLUSH_INTERVAL,
+            DEFAULT_HEARTBEAT_INTERVAL,
+            DEFAULT_HEARTBEAT_EXPIRATION_INTERVAL,
             DEFAULT_TOPIC_METADATA_DISCOVERY_RETRY_DELAY,
             captureFailureCallback,
             unstableProcessFailureCallback
@@ -138,12 +134,11 @@ public class KafkaCaptureFactory implements
         String captureActivationId,
         Producer<String, byte[]> producer,
         Consumer<String, byte[]> membershipConsumer,
-        CaptureMembershipAssignmentTracker assignmentTracker,
-        int minimumActiveProxyCount,
         String topicNameForTraffic,
         int messageSize,
-        Duration livenessSnapshotInterval,
-        Duration manifestExpirationInterval,
+        Duration trafficStreamFlushInterval,
+        Duration heartbeatInterval,
+        Duration heartbeatExpirationInterval,
         Duration topicMetadataDiscoveryRetryDelay,
         java.util.function.Consumer<Throwable> captureFailureCallback,
         java.util.function.Consumer<Throwable> unstableProcessFailureCallback
@@ -152,20 +147,19 @@ public class KafkaCaptureFactory implements
         this.captureActivationId = Objects.requireNonNull(captureActivationId);
         this.producer = Objects.requireNonNull(producer);
         this.membershipConsumer = Objects.requireNonNull(membershipConsumer);
-        this.assignmentTracker = Objects.requireNonNull(assignmentTracker);
-        if (minimumActiveProxyCount <= 0) {
-            throw new IllegalArgumentException("minimumActiveProxyCount must be positive");
-        }
-        this.minimumActiveProxyCount = minimumActiveProxyCount;
         this.topicNameForTraffic = Objects.requireNonNull(topicNameForTraffic);
-        this.livenessSnapshotInterval = requirePositive(livenessSnapshotInterval, "livenessSnapshotInterval");
-        this.manifestExpirationInterval = requirePositive(
-            manifestExpirationInterval,
-            "manifestExpirationInterval"
+        this.trafficStreamFlushInterval = requirePositive(
+            trafficStreamFlushInterval,
+            "trafficStreamFlushInterval"
         );
-        if (livenessSnapshotInterval.compareTo(manifestExpirationInterval) >= 0) {
+        this.heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
+        this.heartbeatExpirationInterval = requirePositive(
+            heartbeatExpirationInterval,
+            "heartbeatExpirationInterval"
+        );
+        if (heartbeatInterval.compareTo(heartbeatExpirationInterval) >= 0) {
             throw new IllegalArgumentException(
-                "livenessSnapshotInterval must be lower than manifestExpirationInterval"
+                "heartbeatInterval must be lower than heartbeatExpirationInterval"
             );
         }
         this.topicMetadataDiscoveryRetryDelay = requirePositive(
@@ -191,6 +185,11 @@ public class KafkaCaptureFactory implements
 
     CompletableFuture<CaptureKafkaPublisher> publisherReady() {
         return publisherFuture;
+    }
+
+    @Override
+    public CompletableFuture<Void> readyForConnections() {
+        return publisherFuture.thenApply(ignored -> null);
     }
 
     @Override
@@ -243,9 +242,8 @@ public class KafkaCaptureFactory implements
             return new StreamChannelConnectionCaptureSerializer<>(
                 route.writerNodeId(),
                 route.connectionId(),
-                route.partition(),
-                route::manifestCycle,
                 new StreamManager(ctx, route),
+                trafficStreamFlushInterval,
                 acknowledgement ->
                     readyPublisher.validateCriticalMutationTrafficAcknowledgement(route, acknowledgement)
             );
@@ -341,8 +339,8 @@ public class KafkaCaptureFactory implements
                 topicNameForTraffic,
                 routingState,
                 bufferSize + KAFKA_MESSAGE_OVERHEAD_BYTES,
-                livenessSnapshotInterval,
-                manifestExpirationInterval,
+                heartbeatInterval,
+                heartbeatExpirationInterval,
                 java.time.Clock.systemUTC(),
                 createdWriteGate,
                 this::failUnstable
@@ -356,8 +354,6 @@ public class KafkaCaptureFactory implements
                 topicNameForTraffic,
                 routingState,
                 createdPublisher,
-                assignmentTracker,
-                minimumActiveProxyCount,
                 this::finishMembershipInitialization,
                 this::failCapture,
                 this::failUnstable
@@ -624,8 +620,7 @@ public class KafkaCaptureFactory implements
         return Arrays.copyOfRange(osh.byteBuffer.array(), 0, osh.byteBuffer.position());
     }
 
-    private boolean isTerminalRecord(byte[] payload) throws InvalidProtocolBufferException {
-        var record = TrafficStream.parseFrom(payload);
+    private boolean isTerminalRecord(TrafficStream record) {
         var finalChunk = record.hasNumberOfThisLastChunk();
         var closeCount = record.getSubStreamList()
             .stream()
@@ -646,7 +641,7 @@ public class KafkaCaptureFactory implements
     private CompletableFuture<RecordMetadata> publishPayload(
         IConnectionContext telemetryContext,
         CaptureRoutingState.ConnectionRoute route,
-        byte[] payload,
+        TrafficStream trafficStream,
         boolean finalRecord,
         int index,
         CaptureKafkaPublisher readyPublisher
@@ -656,9 +651,9 @@ public class KafkaCaptureFactory implements
             telemetryContext,
             topicNameForTraffic,
             recordId,
-            payload.length
+            trafficStream.getSerializedSize()
         );
-        return readyPublisher.publishTraffic(route, payload, finalRecord)
+        return readyPublisher.publishTraffic(route, trafficStream, finalRecord)
             .whenComplete((recordMetadata, throwable) -> {
                 if (throwable != null) {
                     flushContext.addTraceException(throwable, true);
@@ -703,13 +698,14 @@ public class KafkaCaptureFactory implements
         ) {
             try {
                 var recordPayload = payload(outputStreamHolder);
+                var trafficStream = TrafficStream.parseFrom(recordPayload);
                 return publishPayload(
                     telemetryContext,
                     route,
-                    recordPayload,
-                    isTerminalRecord(recordPayload),
+                    trafficStream,
+                    isTerminalRecord(trafficStream),
                     index,
-                    publisher
+                    Objects.requireNonNull(publisher)
                 );
             } catch (InvalidProtocolBufferException e) {
                 return CompletableFuture.failedFuture(e);
@@ -728,7 +724,7 @@ public class KafkaCaptureFactory implements
         // Routing initialization decides whether to build a publisher while holding this lock and after
         // checking the flag set above, so close has to take the lock to read the result of that decision.
         // Reading it unlocked can observe no publisher while one is being constructed, which would leave
-        // it running -- with its liveness snapshot timer -- against the producer closed just below.
+        // it running -- with its heartbeat timers -- against the producer closed just below.
         CaptureKafkaPublisher readyPublisher;
         CaptureKafkaPublisher publisherStillInitializing;
         CaptureKafkaMembership readyMembership;

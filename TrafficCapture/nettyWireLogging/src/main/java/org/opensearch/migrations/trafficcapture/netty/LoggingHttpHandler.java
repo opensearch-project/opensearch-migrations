@@ -253,6 +253,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        trafficOffloader.bindToConnectionEventLoop(
+            ctx.executor(),
+            this::reportAsynchronousCaptureFailure
+        );
         connectionDeadline = ctx.executor().schedule(
             () -> {
                 log.atWarn()
@@ -322,10 +326,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     private void reportCaptureFinalizationFailure(Throwable failure) {
-        var cause = failure;
-        while (cause instanceof CompletionException && cause.getCause() != null) {
-            cause = cause.getCause();
-        }
+        var cause = unwrapCompletionFailure(failure);
         log.atError()
             .setCause(cause)
             .setMessage(
@@ -337,6 +338,27 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         } else {
             captureProcessState.requiredCaptureFailed(cause);
         }
+    }
+
+    private void reportAsynchronousCaptureFailure(Throwable failure) {
+        var cause = unwrapCompletionFailure(failure);
+        log.atError()
+            .setCause(cause)
+            .setMessage("Asynchronous required capture operation failed")
+            .log();
+        if (cause instanceof Error) {
+            captureProcessState.unstableProcessFailed(cause);
+        } else {
+            captureProcessState.requiredCaptureFailed(cause);
+        }
+    }
+
+    private static Throwable unwrapCompletionFailure(Throwable failure) {
+        var cause = failure;
+        while (cause instanceof CompletionException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
     }
 
     private void cancelConnectionDeadline() {

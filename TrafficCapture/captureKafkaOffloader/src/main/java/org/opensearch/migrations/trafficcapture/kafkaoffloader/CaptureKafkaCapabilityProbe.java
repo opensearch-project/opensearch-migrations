@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -11,12 +10,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
-import org.opensearch.migrations.trafficcapture.protos.CaptureRecordTypes;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.header.internals.RecordHeader;
-import org.apache.kafka.common.header.internals.RecordHeaders;
 
 /**
  * Publishes the acknowledged, replay-inert records required before a proxy joins its Kafka group.
@@ -73,9 +70,12 @@ final class CaptureKafkaCapabilityProbe {
             if (probeId.isBlank()) {
                 throw new IllegalArgumentException("probeId must not be blank");
             }
-            var payload = CaptureCapabilityProbe.newBuilder()
-                .setWriterNodeId(writerNodeId)
-                .setProbeId(probeId)
+            var payload = CaptureRecord.newBuilder()
+                .setCaptureCapabilityProbe(
+                    CaptureCapabilityProbe.newBuilder()
+                        .setWriterNodeId(writerNodeId)
+                        .setProbeId(probeId)
+                )
                 .build()
                 .toByteArray();
             var record = new ProducerRecord<String, byte[]>(
@@ -83,11 +83,7 @@ final class CaptureKafkaCapabilityProbe {
                 partition,
                 0L,
                 writerNodeId + ":" + probeId,
-                payload,
-                new RecordHeaders(List.of(new RecordHeader(
-                    CaptureRecordTypes.RECORD_TYPE_HEADER,
-                    CaptureRecordTypes.CAPABILITY_PROBE_RECORD_TYPE.getBytes(StandardCharsets.UTF_8)
-                )))
+                payload
             );
             try {
                 producer.send(record, (metadata, failure) -> {

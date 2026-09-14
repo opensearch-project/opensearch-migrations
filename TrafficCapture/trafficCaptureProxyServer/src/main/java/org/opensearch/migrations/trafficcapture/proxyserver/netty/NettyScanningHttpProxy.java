@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -10,7 +11,11 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.GlobalEventExecutor;
 import lombok.Getter;
 
 public class NettyScanningHttpProxy {
@@ -20,6 +25,8 @@ public class NettyScanningHttpProxy {
     protected EventLoopGroup workerGroup;
     protected EventLoopGroup bossGroup;
     private final Consumer<Throwable> unstableProcessFailureHandler;
+    private final DefaultChannelGroup activeConnections =
+        new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
     private final AtomicBoolean stopping = new AtomicBoolean();
     private final AtomicBoolean unexpectedTerminationReported = new AtomicBoolean();
 
@@ -41,7 +48,13 @@ public class NettyScanningHttpProxy {
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
                 .channel(NioServerSocketChannel.class)
-                .childHandler(proxyChannelInitializer)
+                .childHandler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(SocketChannel channel) throws Exception {
+                        activeConnections.add(channel);
+                        proxyChannelInitializer.initChannel(channel);
+                    }
+                })
                 .childOption(ChannelOption.AUTO_READ, false)
                 .bind(proxyPort)
                 .sync()
@@ -55,15 +68,61 @@ public class NettyScanningHttpProxy {
     }
 
     public void stop() throws InterruptedException {
+        stopAcceptingNewConnections();
+        disconnectActiveConnections().join();
+        stopEventLoops();
+    }
+
+    public void stopAcceptingNewConnections() throws InterruptedException {
         stopping.set(true);
+        if (mainChannel == null) {
+            return;
+        }
         mainChannel.close();
+        mainChannel.closeFuture().sync();
+    }
+
+    public CompletableFuture<Void> whenNoActiveConnections() {
+        if (activeConnections.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        var result = new CompletableFuture<Void>();
+        activeConnections.newCloseFuture().addListener(future -> {
+            if (future.isSuccess()) {
+                result.complete(null);
+            } else {
+                result.completeExceptionally(future.cause());
+            }
+        });
+        return result;
+    }
+
+    public CompletableFuture<Void> disconnectActiveConnections() {
+        var result = new CompletableFuture<Void>();
+        activeConnections.close().addListener(future -> {
+            if (future.isSuccess()) {
+                result.complete(null);
+            } else {
+                result.completeExceptionally(future.cause());
+            }
+        });
+        return result;
+    }
+
+    public int activeConnectionCount() {
+        return activeConnections.size();
+    }
+
+    public void stopEventLoops() throws InterruptedException {
+        stopping.set(true);
         try {
-            mainChannel.closeFuture().sync();
+            if (workerGroup != null) {
+                workerGroup.shutdownGracefully().sync();
+            }
         } finally {
-            var workerShutdown = workerGroup.shutdownGracefully();
-            var bossShutdown = bossGroup.shutdownGracefully();
-            workerShutdown.sync();
-            bossShutdown.sync();
+            if (bossGroup != null) {
+                bossGroup.shutdownGracefully().sync();
+            }
         }
     }
 
