@@ -136,6 +136,16 @@ proxy and replayer. The default publication interval is 10 seconds and the defau
 seconds. `heartbeatIntervalMillis` remains informational to the replayer and does not configure its
 expiration rule. The orchestration layer configures the broker-node clock monitor against the same
 `S`. The timestamp proof is valid only while proxy and replayer `E` and `S` values agree.
+Orchestration and proxy startup reject nonpositive values and require the publication interval `H`
+to satisfy `H < E`. The difference `E - H` must provide sufficient margin for scheduling, Kafka
+publication, retries, acknowledgement processing, and operational jitter. `S` is a broker-clock
+bound and does not contribute to this local heartbeat margin.
+
+The orchestration layer also supplies each proxy's positive `trafficStreamFlushInterval` `F`,
+defaulting to five seconds.
+Managed deployments normally use one value across the proxy fleet for consistent operational
+behavior. `F` is not supplied to or interpreted by the replayer, and proxies do not need identical
+`F` values for record correctness.
 
 Every workflow-managed capture topic sets
 `message.timestamp.type=LogAppendTime`. The proxy independently verifies that requirement before
@@ -385,6 +395,11 @@ The maximum whole-connection lifetime defaults to 60 minutes. Planned retirement
 capture and Kafka publication remain trustworthy follows the normative timing and failure policy in
 [Proxy Capture Protocol §3.5](proxyCaptureProtocol.md#35-scale-down).
 
+Each proxy also receives the base protocol's positive `trafficStreamFlushInterval` `F`.
+[Proxy Capture Protocol §4.2](proxyCaptureProtocol.md#42-publisher-ordering-and-acknowledgement) is
+the normative connection-record algorithm. The controller supplies the setting and observes its
+health metrics; `F` is not a controller recovery boundary.
+
 A heartbeat acknowledgement deadline expiring, an ambiguous producer outcome, inability to publish
 a record required for capture, or any other compromise closes the capture activation immediately
 and applies the configured process-wide capture failure policy. That process may never return to
@@ -583,33 +598,38 @@ generation's `writerNodeId` and that partition.
 
 ## 5. Managed data-plane records
 
-Managed and unmanaged modes use the same capture records:
+Managed and unmanaged modes use the same `CaptureRecord` envelope:
 
 ```
-TrafficStream {
-    nodeId = writerNodeId
-    connectionId
-    subStream[] {
-        connectionObservationSequence
-        ...
+CaptureRecord {
+    payload = oneof {
+        TrafficStream {
+            nodeId = writerNodeId
+            connectionId
+            subStream[] {
+                connectionObservationSequence
+                ...
+            }
+        }
+
+        WriterPartitionHeartbeat {
+            writerNodeId
+            heartbeatIntervalMillis
+            emittedAtMillis?  // optional, diagnostic only
+        }
+
+        CaptureCapabilityProbe {
+            writerNodeId = captureActivationId + ":PROBE"
+            probeId
+        }
     }
 }
-
-WriterPartitionHeartbeat {
-    writerNodeId
-    heartbeatIntervalMillis
-    emittedAtMillis?  // optional, diagnostic only
-}
-
-CaptureCapabilityProbe {
-    writerNodeId = captureActivationId + ":PROBE"
-    probeId
-}
 ```
 
-No record body carries a partition; the partition is always the Kafka partition containing the
-record. `WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Managed orchestration
-still configures the proxy and replayer expiration rules separately.
+The active `payload` field identifies the record type without a Kafka-header discriminator. No
+payload carries a partition; the partition is always the Kafka partition containing the envelope.
+`WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Managed orchestration still
+configures the proxy and replayer expiration rules separately.
 
 One traffic record is homogeneous in writer identity and connection, and its partition is the one
 that holds it. It may contain
@@ -620,8 +640,18 @@ required processing associated with every observation has finished. A heartbeat 
 record and contains no connection identities, chunks, sequence number, or connection-lifecycle
 boundary.
 
-An implementation that supports automatic coverage restoration also requires
-`CaptureCoverageEstablished`:
+Periodic connection-record publication introduces no managed record type or field. It only changes
+where the proxy closes one `TrafficStream` and begins its successor.
+
+Automatic same-resource coverage restoration is unsupported, and the current `CaptureRecord`
+envelope has exactly the three payload cases defined by the base protocol. The semantic evidence
+described below is therefore not a current traffic-topic record. Before such recovery can be
+implemented, the design must decide whether this evidence becomes a new `CaptureRecord` payload or
+uses another durable channel, and must apply the base protocol's new-topic rule to any
+wire-incompatible format.
+
+Any future implementation of automatic coverage restoration would require evidence with the
+following content:
 
 ```
 CaptureCoverageEstablished {
@@ -632,14 +662,13 @@ CaptureCoverageEstablished {
 }
 ```
 
-Each control record is written independently to every traffic partition and acknowledged on every
-partition before the controller advances. Timestamps may be included for diagnostics, but they do
-not establish ordering or authority. The replayer commits a valid control record only after its
-validation and semantic effect are complete. The Kafka offset remains indivisible and follows the
-ordinary whole-record disposition rules. Because the base protocol treats an unrecognized record
-type as a protocol violation, a deployment that writes control records into the traffic topic must
-run a replayer build that recognizes them; a base replayer encountering `CaptureCoverageEstablished`
-halts under the top-level architecture's §13.
+If a future approved design places this evidence in the traffic topic, it must be written
+independently to every traffic partition and acknowledged on every partition before the controller
+advances. Timestamps may be included for diagnostics, but they do not establish ordering or
+authority. The replayer would commit a valid control record only after its validation and semantic
+effect are complete. The Kafka offset would remain indivisible and follow the ordinary whole-record
+disposition rules. The current protocol must not write this unrecognized payload into the traffic
+topic.
 
 `CaptureCoverageEstablished` is a record name. “Coverage marker” is informal shorthand and should
 not appear in protocol APIs.
@@ -1232,7 +1261,7 @@ re-establishment and same-resource replacement-snapshot automation are not speci
 
 | Change | Requirement | Required behavior |
 |---|---|---|
-| Managed configuration | Required | Add `suppressCaptureByDefault`, the process-wide `--capture-failure-policy`, a 60-minute default maximum connection lifetime, and the base protocol's orderly-retirement timing configuration. |
+| Managed configuration | Required | Add `suppressCaptureByDefault`, the process-wide `--capture-failure-policy`, a positive `trafficStreamFlushInterval` `F` defaulting to five seconds, a 60-minute default maximum connection lifetime, and the base protocol's orderly-retirement timing configuration. |
 | Separate status/control interface | Required | Expose local state and authenticated idempotent commands without sharing the source listener. Report capture compromise through a non-Kafka push or watch path with polling reconciliation; acknowledge only after durable terminal status is recorded. |
 | Kafka group assignment | Required | Use a Kafka-provided assignor with no custom assignor, subscription `userData`, assignment metadata, member readiness state, minimum group size, or startup quorum. Treat stickiness and cooperative movement as optional load-balancing optimizations. |
 | Capture Replay status | Required | Add complete/false/unknown coverage, immutable terminal-workflow status, recovery identity, and transition timestamps. |
@@ -1242,7 +1271,7 @@ re-establishment and same-resource replacement-snapshot automation are not speci
 | Kubernetes workload identity | Required | Track Pod UID, container ID, node UID, and process identity; never retire by Pod name or replacement readiness. |
 | Kubernetes fencing | Required | Prove traffic retirement through trusted healthy quiescence, runtime-confirmed termination, or infrastructure fencing that cuts existing connectivity; force deletion and node timeout are insufficient. |
 | Controller command fence | Required | Allocate a domain fence token, persist immutable command intents, target immutable Pod and process identity, and reject stale same-recovery commands independently of leader election. |
-| Record schema | Required | Carry informational `heartbeatIntervalMillis` on `WriterPartitionHeartbeat`; carry no partition in any record body; keep each traffic record homogeneous in writer identity and connection; and commit a Kafka record only after all required processing for every contained observation finishes. |
+| Record schema | Required | Wrap every Kafka application-record value in `CaptureRecord`; use its `payload` oneof to select `TrafficStream`, `WriterPartitionHeartbeat`, or `CaptureCapabilityProbe`; carry informational `heartbeatIntervalMillis` on the heartbeat; carry no partition in any payload; keep each traffic payload homogeneous in writer identity and connection; let periodic connection publication change only record boundaries without adding a payload case or field; and commit a Kafka record only after all required processing for every contained observation finishes. |
 | Proxy state machine | Required | Implement immediate `fail-closed` termination, managed `fail-open` waiting for durable controller acknowledgement before uncaptured forwarding, acknowledgement-timeout termination, healthy suppression, permanent failed-activation rules, last-usable-assignment routing, fresh-process replacement, and concurrent draining of assignment-scoped writer identities. |
 | Topic-bound replayer | Required | Consume only the immutable topic in the trusted replay plan and reject bootstrap or checkpoint state for another topic or plan. |
 | Snapshot replay plan | Required | Persist the capture domain, recovery sequence, immutable Kafka IDs, and partition start offsets fixed before capture grants. |
@@ -1251,7 +1280,7 @@ re-establishment and same-resource replacement-snapshot automation are not speci
 | Replayer fatal-termination alarms | Required | Treat the final in-process fatal metric as best-effort; alert independently on unexpected replayer container restarts and correlate exit code `80` with fatal event-loop-owner loss. Qualify the required kube-state-metrics interfaces for the deployed version. |
 | Source retirement proof | Required before a fresh snapshot | Define how forced termination excludes source operations completing after the recovery boundary. |
 | Security | Required | Authenticate and authorize every mutation and control-record emission. |
-| Observability | Required | Export terminal failure, inventory, compromise, suppression, proxy connection-set-drain, rejection, topic-boundary, and coverage fan-out metrics for the enabled deployment profile. |
+| Observability | Required | Export terminal failure, inventory, compromise, suppression, proxy connection-record age and flush-deadline lateness, proxy connection-set-drain, rejection, topic-boundary, and coverage fan-out metrics for the enabled deployment profile. |
 
 ## 14. Failure boundaries
 
@@ -1371,6 +1400,9 @@ Required deterministic tests:
   reconstruct connection membership from Kafka heartbeats;
 - managed traffic records processing their ordered observations separately while withholding the
   Kafka commit until every observation's required processing finishes;
+- a nonempty low-volume connection record having one callback scheduled for its fixed `F` deadline,
+  an observation at or after the deadline entering only a successor record, continuous activity not
+  extending that deadline, and an idle connection producing no empty traffic records;
 - failed or ambiguous sends preventing healthy suppression;
 - off-load-balancer live connections blocking completeness;
 - unreachable processes producing false or unknown, never true.
@@ -1426,6 +1458,8 @@ Required live deployment tests:
 - replacement-process handoff requiring client reconnect;
 - a connection remaining open until the 60-minute default maximum lifetime and blocking recovery
   until it closes or is force-closed;
+- a long-lived low-volume connection publishing successive bounded-duration traffic records rather
+  than retaining its observations until the connection closes;
 - Pod deletion without actual process death;
 - force deletion leaving the old process running;
 - a node partition leaving the Pod and existing connections alive;
