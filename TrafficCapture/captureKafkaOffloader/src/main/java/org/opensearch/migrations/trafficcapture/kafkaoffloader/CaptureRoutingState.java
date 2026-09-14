@@ -454,26 +454,12 @@ public final class CaptureRoutingState {
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
-    synchronized List<String> snapshot(String writerNodeId, int partition) {
-        return sortedConnections(requireWriterPartition(new WriterPartition(writerNodeId, partition)));
-    }
-
     synchronized WriterStatus writerStatus(String writerNodeId, int partition) {
         return requireWriterPartition(new WriterPartition(writerNodeId, partition)).status;
     }
 
     synchronized boolean hasConnections(WriterPartition writerPartition) {
         return !requireWriterPartition(writerPartition).connectionIds.isEmpty();
-    }
-
-    int topicPartitionCount() {
-        return topicPartitionCount;
-    }
-
-    private List<String> sortedConnections(WriterPartitionState state) {
-        var connections = new ArrayList<>(state.connectionIds);
-        connections.sort(String::compareTo);
-        return List.copyOf(connections);
     }
 
     private WriterPartitionState requireWriterPartition(WriterPartition writerPartition) {
