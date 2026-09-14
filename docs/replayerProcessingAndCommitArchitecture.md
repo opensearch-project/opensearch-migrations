@@ -61,18 +61,16 @@ This document does not define:
 - managed-fleet recovery after an uncaptured interval; or
 - concrete Java class names and generic signatures for every component.
 
-### 1.1 Unresolved decisions
+### 1.1 Lower-level definitions
 
-The following decisions are not made by this document:
+This document settles the required behavior but does not choose:
 
-1. The exact typed cleanup results used after partition revocation or normal shutdown.
-2. How `onPartitionsRevoked` services completion and commit requests during its bounded grace
-   period. The callback occupies the Kafka-owner thread, so work merely queued to that same thread
-   cannot run unless the callback explicitly pumps a restricted completion queue. That mechanism
-   requires review before implementation.
-3. What removes a target-connection actor after heartbeat expiration when the proxy died without a
-   captured close. `CapturedConnectionExpired` is informational and must not close the target
-   channel, while the settled normal-removal rule waits for a captured close to complete.
+- the exact Java names of cancellation and cleanup result types;
+- the command-line option name for the cancellation grace interval; or
+- concrete queue and wakeup classes used to service replay-intake inputs.
+
+Those names and classes belong in the next lower-level design. They may not change the behaviors
+defined here.
 
 ## 2. Central model
 
@@ -265,7 +263,7 @@ The messages are distinct:
 - `SourceResponseIncomplete` identifies one request and carries no partial response represented as
   complete.
 - `CapturedConnectionClose` is the ordered close event for the captured connection.
-- `CapturedConnectionExpired` is informational and causes no target-channel or request transition.
+- Broker-time expiration is an internal replay-intake action. It is not a Kafka record.
 
 A request receives exactly one source-response result: complete, or incomplete. The incomplete
 result need not distinguish an observed close from heartbeat-based expiration. A later
@@ -283,6 +281,22 @@ the typed message.
 The ordered close event still enters the admission queue. If close or heartbeat expiration also ends an
 incomplete source response, replay intake sends the separate `SourceResponseIncomplete` result
 without waiting for the close event to reach the head of either connection queue.
+
+Broker-time expiration ends the current process-local reconstruction for every affected connection
+known to replay intake. Replay intake removes that reconstruction from its active source-side
+registry. If a target-connection actor exists, replay intake notifies it that broker-time
+expiration ended the current reconstruction after sending any resulting
+`SourceResponseIncomplete` messages. The actor admits no later input from that expired
+reconstruction, lets every already-admitted complete request and tuple finish, closes its target
+channel after its target turns finish, and removes itself after its request registry becomes
+empty.
+
+A later observation for the same captured connection identity starts new reconstruction state. If
+that later state produces a complete request, it creates a new target-connection actor and replays
+normally. This is consistent with the accepted possibility that Kafka contains a complete request
+that never reached the source. If the later state remains incomplete, a later broker-time horizon
+expires it independently. By contrast, any observation after an explicit `CloseObservation` is a
+protocol violation.
 
 ### 3.6 Whole-record commit
 
@@ -450,7 +464,7 @@ Replay intake:
 - validates that each connection's `connectionObservationSequence` follows the protocol's required
   progression;
 - owns all incomplete source-request and source-response assembly;
-- processes writer-partition heartbeats and `NoMoreWrites`;
+- processes `WriterPartitionHeartbeat` and `NoMoreWrites` records;
 - applies broker-time expiration after missed heartbeats;
 - associates processing with the Kafka records that supplied it;
 - creates and registers a target-connection owner when it reconstitutes the first complete request
@@ -465,13 +479,13 @@ reconstruction.
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,
 expiration, request, target, tuple, or record-completion state.
 
-A writer-partition heartbeat updates only that writer and partition's accepted broker-time
-baseline. It creates no downstream request, connection, or tuple work. After replay intake applies
-that update, a Kafka record containing only the heartbeat has no unfinished association and follows
-the immediate commit-eligibility rule in §6.1.
+`WriterPartitionHeartbeat` updates only that writer and partition's accepted broker-time baseline.
+It creates no downstream request, connection, or tuple work. After replay intake applies that
+update, a Kafka record containing only `WriterPartitionHeartbeat` has no unfinished association and
+follows the immediate commit-eligibility rule in §6.1.
 
-`CapturedConnectionExpired` is informational. It creates no target-channel or request work. A Kafka
-record containing only that observation likewise follows §6.1.
+`WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Replay intake does not derive
+expiration authority from it; the replayer uses its separately configured `E` and `S` values.
 
 An incomplete request that closes or expires before it can be reconstituted produces no tuple.
 Ending that incomplete assembly allows its associated Kafka-record processing to finish.
@@ -482,22 +496,22 @@ replay intake sends `SourceResponseIncomplete`. No partial source-response bytes
 as a complete response. The connection actor routes either result immediately to the matching
 request-replay owner without placing it in a connection-order queue.
 
-Broker-time expiration releases only incomplete connection state currently known to replay intake.
-It does not permanently retire the writer or partition. A later observation for a connection not
-currently known to replay intake begins fresh source-reconstruction state, exactly as it would if
-the replayer had restarted at that observation.
+Broker-time expiration closes and releases only the current process-local reconstruction state
+known to replay intake. It does not permanently retire the writer, partition, or connection
+identity. A later observation begins fresh source-reconstruction state, exactly as it would if the
+replayer had restarted at that observation.
 
 ### 5.3 Heartbeat expiration
 
-Heartbeats contain no connection identities and never complete, omit, reopen, or retire a
-connection. Replay intake records the accepted heartbeat `LogAppendTime` for its
+`WriterPartitionHeartbeat` contains no connection identities and never completes, omits, reopens,
+or retires a connection. Replay intake records the accepted heartbeat `LogAppendTime` for its
 `(writerNodeId, partition)`.
 
 When the broker-time proof in the top-level protocol establishes that the writer has missed its
-heartbeat interval, replay intake expires only the incomplete request and source-response
-accumulators it currently knows for that writer and partition. Existing target replay and tuple
-work continue. A later first observation for an unknown connection starts fresh reconstruction
-state.
+heartbeat interval, replay intake ends the current reconstruction for each connection it knows for
+that writer and partition. It ends incomplete request and source-response accumulators, while
+existing target replay and tuple work continue. Later observations start fresh reconstruction
+state and never join the expired reconstruction.
 
 ## 6. Kafka-record completion
 
@@ -523,8 +537,7 @@ that depends on them. A single record may therefore be associated with:
 
 The record is closed to new associations only after every observation in it has been applied.
 When applying the record creates no unfinished association, the closed record is immediately
-eligible to emit its commit request. Heartbeats, capability probes, and informational
-`CapturedConnectionExpired` observations commonly follow this path.
+eligible to emit its commit request. Heartbeats and capability probes commonly follow this path.
 
 ### 6.2 Mixed records
 
@@ -618,8 +631,9 @@ source-response result to the matching request without placing that result in ei
 connection queue. It removes a request from this registry only after request-processing completion,
 which includes durable tuple output.
 
-The actor itself remains until the captured close has been applied to the target channel, that
-close has completed, and every request in the registry has reached request-processing completion.
+The actor itself remains until either the captured close or broker-time expiration has caused its
+target channel to close and every request in the registry has reached request-processing
+completion.
 
 ### 7.2 Admission, preparation, and target execution
 
@@ -791,11 +805,14 @@ clean. A successor generation cannot overtake that accepted batch.
 
 ### 9.2 Bounded revocation grace and scoped cancellation
 
-The replayer uses one startup-configured revocation grace interval. It must be short enough, with
+The replayer uses one startup-configured cancellation grace interval for partition revocation and
+normal shutdown. Its default is five seconds. Deployments may lower it, including to one second,
+when their target and tuple behavior make that appropriate. It must remain short enough, with
 operational margin, that `onPartitionsRevoked` returns before the consumer risks exceeding its poll
 interval.
 
-When revocation begins:
+When revocation begins, the Kafka source submits one scoped graceful-cancellation input to replay
+intake. That input identifies the revoked partition generation and the grace deadline.
 
 1. replay intake stops admitting new work from that partition generation;
 2. work whose target request has not been sent is cancelled immediately;
@@ -803,8 +820,10 @@ When revocation begins:
    during the grace interval;
 4. tuple output already started may continue during that interval;
 5. completed work may still produce commit requests and the Kafka source owner may attempt them;
-6. when the grace deadline arrives, remaining unfinished work is cancelled; and
-7. process-local cleanup may continue after the callback returns, but a successor generation of
+6. when the grace deadline arrives, the Kafka source submits a scoped force-cancellation input;
+7. `onPartitionsRevoked` waits only until replay intake accepts that force-cancellation input and
+   then returns; and
+8. process-local cleanup continues after the callback returns, while a successor generation of
    that partition remains paused until cleanup finishes.
 
 If the generation has no unfinished work, the callback returns immediately.
@@ -821,11 +840,20 @@ Cancellation reaches:
 - tuple output; and
 - target-connection work belonging to that generation.
 
-The first revocation message is therefore a bounded quiescence request rather than unconditional
+The graceful-cancellation input is therefore a bounded quiescence request rather than unconditional
 immediate cancellation. Each owner decides from its explicit state whether its work was never
 started and must cancel immediately, or was already externally active and may finish before the
-deadline. The exact typed cleanup results and the restricted completion-queue pump needed inside
-`onPartitionsRevoked` remain the unresolved decisions in §1.1.
+deadline. Force cancellation upgrades the same partition-generation scope and causes every
+remaining owner to begin immediate cancellation.
+
+While waiting, `onPartitionsRevoked` pumps only replay-intake completion, cleanup, and commit
+requests needed to advance the revoked generation. It does not resume ordinary Kafka intake.
+Acceptance of force cancellation means only that replay intake has recorded and begun distributing
+the notification. It does not mean that downstream cleanup has finished.
+
+Each owner returns a typed cleanup result after its local cancellation and resource release finish.
+Replay intake aggregates those results and eventually reports that partition-generation cleanup is
+finished. The exact Java type names belong in the lower-level design.
 
 ### 9.3 Per-partition read gating
 
@@ -868,12 +896,13 @@ never retrying an old-generation commit after rejection or unknown outcome.
 Normal shutdown:
 
 1. pauses every currently assigned partition so no new records are admitted;
-2. continues the Kafka polls or touches needed to keep the current assignment during the same
-   startup-configured quiescence interval used for revocation;
+2. submits the same scoped graceful-cancellation input used for revocation and continues the Kafka
+   polls or touches needed to keep the current assignment during the configured cancellation grace
+   interval;
 3. applies the same state-sensitive rule as revocation: unsent work cancels immediately, while
    already-sent target and tuple work may finish during the interval;
 4. attempts commits for work that completes while the assignment remains valid;
-5. cancels remaining unfinished work when the interval expires;
+5. submits force cancellation for remaining unfinished work when the interval expires;
 6. allows owners to finish process-local cleanup; and
 7. closes Kafka, tuple output, transformation resources, and event loops.
 
@@ -1037,8 +1066,14 @@ anything not known to have committed.
 - Exactly one write-tuple request is sent when tuple inputs become available. The writer may make
   multiple attempts, and exactly one request-processing completion reaches replay intake through
   the connection actor after tuple durability.
-- A heartbeat-only, capability-probe-only, or informational-expiration-only record becomes
+- A record containing only `WriterPartitionHeartbeat` or `CaptureCapabilityProbe` becomes
   immediately commit-eligible after replay intake applies it.
+- Different informational `heartbeatIntervalMillis` values do not change the replayer's configured
+  expiration rule.
+- Broker-time expiration ends the current reconstruction, lets already-admitted target and tuple
+  work finish, and allows a later observation for the same connection identity to start fresh
+  reconstruction.
+- An observation following an explicit `CloseObservation` is a protocol violation.
 - Starting from a nonzero Kafka cursor, with a nonzero first captured request index, preserves
   later request order.
 - Actor construction off-loop followed by Netty submission exposes no mutable state off-loop.
@@ -1057,6 +1092,8 @@ anything not known to have committed.
 - Revoking one partition cancels only its work.
 - Unsent work cancels immediately on revocation; already-sent work may complete during the bounded
   grace interval.
+- At the grace deadline, force cancellation is accepted by replay intake before
+  `onPartitionsRevoked` returns; the callback does not wait for all forced cleanup to finish.
 - A reassigned partition remains paused until its prior local generation finishes cleanup.
 - Unrelated partitions continue polling and replaying during that cleanup.
 
@@ -1099,8 +1136,7 @@ A later class-level design may define:
 - the request-replay transition table;
 - owner adapters for the Kafka executor and Netty event loops;
 - reference-counted data-lifetime contracts and single-completion guards; and
-- the bounded `onPartitionsRevoked` completion-queue pump after that unresolved mechanism is
-  approved.
+- the bounded `onPartitionsRevoked` completion-queue pump.
 
 That design must preserve the ownership and completion model in this document. It must not add an
 independent completion authority, an executor used only for architectural symmetry, or a hard Kafka

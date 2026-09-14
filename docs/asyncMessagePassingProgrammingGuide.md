@@ -185,16 +185,25 @@ explicit queues or ordinals, not from completion timing.
 
 ## 8. Scoped cancellation
 
-Cancellation is a typed component input. It identifies its scope, such as one Kafka partition
-generation.
+Cancellation uses two typed component inputs for the same scope, such as one Kafka partition
+generation:
 
-The owner receives that input through its normal submission path, finds matching work in its own
-state, and begins the component-defined cleanup. The Netty event loop, Kafka executor, and shared
+1. graceful cancellation immediately cancels work that has not started an external operation and
+   gives already-started work a bounded interval to finish; and
+2. force cancellation upgrades that scope and causes every remaining owner to begin immediate
+   cancellation.
+
+The owner receives either input through its normal submission path, finds matching work in its own
+state, and begins the component-defined action. The Netty event loop, Kafka executor, and shared
 replay-intake queue remain active so unrelated partition generations can continue.
 
 Do not implement scoped cancellation by killing an owner thread, replacing unrelated queued
 inputs, or relying only on shared mutable state. If another owner must wait for cleanup, the
 cancellation path returns a typed cleanup result through a required link.
+
+Delivering force cancellation is not the same as finishing cleanup. A revocation callback may
+return after replay intake accepts the force-cancellation input. Downstream owners continue cleanup
+and later return typed cleanup results through their required links.
 
 ## 9. Operation lifetime and observability
 
