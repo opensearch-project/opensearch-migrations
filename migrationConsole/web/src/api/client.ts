@@ -9,6 +9,8 @@ export type ManageRelationship = components["schemas"]["RelationshipV1"];
 export type RuntimeStatus = components["schemas"]["RuntimeStatusV1"];
 export type ConfigurationDocument =
   components["schemas"]["ConfigurationDocumentV1"];
+export type ConfigurationSchema =
+  components["schemas"]["ConfigurationSchemaV1"];
 export type ConfigEnvironmentDiagnostics =
   components["schemas"]["ConfigEnvironmentDiagnosticsV1"];
 export type ConfigReview = components["schemas"]["ConfigReviewV1"];
@@ -146,6 +148,21 @@ export async function getConfigurationDocument(): Promise<ConfigurationDocument>
     throw new ConfigApiError(
       response.status,
       "The saved configuration document is unavailable",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function getConfigurationSchema(): Promise<ConfigurationSchema> {
+  const { data, error, response } = await client.GET(
+    "/api/v1/config/schema",
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "The configuration editor schema is unavailable",
       error,
     );
   }
@@ -353,7 +370,7 @@ export async function getResetPlan(targetId: string): Promise<ResetPlan> {
   if (!response.ok || error || !data) {
     throw new ConfigApiError(
       response.status,
-      "A reset plan could not be created",
+      "A resource deletion plan could not be created",
       error,
     );
   }
@@ -371,7 +388,7 @@ export async function getCombinedResetPlan(
   if (!response.ok || error || !data) {
     throw new ConfigApiError(
       response.status,
-      "A combined reset plan could not be created",
+      "A combined resource deletion plan could not be created",
       error,
     );
   }
@@ -399,7 +416,7 @@ export async function executeReset(
   if (!response.ok || error || !data) {
     throw new ConfigApiError(
       response.status,
-      "Reset could not be started",
+      "Resource deletion could not be started",
       error,
     );
   }

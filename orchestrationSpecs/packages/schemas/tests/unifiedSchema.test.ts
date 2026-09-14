@@ -18,6 +18,12 @@ function getAutoCreateProperties(schema: any) {
         .properties.autoCreate.properties;
 }
 
+function getTopicProperties(schema: any) {
+    return schema.properties.traffic.properties.kafkaClusters.additionalProperties.anyOf
+        .find((branch: any) => branch.properties?.autoCreate)
+        .properties.topics.additionalProperties.properties;
+}
+
 const validConfig = {
     sourceClusters: {
         source: {
@@ -75,12 +81,16 @@ const validConfig = {
                             ],
                         },
                     },
-                    topicSpecOverrides: {
+                },
+                topics: {
+                    capture: {
+                        specOverrides: {
                         partitions: 12,
                         replicas: 2,
                         config: {
                             "cleanup.policy": "compact",
                         },
+                    },
                     },
                 },
             },
@@ -93,10 +103,43 @@ describe("unified schema builder", () => {
         const {schema} = buildUnifiedSchema({
             strimziSchemaPath: strimziFixturePath,
         });
+        const topicSpec = (schema as any).$defs.StrimziKafkaTopicSpec;
+
+        expect(topicSpec.properties.topicName).toBeUndefined();
+        expect(topicSpec.properties.partitions).toMatchObject({
+            type: "integer",
+            minimum: 1,
+            default: 1,
+            "x-essential": true,
+            "x-effective-default": {
+                label: "1",
+                value: 1,
+            },
+        });
+        expect(topicSpec.properties.partitions["x-expert"]).toBeUndefined();
+        expect(topicSpec.properties.replicas).toMatchObject({
+            type: "integer",
+            minimum: 1,
+            default: 3,
+            "x-essential": true,
+            "x-effective-default": {
+                label: "3",
+                value: 3,
+            },
+        });
+        expect(topicSpec.properties.replicas["x-expert"]).toBeUndefined();
+        expect(topicSpec.properties.config["x-expert"]).toBe(true);
+        expect(getAutoCreateProperties(schema).clusterSpecOverrides["x-expert"])
+            .toBe(true);
+        expect(getAutoCreateProperties(schema).nodePoolSpecOverrides["x-expert"])
+            .toBe(true);
+        expect(getTopicProperties(schema).specOverrides["x-expert"])
+            .toBeUndefined();
 
         expect(JSON.stringify({
             mode: schema["x-orchestration-specs-strimzi-schema-mode"],
             autoCreate: getAutoCreateProperties(schema),
+            topic: getTopicProperties(schema),
             defs: {
                 StrimziKafkaSpec: (schema as any).$defs.StrimziKafkaSpec,
                 StrimziKafkaNodePoolSpec: (schema as any).$defs.StrimziKafkaNodePoolSpec,
@@ -116,6 +159,20 @@ describe("unified schema builder", () => {
         expect(validate(validConfig)).toBe(true);
         expect(validate.errors).toBeNull();
 
+        for (const invalidSpecOverrides of [
+            {partitions: 0},
+            {partitions: 1.5},
+            {replicas: 0},
+            {replicas: 1.5},
+        ]) {
+            const invalidCountConfig = structuredClone(validConfig);
+            invalidCountConfig.traffic.kafkaClusters.default.topics.capture.specOverrides = {
+                ...invalidCountConfig.traffic.kafkaClusters.default.topics.capture.specOverrides,
+                ...invalidSpecOverrides,
+            };
+            expect(validate(invalidCountConfig)).toBe(false);
+        }
+
         const invalidConfig = {
             ...validConfig,
             traffic: {
@@ -128,12 +185,16 @@ describe("unified schema builder", () => {
                                 ...validConfig.traffic.kafkaClusters.default.autoCreate.nodePoolSpecOverrides,
                                 roles: ["broker", "invalid-role"],
                             },
-                            topicSpecOverrides: {
-                                ...validConfig.traffic.kafkaClusters.default.autoCreate.topicSpecOverrides,
+                        },
+                        topics: {
+                            capture: {
+                                specOverrides: {
+                                ...validConfig.traffic.kafkaClusters.default.topics.capture.specOverrides,
                                 config: {
                                     "cleanup.policy": "not-allowed",
                                 },
                             },
+                        },
                         },
                     },
                 },
@@ -146,7 +207,7 @@ describe("unified schema builder", () => {
         );
         expect(errorPointers).toEqual(expect.arrayContaining([
             expect.stringMatching(/nodePoolSpecOverrides.*roles/),
-            expect.stringMatching(/topicSpecOverrides.*cleanup\.policy/),
+            expect.stringMatching(/topics.*specOverrides.*cleanup\.policy/),
         ]));
     });
 

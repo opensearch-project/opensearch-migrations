@@ -23,6 +23,7 @@ import {
 
 import type { ManageNode, ManageSnapshot } from "../../api/client";
 import { StatusIndicator } from "../status/StatusIndicator";
+import { presentResourceActionText } from "../status/operationPresentation";
 import { statusLabel } from "../status/status";
 import {
   resourceRenameCollisionProblem,
@@ -272,6 +273,7 @@ const TreeRow = memo(function TreeRow({
     "Syncing",
     "Syncing configuration",
     "Removing",
+    "Deleting",
   ].includes(node.valueSummary ?? "");
   const spokenState = node.status === "removed"
     ? node.valueSummary ?? "Marked for removal"
@@ -328,14 +330,16 @@ const TreeRow = memo(function TreeRow({
   const approvalAttention = approvalCapability || approvalDiagnostic
     ? {
         headline: approvalCapability?.disabledReason
-          ? "Reset before approval"
+          ? "Delete resource before approval"
           : approvalCapability
             ? "Approval required"
             : approvalDiagnostic?.title ?? "Approval blocked",
-        reason: approvalDiagnostic?.message
+        reason: presentResourceActionText(
+          approvalDiagnostic?.message
           ?? approvalCapability?.disabledReason
           ?? approvalCapability?.label
           ?? "",
+        ),
       }
     : null;
   const indicatorState = [

@@ -19,6 +19,7 @@ import type {
 } from "../../api/client";
 import type { ApprovalCandidate } from "../actions/approvals";
 import { StatusIndicator } from "../status/StatusIndicator";
+import { presentResourceActionText } from "../status/operationPresentation";
 import { normalizedStatus, statusLabel } from "../status/status";
 import {
   buildWorkflowGraph,
@@ -29,6 +30,7 @@ import {
 import {
   connectedPath,
   dependencyAnchorY,
+  dependencyLaneGeometry,
   edgeId,
   groupDependencyRoutes,
   type DependencyEdgeSpan,
@@ -89,29 +91,6 @@ function measureDependencyEdges(
 }
 
 
-function dependencyLaneGeometry(
-  routes: DependencyRoute[],
-  nodeElements: Map<string, HTMLElement>,
-  graphRect: DOMRect,
-) {
-  const firstNode = nodeElements.values().next().value;
-  const nodeLeft = firstNode
-    ? firstNode.getBoundingClientRect().left - graphRect.left
-    : 72;
-  const maxDepth = Math.max(1, ...routes.map((route) => route.depth));
-  // Compress lanes as depth grows so trunks stay inside the gutter
-  // instead of drawing underneath the node cards.
-  const laneSpacing = Math.min(
-    10,
-    Math.max(2, (nodeLeft - 14) / (maxDepth + 1)),
-  );
-  return {
-    laneSpacing,
-    leftmostX: Math.max(6, nodeLeft - laneSpacing * (maxDepth + 1)),
-  };
-}
-
-
 function routeBranches(
   route: DependencyRoute,
   nodeElements: Map<string, HTMLElement>,
@@ -146,10 +125,13 @@ function routedDependencyPaths(
   nodeById: Map<string, WorkflowGraphNode>,
   approvals: ApprovalCandidate[],
 ): RoutedPath[] {
-  const { laneSpacing, leftmostX } = dependencyLaneGeometry(
-    routes,
-    nodeElements,
-    graphRect,
+  const firstNode = nodeElements.values().next().value;
+  const nodeLeft = firstNode
+    ? firstNode.getBoundingClientRect().left - graphRect.left
+    : 72;
+  const { laneSpacing, leftmostX, minDepth } = dependencyLaneGeometry(
+    routes.map((route) => route.depth),
+    nodeLeft,
   );
   const paths: RoutedPath[] = [];
   for (const route of routes) {
@@ -162,7 +144,7 @@ function routedDependencyPaths(
       sourceRect.height,
       "outgoing",
     );
-    const laneX = leftmostX + route.depth * laneSpacing;
+    const laneX = leftmostX + (route.depth - minDepth) * laneSpacing;
     const branches = routeBranches(
       route,
       nodeElements,
@@ -228,6 +210,19 @@ function graphNodeState(
 
 function workflowStepState(step: WorkflowGraphStep): string {
   return step.phase ?? statusLabel(step.status);
+}
+
+function workflowStepTooltip(step: WorkflowGraphStep): string {
+  const diagnostics = step.node.diagnostics
+    .filter((diagnostic) => (
+      diagnostic.severity === "error"
+      || diagnostic.severity === "warning"
+      || diagnostic.severity === "blocked"
+    ))
+    .map((diagnostic) => diagnostic.title ?? diagnostic.message);
+  return diagnostics.length > 0
+    ? diagnostics.join("\n")
+    : `${step.label}: ${workflowStepState(step)}`;
 }
 
 
@@ -350,8 +345,8 @@ function GraphNode({
         <span>
           <strong>{graphNode.label}</strong>
           <small>
-            {graphNode.resourcePlural
-              ? `${graphNode.resourcePlural} · `
+            {graphNode.resourceType ?? graphNode.resourcePlural
+              ? `${graphNode.resourceType ?? graphNode.resourcePlural} · `
               : ""}
             {graphNode.unresolved ? "Not found" : state}
           </small>
@@ -378,7 +373,9 @@ function GraphNode({
             type="button"
           >
             <ShieldCheck aria-hidden="true" />
-            {approval.immutable ? "Reset required" : "Review approval"}
+            {approval.immutable
+              ? "Resource deletion required"
+              : "Review approval"}
           </button>
         </div>
       ) : null}
@@ -404,7 +401,12 @@ function GraphNode({
                 } as React.CSSProperties}
                 type="button"
               >
-                <StatusIndicator status={step.phase ?? step.status} />
+                <span
+                  className="workflow-step-status"
+                  title={workflowStepTooltip(step)}
+                >
+                  <StatusIndicator status={step.phase ?? step.status} />
+                </span>
                 <span>
                   <strong>{step.label}</strong>
                   <small>
@@ -449,15 +451,24 @@ function GraphNode({
         <details className="workflow-graph-operation operation-failed">
           <summary>
             <CircleAlert aria-hidden="true" />
-            <span>{operation.message || operation.label}</span>
+            <span>
+              {presentResourceActionText(
+                operation.message || operation.label,
+              )}
+            </span>
             <ChevronRight
               aria-hidden="true"
               className="workflow-graph-operation-chevron"
             />
           </summary>
           <div className="workflow-graph-operation-detail">
-            <strong>{operation.label}</strong>
-            <p>{operation.detail || "No additional failure detail was reported."}</p>
+            <strong>{presentResourceActionText(operation.label)}</strong>
+            <p>
+              {presentResourceActionText(
+                operation.detail
+                || "No additional failure detail was reported.",
+              )}
+            </p>
           </div>
         </details>
       ) : operation ? (
@@ -465,7 +476,11 @@ function GraphNode({
           className={`workflow-graph-operation operation-${operation.status}`}
         >
           <LoaderCircle className="spin" aria-hidden="true" />
-          <span>{operation.message || operation.label}</span>
+          <span>
+            {presentResourceActionText(
+              operation.message || operation.label,
+            )}
+          </span>
         </div>
       ) : null}
     </fieldset>

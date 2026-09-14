@@ -80,6 +80,16 @@ export type UiHint = {
         sourcePathTemplate?: UiReferencePathTemplateSegment[];
         allowCustom?: boolean;
         emptyMeansDefault?: string;
+        createReference?: {
+            label: string;
+            value?: string;
+            valueFromPathSegmentFromEnd?: number;
+            description?: string;
+            // Defaults to true. Set false only for create-and-stay workflows.
+            navigateToCreated?: boolean;
+            // Defaults to true for derived names and false for fixed names.
+            focusName?: boolean;
+        };
         message?: string;
     }
     | {
@@ -170,18 +180,28 @@ const KAFKA_RESOURCE_COLLECTION = resourceCollection(
     'kafkaclusters',
     'Kafka cluster',
 );
+const KAFKA_TOPIC_DEFINITION_COLLECTION: DefinitionCollectionHint = {
+    ownerAncestorLevels: 1,
+    navigation: {
+        groupLabel: 'Topics',
+        groupOrder: 0,
+    },
+    definition: {
+        typeLabel: 'Kafka topic',
+    },
+};
 const S3_SOURCE_RESOURCE_COLLECTION = resourceCollection(
     resourceNavigation(
         'Live Traffic Migration',
         3,
-        'Kafka Topics',
+        'Previously Captured Traffic',
         1,
         false,
         {label: 'Buffer', order: 0},
     ),
     'CapturedTraffic',
     'capturedtraffics',
-    'Kafka topic',
+    'Previously captured traffic',
     {kind: 'named', suffix: '-topic'},
 );
 const CAPTURE_PROXY_RESOURCE_COLLECTION = resourceCollection(
@@ -1282,9 +1302,6 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
             },
         },
     },
-    topicSpecOverrides: {
-        ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES
-    },
 };
 
 const replaceArrayMerge = (_destinationArray: unknown[], sourceArray: unknown[]) => sourceArray;
@@ -1295,7 +1312,6 @@ export const KAFKA_EXISTING_CLUSTER_CONFIG = z.object({
     kafkaConnection: z.string()
         .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.")
         .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
-    kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
     auth: KAFKA_EXISTING_AUTH_CONFIG.default({type: "none"}).optional(),
 });
 
@@ -2164,22 +2180,65 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
             .describe("Optional overrides merged into the generated Strimzi KafkaNodePool.spec. " +
                 "Workflow-managed fields such as cluster labels may be overwritten by the workflow.")
             .expert(),
-        topicSpecOverrides: GENERIC_JSON_OBJECT.optional()
-            .describe("Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics.")
-            .expert(),
-    }).describe("Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application.")
+    }).describe("Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker and node-pool settings are deep-merged here, while the auth default is resolved separately during transform-time policy application.")
 );
 
+const KAFKA_TOPIC_SPEC_OVERRIDES = GENERIC_JSON_OBJECT.superRefine((value, ctx) => {
+    for (const field of ["partitions", "replicas"] as const) {
+        const candidate = value[field];
+        if (
+            candidate !== undefined
+            && (
+                typeof candidate !== "number"
+                || !Number.isInteger(candidate)
+                || candidate < 1
+            )
+        ) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `${field} must be an integer greater than or equal to 1.`,
+                path: [field],
+            });
+        }
+    }
+});
+
+export const KAFKA_TOPIC_CONFIG = z.object({
+    specOverrides: KAFKA_TOPIC_SPEC_OVERRIDES.optional()
+        .describe("Optional overrides merged into this generated Strimzi KafkaTopic.spec. Configure partitions, replicas, retention, segment size, and other Kafka topic settings here.")
+        .expert(),
+}).describe("An explicitly declared Kafka topic belonging to this cluster.");
+
+export const KAFKA_TOPICS_MAP = z.record(
+    z.string().regex(K8S_NAMING_PATTERN),
+    KAFKA_TOPIC_CONFIG,
+).default({}).optional()
+    .describe("Kafka topics declared for this cluster. Each key is a topic name and each value can override that topic's Strimzi KafkaTopic.spec.")
+    .uiHint({
+        kind: 'record',
+        addLabel: 'Kafka topic',
+        keyFormat: 'k8s-name',
+        keyPattern: K8S_NAMING_PATTERN.source,
+        message: "Use a valid Kubernetes DNS name for the Kafka topic.",
+        definitionCollection: KAFKA_TOPIC_DEFINITION_COLLECTION,
+    });
+
 export const KAFKA_CLUSTER_CONFIG = z.union([
-    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
+    z.object({
+        existing: KAFKA_EXISTING_CLUSTER_CONFIG,
+        topics: KAFKA_TOPICS_MAP,
+    })
         .describe("Use an existing Kafka cluster by providing connection details."),
-    z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
+    z.object({
+        autoCreate: KAFKA_CLUSTER_CREATION_CONFIG,
+        topics: KAFKA_TOPICS_MAP,
+    })
         .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
             "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
 
 export const KAFKA_CLUSTERS_MAP = z.record(z.string().regex(K8S_NAMING_PATTERN), KAFKA_CLUSTER_CONFIG)
-    .describe("Map of Kafka cluster names to their configurations. Keys become Kubernetes resource names and must be valid DNS labels. If empty and proxies are configured, a 'default' auto-created cluster is used.")
+    .describe("Map of explicitly configured Kafka clusters. Keys become Kubernetes resource names and must be valid DNS labels. Capture configurations must reference one of these entries.")
     .uiHint({
         kind: 'record',
         addLabel: 'Kafka cluster',
@@ -2313,17 +2372,30 @@ export const ELASTICSEARCH_SOURCE_CLUSTER_REPOS_RECORD =
     .describe("Map of Elasticsearch/OpenSearch snapshot repository names to their backing-store configurations. Keys must follow the repository naming rules enforced by Elasticsearch and OpenSearch.");
 
 export const CAPTURE_CONFIG = z.object({
-    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
+    kafka: z.string().regex(K8S_NAMING_PATTERN)
         .describe("Label of the Kafka cluster to use for captured traffic. Must match a key in traffic.kafkaClusters.")
         .uiHint({
             kind: 'reference',
             sourcePath: ['traffic', 'kafkaClusters'],
-            emptyMeansDefault: 'default',
-            message: "A Kafka cluster with default settings will be provided.",
+            message: "Choose a configured Kafka cluster.",
         }),
-    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
-        .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record).")
-        .uiHint(K8S_NAME_UI_HINT),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN)
+        .describe("Kafka topic that receives captured traffic. It must be explicitly defined under the selected traffic.kafkaClusters entry.")
+        .uiHint({
+            kind: 'reference',
+            sourcePathTemplate: [
+                'traffic',
+                'kafkaClusters',
+                {valueFrom: ['..', 'kafka']},
+                'topics',
+            ],
+            createReference: {
+                label: "Create topic for this proxy",
+                valueFromPathSegmentFromEnd: 2,
+                description: "Add an explicit topic to the selected Kafka cluster and use it for this capture proxy.",
+            },
+            message: "Choose a topic from the selected Kafka cluster or create one for this proxy.",
+        }),
     source: z.string()
         .describe("Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.")
         .uiHint({
@@ -2347,16 +2419,30 @@ export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
         .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
             "LocalStack endpoints are automatically resolved to IP addresses during config transformation.")
         .expert(),
-    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
+    kafka: z.string().regex(K8S_NAMING_PATTERN)
         .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in traffic.kafkaClusters.")
         .uiHint({
             kind: 'reference',
             sourcePath: ['traffic', 'kafkaClusters'],
-            emptyMeansDefault: 'default',
-            message: "A Kafka cluster with default settings will be provided.",
+            message: "Choose a configured Kafka cluster.",
         }),
-    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
-        .describe("Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN)
+        .describe("Kafka topic to load this captured traffic into. It must be explicitly defined under the selected traffic.kafkaClusters entry.")
+        .uiHint({
+            kind: 'reference',
+            sourcePathTemplate: [
+                'traffic',
+                'kafkaClusters',
+                {valueFrom: ['..', 'kafka']},
+                'topics',
+            ],
+            createReference: {
+                label: "Create topic for this captured traffic",
+                valueFromPathSegmentFromEnd: 2,
+                description: "Add an explicit topic to the selected Kafka cluster and use it for this captured-traffic source.",
+            },
+            message: "Choose a topic from the selected Kafka cluster or create one for this captured traffic.",
+        }),
     sourceLabel: z.string()
         .describe("Label of the source cluster this dump was originally captured from. " +
             "Used for resource labeling. Does NOT need to match a sourceClusters key " +
@@ -2416,8 +2502,7 @@ export const REPLAYER_CONFIG = z.object({
 
 export const TRAFFIC_CONFIG = z.object({
     kafkaClusters: KAFKA_CLUSTERS_MAP.default({}).optional()
-        .describe("Kafka cluster configurations for live traffic capture/replay. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
-            "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies and S3 captured traffic sources via 'kafka'."),
+        .describe("Kafka cluster configurations for live traffic capture/replay. Each entry explicitly defines an auto-created or external Kafka cluster referenced by proxies and S3 captured traffic sources via 'kafka'."),
     proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG).default({}).optional()
         .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels.")
         .uiHint({
@@ -2463,23 +2548,24 @@ export const TRAFFIC_CONFIG = z.object({
             });
         }
     }
-    // Two captured-traffic sources cannot land in the same Kafka topic on the
-    // same Kafka cluster. The effective topic is `kafkaTopic ?? sourceName`,
-    // so name collisions across sources, explicit-topic collisions, and any
-    // mix that maps to the same (cluster, topic) tuple all need to be caught.
+    // Two captured-traffic sources cannot land in the same explicitly declared
+    // Kafka topic on the same cluster.
     // Without this, two producers would share one topic — any replayer reading
     // that topic would interleave records from both, with no way to tell them
     // apart, and `kafkaImport.sh`-style reloads would write into a topic the
     // proxy is also feeding.
     type Origin = { kind: 'proxy' | 's3Source'; name: string };
     const claims = new Map<string, Origin>();
+    const originPath = (origin: Origin) => (
+        origin.kind === 'proxy' ? 'proxies' : 's3Sources'
+    );
     const recordClaim = (cluster: string, topic: string, origin: Origin, path: (string | number)[]) => {
         const key = `${cluster}\0${topic}`;
         const existing = claims.get(key);
         if (existing) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `traffic.${origin.kind}s['${origin.name}'] targets kafka cluster '${cluster}' topic '${topic}', which is already claimed by traffic.${existing.kind}s['${existing.name}']. Each (kafka cluster, topic) tuple must have at most one producer.`,
+                message: `traffic.${originPath(origin)}['${origin.name}'] targets kafka cluster '${cluster}' topic '${topic}', which is already claimed by traffic.${originPath(existing)}['${existing.name}']. Each (kafka cluster, topic) tuple must have at most one producer.`,
                 path
             });
         } else {
@@ -2487,14 +2573,10 @@ export const TRAFFIC_CONFIG = z.object({
         }
     };
     for (const [name, p] of Object.entries(proxies)) {
-        const cluster = p.kafka ?? "default";
-        const topic = (p.kafkaTopic && p.kafkaTopic !== "") ? p.kafkaTopic : name;
-        recordClaim(cluster, topic, { kind: 'proxy', name }, ['proxies', name, 'kafkaTopic']);
+        recordClaim(p.kafka, p.kafkaTopic, { kind: 'proxy', name }, ['proxies', name, 'kafkaTopic']);
     }
     for (const [name, s3] of Object.entries(s3Sources)) {
-        const cluster = s3.kafka ?? "default";
-        const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
-        recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
+        recordClaim(s3.kafka, s3.kafkaTopic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
     }
     for (const [name, rc] of Object.entries(data.replayers ?? {})) {
         const inProxies = rc.fromCapturedTraffic in proxies;
@@ -3091,30 +3173,34 @@ const OVERALL_MIGRATION_CONFIG_OBJECT = //validateOptionalDefaultConsistency
                 } else {
                     addSourceEndpointRequirement(proxyConfig.source, `traffic.proxies.${proxyName}`);
                 }
-                const kafkaRef = proxyConfig.kafka ?? 'default';
-                if (
-                    kafkaRef !== 'default'
-                    && Object.keys(kafkaClusters).length > 0
-                    && !(kafkaRef in kafkaClusters)
-                ) {
+                const kafkaRef = proxyConfig.kafka;
+                if (!(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}. Set traffic.proxies.${proxyName}.kafka or add traffic.kafkaClusters.${kafkaRef}.`,
                         path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
+                } else if (!(proxyConfig.kafkaTopic in (kafkaClusters[kafkaRef].topics ?? {}))) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Proxy '${proxyName}' references unknown topic '${proxyConfig.kafkaTopic}' in kafka cluster '${kafkaRef}'. Define traffic.kafkaClusters.${kafkaRef}.topics.${proxyConfig.kafkaTopic} or select another topic.`,
+                        path: ['traffic', 'proxies', proxyName, 'kafkaTopic']
+                    });
                 }
             }
             for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
-                const kafkaRef = s3Config.kafka ?? 'default';
-                if (
-                    kafkaRef !== 'default'
-                    && Object.keys(kafkaClusters).length > 0
-                    && !(kafkaRef in kafkaClusters)
-                ) {
+                const kafkaRef = s3Config.kafka;
+                if (!(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}. Set traffic.s3Sources.${s3Name}.kafka or add traffic.kafkaClusters.${kafkaRef}.`,
                         path: ['traffic', 's3Sources', s3Name, 'kafka']
+                    });
+                } else if (!(s3Config.kafkaTopic in (kafkaClusters[kafkaRef].topics ?? {}))) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `s3Source '${s3Name}' references unknown topic '${s3Config.kafkaTopic}' in kafka cluster '${kafkaRef}'. Define traffic.kafkaClusters.${kafkaRef}.topics.${s3Config.kafkaTopic} or select another topic.`,
+                        path: ['traffic', 's3Sources', s3Name, 'kafkaTopic']
                     });
                 }
             }

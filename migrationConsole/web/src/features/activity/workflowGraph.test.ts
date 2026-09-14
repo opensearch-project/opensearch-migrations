@@ -245,3 +245,36 @@ test("shows unresolved prerequisites instead of hiding broken edges", () => {
     targetId: replay.id,
   });
 });
+
+
+test("omits dependencies whose targets are known configuration definitions", () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const snapshotResource = snapshot.nodes["resource:captureproxies:capture"];
+  const definitionId = "definition:edit:source.snapshotInfo.repos.repo";
+  snapshot.nodes[definitionId] = {
+    ...snapshot.nodes["group:Sources:Sources"],
+    id: definitionId,
+    revision: "repo-1",
+    kind: "config-definition",
+    parentId: "group:Sources:Sources",
+    childIds: [],
+    label: "repo",
+    resourceType: "Snapshot repository",
+  };
+  snapshotResource.relationships = [{
+    kind: "runtime-dependency",
+    direction: "requires",
+    targetId: definitionId,
+    targetName: "repo",
+    targetPlural: null,
+    targetPhase: null,
+    targetStatus: "unknown",
+  }];
+
+  const graph = buildWorkflowGraph(snapshot);
+
+  expect(graph.nodes.map((node) => node.label)).not.toContain("repo");
+  expect(graph.edges).not.toContainEqual(expect.objectContaining({
+    sourceId: definitionId,
+  }));
+});

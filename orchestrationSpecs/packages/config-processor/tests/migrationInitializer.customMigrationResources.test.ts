@@ -44,9 +44,19 @@ describe("migration initializer CRD resource generation", () => {
                 },
             },
             traffic: {
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {},
+                        topics: {
+                            "source-proxy": {},
+                        },
+                    },
+                },
                 proxies: {
                     "source-proxy": {
                         source: "source",
+                        kafka: "default",
+                        kafkaTopic: "source-proxy",
                         proxyConfig: {
                             listenPort: 9200,
                             resources: {
@@ -201,10 +211,20 @@ describe("migration initializer CRD resource generation", () => {
                 },
             },
             traffic: {
+                kafkaClusters: {
+                    default: {
+                        autoCreate: {},
+                        topics: {
+                            "loaded-dump": {},
+                        },
+                    },
+                },
                 s3Sources: {
                     "loaded-dump": {
                         s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
                         awsRegion: "us-east-1",
+                        kafka: "default",
+                        kafkaTopic: "loaded-dump",
                         sourceLabel: "archived-source",
                     },
                 },

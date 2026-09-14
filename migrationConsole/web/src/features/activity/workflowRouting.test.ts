@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   connectedPath,
   dependencyAnchorY,
+  dependencyLaneGeometry,
   edgeId,
   groupDependencyRoutes,
 } from "./workflowRouting";
@@ -72,6 +73,21 @@ test("assigns a stable route column from dependency depth", () => {
     ["b", 2],
     ["c", 3],
   ]);
+});
+
+
+test("aligns the shallowest visible route with the graph edge margin", () => {
+  const geometry = dependencyLaneGeometry([1, 2, 3], 68);
+
+  expect(geometry).toEqual({
+    minDepth: 1,
+    laneSpacing: 10,
+    leftmostX: 14,
+  });
+  expect(
+    geometry.leftmostX
+      + (3 - geometry.minDepth) * geometry.laneSpacing,
+  ).toBe(34);
 });
 
 

@@ -10,6 +10,7 @@ import type {
   Operation,
 } from "../../api/client";
 import type { ApprovalCandidate } from "../actions/approvals";
+import { presentResourceActionText } from "../status/operationPresentation";
 import { WorkflowDependencyGraph } from "./WorkflowDependencyGraph";
 
 
@@ -28,6 +29,7 @@ export function ActivityPanel({
   onSelectNode,
   approvals,
   onReviewApproval,
+  planned,
 }: Readonly<{
   snapshot: ManageSnapshot;
   selectedNode: ManageNode | null;
@@ -35,6 +37,7 @@ export function ActivityPanel({
   onSelectNode: (nodeId: string) => void;
   approvals: ApprovalCandidate[];
   onReviewApproval: (targetId: string) => void;
+  planned: boolean;
 }>) {
   const resources = Object.values(snapshot.nodes).filter(
     (node) => node.kind === "resource",
@@ -75,8 +78,14 @@ export function ActivityPanel({
       <header>
         <GitBranch aria-hidden="true" />
         <div>
-          <h2>Workflow dependencies</h2>
-          <span>Resources, active steps, and blockers</span>
+          <h2>
+            {planned ? "Planned workflow dependencies" : "Workflow dependencies"}
+          </h2>
+          <span>
+            {planned
+              ? "Configuration after these edits are saved and submitted"
+              : "Deployed resources, active steps, and blockers"}
+          </span>
         </div>
       </header>
       {actionCount > 0 || waiting.length > 0 ? (
@@ -115,8 +124,8 @@ export function ActivityPanel({
             <LoaderCircle className="spin" aria-hidden="true" />
           )}
           <div>
-            <strong>{operation.label}</strong>
-            <span>{operation.message}</span>
+            <strong>{presentResourceActionText(operation.label)}</strong>
+            <span>{presentResourceActionText(operation.message)}</span>
           </div>
         </section>
       ))}

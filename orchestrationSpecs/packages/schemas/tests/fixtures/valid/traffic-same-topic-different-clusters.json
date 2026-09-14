@@ -17,10 +17,16 @@
   "traffic": {
     "kafkaClusters": {
       "kc-a": {
-        "autoCreate": {}
+        "autoCreate": {},
+        "topics": {
+          "shared-topic": {}
+        }
       },
       "kc-b": {
-        "autoCreate": {}
+        "autoCreate": {},
+        "topics": {
+          "shared-topic": {}
+        }
       }
     },
     "proxies": {

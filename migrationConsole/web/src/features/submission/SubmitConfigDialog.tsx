@@ -5,8 +5,8 @@ import {
   CheckCircle2,
   LoaderCircle,
   RefreshCw,
-  RotateCcw,
   Send,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -92,9 +92,10 @@ export function SubmitConfigDialog({
   const directSubmitTitle = resetTargetIds.length > 0
     && preflight.data?.allowed === false
     ? (
-      "No workflow will be submitted while reset-required admission errors "
-      + "remain. The affected resources and their dependencies will stay "
-      + "blocked. Use Reset & resubmit."
+      "No workflow will be submitted while admission errors requiring "
+      + "resource deletion remain. The affected resources and their "
+      + "dependencies will stay "
+      + "blocked. Use Delete resources and resubmit."
     )
     : undefined;
   const resetAndResubmitTitle = resetPlan.data
@@ -103,7 +104,7 @@ export function SubmitConfigDialog({
     } before submitting a new workflow: ${
       resetPlan.data.targets.map((target) => target.path).join("; ")
     }.`
-    : "Building the dependency-safe reset plan.";
+    : "Building the dependency-safe resource deletion plan.";
   useEffect(() => () => {
     // Session-keyed queries are unreachable after the dialog closes.
     queryClient.removeQueries({
@@ -195,8 +196,8 @@ export function SubmitConfigDialog({
             >
               {submitting
                 ? <LoaderCircle className="spin" aria-hidden="true" />
-                : <RotateCcw aria-hidden="true" />}
-              Reset &amp; resubmit ({resetActionCount})
+                : <Trash2 aria-hidden="true" />}
+              Delete resources and resubmit ({resetActionCount})
             </button>
           ) : null}
           <button
@@ -348,7 +349,7 @@ export function SubmitConfigDialog({
                           <p>{issue.message}</p>
                           <small>
                             {issue.classification === "recreate-required"
-                              ? "Reset required"
+                              ? "Resource deletion required"
                               : issue.classification === "invalid"
                                 ? "Submission blocked"
                                 : issue.classification === "approval-required"
@@ -364,7 +365,7 @@ export function SubmitConfigDialog({
                       {resetPlan.isPending ? (
                         <span>
                           <LoaderCircle className="spin" aria-hidden="true" />
-                          Building dependency-safe reset plan
+                          Building dependency-safe resource deletion plan
                         </span>
                       ) : resetPlan.isError ? (
                         <span className="submit-reset-error">
@@ -373,7 +374,9 @@ export function SubmitConfigDialog({
                       ) : resetPlan.data ? (
                         <>
                           <strong>
-                            Reset plan: {resetPlan.data.targets.length} {
+                            Resource deletion plan: {
+                              resetPlan.data.targets.length
+                            } {
                               resetPlan.data.targets.length === 1
                                 ? "resource"
                                 : "resources"

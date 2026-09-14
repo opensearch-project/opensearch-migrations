@@ -117,6 +117,38 @@ test("shows active steps and discloses completed steps on their resource", async
 });
 
 
+test("exposes workflow-step error details from the status icon", () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const step = snapshot.nodes[
+    "workflow-step:resource:trafficreplays:replay:deploy"
+  ];
+  step.status = "error";
+  step.phase = "Failed";
+  step.diagnostics = [{
+    severity: "error",
+    message: "The replay deployment could not pull its image.",
+    path: ["replay", "deploy"],
+    source: "workflow",
+  }];
+
+  const { container } = render(
+    <WorkflowDependencyGraph
+      approvals={[]}
+      onReviewApproval={() => undefined}
+      onSelectNode={() => undefined}
+      operations={[]}
+      selectedNodeId={null}
+      snapshot={snapshot}
+    />,
+  );
+
+  expect(container.querySelector(".workflow-step-status")).toHaveAttribute(
+    "title",
+    "The replay deployment could not pull its image.",
+  );
+});
+
+
 test("shows the latest known activity timestamp on a resource", () => {
   const snapshot = structuredClone(manageSnapshot);
   Object.assign(snapshot.nodes["resource:captureproxies:capture"], {
@@ -166,7 +198,7 @@ test("discloses failed operation details on the affected resource", async () => 
 
   await userEvent.click(screen.getByText("Operation failed"));
 
-  expect(screen.getByText("Reset captureproxies/capture"))
+  expect(screen.getByText("Delete resource captureproxies/capture"))
     .toBeInTheDocument();
   expect(screen.getByText(
     "captureproxies.migrations.opensearch.org capture was not found",

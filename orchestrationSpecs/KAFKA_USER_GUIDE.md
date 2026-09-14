@@ -78,23 +78,22 @@ Still incomplete:
 
 ## What You Configure
 
-For an auto-created Kafka cluster, the user-facing Kafka configuration lives
-under:
+The user-facing Kafka configuration lives under:
 
-`traffic.kafkaClusters.<name>.autoCreate`
+`traffic.kafkaClusters.<name>`
 
-The intended primary settings are:
+The intended primary settings for a workflow-managed cluster are:
 
-- `auth`
-- `clusterSpecOverrides`
-- `nodePoolSpecOverrides`
-- `topicSpecOverrides`
+- `autoCreate.auth`
+- `autoCreate.clusterSpecOverrides`
+- `autoCreate.nodePoolSpecOverrides`
+- `topics.<topic>.specOverrides`
 
 These correspond to Strimzi resources:
 
-- `clusterSpecOverrides` -> `Kafka.spec`
-- `nodePoolSpecOverrides` -> `KafkaNodePool.spec`
-- `topicSpecOverrides` -> `KafkaTopic.spec`
+- `autoCreate.clusterSpecOverrides` -> `Kafka.spec`
+- `autoCreate.nodePoolSpecOverrides` -> `KafkaNodePool.spec`
+- `topics.<topic>.specOverrides` -> that topic's `KafkaTopic.spec`
 
 `auth` is intentionally workflow-owned rather than raw Strimzi passthrough. It
 defines the migration application's managed listener/auth contract for an
@@ -104,6 +103,19 @@ Currently supported managed values:
 
 - `type: none`
 - `type: scram-sha-512`
+
+Topic partition and replica counts are also presented as first-class workflow
+settings inside `topics.<topic>.specOverrides`:
+
+- `partitions` defaults to `1`
+- `replicas` defaults to `3`
+- both values must be positive integers
+- a deployed topic's partition count can increase, but cannot decrease
+
+The editor shows these two fields without expert mode. Other
+`KafkaTopic.spec` fields remain validated against the installed Strimzi schema
+and are available as expert settings. Changes to a deployed topic still use
+the normal approval-gated `CapturedTraffic` update path.
 
 ## Defaults And Overrides
 
@@ -146,6 +158,13 @@ traffic:
   kafkaClusters:
     default:
       autoCreate: {}
+      topics:
+        capture: {}
+  proxies:
+    capture:
+      source: source
+      kafka: default
+      kafkaTopic: capture
 ```
 
 That should be enough for the workflow to create a usable Kafka cluster using
@@ -175,10 +194,12 @@ traffic:
             config:
               min.insync.replicas: 2
               message.max.bytes: 2097152
-        topicSpecOverrides:
-          partitions: 12
-          config:
-            cleanup.policy: compact
+      topics:
+        capture:
+          specOverrides:
+            partitions: 12
+            config:
+              cleanup.policy: compact
 ```
 
 In that example, the user changes only the settings they care about. The
@@ -326,10 +347,16 @@ traffic:
     default:
       existing:
         kafkaConnection: broker.example.org:9093
-        kafkaTopic: logging-traffic-topic
         auth:
           type: scram-sha-512
           secretName: existing-kafka-user-secret
+      topics:
+        logging-traffic-topic: {}
+  proxies:
+    capture:
+      source: source
+      kafka: default
+      kafkaTopic: logging-traffic-topic
 ```
 
 The contract should remain:

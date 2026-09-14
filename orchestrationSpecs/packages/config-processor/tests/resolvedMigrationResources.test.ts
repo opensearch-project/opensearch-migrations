@@ -49,9 +49,17 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
             },
         },
         traffic: {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                    topics: {"source-proxy": {}},
+                },
+            },
             proxies: {
                 "source-proxy": {
                     source: "source",
+                    kafka: "default",
+                    kafkaTopic: "source-proxy",
                     proxyConfig: {
                         listenPort: 9200,
                     },
@@ -151,7 +159,10 @@ describe("resolved migration resources", () => {
         kafkaConfigBefore.traffic = {
             ...kafkaConfigBefore.traffic,
             kafkaClusters: {
-            default: {existing: {kafkaConnection: "broker-a:9092"}},
+            default: {
+                existing: {kafkaConnection: "broker-a:9092"},
+                topics: {"source-proxy": {}},
+            },
             },
         } as any;
         const kafkaBefore = await transformAndResolve(kafkaConfigBefore);
@@ -159,7 +170,10 @@ describe("resolved migration resources", () => {
         kafkaConfigAfter.traffic = {
             ...kafkaConfigAfter.traffic,
             kafkaClusters: {
-            default: {existing: {kafkaConnection: "broker-b:9092"}},
+            default: {
+                existing: {kafkaConnection: "broker-b:9092"},
+                topics: {"source-proxy": {}},
+            },
             },
         } as any;
         const kafkaAfter = await transformAndResolve(kafkaConfigAfter);
@@ -409,13 +423,12 @@ describe("resolved migration resources", () => {
             "replicas"
         ]));
         expect(topic?.parameterProvenance?.topicName).toEqual(expect.objectContaining({
-            presence: "defaulted",
+            presence: "authored",
             sourcePath: ["traffic", "proxies", "source-proxy", "kafkaTopic"],
             value: "source-proxy",
-            defaultValue: "source-proxy",
         }),);
         expect(topic?.parameterProvenance?.kafkaClusterName).toEqual(expect.objectContaining({
-            presence: "defaulted",
+            presence: "authored",
             sourcePath: ["traffic", "proxies", "source-proxy", "kafka"],
             value: "default",
         }),);
@@ -433,11 +446,12 @@ describe("resolved migration resources", () => {
         }),);
     });
 
-    it("loosely projects a referenced implicit default kafka cluster as an effective resource", async () => {
+    it("does not synthesize a Kafka cluster for a missing reference", async () => {
         const config = sampleConfig();
         (config as any).traffic.kafkaClusters = {
             kafka: {autoCreate: {}},
         };
+        delete (config as any).traffic.proxies["source-proxy"].kafka;
 
         const resolved = await buildLooseResolvedMigrationResources(config, "workflow-a");
         const kafkaClusters = resolved.resources.filter((resource) => resource.kind === "KafkaCluster");
@@ -445,13 +459,14 @@ describe("resolved migration resources", () => {
             (resource) =>
             resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",);
 
-        expect(resolved.projectionComplete).toBe(true);
-        expect(kafkaClusters.map((resource) => resource.name)).toEqual([
-            "kafka",
-            "default"
-        ]);
-        expect(topic?.parameters.kafkaClusterName).toBe("default");
-        expect(topic?.diagnostics).toBeUndefined();
+        expect(resolved.projectionComplete).toBe(false);
+        expect(kafkaClusters.map((resource) => resource.name)).toEqual(["kafka"]);
+        expect(topic?.parameters.kafkaClusterName).toBe("");
+        expect(topic?.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                path: ["traffic", "proxies", "source-proxy", "kafka"],
+            }),
+        ]));
     });
 
     it("dry-runs VAP-style decisions for safe, gated, impossible, and invariant changes", () => {
@@ -706,7 +721,7 @@ describe("resolved migration resources", () => {
                 (resource) =>
             resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",
         )?.parameterProvenance?.topicName,).toEqual(expect.objectContaining({
-            presence: "defaulted",
+            presence: "authored",
             value: "source-proxy",
         }),);
         expect(resolved.consoleResources?.sources).toContainEqual(expect.objectContaining({
@@ -799,7 +814,7 @@ describe("resolved migration resources", () => {
         expect(resolved.resources.find((resource: any) =>
             resource.kind === "CapturedTraffic" && resource.name === "source-proxy-topic",
         ).parameterProvenance.topicName,).toEqual(expect.objectContaining({
-            presence: "defaulted",
+            presence: "authored",
             value: "source-proxy",
         }),);
     });

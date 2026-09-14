@@ -212,6 +212,7 @@ class ManageSnapshotV1(WebModel):
     workflow_name: str
     workflow: Optional[WorkflowV1]
     root_ids: List[str]
+    configuration_pending: bool = False
     nodes: Dict[str, ManageNodeV1]
     problems: List[ProblemV1] = Field(default_factory=list)
     stale: bool = False
@@ -253,6 +254,10 @@ class ConfigurationDocumentV1(WebModel):
         document: ConfigurationDocument,
     ) -> "ConfigurationDocumentV1":
         return cls.model_validate(document.__dict__)
+
+
+class ConfigurationSchemaV1(WebModel):
+    unified_schema: Dict[str, Any]
 
 
 class SaveConfigurationDocumentRequestV1(WebModel):

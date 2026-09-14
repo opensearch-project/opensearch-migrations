@@ -901,12 +901,17 @@ button.secondary-button:hover:not(:disabled) {
   justify-content: center;
   gap: 7px;
   padding: 0 11px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid #718895;
   border-radius: 4px;
-  color: var(--text);
-  background: var(--surface);
+  color: #173f50;
+  background: #edf4f6;
+  box-shadow: 0 1px 2px rgb(23 33 43 / 16%);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
   white-space: nowrap;
 }
 
@@ -915,9 +920,9 @@ button.secondary-button:hover:not(:disabled) {
 }
 
 .edit-mode-button:hover:not(:disabled) {
-  border-color: #8f9da8;
-  background: var(--surface-subtle);
-  box-shadow: 0 1px 2px rgb(23 33 43 / 12%);
+  border-color: #3c6373;
+  background: #e2eef1;
+  box-shadow: 0 2px 4px rgb(23 33 43 / 18%);
 }
 
 .edit-mode-button:disabled {
@@ -927,24 +932,33 @@ button.secondary-button:hover:not(:disabled) {
 
 .edit-mode-button.active {
   border-color: #58717e;
-  background: #f4f7f8;
+  color: #263746;
+  background: #e8edef;
 }
 
 .submit-mode-button {
   width: 164px;
-  border-color: #2f6f87;
-  color: #16465a;
-  background: #f2fafc;
+  border-color: #16465a;
+  color: #fff;
+  background: #24677f;
 }
 
 .submit-mode-button:hover:not(:disabled) {
-  border-color: #16465a;
-  background: #e7f5f8;
+  border-color: #103b4b;
+  background: #19586d;
 }
 
 .approvals-mode-button {
   position: relative;
   width: 126px;
+  border-color: #a97420;
+  color: #5d430b;
+  background: #fff4d9;
+}
+
+.approvals-mode-button:hover:not(:disabled) {
+  border-color: #805711;
+  background: #ffeabd;
 }
 
 .approvals-mode-button b {
@@ -954,7 +968,7 @@ button.secondary-button:hover:not(:disabled) {
   place-items: center;
   border-radius: 9px;
   color: #fff;
-  background: var(--warning);
+  background: #8d5d0c;
   font-size: 10px;
 }
 
@@ -1982,20 +1996,51 @@ button.secondary-button:hover:not(:disabled) {
 
 .resource-actions button {
   display: inline-flex;
-  min-height: 32px;
+  min-height: 34px;
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid #91a1ad;
   border-radius: 4px;
-  background: var(--surface);
+  color: #263746;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(23 33 43 / 14%);
   font-size: 12px;
+  font-weight: 700;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .resource-actions button:hover:not(:disabled, .primary-button) {
-  border-color: var(--border-strong);
-  background: var(--surface-subtle);
-  box-shadow: 0 1px 2px rgb(23 33 43 / 10%);
+  border-color: #637987;
+  background: #f2f6f7;
+  box-shadow: 0 2px 4px rgb(23 33 43 / 17%);
+}
+
+.resource-actions .resource-action-approve {
+  border-color: #b98222;
+  color: #5d430b;
+  background: #fff8e9;
+}
+
+.resource-actions .resource-action-reset {
+  border-color: #b56d36;
+  color: #713d16;
+  background: #fff5ec;
+}
+
+.resource-actions .resource-action-delete {
+  margin-left: auto;
+  border-color: var(--danger-border);
+  color: #fff;
+  background: var(--danger-strong);
+}
+
+.resource-actions .resource-action-delete:hover:not(:disabled) {
+  border-color: #70231f;
+  background: #8d302b;
 }
 
 .resource-actions button.primary-button.cleanup-action {
@@ -3409,7 +3454,7 @@ button.secondary-button:hover:not(:disabled) {
   position: relative;
   display: grid;
   gap: 7px;
-  padding: 13px 14px 28px 10px;
+  padding: 13px 14px 28px;
 }
 
 .workflow-graph-edges {
@@ -4582,6 +4627,26 @@ button.secondary-button:hover:not(:disabled) {
   box-shadow: 0 18px 48px rgb(19 31 40 / 24%);
 }
 
+.confirmation-dialog.removal-dialog {
+  width: min(760px, 100%);
+}
+
+.removal-dialog .removal-impact-list li {
+  padding: 14px 16px;
+}
+
+.removal-dialog > footer {
+  flex-wrap: wrap;
+}
+
+.removal-reset-warning {
+  margin: 4px 17px 16px;
+}
+
+.removal-reset-warning strong {
+  color: var(--text);
+}
+
 .submission-dialog {
   display: grid;
   width: min(900px, 100%);
@@ -4679,20 +4744,37 @@ button.secondary-button:hover:not(:disabled) {
 }
 
 .removal-impact-list button {
-  min-width: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
   color: var(--accent);
-  background: transparent;
+  background: var(--surface);
   font: inherit;
   font-weight: 600;
-  text-align: left;
+  white-space: nowrap;
+}
+
+.removal-impact-list button svg {
+  width: 14px;
+}
+
+.removal-impact-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.removal-impact-copy strong {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.removal-impact-list span {
+.removal-impact-copy small {
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -5391,6 +5473,45 @@ button.secondary-button:hover:not(:disabled) {
 .inline-reference-link svg {
   width: 14px;
   height: 14px;
+}
+
+.inline-reference-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.inline-reference-create {
+  display: inline-flex;
+  min-height: 26px;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--accent);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.inline-reference-create:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.inline-reference-create:disabled {
+  opacity: 0.5;
+}
+
+.inline-reference-create svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
 }
 
 .property-summary {

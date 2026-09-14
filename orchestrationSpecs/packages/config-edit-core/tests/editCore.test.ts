@@ -37,6 +37,128 @@ describe("browser-safe configuration editing", () => {
         expect("allowInsecure" in config.sourceClusters.source).toBe(false);
     });
 
+    it("can preserve downstream configuration while clearing deleted references", () => {
+        const trafficConfig = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10",
+                },
+            },
+            targetClusters: {
+                target: {
+                    endpoint: "https://target.example.com:9200",
+                },
+            },
+            snapshotMigrationConfigs: [],
+            traffic: {
+                kafkaClusters: {
+                    kafka: {
+                        autoCreate: {},
+                        topics: {
+                            capture: {},
+                        },
+                    },
+                },
+                proxies: {
+                    capture: {
+                        source: "source",
+                        kafka: "kafka",
+                        kafkaTopic: "capture",
+                        proxyConfig: {},
+                    },
+                },
+                replayers: {
+                    replay: {
+                        fromCapturedTraffic: "capture",
+                        toTarget: "target",
+                    },
+                },
+            },
+        };
+
+        const withoutCluster = applyEditOperation(trafficConfig, {
+            op: "removeConfig",
+            path: ["traffic", "kafkaClusters", "kafka"],
+            referencingResources: "clear-references",
+        }) as any;
+        expect(withoutCluster.traffic.kafkaClusters.kafka).toBeUndefined();
+        expect(withoutCluster.traffic.proxies.capture).toEqual({
+            source: "source",
+            proxyConfig: {},
+        });
+        expect(withoutCluster.traffic.replayers.replay).toEqual({
+            fromCapturedTraffic: "capture",
+            toTarget: "target",
+        });
+
+        const withoutProxy = applyEditOperation(trafficConfig, {
+            op: "removeConfig",
+            path: ["traffic", "proxies", "capture"],
+            referencingResources: "clear-references",
+        }) as any;
+        expect(withoutProxy.traffic.proxies.capture).toBeUndefined();
+        expect(withoutProxy.traffic.replayers.replay).toEqual({
+            toTarget: "target",
+        });
+    });
+
+    it("renames a Kafka topic key and updates producer references", () => {
+        const trafficConfig = {
+            traffic: {
+                kafkaClusters: {
+                    kafka: {
+                        autoCreate: {},
+                        topics: {
+                            capture: {
+                                specOverrides: {
+                                    partitions: 2,
+                                },
+                            },
+                        },
+                    },
+                },
+                proxies: {
+                    capture: {
+                        kafka: "kafka",
+                        kafkaTopic: "capture",
+                    },
+                },
+                s3Sources: {
+                    imported: {
+                        kafka: "kafka",
+                        kafkaTopic: "capture",
+                    },
+                },
+            },
+        };
+
+        const renamed = applyEditOperation(trafficConfig, {
+            op: "renameConfig",
+            path: [
+                "traffic",
+                "kafkaClusters",
+                "kafka",
+                "topics",
+                "capture",
+            ],
+            newName: "renamed-capture",
+        }) as any;
+
+        expect(renamed.traffic.kafkaClusters.kafka.topics.capture)
+            .toBeUndefined();
+        expect(renamed.traffic.kafkaClusters.kafka.topics["renamed-capture"])
+            .toEqual({
+                specOverrides: {
+                    partitions: 2,
+                },
+            });
+        expect(renamed.traffic.proxies.capture.kafkaTopic)
+            .toBe("renamed-capture");
+        expect(renamed.traffic.s3Sources.imported.kafkaTopic)
+            .toBe("renamed-capture");
+    });
+
     it("projects and validates without Node runtime services", () => {
         expect(validationForConfig(config).valid).toBe(true);
         expect(buildEditStateFromObject(config).provenance).toMatchObject({

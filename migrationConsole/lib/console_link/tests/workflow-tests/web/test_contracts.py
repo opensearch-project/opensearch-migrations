@@ -18,6 +18,7 @@ def test_snapshot_transport_uses_camel_case_and_exact_capability_target():
         workflow_name="migration",
         workflow=None,
         root_ids=("resource:captureproxies:capture",),
+        configuration_pending=True,
         nodes={
             "resource:captureproxies:capture": ManageNode(
                 id="resource:captureproxies:capture",
@@ -58,6 +59,7 @@ def test_snapshot_transport_uses_camel_case_and_exact_capability_target():
     assert payload["formatVersion"] == 1
     assert payload["observedAt"] == "2026-08-12T12:00:00Z"
     assert payload["rootIds"] == ["resource:captureproxies:capture"]
+    assert payload["configurationPending"] is True
     assert payload["nodes"]["resource:captureproxies:capture"]["capabilities"] == [
         {
             "kind": "edit",

@@ -2,6 +2,7 @@ import type {
   ManageNode,
   ManageSnapshot,
 } from "../../api/client";
+import type { EditNode } from "@opensearch-migrations/config-edit-core";
 import {
   type PendingResourceAddition,
   type PendingResourceRename,
@@ -13,6 +14,32 @@ export function editTarget(node: ManageNode): string | null {
     (candidate) => candidate.kind === "edit",
   );
   return capability?.kind === "edit" ? capability.editTargetId : null;
+}
+
+
+export function removableEditTarget(
+  nodes: EditNode[],
+  targetId: string | null,
+): string | null {
+  if (!targetId) return null;
+  let bestMatchId: string | null = null;
+  const visit = (node: EditNode) => {
+    if (
+      node.removable
+      && (
+        node.id === targetId
+        || targetId.startsWith(`${node.id}.`)
+      )
+      && (!bestMatchId || node.id.length > bestMatchId.length)
+    ) {
+      bestMatchId = node.id;
+    }
+    if (Array.isArray(node.children)) {
+      node.children.forEach(visit);
+    }
+  };
+  nodes.forEach(visit);
+  return bestMatchId;
 }
 
 

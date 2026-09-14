@@ -283,12 +283,15 @@ traffic:
         topicSpecOverrides:
           partitions: 1
           replicas: 1
+      topics:
+        "{KAFKA_TOPIC_NAME}": {{}}
   s3Sources:
     byoc-put:
       s3Uri: "s3://{S3_BUCKET}/{S3_KEY}"
       endpoint: "{S3_ENDPOINT}"
       awsRegion: "us-east-1"
       sourceLabel: "source"
+      kafka: "default"
       kafkaTopic: "{KAFKA_TOPIC_NAME}"
   replayers:
     replay1:

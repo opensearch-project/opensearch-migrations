@@ -8,8 +8,8 @@ import {
   Logs,
   Pencil,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
+  Trash2,
   TriangleAlert,
 } from "lucide-react";
 
@@ -26,6 +26,7 @@ import { LogPanel } from "../logviewer/LogPanel";
 import { ResetDialog } from "../actions/ResourceActionDialogs";
 import type { ApprovalCandidate } from "../actions/approvals";
 import { StatusIndicator } from "../status/StatusIndicator";
+import { presentResourceActionText } from "../status/operationPresentation";
 
 
 interface PendingAction {
@@ -238,7 +239,7 @@ function displayValue(value: { present: boolean; value?: unknown }): string {
 
 function capabilityIcon(kind: string) {
   if (kind === "logs") return Logs;
-  if (kind === "reset") return RotateCcw;
+  if (kind === "reset") return Trash2;
   if (kind === "approve") return ShieldCheck;
   return FileOutput;
 }
@@ -249,6 +250,7 @@ function ResourceActions({
   onOutput,
   onLogs,
   onApproval,
+  onDelete,
   onReset,
   cleanupRequired,
   approvals,
@@ -258,6 +260,7 @@ function ResourceActions({
   onOutput: (targetId: string) => void;
   onLogs: (targetId: string) => void;
   onApproval: (targetId: string) => void;
+  onDelete?: () => void;
   onReset: (targetId: string) => void;
   cleanupRequired: boolean;
   approvals: ApprovalCandidate[];
@@ -266,7 +269,7 @@ function ResourceActions({
   const capabilities = node.capabilities.filter(
     (capability) => capability.kind !== "edit",
   );
-  if (capabilities.length === 0) return null;
+  if (capabilities.length === 0 && !onDelete) return null;
   const resetBeforeRetry = cleanupRequired || capabilities.some(
     (capability) => (
       capability.kind === "approve"
@@ -296,7 +299,9 @@ function ResourceActions({
     <div className="resource-actions" aria-label="Available actions">
       {orderedCapabilities.map((capability, capabilityIndex) => {
         const Icon = capabilityIcon(capability.kind);
-        const label = capability.label ?? capability.kind;
+        const label = capability.kind === "reset"
+          ? "Delete resource"
+          : capability.label ?? capability.kind;
         const outputTarget = (
           capability.kind === "output"
             ? capability.outputTargetId
@@ -318,15 +323,19 @@ function ResourceActions({
             : null
         );
         const actionTarget = approvalTarget ?? resetTarget;
-        const disabledReason = capability.disabledReason;
+        const disabledReason = capability.disabledReason
+          ? presentResourceActionText(capability.disabledReason)
+          : undefined;
         return (
           <button
             aria-label={label}
-            className={
+            className={[
+              "resource-action-button",
+              `resource-action-${capability.kind}`,
               resetBeforeRetry && capability.kind === "reset"
                 ? "primary-button cleanup-action"
-                : undefined
-            }
+                : "",
+            ].filter(Boolean).join(" ")}
             disabled={
               Boolean(disabledReason)
               || (capability.kind === "reset" && resetInProgress)
@@ -344,7 +353,7 @@ function ResourceActions({
             }}
             title={(
               capability.kind === "reset" && resetInProgress
-                ? "Removal is already in progress"
+                ? "Resource deletion is already in progress"
                 : disabledReason
             ) ?? (
               outputTarget || logTarget || actionTarget
@@ -358,6 +367,18 @@ function ResourceActions({
           </button>
         );
       })}
+      {onDelete ? (
+        <button
+          aria-label={`Remove ${node.label} from configuration`}
+          className="resource-action-button resource-action-delete"
+          onClick={onDelete}
+          title={`Review removing ${node.label} from the workflow configuration`}
+          type="button"
+        >
+          <Trash2 aria-hidden="true" />
+          Remove from configuration
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -387,7 +408,7 @@ function ResourceIssues({
     (diagnostic) => diagnostic.code === "immutable-resource-update",
   );
   const approvalTitle = approvalCapability?.disabledReason
-    ? "Reset required before approval"
+    ? "Resource deletion required before approval"
     : approvalCapability || approvalIssue
       ? "Approval required"
       : null;
@@ -403,26 +424,35 @@ function ResourceIssues({
             <strong>{approvalTitle}</strong>
             <span>
               {approvalCapability?.disabledReason
-                ?? "Review the denied change before approving the retry."}
+                ? presentResourceActionText(
+                    approvalCapability.disabledReason,
+                  )
+                : "Review the denied change before approving the retry."}
             </span>
           </div>
         </header>
       ) : null}
       {issues.map((issue, index) => (
         <div
-          aria-label={issue.title ?? "Workflow failure"}
+          aria-label={
+            presentResourceActionText(issue.title ?? "Workflow failure")
+          }
           className="resource-issue"
           key={`${issue.code ?? issue.message}-${index}`}
           role="alert"
         >
           <TriangleAlert aria-hidden="true" />
           <div>
-            <h3>{issue.title ?? "Workflow step failed"}</h3>
-            <p>{issue.message}</p>
+            <h3>
+              {presentResourceActionText(
+                issue.title ?? "Workflow step failed",
+              )}
+            </h3>
+            <p>{presentResourceActionText(issue.message)}</p>
             {issue.remedy ? (
               <div className="issue-remedy">
                 <strong>Next step</strong>
-                <span>{issue.remedy}</span>
+                <span>{presentResourceActionText(issue.remedy)}</span>
               </div>
             ) : null}
             {issue.technicalDetail ? (
@@ -450,8 +480,8 @@ function ResourceIssues({
                         )}
                         type="button"
                       >
-                        <RotateCcw aria-hidden="true" />
-                        Review reset &amp; resubmit
+                        <Trash2 aria-hidden="true" />
+                        Review resource deletion and resubmit
                       </button>
                     )
                     : null
@@ -490,14 +520,16 @@ function RecentOperationFailure({
         <TriangleAlert aria-hidden="true" />
         <div>
           <h3>Recent operation failed</h3>
-          <strong>{latest.label}</strong>
+          <strong>{presentResourceActionText(latest.label)}</strong>
         </div>
       </header>
-      <p>{latest.message}</p>
+      <p>{presentResourceActionText(latest.message)}</p>
       <details>
         <summary>Failure details</summary>
         <pre>
-          {latest.detail || "No additional failure detail was reported."}
+          {presentResourceActionText(
+            latest.detail || "No additional failure detail was reported.",
+          )}
         </pre>
       </details>
     </section>
@@ -811,8 +843,10 @@ export function ResourceWorkspace({
   node,
   navigationBackLabel,
   onSelect,
+  onDelete,
   onEdit,
   onNavigateBack,
+  onResourceDeletionStarted,
   onRequestApproval,
   approvalGates = [],
   approvalGatesLoading = false,
@@ -826,8 +860,10 @@ export function ResourceWorkspace({
   node: ManageNode;
   navigationBackLabel?: string | null;
   onSelect: (nodeId: string) => void;
+  onDelete?: () => void;
   onEdit?: () => void;
   onNavigateBack?: () => void;
+  onResourceDeletionStarted?: () => void;
   onRequestApproval?: (targetId: string) => void;
   approvalGates?: ApprovalGateSummary[];
   approvalGatesLoading?: boolean;
@@ -903,6 +939,7 @@ export function ResourceWorkspace({
           setLogTarget(targetId);
         }}
         onApproval={(targetId) => onRequestApproval?.(targetId)}
+        onDelete={onDelete}
         onOutput={(targetId) => {
           setLogTarget(null);
           setOutputTarget(targetId);
@@ -926,23 +963,29 @@ export function ResourceWorkspace({
       ) : null}
       {cleanupRequired || resetInProgress ? (
         <section
-          aria-label={resetInProgress ? "Removal in progress" : "Cleanup required"}
+          aria-label={
+            resetInProgress
+              ? "Resource deletion in progress"
+              : "Resource deletion required"
+          }
           className={`cleanup-notice ${resetInProgress ? "removing" : ""}`}
         >
           {resetInProgress
             ? <LoaderCircle className="spin" aria-hidden="true" />
-            : <RotateCcw aria-hidden="true" />}
+            : <Trash2 aria-hidden="true" />}
           <div>
             <h3>
-              {resetInProgress ? "Removal in progress" : "Cleanup required"}
+              {resetInProgress
+                ? "Resource deletion in progress"
+                : "Resource deletion required"}
             </h3>
             <p>
               {resetInProgress
-                ? "The reset operation is removing this resource and its planned dependents."
+                ? "The resource deletion operation is deleting this resource and its planned dependents."
                 : (
                   "This resource is still deployed but is no longer in the "
-                  + "submitted configuration. Reset it to perform the "
-                  + "dependency-safe cleanup."
+                  + "submitted configuration. Delete it and its planned "
+                  + "dependents using the dependency-safe resource plan."
                 )}
             </p>
           </div>
@@ -993,6 +1036,7 @@ export function ResourceWorkspace({
       {pendingAction ? (
         <ResetDialog
           onClose={() => setPendingAction(null)}
+          onStarted={onResourceDeletionStarted}
           targetId={pendingAction.targetId}
         />
       ) : null}

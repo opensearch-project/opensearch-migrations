@@ -20,6 +20,15 @@ function storageKey(resourceType: string): string {
 }
 
 
+function normalizeEditorDisplayPreferences(
+  preferences: EditorDisplayPreferences,
+): EditorDisplayPreferences {
+  return preferences.showExpert
+    ? { ...preferences, showOptional: true }
+    : preferences;
+}
+
+
 export function readEditorDisplayPreferences(
   resourceType: string,
 ): EditorDisplayPreferences {
@@ -27,7 +36,7 @@ export function readEditorDisplayPreferences(
     const stored = globalThis.localStorage.getItem(storageKey(resourceType));
     if (!stored) return { ...DEFAULT_EDITOR_DISPLAY_PREFERENCES };
     const parsed = JSON.parse(stored) as Partial<EditorDisplayPreferences>;
-    return {
+    return normalizeEditorDisplayPreferences({
       showDocumentation: typeof parsed.showDocumentation === "boolean"
         ? parsed.showDocumentation
         : DEFAULT_EDITOR_DISPLAY_PREFERENCES.showDocumentation,
@@ -37,7 +46,7 @@ export function readEditorDisplayPreferences(
       showOptional: typeof parsed.showOptional === "boolean"
         ? parsed.showOptional
         : DEFAULT_EDITOR_DISPLAY_PREFERENCES.showOptional,
-    };
+    });
   } catch {
     return { ...DEFAULT_EDITOR_DISPLAY_PREFERENCES };
   }
@@ -51,7 +60,7 @@ export function writeEditorDisplayPreferences(
   try {
     globalThis.localStorage.setItem(
       storageKey(resourceType),
-      JSON.stringify(preferences),
+      JSON.stringify(normalizeEditorDisplayPreferences(preferences)),
     );
   } catch {
     // Browser privacy and storage policies must not prevent configuration edits.

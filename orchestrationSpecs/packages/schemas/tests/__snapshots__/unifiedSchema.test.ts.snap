@@ -46,15 +46,19 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
     },
     "clusterSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaSpec",
-      "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+      "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource.",
+      "x-expert": true
     },
     "nodePoolSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
-      "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
-    },
-    "topicSpecOverrides": {
+      "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource.",
+      "x-expert": true
+    }
+  },
+  "topic": {
+    "specOverrides": {
       "$ref": "#/$defs/StrimziKafkaTopicSpec",
-      "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
+      "description": "Kafka topic settings merged into the generated Strimzi KafkaTopic.spec. Partition and replica counts are common settings; additional Strimzi fields are available in expert mode."
     }
   },
   "defs": {
@@ -65,7 +69,54 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
       "$ref": "#/$defs/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
     },
     "StrimziKafkaTopicSpec": {
-      "$ref": "#/$defs/io.strimzi.api.kafka.model.topic.KafkaTopicSpec"
+      "type": "object",
+      "properties": {
+        "partitions": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Number of partitions for the topic. This can be increased after deployment but cannot be decreased.",
+          "x-effective-default": {
+            "label": "1",
+            "value": 1,
+            "description": "New topics use one partition unless this value is overridden."
+          },
+          "x-essential": true
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Replication factor for the topic. Changes to a deployed topic require approval.",
+          "x-effective-default": {
+            "label": "3",
+            "value": 3,
+            "description": "New topics use three replicas unless this value is overridden."
+          },
+          "x-essential": true
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "cleanup.policy": {
+              "type": "string",
+              "enum": [
+                "delete",
+                "compact"
+              ]
+            },
+            "retention.ms": {
+              "type": "integer"
+            },
+            "segment.bytes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false,
+          "x-expert": true
+        }
+      },
+      "additionalProperties": false
     },
     "GenericKafkaListener": {
       "type": "object",

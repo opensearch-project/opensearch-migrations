@@ -493,7 +493,79 @@ test("renders real manage state with exact-node details and capabilities", async
   expect(screen.getByText("1 configuration error")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Edit capture" })).toBeNull();
   expect(screen.getByRole("button", { name: "Logs for capture" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "Reset capture" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Delete resource" })).toBeEnabled();
+});
+
+
+test("opens the focused configuration deletion review from a runtime resource", async () => {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = structuredClone(
+    snapshot.nodes["resource:captureproxies:capture"],
+  );
+  Object.assign(source, {
+    id: "resource:sourceconfigs:legacy",
+    revision: "legacy-source-1",
+    parentId: "group:Sources:Sources",
+    childIds: [],
+    label: "legacy",
+    description: "sourceconfigs/legacy",
+    status: "ok",
+    phase: "Ready",
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [{
+      kind: "edit",
+      editTargetId: "edit:sourceClusters.legacy",
+      label: "Edit legacy",
+    }],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: "sourceconfigs",
+    resourceName: "legacy",
+    resourceType: "Source cluster",
+  });
+  snapshot.nodes[source.id] = source;
+  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+  );
+
+  renderApp();
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(within(tree).getByRole("treeitem", {
+    name: /^legacy, Ready$/,
+  }));
+  await userEvent.click(screen.getByRole("button", {
+    name: "Remove legacy from configuration",
+  }));
+
+  expect(await screen.findByText("Editing configuration"))
+    .toBeInTheDocument();
+  expect(screen.getByRole("heading", {
+    name: "Remove legacy from configuration?",
+  }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("note")).toHaveTextContent(
+    "Deployed resources are not deleted.",
+  );
+  expect(screen.getByRole("note")).toHaveTextContent(
+    "deleting migrated indexes or restoring snapshots",
+  );
+  expect(screen.getByRole("button", {
+    name: "Confirm configuration removal",
+  }))
+    .toBeEnabled();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Cancel",
+  }));
+  expect(screen.queryByRole("heading", {
+    name: "Remove legacy from configuration?",
+  })).toBeNull();
+  expect(screen.getByText("Edit legacy")).toBeInTheDocument();
 });
 
 
@@ -1014,7 +1086,7 @@ test("lifts a VAP retry failure and requires reset before resubmitting", async (
     name: "Review required actions",
   });
   expect(within(requiredActions).getByText(
-    "Impossible update / reset required",
+    "Impossible update / resource deletion required",
   )).toBeInTheDocument();
   expect(await within(requiredActions).findByText(
     /deployed resource must be deleted/,
@@ -1023,39 +1095,39 @@ test("lifts a VAP retry failure and requires reset before resubmitting", async (
     name: "Edit configuration",
   })).toBeEnabled();
   await waitFor(() => expect(within(requiredActions).getByRole("button", {
-    name: "Reset & resubmit",
+    name: "Delete resource and resubmit",
   })).toBeEnabled());
 
   const tree = await screen.findByRole("tree", { name: "Workflow resources" });
   const capture = within(tree).getByRole(
     "treeitem",
-    { name: /^capture, Ready, Reset before approval/ },
+    { name: /^capture, Ready, Delete resource before approval/ },
   );
-  expect(within(capture).getByText("Reset before approval"))
+  expect(within(capture).getByText("Delete resource before approval"))
     .toBeInTheDocument();
   expect(within(capture).getByText(/sourceLabel cannot be changed/))
     .toBeInTheDocument();
   await userEvent.click(capture);
 
   expect(screen.getByRole("region", {
-    name: "Reset required before approval",
+    name: "Resource deletion required before approval",
   })).toBeInTheDocument();
   const issue = screen.getByRole("alert", {
-    name: "Apply failed; reset required",
+    name: "Apply failed; resource deletion required",
   });
   expect(within(issue).getByText(
     "Impossible: sourceLabel cannot be changed. Delete and recreate.",
   )).toBeInTheDocument();
   expect(within(issue).getByText(
-    "Reset capture to delete and recreate it, then retry the apply.",
+    "Delete resource capture so it can be recreated, then retry the apply.",
   )).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Reset capture" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Delete resource" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Retry apply" }))
     .toBeDisabled();
   expect(screen.getByRole("button", { name: "Retry apply" }))
     .toHaveAttribute(
       "title",
-      "Reset capture before retrying this apply.",
+      "Delete resource capture before retrying this apply.",
     );
 
   expect(screen.getByRole("button", {
@@ -1232,6 +1304,53 @@ test("starts pauses and explicitly stops bounded resource logs", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Stop" }));
   await waitFor(() => expect(stoppedStream).toBe("log-stream-test"));
   expect(screen.getByRole("button", { name: "Start logs" })).toBeEnabled();
+});
+
+
+test("clears the selected workspace and logs when resource deletion starts", async () => {
+  let resetRequest: unknown;
+  server.use(
+    http.post("*/api/v1/resets", async ({ request }) => {
+      resetRequest = await request.json();
+      return HttpResponse.json({
+        id: "operation-reset-capture",
+        kind: "reset",
+        label: "Delete captureproxy.capture",
+        status: "queued",
+        targetIds: ["resource:captureproxies:capture"],
+        createdAt: "2026-09-14T12:00:00Z",
+        updatedAt: "2026-09-14T12:00:00Z",
+        message: "Queued",
+        detail: null,
+        result: {},
+      }, { status: 202 });
+    }),
+  );
+  renderApp();
+
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Logs for capture",
+  }));
+  expect(await screen.findByRole("region", { name: "Managed logs" }))
+    .toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Delete resource",
+  }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Review resource deletion",
+  });
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "Delete listed resources",
+  }));
+
+  await waitFor(() => expect(resetRequest).toEqual({
+    planToken: "reset-token",
+    resubmit: false,
+  }));
+  expect(await screen.findByRole("heading", { name: "Select a resource" }))
+    .toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Managed logs" })).toBeNull();
 });
 
 
@@ -1559,10 +1678,10 @@ test("resets and retries all impossible deployed updates in one action", async (
   const dialog = await screen.findByRole("dialog", {
     name: "Review required actions",
   });
-  expect(await within(dialog).findByText("2 resources removed"))
+  expect(await within(dialog).findByText("2 resources to delete"))
     .toBeInTheDocument();
   const resetAll = within(dialog).getByRole("button", {
-    name: "Reset & resubmit all (2)",
+    name: "Delete resources and resubmit all (2)",
   });
   expect(resetAll).toBeEnabled();
   await userEvent.click(resetAll);
@@ -1654,15 +1773,15 @@ test("reviews exact approval and reset targets before starting operations", asyn
   }));
 
   await userEvent.click(screen.getByRole("button", {
-    name: "Reset capture",
+    name: "Delete resource",
   }));
   const reset = await screen.findByRole("dialog", {
-    name: "Review reset plan",
+    name: "Review resource deletion",
   });
   expect(within(reset).getByText("captureproxy.capture"))
     .toBeInTheDocument();
   await userEvent.click(within(reset).getByRole("button", {
-    name: "Reset exact plan",
+    name: "Delete listed resources",
   }));
   await waitFor(() => expect(resetRequest).toEqual({
     planToken: "reset-token",
@@ -1987,9 +2106,9 @@ test("labels orphan cleanup and active removal without implying automatic prunin
   expect(within(tree).getByRole("treeitem", {
     name: /^capture, Orphaned; cleanup required$/,
   })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Cleanup required" }))
+  expect(screen.getByRole("heading", { name: "Resource deletion required" }))
     .toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Reset capture" }))
+  expect(screen.getByRole("button", { name: "Delete resource" }))
     .toHaveClass("primary-button");
 
   operations = {
@@ -2010,10 +2129,10 @@ test("labels orphan cleanup and active removal without implying automatic prunin
     name: "Refresh state",
   }));
   await waitFor(() => expect(within(tree).getByRole("treeitem", {
-    name: /^capture, Removing$/,
+    name: /^capture, Deleting$/,
   })).toBeInTheDocument());
-  expect(screen.getAllByText("Removing")).not.toHaveLength(0);
-  expect(screen.getByRole("button", { name: "Reset capture" }))
+  expect(screen.getAllByText("Deleting")).not.toHaveLength(0);
+  expect(screen.getByRole("button", { name: "Delete resource" }))
     .toBeDisabled();
 });
 
@@ -2043,7 +2162,7 @@ test("shows failed operation details with the selected resource", async () => {
   expect(await screen.findByRole("heading", {
     name: "Recent operation failed",
   })).toBeInTheDocument();
-  expect(screen.getAllByText("Reset captureproxies/capture"))
+  expect(screen.getAllByText("Delete resource captureproxies/capture"))
     .not.toHaveLength(0);
 
   await userEvent.click(screen.getByText("Failure details"));
@@ -2379,6 +2498,21 @@ test("opens a generic configuration editor and explains generated values", async
   await waitFor(() => expect(
     within(configTree).queryByRole("row", { name: /Timeout/ }),
   ).toBeNull());
+
+  const optionalFields = screen.getByRole("checkbox", {
+    name: "Show optional fields",
+  });
+  const expertFields = screen.getByRole("checkbox", {
+    name: "Show expert fields",
+  });
+  expect(optionalFields).not.toBeChecked();
+  await userEvent.click(expertFields);
+  expect(expertFields).toBeChecked();
+  expect(optionalFields).toBeChecked();
+
+  await userEvent.click(optionalFields);
+  expect(optionalFields).not.toBeChecked();
+  expect(expertFields).not.toBeChecked();
 });
 
 
@@ -2589,6 +2723,119 @@ test("expands authored expert sections and supports animated collapse and expand
 });
 
 
+test("starts dense subtrees collapsed and reopens one level at a time", async () => {
+  const denseDraft = structuredClone(configDraft);
+  const sources = denseDraft.editState.nodes.find(
+    (node) => node.id === "edit:sourceClusters",
+  );
+  const legacy = sources?.children.find(
+    (node) => node.id === "edit:sourceClusters.legacy",
+  );
+  if (!legacy) throw new Error("Missing source fixture");
+
+  legacy.children.push({
+    id: "edit:sourceClusters.legacy.largeSettings",
+    path: ["sourceClusters", "legacy", "largeSettings"],
+    label: "Large settings",
+    valueKind: "object",
+    presence: "required",
+    status: "ok",
+    diagnostics: [],
+    children: [
+      {
+        id: "edit:sourceClusters.legacy.largeSettings.nested",
+        path: ["sourceClusters", "legacy", "largeSettings", "nested"],
+        label: "Nested settings",
+        valueKind: "object",
+        presence: "required",
+        status: "ok",
+        diagnostics: [],
+        children: [{
+          id: "edit:sourceClusters.legacy.largeSettings.nested.deep",
+          path: [
+            "sourceClusters",
+            "legacy",
+            "largeSettings",
+            "nested",
+            "deep",
+          ],
+          label: "Deep value: configured",
+          value: "configured",
+          valueAuthored: true,
+          valueKind: "scalar",
+          valueType: "string",
+          presence: "required",
+          status: "ok",
+          diagnostics: [],
+          children: [],
+        }],
+      },
+      ...Array.from({ length: 12 }, (_, index) => ({
+        id: `edit:sourceClusters.legacy.largeSettings.value${index}`,
+        path: [
+          "sourceClusters",
+          "legacy",
+          "largeSettings",
+          `value${index}`,
+        ],
+        label: `Value ${index + 1}: configured`,
+        value: "configured",
+        valueAuthored: true,
+        valueKind: "scalar" as const,
+        valueType: "string" as const,
+        presence: "required" as const,
+        status: "ok" as const,
+        diagnostics: [],
+        children: [],
+      })),
+    ],
+  });
+
+  renderApp(denseDraft);
+  await enterEditMode();
+
+  const config = await screen.findByRole("table", {
+    name: "Configuration fields",
+  });
+  const expandLarge = within(config).getByRole("button", {
+    name: "Expand Large settings",
+  });
+  expect(within(config).queryByRole("row", { name: /Nested settings/ }))
+    .toBeNull();
+
+  await userEvent.click(expandLarge);
+  const nestedRow = within(config).getByRole("row", {
+    name: /Nested settings/,
+  });
+  expect(within(config).queryByRole("row", { name: /Deep value/ }))
+    .toBeNull();
+
+  await userEvent.click(within(nestedRow).getByRole("button", {
+    name: "Expand Nested settings",
+  }));
+  expect(within(config).getByRole("row", { name: /Deep value/ }))
+    .toBeInTheDocument();
+
+  const largeRow = within(config).getByRole("row", {
+    name: /Large settings/,
+  });
+  await userEvent.click(within(largeRow).getByRole("button", {
+    name: "Collapse Large settings",
+  }));
+  await waitFor(() => expect(
+    within(config).queryByRole("row", { name: /Nested settings/ }),
+  ).toBeNull());
+
+  await userEvent.click(within(largeRow).getByRole("button", {
+    name: "Expand Large settings",
+  }));
+  expect(within(config).getByRole("row", { name: /Nested settings/ }))
+    .toBeInTheDocument();
+  expect(within(config).queryByRole("row", { name: /Deep value/ }))
+    .toBeNull();
+});
+
+
 test("keeps resource context while scoping edit mode to the selected resource", async () => {
   const scopedSnapshot = structuredClone(manageSnapshot);
   const capture = scopedSnapshot.nodes["resource:captureproxies:capture"];
@@ -2622,7 +2869,9 @@ test("keeps resource context while scoping edit mode to the selected resource", 
     name: "Workflow resources",
   });
   expect(resources).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Workflow dependencies" }))
+  expect(screen.getByRole("heading", {
+    name: "Planned workflow dependencies",
+  }))
     .toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Edit capture" }))
     .toBeInTheDocument();
@@ -3246,8 +3495,11 @@ test("highlights unsaved resources and fields with previous values", async () =>
   expect(endpointRow).toHaveClass("draft-change-item");
   expect(endpointRow.querySelector(".property-label"))
     .toHaveAttribute("title", expectedTitle);
-  expect(within(endpointRow).getByText("Changed"))
-    .toHaveAttribute("title", expectedTitle);
+  expect(within(endpointRow).getByText("Unsaved change"))
+    .toHaveAttribute(
+      "title",
+      `Cyan highlighting marks an unsaved browser draft change. ${expectedTitle}`,
+    );
 });
 
 
@@ -3258,7 +3510,7 @@ test("groups Kafka clusters and topics without repeating resource types", async 
   const capture = snapshot.nodes["resource:captureproxies:capture"];
   const bufferGroupId = "group:Live Traffic Migration:Buffer";
   const clusterGroupId = `${bufferGroupId}:Kafka Clusters`;
-  const topicGroupId = `${bufferGroupId}:Kafka Topics`;
+  const topicGroupId = `${bufferGroupId}:Previously Captured Traffic`;
   const kafkaId = "resource:kafkaclusters:default";
   const s3Id = "resource:capturedtraffics:proxy-topic";
   section.childIds = [bufferGroupId, ...section.childIds];
@@ -3283,7 +3535,7 @@ test("groups Kafka clusters and topics without repeating resource types", async 
     revision: "topic-group-1",
     parentId: bufferGroupId,
     childIds: [s3Id],
-    label: "Kafka Topics",
+    label: "Previously Captured Traffic",
   };
   snapshot.nodes[kafkaId] = {
     ...capture,
@@ -3321,7 +3573,7 @@ test("groups Kafka clusters and topics without repeating resource types", async 
     name: /^Kafka Clusters,/,
   })).toBeInTheDocument();
   expect(within(tree).getByRole("treeitem", {
-    name: /^Kafka Topics,/,
+    name: /^Previously Captured Traffic,/,
   })).toBeInTheDocument();
   const kafka = within(tree).getByRole("treeitem", {
     name: /^default, Ready$/,
@@ -3338,17 +3590,193 @@ test("groups Kafka clusters and topics without repeating resource types", async 
 });
 
 
-test("describes an implicit Kafka default without reporting a missing reference", async () => {
+test("creates and renames a provisional Kafka cluster from a reference", async () => {
+  const rawYaml = `sourceClusters:
+  source:
+    endpoint: https://source.example.com:9200
+    version: ES 7.10.2
+traffic:
+  kafkaClusters:
+    main-k:
+      autoCreate: {}
+      topics:
+        capture: {}
+  proxies:
+    capture:
+      source: source
+      kafka: main-k
+      kafkaTopic: capture
+      proxyConfig: {}
+  replayers: {}
+snapshotMigrationConfigs: []
+`;
+  const projection = projectConfigYaml(rawYaml);
+  const draft: ConfigDraft = {
+    ...structuredClone(configDraft),
+    rawYaml,
+    editState: projection.editState,
+  };
+  const { client } = renderApp(draft);
+  await enterEditMode();
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(within(tree).getByRole("treeitem", {
+    name: "capture",
+  }));
+
+  const kafkaClusterRow = await screen.findByRole("row", {
+    name: /Kafka cluster/i,
+  });
+  expect(within(kafkaClusterRow).getByRole("combobox", {
+    name: "Kafka",
+  })).toHaveValue("main-k");
+  await userEvent.click(within(kafkaClusterRow).getByRole("button", {
+    name: "Create new Kafka cluster",
+  }));
+
+  await waitFor(() => expect(
+    client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config,
+  ).toMatchObject({
+    traffic: {
+      kafkaClusters: {
+        "kafka-cluster": { autoCreate: {} },
+      },
+      proxies: {
+        capture: { kafka: "kafka-cluster" },
+      },
+    },
+  }));
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^kafka-cluster/,
+  })).toBeInTheDocument();
+  expect(await screen.findByRole("textbox", {
+    name: "New name for kafka-cluster",
+  })).toHaveFocus();
+  expect(screen.getByRole("button", { name: "Back to capture" }))
+    .toBeInTheDocument();
+});
+
+
+test("creates and selects a proxy topic under the selected Kafka cluster", async () => {
   const draft = structuredClone(configDraft);
+  draft.rawYaml = JSON.stringify({
+    traffic: {
+      kafkaClusters: {
+        shared: {
+          autoCreate: {},
+          topics: {},
+        },
+      },
+      proxies: {
+        capture: {
+          source: "source",
+          kafka: "shared",
+          kafkaTopic: "",
+          proxyConfig: { listenPort: 9201 },
+        },
+      },
+    },
+  }, null, 2);
   const traffic = draft.editState.nodes.find(
     (node) => node.id === "edit:traffic",
   );
   if (!traffic) throw new Error("Missing traffic edit node");
   traffic.children.unshift({
-    id: "edit:traffic.kafka",
-    path: ["traffic", "kafka"],
-    label: "Kafka cluster",
-    value: "default",
+    id: "edit:traffic.proxies.capture.kafkaTopic",
+    path: ["traffic", "proxies", "capture", "kafkaTopic"],
+    label: "Kafka topic",
+    valueKind: "scalar",
+    valueType: "string",
+    presence: "required",
+    required: true,
+    status: "required",
+    inputHint: {
+      kind: "reference",
+      sourcePath: ["traffic", "kafkaClusters", "shared", "topics"],
+      allowCustom: false,
+      options: [],
+      createReference: {
+        label: "Create topic for this proxy",
+        valueFromPathSegmentFromEnd: 2,
+        description: "Create and select an explicit topic.",
+      },
+      message: "Choose a topic from the selected Kafka cluster.",
+    },
+    diagnostics: [],
+    children: [],
+  });
+  const { client } = renderApp(draft);
+  await enterEditMode();
+
+  expect(screen.queryByLabelText("Kafka topic")).toBeNull();
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create topic for this proxy",
+  }));
+
+  await waitFor(() => expect(
+    client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config,
+  ).toMatchObject({
+    traffic: {
+      kafkaClusters: {
+        shared: {
+          topics: {
+            capture: {},
+          },
+        },
+      },
+      proxies: {
+        capture: {
+          kafkaTopic: "capture",
+        },
+      },
+    },
+  }));
+  const topicName = await screen.findByRole("textbox", {
+    name: "New name for capture",
+  });
+  expect(topicName).toHaveFocus();
+  expect(screen.getByRole("button", { name: "Back to capture" }))
+    .toBeInTheDocument();
+});
+
+
+test("offers topic creation beside a populated topic selector", async () => {
+  const draft = structuredClone(configDraft);
+  draft.rawYaml = JSON.stringify({
+    traffic: {
+      kafkaClusters: {
+        shared: {
+          autoCreate: {},
+          topics: {
+            existing: {},
+          },
+        },
+      },
+      proxies: {
+        capture: {
+          source: "source",
+          kafka: "shared",
+          kafkaTopic: "existing",
+          proxyConfig: { listenPort: 9201 },
+        },
+      },
+    },
+  }, null, 2);
+  const traffic = draft.editState.nodes.find(
+    (node) => node.id === "edit:traffic",
+  );
+  if (!traffic) throw new Error("Missing traffic edit node");
+  traffic.children.unshift({
+    id: "edit:traffic.proxies.capture.kafkaTopic",
+    path: ["traffic", "proxies", "capture", "kafkaTopic"],
+    label: "Kafka topic",
+    value: "existing",
+    valueAuthored: "existing",
     valueKind: "scalar",
     valueType: "string",
     presence: "required",
@@ -3356,187 +3784,211 @@ test("describes an implicit Kafka default without reporting a missing reference"
     status: "ok",
     inputHint: {
       kind: "reference",
-      sourcePath: ["traffic", "kafkaClusters"],
+      sourcePath: ["traffic", "kafkaClusters", "shared", "topics"],
       allowCustom: false,
-      options: [],
-      emptyMeansDefault: "default",
-      message: "A Kafka cluster with default settings will be provided.",
+      options: [{
+        label: "existing",
+        value: "existing",
+      }],
+      createReference: {
+        label: "Create topic for this proxy",
+        valueFromPathSegmentFromEnd: 2,
+        description: "Create and select an explicit topic.",
+      },
+      message: "Choose a topic from the selected Kafka cluster.",
     },
     diagnostics: [],
     children: [],
   });
-  renderApp(draft);
+  const { client } = renderApp(draft);
   await enterEditMode();
 
-  expect(screen.getByLabelText("Kafka cluster")).toBeDisabled();
-  const message = screen.getByText(
-    "A Kafka cluster with default settings will be provided.",
-  );
-  expect(message).toHaveClass("field-help");
-  expect(message).not.toHaveClass("field-error");
+  const topic = screen.getByRole("combobox", { name: "Kafka topic" });
+  expect(within(topic).queryByRole("option", {
+    name: "Create topic for this proxy",
+  })).toBeNull();
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create topic for this proxy",
+  }));
+
+  await waitFor(() => expect(
+    client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config,
+  ).toMatchObject({
+    traffic: {
+      kafkaClusters: {
+        shared: {
+          topics: {
+            existing: {},
+            capture: {},
+          },
+        },
+      },
+      proxies: {
+        capture: {
+          kafkaTopic: "capture",
+        },
+      },
+    },
+  }));
+  const topicName = await screen.findByRole("textbox", {
+    name: "New name for capture",
+  });
+  expect(topicName).toHaveFocus();
+  expect(screen.getByRole("button", { name: "Back to capture" }))
+    .toBeInTheDocument();
 });
 
 
-test("edits the implicit Kafka default without offering rename or removal", async () => {
+test("keeps resource creation adjacent to an existing reference", async () => {
   const draft = structuredClone(configDraft);
   const traffic = draft.editState.nodes.find(
     (node) => node.id === "edit:traffic",
   );
   if (!traffic) throw new Error("Missing traffic edit node");
   traffic.children.unshift({
-    id: "edit:traffic.kafkaClusters",
-    path: ["traffic", "kafkaClusters"],
-    label: "Kafka Clusters",
-    valueKind: "record",
-    presence: "optional",
-    essential: true,
+    id: "edit:traffic.source",
+    path: ["traffic", "source"],
+    label: "Source cluster",
+    value: "legacy",
+    valueAuthored: true,
+    valueKind: "scalar",
+    valueType: "string",
+    presence: "required",
+    required: true,
     status: "ok",
     inputHint: {
-      kind: "record",
-      addLabel: "Kafka cluster",
-      resourceCollection: {
-        navigation: {
-          sectionId: "section:Live Traffic Migration",
-          sectionLabel: "Live Traffic Migration",
-          sectionOrder: 3,
-          groupId: "group:Live Traffic Migration:Kafka Clusters",
-          groupLabel: "Kafka Clusters",
-          groupOrder: 0,
-        },
-        resource: {
-          kind: "Kafka",
-          plural: "kafkaclusters",
-          typeLabel: "Kafka cluster",
-          identity: { kind: "named" },
-        },
-      },
+      kind: "reference",
+      sourcePath: ["sourceClusters"],
+      allowCustom: false,
+      options: [{
+        label: "legacy",
+        value: "legacy",
+        editTargetId: "edit:sourceClusters.legacy",
+      }],
+      message: "Choose a configured source cluster.",
     },
     diagnostics: [],
-    children: [{
-      id: "edit:traffic.kafkaClusters.default",
-      path: ["traffic", "kafkaClusters", "default"],
-      label: "default",
-      valueKind: "object",
-      presence: "required",
-      implicit: true,
-      removable: false,
-      valueDefaulted: true,
-      status: "ok",
-      diagnostics: [],
-      children: [{
-        id: "edit:traffic.kafkaClusters.default.autoCreate",
-        path: ["traffic", "kafkaClusters", "default", "autoCreate"],
-        label: "Create a managed cluster",
-        valueKind: "object",
-        presence: "required",
-        status: "ok",
-        diagnostics: [],
-        children: [{
-          id: "edit:traffic.kafkaClusters.default.autoCreate.auth",
-          path: [
-            "traffic",
-            "kafkaClusters",
-            "default",
-            "autoCreate",
-            "auth",
-          ],
-          label: "Authentication: < scram-sha-512 >",
-          value: "scram-sha-512",
-          valueDefaulted: true,
-          valueKind: "union",
-          presence: "optional",
-          status: "ok",
-          variants: [
-            { label: "none", value: "none" },
-            { label: "scram-sha-512", value: "scram-sha-512" },
-          ],
-          diagnostics: [],
-          children: [],
-        }],
-      }],
-    }, {
-      id: "edit:traffic.kafkaClusters:add",
-      path: ["traffic", "kafkaClusters"],
-      label: "+ Add Kafka cluster",
-      valueKind: "command",
-      status: "ok",
-      command: {
-        requiresName: true,
-        editAdded: true,
-        autoEditAdded: true,
-      },
-      diagnostics: [],
-      children: [],
-    }],
+    children: [],
   });
-  const navigation = setNavigation(draft);
-  ensureNavigationGroup(navigation, {
-    sectionId: "section:Live Traffic Migration",
-    sectionLabel: "Live Traffic Migration",
-    groupId: "group:Live Traffic Migration:Kafka Clusters",
-    groupLabel: "Kafka Clusters",
-  });
-  addConfigNavigationResource(navigation, {
-    id: "resource:kafkaclusters:default",
-    groupId: "group:Live Traffic Migration:Kafka Clusters",
-    label: "default",
-    editTargetId: "edit:traffic.kafkaClusters.default",
-    resourcePlural: "kafkaclusters",
-    resourceType: "Kafka cluster",
-    status: "ok",
-    valueSummary: "Available when referenced",
-  });
-  const implicit = navigation.nodes["resource:kafkaclusters:default"];
-  implicit.phase = "Implicit default";
-  implicit.configPresence = { deployed: false, pending: false };
-
   const { client } = renderApp(draft);
   await enterEditMode();
 
+  const source = await screen.findByRole("combobox", {
+    name: "Source cluster",
+  });
+  expect(source).toHaveValue("legacy");
+  expect(screen.getByRole("button", {
+    name: "Defined in legacy",
+  })).toBeInTheDocument();
+  expect(within(source).queryByRole("option", {
+    name: /Create/i,
+  })).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create new Source cluster",
+  }));
+
+  await waitFor(() => expect(
+    client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config,
+  ).toMatchObject({
+    sourceClusters: {
+      "source-cluster": {},
+    },
+    traffic: {
+      source: "source-cluster",
+    },
+  }));
+  const provisionalName = await screen.findByRole("textbox", {
+    name: "New name for source-cluster",
+  });
+  expect(provisionalName).toHaveFocus();
+});
+
+
+test("returns to the current snapshot migration after creating a snapshot", async () => {
+  const rawYaml = `sourceClusters:
+  source:
+    endpoint: https://source.example.com:9200
+    version: ES 7.10.2
+    snapshotInfo:
+      repos:
+        repo:
+          repoPathUri: s3://bucket/
+          awsRegion: us-east-2
+      snapshots:
+        snap:
+          repoName: repo
+          config:
+            createSnapshotConfig: {}
+targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+snapshotMigrationConfigs:
+  - fromSource: source
+    toTarget: target
+    fromSnapshot: snap
+    slice: slice-n
+    metadataMigrationConfig: {}
+traffic:
+  kafkaClusters: {}
+  proxies: {}
+  replayers: {}
+`;
+  const projection = projectConfigYaml(rawYaml);
+  const draft: ConfigDraft = {
+    ...structuredClone(configDraft),
+    rawYaml,
+    editState: projection.editState,
+  };
+  const { client } = renderApp(draft);
+  await enterEditMode();
   const tree = await screen.findByRole("tree", {
     name: "Workflow resources",
   });
-  const defaultResource = within(tree).getByRole("treeitem", {
-    name: /^default/,
-  });
-  expect(defaultResource).not.toHaveAccessibleName(
-    /Addition pending submission/,
-  );
-  expect(within(defaultResource).queryByRole("button", {
-    name: "Rename default",
-  })).toBeNull();
-  await userEvent.click(defaultResource);
+  await userEvent.click(await within(tree).findByRole("treeitem", {
+    name: /^source-target-snap-slice-n/,
+  }));
 
-  const fields = await screen.findByRole("table", {
-    name: "Configuration fields",
-  });
-  expect(within(fields).queryByRole("button", {
-    name: "Remove default",
-  })).toBeNull();
-  await userEvent.selectOptions(
-    within(fields).getByRole("combobox", { name: "Authentication" }),
-    "none",
-  );
-
+  await userEvent.click(screen.getByRole("button", {
+    name: "Create new Source snapshot",
+  }));
   await waitFor(() => expect(
-    (
-      client.getQueryData<BrowserConfigDraft>(
-        BROWSER_CONFIG_DRAFT_QUERY_KEY,
-      )?.config as {
-        traffic?: {
-          kafkaClusters?: {
-            default?: {
-              autoCreate?: {
-                auth?: {
-                  type?: string;
-                };
-              };
-            };
-          };
-        };
-      }
-    ).traffic?.kafkaClusters?.default?.autoCreate?.auth?.type,
-  ).toBe("none"));
+    client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config,
+  ).toMatchObject({
+    sourceClusters: {
+      source: {
+        snapshotInfo: {
+          snapshots: {
+            "source-snapshot": {},
+          },
+        },
+      },
+    },
+    snapshotMigrationConfigs: [{
+      fromSnapshot: "source-snapshot",
+      slice: "slice-n",
+    }],
+  }));
+  expect(await within(tree).findByRole("treeitem", {
+    name: /^source-snapshot/,
+  })).toBeInTheDocument();
+  expect(await screen.findByRole("textbox", {
+    name: "New name for source-snapshot",
+  })).toHaveFocus();
+
+  const back = await screen.findByRole("button", {
+    name: "Back to source-target-source-snapshot-slice-n",
+  });
+  await userEvent.click(back);
+  expect(await screen.findByRole("heading", {
+    name: "Edit source-target-source-snapshot-slice-n",
+  })).toBeInTheDocument();
 });
 
 
@@ -3693,7 +4145,9 @@ test("shows the server reason when configuration cannot be opened", async () => 
     .toBeInTheDocument();
   expect(screen.getByRole("tree", { name: "Workflow resources" }))
     .toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Workflow dependencies" }))
+  expect(screen.getByRole("heading", {
+    name: "Planned workflow dependencies",
+  }))
     .toBeInTheDocument();
 });
 
@@ -4762,10 +5216,10 @@ test("promotes add commands to collection actions and keeps exact deletion", asy
 
   await userEvent.click(screen.getByRole("button", { name: "Remove legacy" }));
   expect(await screen.findByRole("dialog", {
-    name: "Remove legacy?",
+    name: "Remove legacy from configuration?",
   })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", {
-    name: "Confirm removal",
+    name: "Confirm configuration removal",
   }));
   await waitFor(() => {
     const sourceClusters = (
@@ -4801,22 +5255,25 @@ test("keeps a deleted source selected as a tombstone and previews dependents", a
 targetClusters:
   target:
     endpoint: https://target.example.com:9200
-    version: OS 2.15
 traffic:
   kafkaClusters:
     default:
       autoCreate: {}
+      topics:
+        capture: {}
   proxies:
     capture:
       source: legacy
       proxyConfig: {}
       kafka: default
+      kafkaTopic: capture
   replayers:
     replay:
       fromCapturedTraffic: capture
       toTarget: target
 snapshotMigrationConfigs: []
 `;
+  draft.editState = projectConfigYaml(draft.rawYaml).editState;
 
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
@@ -4824,21 +5281,24 @@ snapshotMigrationConfigs: []
   renderApp(draft);
 
   await enterEditMode();
-  await userEvent.click(screen.getByRole("button", { name: "Remove legacy" }));
+  const [removeLegacy] = await screen.findAllByRole("button", {
+    name: "Remove legacy",
+  });
+  await userEvent.click(removeLegacy);
 
   const dialog = await screen.findByRole("dialog", {
-    name: "Remove legacy?",
+    name: "Remove legacy from configuration?",
   });
   expect(within(dialog).getByText("traffic.proxies.capture"))
     .toBeInTheDocument();
   expect(within(dialog).getByText("traffic.replayers.replay"))
     .toBeInTheDocument();
   await userEvent.click(within(dialog).getByRole("button", {
-    name: "Confirm removal",
+    name: "Confirm configuration removal",
   }));
 
-  const tree = screen.getByRole("tree", { name: "Workflow resources" });
-  expect(await within(tree).findByRole("treeitem", {
+  const updatedTree = screen.getByRole("tree", { name: "Workflow resources" });
+  expect(await within(updatedTree).findByRole("treeitem", {
     name: /^source, Marked for removal$/,
   })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByRole("heading", { name: "source" })).toBeInTheDocument();
@@ -4846,6 +5306,184 @@ snapshotMigrationConfigs: []
     "This source is marked for removal from the configuration.",
   )).toBeInTheDocument();
   expect(screen.queryByText("Workflow configuration")).toBeNull();
+});
+
+
+test("reviews a downstream resource and returns to cascading deletion", async () => {
+  const rawYaml = `sourceClusters:
+  legacy:
+    endpoint: https://legacy.example.com:9200
+    version: ES 7.10
+targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+snapshotMigrationConfigs: []
+traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture: {}
+  proxies:
+    capture:
+      source: legacy
+      kafka: default
+      kafkaTopic: capture
+      proxyConfig:
+        listenPort: 9200
+  replayers:
+    replay:
+      fromCapturedTraffic: capture
+      toTarget: target
+`;
+  const projection = projectConfigYaml(rawYaml);
+  const draft: ConfigDraft = {
+    baseRevision: "cascade-base",
+    draftRevision: "cascade-draft",
+    dirty: false,
+    editState: projection.editState,
+    rawYaml,
+    notices: [],
+  };
+  const { client } = renderApp(draft);
+
+  await enterEditMode();
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  await userEvent.click(within(tree).getByRole("treeitem", {
+    name: "capture",
+  }));
+  const captureEditor = await screen.findByRole("region", {
+    name: "Edit capture configuration",
+  });
+  await userEvent.click(within(captureEditor).getByRole("button", {
+    name: "Remove capture",
+  }));
+
+  let dialog = await screen.findByRole("dialog", {
+    name: /Remove capture from configuration/,
+  });
+  expect(within(dialog).getByText(
+    /Referencing entries can be kept with their affected fields cleared/,
+  )).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", {
+    name: "Confirm configuration removal",
+  })).toHaveTextContent("Remove 2 configuration entries");
+
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "View traffic.replayers.replay",
+  }));
+  expect(screen.queryByRole("dialog", {
+    name: /Remove capture from configuration/,
+  })).toBeNull();
+  expect(await screen.findByRole("heading", {
+    name: "Edit replay",
+  })).toBeInTheDocument();
+  expect(screen.getByRole("row", {
+    name: /From Captured Traffic/,
+  })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Back to capture",
+  }));
+  dialog = await screen.findByRole("dialog", {
+    name: /Remove capture from configuration/,
+  });
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "Confirm configuration removal",
+  }));
+
+  await waitFor(() => {
+    const config = client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config as {
+      traffic?: {
+        proxies?: Record<string, unknown>;
+        replayers?: Record<string, unknown>;
+      };
+    };
+    expect(config.traffic?.proxies?.capture).toBeUndefined();
+    expect(config.traffic?.replayers?.replay).toBeUndefined();
+  });
+});
+
+
+test("keeps downstream resources and clears their references during deletion", async () => {
+  const rawYaml = `sourceClusters:
+  source:
+    endpoint: https://source.example.com:9200
+    version: ES 7.10
+targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+snapshotMigrationConfigs: []
+traffic:
+  kafkaClusters:
+    default:
+      autoCreate: {}
+      topics:
+        capture: {}
+  proxies:
+    capture:
+      source: source
+      kafka: default
+      kafkaTopic: capture
+      proxyConfig:
+        listenPort: 9200
+  replayers:
+    replay:
+      fromCapturedTraffic: capture
+      toTarget: target
+`;
+  const projection = projectConfigYaml(rawYaml);
+  const draft: ConfigDraft = {
+    baseRevision: "keep-dependents-base",
+    draftRevision: "keep-dependents-draft",
+    dirty: false,
+    editState: projection.editState,
+    rawYaml,
+    notices: [],
+  };
+  const { client } = renderApp(draft);
+
+  await enterEditMode();
+  const tree = screen.getByRole("tree", { name: "Workflow resources" });
+  await userEvent.click(within(tree).getByRole("treeitem", {
+    name: "capture",
+  }));
+  const captureEditor = await screen.findByRole("region", {
+    name: "Edit capture configuration",
+  });
+  await userEvent.click(within(captureEditor).getByRole("button", {
+    name: "Remove capture",
+  }));
+
+  const dialog = await screen.findByRole("dialog", {
+    name: "Remove capture from configuration?",
+  });
+  expect(within(dialog).getByText(
+    /Can be kept; clear traffic\.replayers\.replay\.fromCapturedTraffic/,
+  )).toBeInTheDocument();
+  await userEvent.click(within(dialog).getByRole("button", {
+    name: "Remove and clear references",
+  }));
+
+  await waitFor(() => {
+    const config = client.getQueryData<BrowserConfigDraft>(
+      BROWSER_CONFIG_DRAFT_QUERY_KEY,
+    )?.config as {
+      traffic?: {
+        proxies?: Record<string, unknown>;
+        replayers?: Record<string, {
+          fromCapturedTraffic?: string;
+          toTarget?: string;
+        }>;
+      };
+    };
+    expect(config.traffic?.proxies?.capture).toBeUndefined();
+    expect(config.traffic?.replayers?.replay).toEqual({
+      toTarget: "target",
+    });
+  });
 });
 
 
@@ -5623,12 +6261,12 @@ test("offers one reset and resubmit action for immutable preflight failures", as
   expect(blockedSubmit).toBeDisabled();
   expect(blockedSubmit).toHaveAttribute(
     "title",
-    "No workflow will be submitted while reset-required admission errors "
-      + "remain. The affected resources and their dependencies will stay "
-      + "blocked. Use Reset & resubmit.",
+    "No workflow will be submitted while admission errors requiring "
+      + "resource deletion remain. The affected resources and their "
+      + "dependencies will stay blocked. Use Delete resources and resubmit.",
   );
   const resetAndResubmit = await within(dialog).findByRole("button", {
-    name: "Reset & resubmit (2)",
+    name: "Delete resources and resubmit (2)",
   });
   expect(resetAndResubmit).toHaveAttribute(
     "title",
@@ -5678,6 +6316,41 @@ test("explains why submission is unavailable after validation state changes", as
   expect(submit).toHaveAttribute(
     "title",
     "Configuration is current; no resources are missing or failed",
+  );
+});
+
+
+test("enables submit from snapshot-level configuration dirtiness", async () => {
+  const currentState = structuredClone(manageSnapshot);
+  currentState.configurationPending = true;
+  const capture = currentState.nodes["resource:captureproxies:capture"];
+  capture.comparisons = capture.comparisons.map((comparison) => ({
+    ...comparison,
+    pending: comparison.submitted,
+    pendingChanged: false,
+  }));
+  const validDraft = structuredClone(configDraft);
+  validDraft.editState.validation = {
+    valid: true,
+    errors: [],
+    diagnostics: [],
+  };
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(currentState),
+    ),
+  );
+
+  renderApp(validDraft);
+
+  const submit = await screen.findByRole("button", {
+    name: "Review and submit",
+  });
+  await waitFor(() => expect(submit).toBeEnabled());
+  expect(submit).toHaveAttribute(
+    "title",
+    "Review and submit pending configuration",
   );
 });
 
@@ -5894,16 +6567,16 @@ test("Escape invokes the reset dialog Cancel action", async () => {
     name: /^capture, Ready$/,
   }));
   await userEvent.click(screen.getByRole("button", {
-    name: "Reset capture",
+    name: "Delete resource",
   }));
   expect(await screen.findByRole("dialog", {
-    name: "Review reset plan",
+    name: "Review resource deletion",
   })).toBeInTheDocument();
 
   await userEvent.keyboard("{Escape}");
 
   expect(screen.queryByRole("dialog", {
-    name: "Review reset plan",
+    name: "Review resource deletion",
   })).toBeNull();
   expect(screen.getByRole("heading", { name: "capture" }))
     .toBeInTheDocument();

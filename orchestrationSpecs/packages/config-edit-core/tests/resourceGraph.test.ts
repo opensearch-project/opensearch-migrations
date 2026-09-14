@@ -218,6 +218,136 @@ describe("configuration resource graph projection", () => {
         });
     });
 
+    it("preserves the runtime-backed Kafka topic in its edit location", () => {
+        const liveSection = "section:Live Traffic Migration";
+        const bufferGroup = "group:Live Traffic Migration:Buffer";
+        const kafkaGroup = `${bufferGroup}:Kafka Clusters`;
+        const clusterId = "resource:kafkaclusters:main-k";
+        const topicsGroup =
+            "definition-group:edit:traffic.kafkaClusters.main-k.topics";
+        const captureGroup = "group:Live Traffic Migration:Capture";
+        const capturedId = "resource:capturedtraffics:c-topic";
+        const proxyId = "resource:captureproxies:c";
+        const snapshot = emptySnapshot();
+        snapshot.rootIds = [liveSection];
+        snapshot.nodes = {
+            [liveSection]: node(
+                liveSection,
+                "section",
+                "Live Traffic Migration",
+                {childIds: [bufferGroup, captureGroup]},
+            ),
+            [bufferGroup]: node(bufferGroup, "group", "Buffer", {
+                parentId: liveSection,
+                childIds: [kafkaGroup],
+            }),
+            [kafkaGroup]: node(
+                kafkaGroup,
+                "group",
+                "Kafka Clusters",
+                {
+                    parentId: bufferGroup,
+                    childIds: [clusterId],
+                },
+            ),
+            [clusterId]: node(clusterId, "resource", "main-k", {
+                parentId: kafkaGroup,
+                childIds: [topicsGroup],
+                capabilities: [{
+                    kind: "edit",
+                    editTargetId: "edit:traffic.kafkaClusters.main-k",
+                }],
+                resourcePlural: "kafkaclusters",
+                resourceName: "main-k",
+                resourceType: "Kafka cluster",
+            }),
+            [topicsGroup]: node(topicsGroup, "group", "Topics", {
+                parentId: clusterId,
+                childIds: [capturedId],
+            }),
+            [captureGroup]: node(captureGroup, "group", "Capture", {
+                parentId: liveSection,
+                childIds: [proxyId],
+            }),
+            [capturedId]: node(capturedId, "resource", "c", {
+                parentId: topicsGroup,
+                capabilities: [{
+                    kind: "edit",
+                    editTargetId:
+                        "edit:traffic.kafkaClusters.main-k.topics.c",
+                }],
+                resourcePlural: "capturedtraffics",
+                resourceName: "c-topic",
+                resourceType: "Kafka topic",
+                configPresence: {deployed: true, pending: true},
+            }),
+            [proxyId]: node(proxyId, "resource", "c", {
+                parentId: captureGroup,
+                capabilities: [{
+                    kind: "edit",
+                    editTargetId: "edit:traffic.proxies.c",
+                }],
+                resourcePlural: "captureproxies",
+                resourceName: "c",
+                resourceType: "Capture proxy",
+                configPresence: {deployed: true, pending: true},
+            }),
+        };
+        const config = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com:9200",
+                    version: "ES 7.10",
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+            traffic: {
+                kafkaClusters: {
+                    "main-k": {
+                        autoCreate: {},
+                        topics: {
+                            c: {},
+                        },
+                    },
+                },
+                proxies: {
+                    c: {
+                        source: "source",
+                        kafka: "main-k",
+                        kafkaTopic: "c",
+                        proxyConfig: {},
+                    },
+                },
+                replayers: {},
+            },
+        };
+
+        const projected = projectConfigResourceGraph(
+            snapshot,
+            draft(config, config, false),
+        );
+
+        expect(projected.nodes[capturedId]).toMatchObject({
+            label: "c",
+            parentId: topicsGroup,
+            resourceName: "c-topic",
+            resourceType: "Kafka topic",
+            capabilities: [expect.objectContaining({
+                editTargetId:
+                    "edit:traffic.kafkaClusters.main-k.topics.c",
+            })],
+        });
+        expect(projected.nodes[proxyId]).toMatchObject({
+            capabilities: [expect.objectContaining({
+                editTargetId: "edit:traffic.proxies.c",
+            })],
+        });
+        expect(projected.nodes[
+            "definition:edit:traffic.kafkaClusters.main-k.topics.c"
+        ]).toBeUndefined();
+    });
+
     it("rebinds snapshot migration resources by semantic identity after compaction", () => {
         const sectionId = "section:Snapshot Migration";
         const groupId = "group:Snapshot Migration:Backfill";
@@ -392,13 +522,18 @@ describe("configuration resource graph projection", () => {
                 toTargetId: "edit:traffic.proxies.capture",
             }),
         ]));
-        expect(configRemovalImpact(config, ["sourceClusters", "source"]))
-            .toEqual(expect.arrayContaining([
+        const removalImpact = configRemovalImpact(
+            config,
+            ["sourceClusters", "source"],
+        );
+        expect(removalImpact).toEqual(expect.arrayContaining([
                 expect.objectContaining({
                     path: ["traffic", "proxies", "capture"],
+                    direct: true,
                 }),
                 expect.objectContaining({
                     path: ["traffic", "replayers", "replay"],
+                    direct: false,
                 }),
             ]));
 
@@ -501,6 +636,60 @@ describe("configuration resource graph projection", () => {
             direction: "requires",
             targetId: "resource:sourceconfigs:old",
         }));
+    });
+
+    it("rebinds stale runtime edit targets to the current configuration paths", () => {
+        const snapshot = emptySnapshot();
+        const replayGroupId = "group:Live Traffic Migration:Replay";
+        const replayId = "resource:trafficreplays:replay";
+        snapshot.rootIds = [replayGroupId];
+        snapshot.nodes[replayGroupId] = node(
+            replayGroupId,
+            "group",
+            "Replay",
+            {childIds: [replayId]},
+        );
+        snapshot.nodes[replayId] = node(
+            replayId,
+            "resource",
+            "replay",
+            {
+                parentId: replayGroupId,
+                resourcePlural: "trafficreplays",
+                resourceName: "replay",
+                resourceType: "Traffic replayer",
+                capabilities: [{
+                    kind: "edit",
+                    editTargetId: "edit:trafficreplays:replay",
+                }],
+            },
+        );
+        const config = {
+            sourceClusters: {},
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [],
+            traffic: {
+                replayers: {
+                    replay: {
+                        fromCapturedTraffic: "capture",
+                        toTarget: "target",
+                    },
+                },
+            },
+        };
+
+        const projected = projectConfigResourceGraph(
+            snapshot,
+            draft(config, config, false),
+        );
+
+        expect(projected.nodes[replayId].capabilities).toContainEqual({
+            kind: "edit",
+            editTargetId: "edit:traffic.replayers.replay",
+            label: "Edit replay",
+        });
     });
 
     it("does not infer configured resources from a raw-repair draft", () => {

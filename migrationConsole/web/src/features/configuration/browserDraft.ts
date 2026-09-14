@@ -4,6 +4,7 @@ import {
   projectConfigYaml,
   type EditOperation,
   type EditStateV1,
+  type JsonSchema,
 } from "@opensearch-migrations/config-edit-core";
 import { parse } from "yaml";
 
@@ -28,6 +29,7 @@ export interface BrowserConfigDraft {
   rawDocument: string;
   remotePersistedRevision?: string;
   savedRawDocument: string;
+  unifiedSchema?: JsonSchema;
 }
 
 
@@ -51,8 +53,9 @@ function parseYaml(rawYaml: string): unknown {
 function projectedDraft(
   document: ConfigurationDocument,
   navigation?: ManageSnapshot | null,
+  unifiedSchema?: JsonSchema,
 ): BrowserConfigDraft {
-  const projection = projectConfigYaml(document.rawYaml);
+  const projection = projectConfigYaml(document.rawYaml, { unifiedSchema });
   const editState = projection.editState;
   return {
     baseRevision: document.persistedRevision,
@@ -70,6 +73,7 @@ function projectedDraft(
     persistedRevision: document.persistedRevision,
     rawDocument: document.rawYaml,
     savedRawDocument: document.rawYaml,
+    unifiedSchema,
   };
 }
 
@@ -77,8 +81,9 @@ function projectedDraft(
 export function createBrowserConfigDraft(
   document: ConfigurationDocument,
   navigation?: ManageSnapshot | null,
+  unifiedSchema?: JsonSchema,
 ): BrowserConfigDraft {
-  return projectedDraft(document, navigation);
+  return projectedDraft(document, navigation, unifiedSchema);
 }
 
 
@@ -94,6 +99,7 @@ export function applyBrowserEditOperation(
   const result = applyEditOperationToObject(
     draft.config,
     operation,
+    { unifiedSchema: draft.unifiedSchema },
   );
   const config = result.yaml.trim() === "" ? {} : parseYaml(result.yaml);
   const editState = annotateDraftChanges(
@@ -117,7 +123,10 @@ export function replaceBrowserConfigYaml(
   draft: BrowserConfigDraft,
   rawYaml: string,
 ): BrowserConfigDraft {
-  const projection = projectConfigYaml(rawYaml);
+  const projection = projectConfigYaml(
+    rawYaml,
+    { unifiedSchema: draft.unifiedSchema },
+  );
   const projectedEditState = projection.editState.provenance.mode === "raw"
     ? projection.editState
     : annotateDraftChanges(
@@ -144,7 +153,11 @@ export function savedBrowserConfigDraft(
   previous: BrowserConfigDraft,
   navigation?: ManageSnapshot | null,
 ): BrowserConfigDraft {
-  return projectedDraft(document, navigation ?? previous.navigation);
+  return projectedDraft(
+    document,
+    navigation ?? previous.navigation,
+    previous.unifiedSchema,
+  );
 }
 
 
@@ -168,7 +181,7 @@ export function revertedBrowserConfigDraft(
     modelVersion: "1",
     persistedRevision: draft.persistedRevision,
     rawYaml: draft.savedRawDocument,
-  }, draft.navigation);
+  }, draft.navigation, draft.unifiedSchema);
 }
 
 

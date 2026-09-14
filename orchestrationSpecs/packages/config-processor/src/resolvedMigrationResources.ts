@@ -609,6 +609,7 @@ function capturedTrafficParameterProvenance(
     sourceBasePath: string[],
     parameters: Record<string, unknown>,
     kafkaName: string,
+    topicName: string,
     options: ResolvedMigrationResourcesOptions,
     extraGeneratedPaths: string[][] = [],
 ): ResolvedParameterProvenanceMap | undefined {
@@ -632,7 +633,12 @@ function capturedTrafficParameterProvenance(
         [...sourceBasePath, "kafkaTopic"],
     );
     for (const path of [["partitions"], ["replicas"], ["topicConfig"]]) {
-        const sourcePath = ["autoCreate", "topicSpecOverrides", path[0] === "topicConfig" ? "config" : path[0]];
+        const sourcePath = [
+            "topics",
+            topicName,
+            "specOverrides",
+            path[0] === "topicConfig" ? "config" : path[0],
+        ];
         setParameterProvenance(
             result,
             parameters,
@@ -676,6 +682,7 @@ function s3CapturedTrafficParameterProvenance(
         ["traffic", "s3Sources", sourceName],
         parameters,
         kafkaName,
+        asString(source.kafkaTopic) ?? "",
         options,
         [["sourceKind"], ["loadStarted"]],
     );
@@ -861,6 +868,7 @@ export function buildResolvedMigrationResourceList(
                 ["traffic", "proxies", proxy.name],
                 topicParameters,
                 proxy.kafkaConfig.label,
+                proxy.kafkaConfig.kafkaTopic,
                 options,
             ),
         ));
@@ -1161,12 +1169,18 @@ function looseKafkaClusterParameters(kafkaConfig: Record<string, unknown>): Reco
 function looseTopicSpecForKafka(
     kafkaEntries: [string, Record<string, unknown>][],
     kafkaName: string,
+    topicName: string,
 ): Record<string, unknown> {
     const kafkaConfig = kafkaEntries.find(([name]) => name === kafkaName)?.[1];
-    const autoCreate = asRecord(kafkaConfig?.autoCreate);
+    const topic = asRecord(asRecord(kafkaConfig?.topics)[topicName]);
+    const specOverrides = asRecord(topic.specOverrides);
     return {
         ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
-        ...asRecord(autoCreate.topicSpecOverrides),
+        ...specOverrides,
+        config: {
+            ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.config,
+            ...asRecord(specOverrides.config),
+        },
     };
 }
 
@@ -1175,12 +1189,13 @@ function looseCapturedTrafficParameters(
     source: Record<string, unknown>,
     kafkaEntries: [string, Record<string, unknown>][],
 ): Record<string, unknown> {
-    const kafkaName = kafkaClusterNameForReference({kafka: asString(source.kafka)});
-    const topicSpec = looseTopicSpecForKafka(kafkaEntries, kafkaName);
+    const kafkaName = asString(source.kafka) ?? "";
+    const topicName = asString(source.kafkaTopic) ?? "";
+    const topicSpec = looseTopicSpecForKafka(kafkaEntries, kafkaName, topicName);
     return {
-        dependsOn: [kafkaName],
+        dependsOn: kafkaName ? [kafkaName] : [],
         kafkaClusterName: kafkaName,
-        topicName: asString(source.kafkaTopic) ?? sourceName,
+        topicName,
         partitions: topicSpec.partitions,
         replicas: topicSpec.replicas,
         topicConfig: topicSpec.config,
@@ -1558,7 +1573,7 @@ function buildLooseResourceList(
     const traffic = asRecord(rawConfig.traffic);
     for (const [proxyName, proxy] of recordEntries(traffic.proxies)) {
         const topicParameters = looseCapturedTrafficParameters(proxyName, proxy, kafkaEntries);
-        const kafkaName = kafkaClusterNameForReference({kafka: asString(proxy.kafka)});
+        const kafkaName = asString(proxy.kafka) ?? "";
         resources.push(resourceWithDiagnostics(
             "CapturedTraffic",
             `${proxyName}-topic`,
@@ -1572,6 +1587,7 @@ function buildLooseResourceList(
                 ["traffic", "proxies", proxyName],
                 topicParameters,
                 kafkaName,
+                asString(proxy.kafkaTopic) ?? "",
                 options,
             ),
         ));
@@ -1594,7 +1610,7 @@ function buildLooseResourceList(
 
     for (const [s3Name, s3] of recordEntries(traffic.s3Sources)) {
         const parameters = looseS3CapturedTrafficParameters(s3Name, s3, kafkaEntries);
-        const kafkaName = kafkaClusterNameForReference({kafka: asString(s3.kafka)});
+        const kafkaName = asString(s3.kafka) ?? "";
         resources.push(resourceWithDiagnostics(
             "CapturedTraffic",
             `${s3Name}-topic`,

@@ -355,6 +355,9 @@ def _config_edit_target_id(
         ]
         if not paths:
             continue
+        owner_path = _generated_resource_owner_path(plural, resource, paths)
+        if owner_path:
+            return f"edit:{'.'.join(owner_path)}"
         by_root: Dict[str, List[List[str]]] = {}
         for path in paths:
             by_root.setdefault(path[0], []).append(path)
@@ -372,6 +375,43 @@ def _config_edit_target_id(
                 prefix = fallback
             return f"edit:{'.'.join(prefix)}"
     return f"edit:{'.'.join(fallback)}" if fallback else None
+
+
+def _generated_resource_owner_path(
+    plural: str,
+    resource: Optional[Dict[str, Any]],
+    paths: List[List[str]],
+) -> Optional[List[str]]:
+    owner_roots = {
+        "capturedtraffics": {
+            ("traffic", "proxies"),
+            ("traffic", "s3Sources"),
+        },
+    }.get(plural)
+    if not owner_roots:
+        return None
+    candidates = {
+        tuple(path[:3])
+        for path in paths
+        if len(path) >= 3 and tuple(path[:2]) in owner_roots
+    }
+    if len(candidates) != 1:
+        return None
+    owner = list(next(iter(candidates)))
+    if plural != "capturedtraffics" or owner[:2] != ["traffic", "proxies"]:
+        return owner
+    parameters = (resource or {}).get("parameters") or {}
+    cluster_name = str(parameters.get("kafkaClusterName") or "")
+    topic_name = str(parameters.get("topicName") or "")
+    if cluster_name and topic_name:
+        return [
+            "traffic",
+            "kafkaClusters",
+            cluster_name,
+            "topics",
+            topic_name,
+        ]
+    return owner
 
 
 def _common_path_prefix(paths: List[List[str]]) -> List[str]:

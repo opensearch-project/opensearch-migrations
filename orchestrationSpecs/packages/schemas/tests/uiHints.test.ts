@@ -120,9 +120,40 @@ describe("workflow schema UI hints", () => {
         expect(schema.properties.traffic.properties.proxies.additionalProperties.properties.kafka["x-ui-hint"]).toMatchObject({
             kind: "reference",
             sourcePath: ["traffic", "kafkaClusters"],
-            emptyMeansDefault: "default",
-            message: "A Kafka cluster with default settings will be provided.",
+            message: "Choose a configured Kafka cluster.",
         });
+        expect(
+            schema.properties.traffic.properties.proxies.additionalProperties
+                .properties.kafka["x-ui-hint"].createReference,
+        ).toBeUndefined();
+        expect(schema.properties.traffic.properties.proxies.additionalProperties.properties.kafkaTopic["x-ui-hint"]).toMatchObject({
+            kind: "reference",
+            sourcePathTemplate: [
+                "traffic",
+                "kafkaClusters",
+                {valueFrom: ["..", "kafka"]},
+                "topics",
+            ],
+            createReference: {
+                label: "Create topic for this proxy",
+                valueFromPathSegmentFromEnd: 2,
+            },
+        });
+        const kafkaCluster = schema.properties.traffic.properties.kafkaClusters.additionalProperties;
+        for (const branch of kafkaCluster.anyOf) {
+            expect(branch.properties.topics["x-ui-hint"]).toMatchObject({
+                kind: "record",
+                addLabel: "Kafka topic",
+                definitionCollection: {
+                    navigation: {
+                        groupLabel: "Topics",
+                    },
+                    definition: {
+                        typeLabel: "Kafka topic",
+                    },
+                },
+            });
+        }
     });
 
     it("exports Java regex hints for capture suppression patterns", () => {

@@ -23,6 +23,32 @@ export interface ConnectedPath {
 }
 
 
+export interface DependencyLaneGeometry {
+  laneSpacing: number;
+  leftmostX: number;
+  minDepth: number;
+}
+
+
+export function dependencyLaneGeometry(
+  depths: number[],
+  nodeLeft: number,
+): DependencyLaneGeometry {
+  const minDepth = Math.min(...depths);
+  const maxDepth = Math.max(...depths);
+  const edgeMargin = 14;
+  const visibleDepthCount = Math.max(1, maxDepth - minDepth + 1);
+  return {
+    minDepth,
+    laneSpacing: Math.min(
+      10,
+      Math.max(2, (nodeLeft - edgeMargin) / visibleDepthCount),
+    ),
+    leftmostX: edgeMargin,
+  };
+}
+
+
 export function edgeId(edge: WorkflowGraphEdge): string {
   return `${edge.sourceId}\n${edge.targetId}`;
 }

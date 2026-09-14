@@ -387,6 +387,40 @@ def test_pending_only_resource_has_edit_but_no_cluster_actions():
     assert set(_capabilities(resource)) == {"edit"}
 
 
+def test_snapshot_reports_effective_saved_configuration_dirtiness():
+    current = _service({}, snapshots={
+        "submitted": {
+            "workflowConfig": {
+                "snapshotMigrations": [{
+                    "label": "migration",
+                    "metadataMigrationConfig": {},
+                }],
+            },
+        },
+        "pending": {
+            "workflowConfig": {
+                "snapshotMigrations": [{
+                    "label": "migration",
+                    "metadataMigrationConfig": {},
+                    "documentBackfillConfig": {},
+                }],
+            },
+        },
+        "submitted_console": {},
+        "pending_console": {},
+    }).observe()
+    unchanged = _service({}, snapshots={
+        "submitted": {"workflowConfig": {"snapshotMigrations": []}},
+        "pending": {"workflowConfig": {"snapshotMigrations": []}},
+        "submitted_console": {},
+        "pending_console": {},
+    }).observe()
+
+    assert current.configuration_pending is True
+    assert current.to_dict()["configurationPending"] is True
+    assert unchanged.configuration_pending is False
+
+
 def test_config_only_snapshot_migration_keeps_its_four_part_identity():
     # Config-only resources have no deployed spec. Their identity has to come
     # from the resolved parameters, otherwise navigation can only match them by
@@ -678,7 +712,84 @@ def test_saved_resource_removal_has_an_explicit_navigation_summary():
     assert source.value_summary == "Removal pending submission"
 
 
-def test_buffer_resources_are_grouped_by_cluster_and_topic():
+def test_proxy_capture_topic_uses_the_topic_definition_as_its_stable_home():
+    snapshots = {
+        "pending": {
+            "resources": [{
+                "kind": "CapturedTraffic",
+                "name": "capture-topic",
+                "parameters": {
+                    "sourceKind": "proxy",
+                    "kafkaClusterName": "main",
+                    "topicName": "traffic",
+                },
+                "parameterProvenance": {
+                    "topicName": {
+                        "path": ["topicName"],
+                        "presence": "authored",
+                        "sourcePath": [
+                            "traffic",
+                            "proxies",
+                            "capture",
+                            "kafkaTopic",
+                        ],
+                        "value": "traffic",
+                    },
+                    "partitions": {
+                        "path": ["partitions"],
+                        "presence": "authored",
+                        "sourcePath": [
+                            "traffic",
+                            "kafkaClusters",
+                            "main",
+                            "topics",
+                            "traffic",
+                            "specOverrides",
+                            "partitions",
+                        ],
+                        "value": 3,
+                    },
+                },
+            }],
+        },
+    }
+
+    snapshot = _service({
+        "kafkaclusters": [
+            _cr(
+                "kafkaclusters",
+                "main",
+                spec={},
+            ),
+        ],
+        "capturedtraffics": [
+            _cr(
+                "capturedtraffics",
+                "capture-topic",
+                spec={
+                    "sourceKind": "proxy",
+                    "kafkaClusterName": "main",
+                    "topicName": "traffic",
+                },
+            ),
+        ],
+    }, snapshots=snapshots).observe()
+
+    captured = _node(snapshot, "capturedtraffics:capture-topic")
+    assert _capabilities(captured)["edit"].target_id == (
+        "edit:traffic.kafkaClusters.main.topics.traffic"
+    )
+    assert captured.parent_id == (
+        "definition-group:edit:traffic.kafkaClusters.main.topics"
+    )
+    assert captured.label == "traffic"
+    assert captured.resource_type == "Kafka topic"
+    topics = snapshot.nodes[captured.parent_id]
+    assert topics.label == "Topics"
+    assert topics.parent_id == "resource:kafkaclusters:main"
+
+
+def test_buffer_resources_are_grouped_by_cluster_and_traffic_source():
     sections = [
         ResourceSection(
             name="Live Traffic Migration",
@@ -700,7 +811,19 @@ def test_buffer_resources_are_grouped_by_cluster_and_topic():
                             plural="capturedtraffics",
                             phase="Ready",
                             depends_on=[],
-                            spec={},
+                            spec={
+                                "sourceKind": "proxy",
+                                "kafkaClusterName": "default",
+                                "topicName": "traffic",
+                            },
+                            status={},
+                        ),
+                        ResourceNode(
+                            name="archive-topic",
+                            plural="capturedtraffics",
+                            phase="Ready",
+                            depends_on=[],
+                            spec={"sourceKind": "s3"},
                             status={},
                         ),
                     ],
@@ -714,15 +837,25 @@ def test_buffer_resources_are_grouped_by_cluster_and_topic():
     buffer = snapshot.nodes["group:Live Traffic Migration:Buffer"]
     assert buffer.child_ids == (
         "group:Live Traffic Migration:Buffer:Kafka Clusters",
-        "group:Live Traffic Migration:Buffer:Kafka Topics",
+        "group:Live Traffic Migration:Buffer:Previously Captured Traffic",
     )
     clusters = snapshot.nodes[buffer.child_ids[0]]
-    topics = snapshot.nodes[buffer.child_ids[1]]
+    imported_traffic = snapshot.nodes[buffer.child_ids[1]]
     assert clusters.label == "Kafka Clusters"
     assert clusters.child_ids == ("resource:kafkaclusters:default",)
-    assert topics.label == "Kafka Topics"
+    cluster = snapshot.nodes["resource:kafkaclusters:default"]
+    assert cluster.child_ids == (
+        "definition-group:edit:traffic.kafkaClusters.default.topics",
+    )
+    topics = snapshot.nodes[cluster.child_ids[0]]
+    assert topics.label == "Topics"
     assert topics.child_ids == (
         "resource:capturedtraffics:capture-topic",
+    )
+    assert snapshot.nodes[topics.child_ids[0]].label == "traffic"
+    assert imported_traffic.label == "Previously Captured Traffic"
+    assert imported_traffic.child_ids == (
+        "resource:capturedtraffics:archive-topic",
     )
 
 

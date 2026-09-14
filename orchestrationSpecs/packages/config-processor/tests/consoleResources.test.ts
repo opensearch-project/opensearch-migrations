@@ -80,6 +80,9 @@ function multiResourceConfig() {
             kafkaClusters: {
                 default: {
                     autoCreate: {},
+                    topics: {
+                        "proxy-a": {},
+                    },
                 },
                 "my-kafka": {
                     autoCreate: {
@@ -87,11 +90,16 @@ function multiResourceConfig() {
                             type: "none",
                         },
                     },
+                    topics: {
+                        "proxy-b": {},
+                    },
                 },
             },
             proxies: {
                 "proxy-a": {
                     source: "sourcea",
+                    kafka: "default",
+                    kafkaTopic: "proxy-a",
                     proxyConfig: {
                         listenPort: 9201,
                         tls: {
@@ -107,6 +115,7 @@ function multiResourceConfig() {
                 "proxy-b": {
                     source: "sourceb",
                     kafka: "my-kafka",
+                    kafkaTopic: "proxy-b",
                     proxyConfig: {
                         listenPort: 9202,
                         tls: {
@@ -365,12 +374,16 @@ describe("console resources", () => {
                         kafkaUserName: "migration-app",
                     },
                 },
+                topics: {
+                    "proxy-a": {},
+                },
             },
         };
         config.traffic.proxies = {
             "proxy-a": {
                 source: "sourcea",
                 kafka: "external",
+                kafkaTopic: "proxy-a",
                 proxyConfig: {
                     listenPort: 9201,
                 },

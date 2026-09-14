@@ -3,7 +3,10 @@ import type {
     EditNode,
     EditStateV1,
 } from "./schemaEditModel";
-import {buildConfigDependencyGraph} from "./configDependencies";
+import {
+    buildConfigDependencyGraph,
+    downstreamConfigReferences,
+} from "./configDependencies";
 
 
 const EDIT_TARGET_PREFIX = "edit:";
@@ -23,7 +26,7 @@ const NAVIGATION_EDIT_TARGETS: Readonly<Record<string, string>> = {
     "group:Live Traffic Migration:Capture": "edit:traffic.proxies",
     "group:Live Traffic Migration:Buffer": "edit:traffic.buffer",
     "group:Live Traffic Migration:Buffer:Kafka Clusters": "edit:traffic.kafkaClusters",
-    "group:Live Traffic Migration:Buffer:Kafka Topics": "edit:traffic.s3Sources",
+    "group:Live Traffic Migration:Buffer:Previously Captured Traffic": "edit:traffic.s3Sources",
     "group:Live Traffic Migration:Replay": "edit:traffic.replayers",
 };
 
@@ -135,6 +138,7 @@ export interface ConfigRemovalImpactEntry {
     path: string[];
     fieldPath: string[];
     reason: string;
+    direct: boolean;
 }
 
 
@@ -594,6 +598,26 @@ function snapshotMigrationTargets(
 }
 
 
+function configuredResourceTarget(
+    node: ResourceGraphNode,
+    nodesByTarget: ReadonlyMap<string, EditNode>,
+    placements: ResourcePlacement[],
+): string | undefined {
+    for (const placement of placements) {
+        if (placement.resourcePlural !== node.resourcePlural) continue;
+        const collection = nodesByTarget.get(
+            `${EDIT_TARGET_PREFIX}${placement.collectionPath.join(".")}`,
+        );
+        if (!collection) continue;
+        const match = nodeChildren(collection).find((child, index) => (
+            resourceIdentity(placement, child, index)?.[0] === node.id
+        ));
+        if (match) return match.id;
+    }
+    return undefined;
+}
+
+
 function projectExistingNode<TNode extends ResourceGraphNode>(
     node: TNode,
     draft: ResourceGraphDraft,
@@ -602,7 +626,10 @@ function projectExistingNode<TNode extends ResourceGraphNode>(
     migrationTargets: ReadonlyMap<string, string[]>,
 ): TNode {
     if (node.kind !== "resource") return node;
-    let projected = node;
+    let projected = withEditCapability(
+        node,
+        configuredResourceTarget(node, nodesByTarget, placements),
+    );
     let semanticRemoval = false;
     if (
         node.resourcePlural === "snapshotmigrations"
@@ -1298,34 +1325,26 @@ export function configRemovalImpact(
     config: unknown,
     path: string[],
 ): ConfigRemovalImpactEntry[] {
-    const targetId = `${EDIT_TARGET_PREFIX}${path.join(".")}`;
-    const references = configReferences(config);
-    const removedTargets = new Set([targetId]);
-    const selected: ConfigReference[] = [];
-    let changed = true;
-    while (changed) {
-        changed = false;
-        references.forEach((reference) => {
-            const affected = [...removedTargets].some((removed) => (
-                reference.toTargetId === removed
-                || reference.toTargetId.startsWith(`${removed}.`)
-            ));
-            if (!affected || removedTargets.has(reference.fromTargetId)) return;
-            selected.push(reference);
-            removedTargets.add(reference.fromTargetId);
-            changed = true;
-        });
-    }
+    const directPaths = new Set(
+        buildConfigDependencyGraph(config)
+            .filter((reference) => (
+                reference.toPath.length >= path.length
+                && path.every(
+                    (part, index) => reference.toPath[index] === part,
+                )
+            ))
+            .map((reference) => reference.fromPath.join("\0")),
+    );
     const seen = new Set<string>();
-    return selected.flatMap((reference) => {
-        if (seen.has(reference.fromTargetId)) return [];
-        seen.add(reference.fromTargetId);
+    return downstreamConfigReferences(config, path).flatMap((reference) => {
+        const fromTargetId = `${EDIT_TARGET_PREFIX}${reference.fromPath.join(".")}`;
+        if (seen.has(fromTargetId)) return [];
+        seen.add(fromTargetId);
         return [{
-            path: reference.fromTargetId
-                .slice(EDIT_TARGET_PREFIX.length)
-                .split("."),
+            path: [...reference.fromPath],
             fieldPath: [...reference.fromFieldPath],
             reason: reference.reason,
+            direct: directPaths.has(reference.fromPath.join("\0")),
         }];
     });
 }

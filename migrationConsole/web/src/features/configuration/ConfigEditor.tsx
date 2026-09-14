@@ -20,7 +20,9 @@ import {
   Pencil,
   Plus,
   Save,
+  SquareArrowOutUpRight,
   Trash2,
+  Unlink,
   Undo2,
   X,
 } from "lucide-react";
@@ -33,6 +35,7 @@ import {
 } from "@opensearch-migrations/config-edit-core";
 import {
   getConfigurationDocument,
+  getConfigurationSchema,
   saveConfigurationDocument,
   type ManageSnapshot,
 } from "../../api/client";
@@ -68,11 +71,13 @@ import {
   type PendingResourceAddition,
   type PendingResourceRename,
   type ResourceAddController,
+  type ResourceAddOption,
   type ResourceRenameOption,
 } from "./resourceAdds";
 
 
 interface ConfigEditorProps {
+  initialRemovalTargetId?: string | null;
   initialTargetId?: string | null;
   navigationBackLabel?: string | null;
   onClose: () => void;
@@ -92,6 +97,12 @@ interface ConfigEditorProps {
   ) => void;
   onResourceAddsReady: (controller: ResourceAddController | null) => void;
   onNavigateEditTarget: (targetId: string) => void;
+  onNavigateCreatedEditTarget: (
+    targetId: string,
+    returnTargetId: string,
+    returnLabel: string,
+  ) => boolean;
+  onInitialRemovalHandled?: () => void;
   onSubmitted: () => void;
   removalState?: string | null;
   resourceId: string;
@@ -223,11 +234,18 @@ interface AddContext {
 }
 
 
+interface ReferenceAddContext extends AddContext {
+  option: ResourceAddOption;
+  sourcePath: string[];
+}
+
+
 interface PendingRemoval {
   node: EditNode;
   impact: ConfigRemovalImpact | null;
   loading: boolean;
   error: string;
+  reviewingTargetId?: string;
 }
 
 
@@ -284,6 +302,92 @@ function topLevelAddContexts(nodes: EditNode[]): AddContext[] {
 }
 
 
+function referenceSourcePaths(node: EditNode): string[][] {
+  if (node.inputHint?.kind !== "reference") return [];
+  const hint = hintRecord(node.inputHint);
+  const paths: string[][] = [];
+  if (
+    Array.isArray(hint.sourcePath)
+    && hint.sourcePath.every((segment) => typeof segment === "string")
+  ) {
+    paths.push(hint.sourcePath);
+  }
+  if (Array.isArray(hint.sourcePaths)) {
+    hint.sourcePaths.forEach((path) => {
+      if (
+        Array.isArray(path)
+        && path.every((segment) => typeof segment === "string")
+      ) {
+        paths.push(path);
+      }
+    });
+  }
+  return paths;
+}
+
+
+function referenceAddContexts(
+  node: EditNode,
+  topLevelAdds: AddContext[],
+  resourceAddOptions: ResourceAddOption[],
+): ReferenceAddContext[] {
+  return referenceSourcePaths(node).flatMap((sourcePath) => {
+    const collectionPath = sourcePath.join(".");
+    const option = resourceAddOptions.find(
+      (candidate) => candidate.placement.collectionPath === collectionPath,
+    );
+    const context = option
+      ? topLevelAdds.find(
+        (candidate) => candidate.command.id === option.id,
+      )
+      : undefined;
+    return option && context
+      ? [{ ...context, option, sourcePath }]
+      : [];
+  });
+}
+
+
+function provisionalReferenceName(
+  node: EditNode,
+  context: ReferenceAddContext,
+): string {
+  const existingNames = new Set(
+    propertyChildren(context.parent)
+      .map((child) => child.path.at(-1))
+      .filter((name): name is string => typeof name === "string"),
+  );
+  const resourceSlug = context.option.placement.resourceType
+    .toLocaleLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+/g, "")
+    .replaceAll(/-+$/g, "");
+  const ownerName = node.path.at(-2) ?? "";
+  const preferredBase = (
+    context.option.placement.resourceType.toLocaleLowerCase().includes("topic")
+    && ownerName
+  )
+    ? ownerName
+    : resourceSlug || "resource";
+  for (let suffix = 1; suffix < 10_000; suffix += 1) {
+    const candidate = suffix === 1
+      ? preferredBase
+      : `${preferredBase}-${suffix}`;
+    if (
+      !existingNames.has(candidate)
+      && !fieldValidationProblem(
+        candidate,
+        context.option.pattern,
+        context.option.validationMessage,
+      )
+    ) {
+      return candidate;
+    }
+  }
+  return `resource-${Date.now()}`;
+}
+
+
 function renameableConfigPath(path: readonly string[]): boolean {
   if (
     path.length === 2
@@ -296,6 +400,14 @@ function renameableConfigPath(path: readonly string[]): boolean {
     && path[0] === "traffic"
     && ["kafkaClusters", "proxies", "s3Sources", "replayers"]
       .includes(path[1])
+  ) {
+    return true;
+  }
+  if (
+    path.length === 5
+    && path[0] === "traffic"
+    && path[1] === "kafkaClusters"
+    && path[3] === "topics"
   ) {
     return true;
   }
@@ -594,6 +706,61 @@ function treeRows(
   return rows;
 }
 
+const AUTO_EXPAND_SUBTREE_LIMIT = 12;
+
+
+function visibleSubtreeSize(
+  node: EditNode,
+  showOptional: boolean,
+  showExpert: boolean,
+  limit = Number.POSITIVE_INFINITY,
+): number {
+  if (!visibleNode(node, showOptional, showExpert)) return 0;
+  let size = 1;
+  for (const child of propertyChildren(node)) {
+    size += visibleSubtreeSize(
+      child,
+      showOptional,
+      showExpert,
+      limit - size,
+    );
+    if (size > limit) break;
+  }
+  return size;
+}
+
+
+function shouldAutoExpand(
+  node: EditNode,
+  showOptional: boolean,
+  showExpert: boolean,
+): boolean {
+  const visibleChildren = propertyChildren(node).filter((child) =>
+    visibleNode(child, showOptional, showExpert));
+  if (visibleChildren.length === 0) return false;
+  if (node.collapsed === true && !nodeTreeHasAuthoredValue(node)) return false;
+  if (visibleChildren.length > AUTO_EXPAND_SUBTREE_LIMIT) return false;
+  return !node.expert || visibleSubtreeSize(
+      node,
+      showOptional,
+      showExpert,
+      AUTO_EXPAND_SUBTREE_LIMIT,
+    ) <= AUTO_EXPAND_SUBTREE_LIMIT;
+}
+
+
+function descendantNodeIds(node: EditNode): Set<string> {
+  const result = new Set<string>();
+  const visit = (current: EditNode) => {
+    propertyChildren(current).forEach((child) => {
+      result.add(child.id);
+      visit(child);
+    });
+  };
+  visit(node);
+  return result;
+}
+
 
 function findNode(nodes: EditNode[], nodeId: string | null): EditNode | null {
   if (!nodeId) return null;
@@ -643,21 +810,19 @@ function editScope(nodes: EditNode[], nodeId: string | null): EditNode | null {
 }
 
 
-function initialExpanded(nodes: EditNode[]): Set<string> {
+function initialExpanded(
+  nodes: EditNode[],
+  showOptional: boolean,
+  showExpert: boolean,
+): Set<string> {
   const result = new Set<string>();
   const visit = (node: EditNode) => {
-    if (
-      propertyChildren(node).length > 0
-      && (node.collapsed !== true || nodeTreeHasAuthoredValue(node))
-    ) {
-      result.add(node.id);
-    }
+    if (!visibleNode(node, showOptional, showExpert)) return;
+    if (!shouldAutoExpand(node, showOptional, showExpert)) return;
+    result.add(node.id);
     propertyChildren(node).forEach(visit);
   };
-  nodes.forEach((node) => {
-    if (propertyChildren(node).length > 0) result.add(node.id);
-    propertyChildren(node).forEach(visit);
-  });
+  nodes.forEach(visit);
   return result;
 }
 
@@ -739,17 +904,21 @@ function regex101Url(value: string, samples: string[]): string {
   return `https://regex101.com/?${params.toString()}`;
 }
 
+type CreatedReferenceFocus = "name" | "first-required";
+
 
 function ScalarEditor({
   node,
   commit,
   busy,
+  hasReferenceCreationAction,
   onLocalDirtyChange,
   showDocumentation,
 }: Readonly<{
   node: EditNode;
   commit: (operation: EditOperation) => Promise<boolean>;
   busy: boolean;
+  hasReferenceCreationAction: boolean;
   onLocalDirtyChange: (dirty: boolean) => void;
   showDocumentation: boolean;
 }>) {
@@ -764,10 +933,14 @@ function ScalarEditor({
     isReference && !allowCustom && options.length === 0
   );
   const usesImplicitReferenceDefault = (
-    referenceUnavailable && typeof hint.emptyMeansDefault === "string"
+    referenceUnavailable
+    && !hasReferenceCreationAction
+    && typeof hint.emptyMeansDefault === "string"
   );
   const noReferenceChoices = (
-    referenceUnavailable && !usesImplicitReferenceDefault
+    referenceUnavailable
+    && !usesImplicitReferenceDefault
+    && !hasReferenceCreationAction
   );
   const readOnly = hint.readOnly === true;
   const generatedDefault = (
@@ -778,11 +951,56 @@ function ScalarEditor({
   const [focused, setFocused] = useState(false);
   const [validationProblem, setValidationProblem] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const autoSelectedReference = useRef("");
   const pattern = hintRecord(node.validation).pattern;
   const patternMessage = hintRecord(node.validation).message;
   const selectedOption = options.find(
     (option) => String(option.value) === (value || generatedDefault),
   );
+  useEffect(() => {
+    if (
+      !isReference
+      || allowCustom
+      || options.length !== 1
+      || value
+      || generatedDefault
+      || busy
+      || applying
+    ) {
+      return;
+    }
+    const onlyOption = options[0];
+    const selectionKey = `${node.id}:${String(onlyOption.value)}`;
+    if (autoSelectedReference.current === selectionKey) return;
+    autoSelectedReference.current = selectionKey;
+    setValue(String(onlyOption.value));
+    setApplying(true);
+    void commit({
+      op: "set",
+      path: node.path,
+      value: onlyOption.value,
+    }).then((applied) => {
+      if (!applied) {
+        autoSelectedReference.current = "";
+        setValue("");
+      }
+    }).finally(() => setApplying(false));
+  }, [
+    allowCustom,
+    applying,
+    busy,
+    commit,
+    generatedDefault,
+    isReference,
+    node.id,
+    node.path,
+    options,
+    value,
+  ]);
+
+  if (referenceUnavailable && !value && hasReferenceCreationAction) {
+    return null;
+  }
 
   if (options.length > 0 && !allowCustom) {
     return (
@@ -815,7 +1033,7 @@ function ScalarEditor({
               <option disabled value="">
                 {generatedDefault && !focused
                   ? `Default: ${authoredValue}`
-                  : "Select a value"}
+                  : "<Select existing...>"}
               </option>
             )}
             {options.map((option) => (
@@ -895,6 +1113,9 @@ function ScalarEditor({
             void syncValue();
           }}
           pattern={typeof pattern === "string" ? pattern : undefined}
+          min={node.validation?.minimum}
+          max={node.validation?.maximum}
+          step={node.validation?.integer ? 1 : undefined}
           placeholder={!focused && generatedDefault
             ? generatedDefault
             : undefined}
@@ -1307,6 +1528,8 @@ function ConfigPropertyRow({
   onSelectAdded,
   onSelect,
   onNavigateEditTarget,
+  onReferenceCreated,
+  referenceAdds,
   onRevealChildren,
   onToggle,
   rowRef,
@@ -1330,6 +1553,11 @@ function ConfigPropertyRow({
   onSelectAdded: (nodeId: string, parentId: string | null) => void;
   onSelect: () => void;
   onNavigateEditTarget: (targetId: string) => void;
+  onReferenceCreated: (
+    targetId: string,
+    focus: CreatedReferenceFocus,
+  ) => void;
+  referenceAdds: ReferenceAddContext[];
   onRevealChildren: () => void;
   onToggle: () => void;
   rowRef: (element: HTMLTableRowElement | null) => void;
@@ -1337,6 +1565,7 @@ function ConfigPropertyRow({
 }>) {
   const [renaming, setRenaming] = useState(false);
   const [addingCommandId, setAddingCommandId] = useState<string | null>(null);
+  const [referenceApplying, setReferenceApplying] = useState(false);
   const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const externalEditorTriggerRef = useRef<HTMLButtonElement>(null);
   const [newName, setNewName] = useState(node.path.at(-1) ?? "");
@@ -1388,8 +1617,7 @@ function ConfigPropertyRow({
     && children.length === 0
     && !["scalar", "boolean", "union", "command"].includes(node.valueKind)
   );
-  const showDetails = Boolean(addingCommand)
-    || (selected && structured);
+  const showDetails = Boolean(addingCommand) || (selected && structured);
   const name = fieldName(node, parent);
   const errorEmphasis = validationErrorEmphasis(node);
   const changeTitle = draftChangeTitle(node);
@@ -1413,6 +1641,36 @@ function ConfigPropertyRow({
   const selectedReference = hintOptions(node).find(
     (option) => String(option.value) === scalarString(node.value),
   );
+  const referenceOptions = hintOptions(node);
+  const createReference = node.inputHint?.kind === "reference"
+    ? node.inputHint.createReference
+    : undefined;
+  const createReferenceSourcePath = (
+    node.inputHint?.kind === "reference"
+    && Array.isArray(node.inputHint.sourcePath)
+  )
+    ? node.inputHint.sourcePath
+    : null;
+  const createReferenceValue = createReference?.value
+    ?? (
+      typeof createReference?.valueFromPathSegmentFromEnd === "number"
+        ? node.path.at(-createReference.valueFromPathSegmentFromEnd)
+        : undefined
+    );
+  const canCreateExplicitReference = Boolean(
+    createReference
+    && createReferenceSourcePath
+    && createReferenceValue
+    && !referenceOptions.some(
+      (option) => String(option.value) === String(createReferenceValue),
+    ),
+  );
+  const hasReferenceCreationAction = (
+    canCreateExplicitReference || referenceAdds.length > 0
+  );
+  const visibleReferenceAdds = canCreateExplicitReference
+    ? []
+    : referenceAdds;
   const referenceTargetId = node.referenceTargetId
     ?? selectedReference?.editTargetId;
   const referenceLabel = node.referenceLabel
@@ -1423,6 +1681,76 @@ function ConfigPropertyRow({
   const closeExternalEditor = () => {
     setExternalEditorOpen(false);
     globalThis.setTimeout(() => externalEditorTriggerRef.current?.focus(), 0);
+  };
+  const createAndSelectExplicitReference = async () => {
+    if (
+      !createReference
+      || !createReferenceSourcePath
+      || !createReferenceValue
+      || referenceApplying
+      || busy
+    ) {
+      return false;
+    }
+    setReferenceApplying(true);
+    try {
+      const applied = await applyExternalOperations([
+        {
+          op: "add",
+          path: createReferenceSourcePath,
+          value: { name: createReferenceValue },
+        },
+        {
+          op: "set",
+          path: node.path,
+          value: createReferenceValue,
+        },
+      ], `${createReference.label}.`);
+      if (applied && createReference.navigateToCreated !== false) {
+        const focus = createReference.focusName
+          ?? createReference.value === undefined;
+        onReferenceCreated(
+          `edit:${[
+            ...createReferenceSourcePath,
+            String(createReferenceValue),
+          ].join(".")}`,
+          focus ? "name" : "first-required",
+        );
+      }
+      return applied;
+    } finally {
+      setReferenceApplying(false);
+    }
+  };
+  const createAndSelectReference = async (
+    context: ReferenceAddContext,
+  ) => {
+    if (referenceApplying || busy) return false;
+    const name = provisionalReferenceName(node, context);
+    setReferenceApplying(true);
+    try {
+      const applied = await applyExternalOperations([
+        {
+          op: "add",
+          path: context.sourcePath,
+          value: { name },
+        },
+        {
+          op: "set",
+          path: node.path,
+          value: name,
+        },
+      ], `Created and selected ${name}.`);
+      if (applied) {
+        onReferenceCreated(
+          `edit:${[...context.sourcePath, name].join(".")}`,
+          "name",
+        );
+      }
+      return applied;
+    } finally {
+      setReferenceApplying(false);
+    }
   };
 
   const valueEditor = node.externalRef ? (
@@ -1444,6 +1772,7 @@ function ConfigPropertyRow({
     <ScalarEditor
       busy={busy}
       commit={commit}
+      hasReferenceCreationAction={hasReferenceCreationAction}
       node={node}
       onLocalDirtyChange={(dirty) => onLocalDirtyChange(node.id, dirty)}
       showDocumentation={showDocumentation}
@@ -1530,8 +1859,15 @@ function ConfigPropertyRow({
                 <strong>{name}</strong>
                 <span className="property-flags">
                   {node.draftChange ? (
-                    <span title={changeTitle}>
-                      {node.draftChange.kind === "added" ? "Added" : "Changed"}
+                    <span
+                      title={[
+                        "Cyan highlighting marks an unsaved browser draft change.",
+                        changeTitle,
+                      ].filter(Boolean).join(" ")}
+                    >
+                      {node.draftChange.kind === "added"
+                        ? "Unsaved addition"
+                        : "Unsaved change"}
                     </span>
                   ) : null}
                   {node.presence === "required"
@@ -1563,17 +1899,57 @@ function ConfigPropertyRow({
           >
             {valueEditor}
             {referenceTargetId
-              && node.id !== referenceTargetId
-              && !node.id.startsWith(`${referenceTargetId}.`) ? (
-              <button
-                className="inline-reference-link"
-                onClick={() => onNavigateEditTarget(referenceTargetId)}
-                title={`Open the definition referenced by ${name}`}
-                type="button"
-              >
-                <Link2 aria-hidden="true" />
-                Defined in {referenceLabel}
-              </button>
+              || canCreateExplicitReference
+              || visibleReferenceAdds.length > 0 ? (
+              <div className="inline-reference-actions">
+                {referenceTargetId
+                  && node.id !== referenceTargetId
+                  && !node.id.startsWith(`${referenceTargetId}.`) ? (
+                  <button
+                    className="inline-reference-link"
+                    onClick={() => onNavigateEditTarget(referenceTargetId)}
+                    title={`Open the definition referenced by ${name}`}
+                    type="button"
+                  >
+                    <Link2 aria-hidden="true" />
+                    Defined in {referenceLabel}
+                  </button>
+                ) : null}
+                {canCreateExplicitReference && createReference ? (
+                  <button
+                    className="inline-reference-create"
+                    disabled={busy || referenceApplying}
+                    onClick={() => void createAndSelectExplicitReference()}
+                    title={createReference.description}
+                    type="button"
+                  >
+                    {referenceApplying
+                      ? <LoaderCircle className="spin inline-spinner" />
+                      : <Plus aria-hidden="true" />}
+                    {createReference.label}
+                  </button>
+                ) : null}
+                {visibleReferenceAdds.map((context) => (
+                  <button
+                    className="inline-reference-create"
+                    disabled={
+                      busy
+                      || referenceApplying
+                      || context.option.disabled
+                    }
+                    key={context.option.id}
+                    onClick={() => void createAndSelectReference(context)}
+                    title={
+                      context.option.disabledReason
+                      ?? `Create new ${context.option.placement.resourceType}`
+                    }
+                    type="button"
+                  >
+                    <Plus aria-hidden="true" />
+                    Create new {context.option.placement.resourceType}
+                  </button>
+                ))}
+              </div>
             ) : null}
             {inlineCommands.length > 0 ? (
               <div className="inline-add-actions">
@@ -1625,10 +2001,11 @@ function ConfigPropertyRow({
         </td>
         <td className="property-action-cell">
           <div className="property-action-content">
-            {node.status && node.status !== "ok" ? (
-              <span className={`field-status status-${node.status}`}>
-                {node.status}
-              </span>
+                  {node.status
+                    && !["ok", "required"].includes(node.status) ? (
+                    <span className={`field-status status-${node.status}`}>
+                      {node.status}
+                    </span>
             ) : null}
             <div className="property-actions">
             {topLevelResourceCommand ? (
@@ -1797,6 +2174,7 @@ function ConfigPropertyRow({
 
 
 export function ConfigEditor({
+  initialRemovalTargetId,
   initialTargetId,
   navigationBackLabel,
   onClose,
@@ -1810,6 +2188,8 @@ export function ConfigEditor({
   onResourceRenameSettled,
   onResourceAddsReady,
   onNavigateEditTarget,
+  onNavigateCreatedEditTarget,
+  onInitialRemovalHandled,
   onSubmitted,
   removalState,
   resourceId,
@@ -1822,9 +2202,17 @@ export function ConfigEditor({
   const queryClient = useQueryClient();
   const draftQuery = useQuery({
     queryKey: BROWSER_CONFIG_DRAFT_QUERY_KEY,
-    queryFn: async () => createBrowserConfigDraft(
-      await getConfigurationDocument(),
-    ),
+    queryFn: async () => {
+      const [document, schema] = await Promise.all([
+        getConfigurationDocument(),
+        getConfigurationSchema(),
+      ]);
+      return createBrowserConfigDraft(
+        document,
+        undefined,
+        schema.unifiedSchema,
+      );
+    },
     staleTime: Infinity,
   });
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -1868,6 +2256,12 @@ export function ConfigEditor({
   const [notice, setNotice] = useState("");
   const [titleRenaming, setTitleRenaming] = useState(false);
   const [titleRenameName, setTitleRenameName] = useState("");
+  const [pendingCreatedTarget, setPendingCreatedTarget] = useState<{
+    targetId: string;
+    focus: CreatedReferenceFocus;
+    returnTargetId: string;
+    returnLabel: string;
+  } | null>(null);
   const [pendingRemoval, setPendingRemoval] =
     useState<PendingRemoval | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
@@ -1914,6 +2308,9 @@ export function ConfigEditor({
   const resourceRenameRequest = useRef<ResourceAddController["rename"]>(
     () => Promise.resolve(false),
   );
+  const autoRenameTarget = useRef<string | null>(null);
+  const autoFocusFieldTarget = useRef<string | null>(null);
+  const handledInitialRemovalTarget = useRef<string | null>(null);
 
   const draft = draftQuery.data;
   const editorBusy = busy || resourceSyncing;
@@ -2141,9 +2538,40 @@ export function ConfigEditor({
   );
 
   useEffect(() => {
+    const focusCreatedName = autoRenameTarget.current === initialTargetId;
     setActiveTargetId(initialTargetId ?? null);
-    setTitleRenaming(false);
+    setTitleRenaming(focusCreatedName);
     setTitleRenameName("");
+    if (focusCreatedName) autoRenameTarget.current = null;
+  }, [initialTargetId]);
+
+  useEffect(() => {
+    if (
+      !pendingCreatedTarget
+      || !findNode(nodes, pendingCreatedTarget.targetId)
+    ) {
+      return;
+    }
+    if (pendingCreatedTarget.focus === "name") {
+      autoRenameTarget.current = pendingCreatedTarget.targetId;
+    } else {
+      autoFocusFieldTarget.current = pendingCreatedTarget.targetId;
+    }
+    const navigated = onNavigateCreatedEditTarget(
+      pendingCreatedTarget.targetId,
+      pendingCreatedTarget.returnTargetId,
+      pendingCreatedTarget.returnLabel,
+    );
+    if (navigated) setPendingCreatedTarget(null);
+  }, [nodes, onNavigateCreatedEditTarget, pendingCreatedTarget]);
+
+  useEffect(() => {
+    setPendingRemoval((current) => (
+      current?.reviewingTargetId
+      && initialTargetId === current.node.id
+        ? { ...current, reviewingTargetId: undefined }
+        : current
+    ));
   }, [initialTargetId]);
 
   useEffect(() => {
@@ -2162,7 +2590,11 @@ export function ConfigEditor({
     setExpanded((current) => {
       if (scopeChanged || previousIds === null) {
         manuallyCollapsedIds.current.clear();
-        const initiallyExpanded = initialExpanded(scopedNodes);
+        const initiallyExpanded = initialExpanded(
+          scopedNodes,
+          renderOptional,
+          renderExpert,
+        );
         knownRowIds.current = new Set(
           treeRows(
             scopedNodes,
@@ -2187,6 +2619,7 @@ export function ConfigEditor({
         if (
           children.length > 0
           && !manuallyCollapsedIds.current.has(node.id)
+          && shouldAutoExpand(node, renderOptional, renderExpert)
           && (
             (
               (newlyAdded || receivedNewChildren)
@@ -2197,7 +2630,7 @@ export function ConfigEditor({
         ) {
           retained.add(node.id);
         }
-        children.forEach(visit);
+        if (retained.has(node.id)) children.forEach(visit);
       };
       scopedNodes.forEach(visit);
       return retained;
@@ -2242,6 +2675,36 @@ export function ConfigEditor({
     () => treeRows(scopedNodes, expanded, renderOptional, renderExpert),
     [expanded, renderExpert, renderOptional, scopedNodes],
   );
+  useLayoutEffect(() => {
+    if (
+      autoFocusFieldTarget.current !== initialTargetId
+      || activeTargetId !== initialTargetId
+      || rows.length === 0
+    ) {
+      return;
+    }
+    const editableRows = rows.filter(({ node }) => (
+      ["boolean", "scalar", "union"].includes(node.valueKind)
+      && hintRecord(node.inputHint).readOnly !== true
+    ));
+    const candidate = editableRows.find(({ node }) => (
+      node.required === true
+      || node.presence === "required"
+      || node.status === "required"
+    )) ?? editableRows[0];
+    if (!candidate) return;
+    const row = rowElements.current.get(candidate.node.id);
+    const control = row?.querySelector<HTMLElement>(
+      ".property-value input:not(:disabled), "
+      + ".property-value select:not(:disabled), "
+      + ".property-value textarea:not(:disabled), "
+      + ".property-value button:not(:disabled)",
+    );
+    if (!control) return;
+    autoFocusFieldTarget.current = null;
+    setSelectedId(candidate.node.id);
+    control.focus();
+  }, [activeTargetId, initialTargetId, rows]);
   const measureRowTops = useCallback(() => {
     const tops = new Map<string, number>();
     // offsetTop is layout truth: unaffected by panel scroll AND by any
@@ -2378,8 +2841,17 @@ export function ConfigEditor({
     clearRemovingRows(transition.rowIds);
   }, [clearRemovingRows]);
   const changeOptionalVisibility = (next: boolean) => {
-    storeDisplayPreferences({ showOptional: next });
+    const hideExpert = !next && showExpert;
+    storeDisplayPreferences({
+      showOptional: next,
+      ...(hideExpert ? { showExpert: false } : {}),
+    });
     setShowOptional(next);
+    if (hideExpert) {
+      setShowExpert(false);
+      cancelRowExit(expertTransition.current);
+      expertTransition.current = null;
+    }
     cancelRowExit(optionalTransition.current);
     optionalTransition.current = null;
     if (next) {
@@ -2397,6 +2869,7 @@ export function ConfigEditor({
             node
             && (!node.expert || nodeTreeHasAuthoredValue(node))
             && !manuallyCollapsedIds.current.has(id)
+            && shouldAutoExpand(node, true, renderExpert)
           ) {
             nextExpanded.add(id);
           }
@@ -2406,7 +2879,7 @@ export function ConfigEditor({
       return;
     }
     const nextIds = new Set(
-      treeRows(scopedNodes, expanded, false, renderExpert)
+      treeRows(scopedNodes, expanded, false, hideExpert ? false : renderExpert)
         .map(({ node }) => node.id),
     );
     const exiting = new Set(
@@ -2417,10 +2890,17 @@ export function ConfigEditor({
     optionalTransition.current = beginRowExit(exiting, () => {
       optionalTransition.current = null;
       setRenderOptional(false);
+      if (hideExpert) setRenderExpert(false);
     });
   };
   const changeExpertVisibility = (next: boolean) => {
-    storeDisplayPreferences({ showExpert: next });
+    if (next && !showOptional) {
+      changeOptionalVisibility(true);
+    }
+    storeDisplayPreferences({
+      showExpert: next,
+      ...(next ? { showOptional: true } : {}),
+    });
     setShowExpert(next);
     cancelRowExit(expertTransition.current);
     expertTransition.current = null;
@@ -2471,12 +2951,14 @@ export function ConfigEditor({
       }
     }
     manuallyCollapsedIds.current.add(node.id);
+    const descendants = descendantNodeIds(node);
     setCollapsingIds((current) => new Set(current).add(node.id));
     const transition = beginRowExit(exiting, () => {
       collapseTransitions.current.delete(node.id);
       setExpanded((current) => {
         const next = new Set(current);
         next.delete(node.id);
+        descendants.forEach((id) => next.delete(id));
         return next;
       });
       setCollapsingIds((current) => {
@@ -2816,10 +3298,17 @@ export function ConfigEditor({
     if (current.baseStale) {
       setActionPending(true);
       try {
-        const document = await getConfigurationDocument();
+        const [document, schema] = await Promise.all([
+          getConfigurationDocument(),
+          getConfigurationSchema(),
+        ]);
         queryClient.setQueryData(
           BROWSER_CONFIG_DRAFT_QUERY_KEY,
-          createBrowserConfigDraft(document),
+          createBrowserConfigDraft(
+            document,
+            undefined,
+            schema.unifiedSchema,
+          ),
         );
         setLocallyEditedIds(new Set());
         setRawYamlText(document.rawYaml);
@@ -2876,7 +3365,7 @@ export function ConfigEditor({
     setConfirmSubmit(true);
   };
 
-  const requestRemoval = (node: EditNode) => {
+  const requestRemoval = useCallback((node: EditNode) => {
     const current = queryClient.getQueryData<BrowserConfigDraft>(
       BROWSER_CONFIG_DRAFT_QUERY_KEY,
     );
@@ -2891,16 +3380,54 @@ export function ConfigEditor({
       loading: false,
       error: "",
     });
-  };
+  }, [queryClient]);
 
-  const confirmRemoval = async () => {
+  useEffect(() => {
+    if (
+      !initialRemovalTargetId
+      || handledInitialRemovalTarget.current === initialRemovalTargetId
+    ) {
+      return;
+    }
+    const removalNode = findNode(nodes, initialRemovalTargetId);
+    if (!removalNode) return;
+    handledInitialRemovalTarget.current = initialRemovalTargetId;
+    setActiveTargetId(initialRemovalTargetId);
+    setSelectedId(initialRemovalTargetId);
+    if (removalNode.removable) {
+      requestRemoval(removalNode);
+    } else {
+      setProblem(
+        `${fieldName(removalNode)} cannot be removed directly from this configuration view.`,
+      );
+    }
+    onInitialRemovalHandled?.();
+  }, [
+    initialRemovalTargetId,
+    nodes,
+    onInitialRemovalHandled,
+    requestRemoval,
+  ]);
+
+  const confirmRemoval = async (
+    referencingResources: "delete" | "clear-references",
+  ) => {
     if (!pendingRemoval?.impact) return;
     const operation = {
       op: "removeConfig" as const,
       path: pendingRemoval.node.path,
+      referencingResources,
     };
     const applied = await commit(operation);
     if (applied) setPendingRemoval(null);
+  };
+
+  const reviewRemovalTarget = (entry: ConfigRemovalImpactEntry) => {
+    const targetId = `edit:${entry.path.join(".")}`;
+    setPendingRemoval((current) => (
+      current ? { ...current, reviewingTargetId: targetId } : current
+    ));
+    onNavigateEditTarget(targetId);
   };
 
   const selectAdded = (nodeId: string, parentId: string | null) => {
@@ -3403,7 +3930,11 @@ export function ConfigEditor({
         >
           <header className="config-outline-header">
             <div>
-              <strong>{scope?.label ?? "Workflow configuration"}</strong>
+              <strong>
+                {scope
+                  ? fieldName(scope, findParent(nodes, scope.id))
+                  : "Workflow configuration"}
+              </strong>
               <span>{rows.length} visible settings</span>
               {scopeTargetId
                 && usedIn.length === 0
@@ -3503,10 +4034,11 @@ export function ConfigEditor({
                         : "settings"
                     }
                   </span>
-                  {node.status && node.status !== "ok" ? (
-                    <span className={`field-status status-${node.status}`}>
-                      {node.status}
-                    </span>
+            {node.status
+              && !["ok", "required"].includes(node.status) ? (
+              <span className={`field-status status-${node.status}`}>
+                {node.status}
+              </span>
                   ) : null}
                 </button>
                 );
@@ -3552,6 +4084,20 @@ export function ConfigEditor({
                     showDocumentation={showDocumentation}
                     onLocalDirtyChange={markLocalEdit}
                     onNavigateEditTarget={onNavigateEditTarget}
+                    onReferenceCreated={(targetId, focus) => {
+                      setPendingCreatedTarget({
+                        targetId,
+                        focus,
+                        returnTargetId: initialTargetId
+                          ?? "edit:workflowConfiguration",
+                        returnLabel: resourceLabel,
+                      });
+                    }}
+                    referenceAdds={referenceAddContexts(
+                      node,
+                      topLevelAdds,
+                      resourceAddOptions,
+                    )}
                     onRequestRemoval={(removalNode) => {
                       void requestRemoval(removalNode);
                     }}
@@ -3630,6 +4176,7 @@ export function ConfigEditor({
       </div>)}
       {exitPromptOpen ? (
         <ModalDialog
+          className="removal-dialog"
           escapeDisabled={actionPending}
           hideCloseButton
           icon={<AlertTriangle aria-hidden="true" />}
@@ -3675,36 +4222,64 @@ export function ConfigEditor({
           </p>
         </ModalDialog>
       ) : null}
-      {pendingRemoval ? (
+      {pendingRemoval && !pendingRemoval.reviewingTargetId ? (
         <ModalDialog
-          closeLabel="Cancel removal"
+          closeLabel="Cancel configuration removal"
           escapeDisabled={busy}
           icon={<Trash2 aria-hidden="true" />}
-          kicker="Configuration removal"
+          kicker={
+            pendingRemoval.impact?.affected.length
+              ? "Referenced configuration"
+              : "Configuration removal"
+          }
           onClose={() => setPendingRemoval(null)}
-          title={<>Remove {fieldName(pendingRemoval.node)}?</>}
+          title={(
+            <>
+              Remove {fieldName(pendingRemoval.node)} from configuration?
+            </>
+          )}
           footer={(
             <>
+              {(pendingRemoval.impact?.affected.length ?? 0) > 0 ? (
+                <button
+                  className="primary-button"
+                  disabled={
+                    busy
+                    || pendingRemoval.loading
+                    || !pendingRemoval.impact
+                  }
+                  onClick={() =>
+                    void confirmRemoval("clear-references")}
+                  type="button"
+                >
+                  <Unlink aria-hidden="true" />
+                  Remove and clear references
+                </button>
+              ) : null}
               <button
-                disabled={busy}
-                onClick={() => setPendingRemoval(null)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                aria-label="Confirm removal"
+                aria-label="Confirm configuration removal"
                 className="danger-confirm"
                 disabled={
                   busy
                   || pendingRemoval.loading
                   || !pendingRemoval.impact
                 }
-                onClick={() => void confirmRemoval()}
+                onClick={() => void confirmRemoval("delete")}
                 type="button"
               >
                 <Trash2 aria-hidden="true" />
-                Remove
+                {pendingRemoval.impact?.affected.length
+                  ? `Remove ${
+                    pendingRemoval.impact.affected.length + 1
+                  } configuration entries`
+                  : "Remove from configuration"}
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => setPendingRemoval(null)}
+                type="button"
+              >
+                Cancel
               </button>
             </>
           )}
@@ -3721,24 +4296,31 @@ export function ConfigEditor({
                 {(pendingRemoval.impact?.affected.length ?? 0) > 0 ? (
                   <>
                     <p>
-                      This removal also affects the following configuration
-                      entries:
+                      Configuration nested inside {
+                        fieldName(pendingRemoval.node)
+                      } is always removed. Referencing entries can be kept
+                      with their affected fields cleared, or removed with
+                      their downstream chain.
                     </p>
                     <ul className="removal-impact-list">
                       {pendingRemoval.impact?.affected.map((entry) => (
                         <li key={entry.path.join(".")}>
+                          <span className="removal-impact-copy">
+                            <strong>{entry.path.join(".")}</strong>
+                            <small>
+                              {entry.direct
+                                ? `Can be kept; clear ${entry.fieldPath.join(".")}`
+                                : "Removed only when cascading through its upstream entry"}
+                            </small>
+                          </span>
                           <button
-                            onClick={() => {
-                              const targetId = `edit:${entry.path.join(".")}`;
-                              setActiveTargetId(targetId);
-                              setSelectedId(targetId);
-                              setPendingRemoval(null);
-                            }}
+                            aria-label={`View ${entry.path.join(".")}`}
+                            onClick={() => reviewRemovalTarget(entry)}
                             type="button"
                           >
-                            {entry.path.join(".")}
+                            <SquareArrowOutUpRight aria-hidden="true" />
+                            View
                           </button>
-                          <span>{entry.reason}</span>
                         </li>
                       ))}
                     </ul>
@@ -3748,6 +4330,20 @@ export function ConfigEditor({
                     This entry will be removed from the working configuration.
                   </p>
                 )}
+                <div
+                  className="action-warning removal-reset-warning"
+                  role="note"
+                >
+                  <AlertTriangle aria-hidden="true" />
+                  <span>
+                    <strong>Deployed resources are not deleted.</strong>
+                    {" "}
+                    Resource deletion remains a separate action because this
+                    resource and its downstream dependencies may require
+                    coordinated cleanup or recovery outside Kubernetes, such
+                    as deleting migrated indexes or restoring snapshots.
+                  </span>
+                </div>
               </>
             )}
         </ModalDialog>

@@ -29,6 +29,7 @@ import {
   getApprovalGates,
   getApprovalReview,
   getConfigurationDocument,
+  getConfigurationSchema,
   getHealth,
   getManageState,
   getOperations,
@@ -51,6 +52,7 @@ import {
   editTarget,
   navigationResourceId,
   projectEditSnapshot,
+  removableEditTarget,
   resourceDraftChangeStates,
   resourceValidationStates,
   settledRenameResourceId,
@@ -99,12 +101,14 @@ const PROMPTED_APPROVALS_KEY = "workflow-manage-prompted-approvals";
 interface EditContext {
   resourceId: string;
   targetId: string;
+  removalTargetId?: string;
 }
 
 
 interface LinkedNavigationEntry {
-  nodeId: string;
+  nodeId: string | null;
   editTargetId: string | null;
+  label: string;
 }
 
 
@@ -194,7 +198,9 @@ function submissionSignals(snapshot?: ManageSnapshot): SubmissionSignals {
   }
   const nodes = Object.values(snapshot.nodes);
   return {
-    pendingConfiguration: hasPendingConfiguration(snapshot),
+    pendingConfiguration: (
+      snapshot.configurationPending ?? hasPendingConfiguration(snapshot)
+    ),
     missingResourceCount: nodes.filter(configuredResourceIsMissing).length,
     failedResourceCount: nodes.filter(managedResourceHasFailed).length,
   };
@@ -283,6 +289,7 @@ function ManageApp() {
     retry: false,
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectionInitializedRef = useRef(false);
   const [linkedNavigation, setLinkedNavigation] =
     useState<LinkedNavigationEntry[]>([]);
   const [treeOpen, setTreeOpen] = useState(false);
@@ -335,10 +342,18 @@ function ManageApp() {
   const submitSignalText = submissionSignalText(submitSignals);
   const browserConfigDraft = useQuery({
     queryKey: BROWSER_CONFIG_DRAFT_QUERY_KEY,
-    queryFn: async () => createBrowserConfigDraft(
-      await getConfigurationDocument(),
-    ),
-    enabled: editContext !== null || submissionAvailable,
+    queryFn: async () => {
+      const [document, schema] = await Promise.all([
+        getConfigurationDocument(),
+        getConfigurationSchema(),
+      ]);
+      return createBrowserConfigDraft(
+        document,
+        undefined,
+        schema.unifiedSchema,
+      );
+    },
+    enabled: true,
     staleTime: Infinity,
   });
   const resetTargetIds = useMemo(
@@ -377,8 +392,11 @@ function ManageApp() {
       return;
     }
     let cancelled = false;
-    void getConfigurationDocument()
-      .then((document) => {
+    void Promise.all([
+      getConfigurationDocument(),
+      getConfigurationSchema(),
+    ])
+      .then(([document, schema]) => {
         if (
           cancelled
           || document.persistedRevision !== savedConfigurationRevision
@@ -387,7 +405,11 @@ function ManageApp() {
         }
         queryClient.setQueryData(
           BROWSER_CONFIG_DRAFT_QUERY_KEY,
-          createBrowserConfigDraft(document),
+          createBrowserConfigDraft(
+            document,
+            undefined,
+            schema.unifiedSchema,
+          ),
         );
       })
       .catch(() => undefined);
@@ -509,14 +531,21 @@ function ManageApp() {
 
   useEffect(() => {
     if (!displayedState) return;
-    setSelectedId((current) => (
-      current && displayedState.nodes[current]
-        ? current
-        : editContext
-          ? null
-          : firstSelectableId(displayedState)
-    ));
-  }, [displayedState, editContext]);
+    if (selectedId && displayedState.nodes[selectedId]) {
+      selectionInitializedRef.current = true;
+      return;
+    }
+    if (editContext) {
+      if (selectedId) setSelectedId(null);
+      return;
+    }
+    if (!selectionInitializedRef.current) {
+      selectionInitializedRef.current = true;
+      setSelectedId(firstSelectableId(displayedState));
+      return;
+    }
+    if (selectedId) setSelectedId(null);
+  }, [displayedState, editContext, selectedId]);
 
   const selectedNode = useMemo(
     () => (
@@ -525,6 +554,13 @@ function ManageApp() {
         : null
     ),
     [displayedState, selectedId],
+  );
+  const selectedRemovalTargetId = useMemo(
+    () => removableEditTarget(
+      browserConfigDraft.data?.editState.nodes ?? [],
+      selectedNode ? editTarget(selectedNode) : null,
+    ),
+    [browserConfigDraft.data?.editState.nodes, selectedNode],
   );
   const resourceDraftChanges = useMemo(
     () => (
@@ -881,6 +917,26 @@ function ManageApp() {
       targetId: targetId ?? "edit:workflowConfiguration",
     });
   };
+  const startDeleting = () => {
+    if (
+      !selectedNode
+      || selectedNode.kind !== "resource"
+      || !selectedRemovalTargetId
+    ) return;
+    setLinkedNavigation([]);
+    setSelectedId(selectedNode.id);
+    setEditContext({
+      resourceId: selectedNode.id,
+      targetId: selectedRemovalTargetId,
+      removalTargetId: selectedRemovalTargetId,
+    });
+    setTreeOpen(false);
+  };
+  const clearRuntimeSelection = () => {
+    setLinkedNavigation([]);
+    setSelectedId(null);
+    setTreeOpen(false);
+  };
   const applyNodeSelection = (nodeId: string) => {
     const navigation = editContext
       ? resourceNavigationState ?? displayedState
@@ -900,15 +956,29 @@ function ManageApp() {
     return true;
   };
   const selectNode = (nodeId: string) => {
-    if (nodeId === selectedId) return;
+    const navigation = editContext
+      ? resourceNavigationState ?? displayedState
+      : displayedState;
+    const targetId = navigation?.nodes[nodeId]
+      ? editTarget(navigation.nodes[nodeId])
+      : null;
+    if (
+      nodeId === selectedId
+      && (!editContext || targetId === editContext.targetId)
+    ) {
+      return;
+    }
     setLinkedNavigation([]);
     applyNodeSelection(nodeId);
   };
   const rememberLinkedOrigin = () => {
-    if (!selectedId || !displayedState?.nodes[selectedId]) return;
+    const navigation = resourceNavigationState ?? displayedState;
+    const node = selectedId ? navigation?.nodes[selectedId] : null;
+    if (!node) return;
     const entry: LinkedNavigationEntry = {
       nodeId: selectedId,
       editTargetId: editContext?.targetId ?? null,
+      label: node.label,
     };
     setLinkedNavigation((current) => {
       const previous = current.at(-1);
@@ -930,7 +1000,15 @@ function ManageApp() {
     const node = Object.values(navigation?.nodes ?? {}).find(
       (candidate) => editTarget(candidate) === targetId,
     );
-    if (!node || node.id === selectedId) return;
+    if (
+      !node
+      || (
+        node.id === selectedId
+        && editContext?.targetId === targetId
+      )
+    ) {
+      return;
+    }
     rememberLinkedOrigin();
     setSelectedId(node.id);
     setEditContext({
@@ -939,12 +1017,54 @@ function ManageApp() {
     });
     setTreeOpen(false);
   };
+  const navigateCreatedEditTarget = (
+    targetId: string,
+    returnTargetId: string,
+    returnLabel: string,
+  ) => {
+    const navigation = resourceNavigationState ?? displayedState;
+    const node = Object.values(navigation?.nodes ?? {}).find(
+      (candidate) => editTarget(candidate) === targetId,
+    );
+    if (!node) return false;
+    const entry: LinkedNavigationEntry = {
+      nodeId: selectedId,
+      editTargetId: returnTargetId,
+      label: returnLabel,
+    };
+    setLinkedNavigation((current) => {
+      const previous = current.at(-1);
+      return (
+        previous?.editTargetId === entry.editTargetId
+        && previous.nodeId === entry.nodeId
+      )
+        ? current
+        : [...current, entry];
+    });
+    setSelectedId(node.id);
+    setEditContext({
+      resourceId: node.id,
+      targetId,
+    });
+    setTreeOpen(false);
+    return true;
+  };
+  const linkedNavigationNode = (entry: LinkedNavigationEntry) => {
+    const navigation = resourceNavigationState ?? displayedState;
+    if (entry.editTargetId) {
+      const currentNode = Object.values(navigation?.nodes ?? {}).find(
+        (candidate) => editTarget(candidate) === entry.editTargetId,
+      );
+      if (currentNode) return currentNode;
+    }
+    return entry.nodeId ? navigation?.nodes[entry.nodeId] ?? null : null;
+  };
   let linkedBackIndex = -1;
   for (let index = linkedNavigation.length - 1; index >= 0; index -= 1) {
     const entry = linkedNavigation[index];
-    const node = displayedState?.nodes[entry.nodeId];
+    const node = linkedNavigationNode(entry);
     if (
-      node
+      (node || entry.editTargetId)
       && Boolean(entry.editTargetId) === Boolean(editContext)
     ) {
       linkedBackIndex = index;
@@ -955,17 +1075,18 @@ function ManageApp() {
     ? linkedNavigation[linkedBackIndex]
     : null;
   const linkedBackLabel = linkedBackEntry
-    ? displayedState?.nodes[linkedBackEntry.nodeId]?.label ?? null
+    ? linkedNavigationNode(linkedBackEntry)?.label
+      ?? linkedBackEntry.label
     : null;
   const navigateLinkedBack = () => {
     if (!linkedBackEntry) return;
-    const node = displayedState?.nodes[linkedBackEntry.nodeId];
-    if (!node) return;
+    const node = linkedNavigationNode(linkedBackEntry);
+    if (!node && !linkedBackEntry.editTargetId) return;
     setLinkedNavigation(linkedNavigation.slice(0, linkedBackIndex));
-    setSelectedId(node.id);
+    setSelectedId(node?.id ?? null);
     if (linkedBackEntry.editTargetId) {
       setEditContext({
-        resourceId: node.id,
+        resourceId: node?.id ?? "",
         targetId: linkedBackEntry.editTargetId,
       });
     }
@@ -1497,6 +1618,9 @@ function ManageApp() {
                 >
                   <ConfigEditor
                     initialTargetId={editContext.targetId}
+                    initialRemovalTargetId={
+                      editContext.removalTargetId ?? null
+                    }
                     navigationBackLabel={linkedBackLabel}
                     onClose={() => {
                       setLinkedNavigation([]);
@@ -1512,6 +1636,19 @@ function ManageApp() {
                     onResourceRenameStarted={resourceRenameStarted}
                     onResourceAddsReady={registerResourceAdds}
                     onNavigateEditTarget={navigateEditTarget}
+                    onNavigateCreatedEditTarget={
+                      navigateCreatedEditTarget
+                    }
+                    onInitialRemovalHandled={() => {
+                      setEditContext((current) => (
+                        current?.removalTargetId
+                          ? {
+                            resourceId: current.resourceId,
+                            targetId: current.targetId,
+                          }
+                          : current
+                      ));
+                    }}
                     onSubmitted={() => {
                       setLinkedNavigation([]);
                       setEditContext(null);
@@ -1553,6 +1690,10 @@ function ManageApp() {
                   key={selectedNode.id}
                   navigationBackLabel={linkedBackLabel}
                   node={selectedNode}
+                  onDelete={
+                    selectedRemovalTargetId ? startDeleting : undefined
+                  }
+                  onResourceDeletionStarted={clearRuntimeSelection}
                   onEdit={startEditing}
                   onNavigateBack={navigateLinkedBack}
                   onRequestApproval={setApprovalDialogTargetId}
@@ -1575,6 +1716,7 @@ function ManageApp() {
                 operations={operations.data ?? []}
                 onReviewApproval={setApprovalDialogTargetId}
                 onSelectNode={selectNode}
+                planned={Boolean(editContext)}
                 selectedNode={observedSelectedNode}
                 snapshot={
                   editContext

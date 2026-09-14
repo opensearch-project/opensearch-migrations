@@ -254,6 +254,7 @@ class ManageSnapshot:
     workflow: Optional[ManageWorkflow]
     root_ids: Tuple[str, ...]
     nodes: Mapping[str, ManageNode] = field(compare=True)
+    configuration_pending: bool = False
     problems: Tuple[ManageProblem, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -265,6 +266,7 @@ class ManageSnapshot:
             "workflowName": self.workflow_name,
             "workflow": self.workflow.to_dict() if self.workflow else None,
             "rootIds": list(self.root_ids),
+            "configurationPending": self.configuration_pending,
             "nodes": {
                 node_id: node.to_dict()
                 for node_id, node in self.nodes.items()

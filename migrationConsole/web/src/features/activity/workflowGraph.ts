@@ -12,6 +12,7 @@ export interface WorkflowGraphNode {
   node: ManageNode | null;
   label: string;
   resourcePlural: string | null;
+  resourceType?: string | null;
   phase: string | null;
   status: string;
   steps: WorkflowGraphStep[];
@@ -112,6 +113,7 @@ function workflowStepsFor(
 function relationshipTarget(
   relationship: ManageRelationship,
   resources: WorkflowGraphNode[],
+  snapshot: ManageSnapshot,
 ): WorkflowGraphNode | null {
   const target = resources.find((candidate) => (
     candidate.id === relationship.targetId
@@ -123,6 +125,12 @@ function relationshipTarget(
     )
   ));
   if (target) return target;
+  if (
+    relationship.targetId
+    && snapshot.nodes[relationship.targetId]?.kind !== "resource"
+  ) {
+    return null;
+  }
   if (isConfigOnlyCluster(relationship.targetPlural)) return null;
   return {
     id: relationship.targetId ?? unresolvedId(relationship),
@@ -131,6 +139,7 @@ function relationshipTarget(
     node: null,
     label: relationship.targetName,
     resourcePlural: relationship.targetPlural ?? null,
+    resourceType: null,
     phase: relationship.targetPhase ?? null,
     status: relationship.targetStatus,
     steps: [],
@@ -163,6 +172,7 @@ function graphResources(
       node,
       label: node.label,
       resourcePlural: node.resourcePlural,
+      resourceType: node.resourceType,
       phase: node.phase,
       status: node.status,
       steps: workflowStepsFor(snapshot, node),
@@ -175,6 +185,7 @@ function graphResources(
 
 
 function graphEdges(
+  snapshot: ManageSnapshot,
   resources: WorkflowGraphNode[],
   nodes: Map<string, WorkflowGraphNode>,
 ): Map<string, WorkflowGraphEdge> {
@@ -184,7 +195,7 @@ function graphEdges(
       (relationship) => relationship.direction === "requires",
     );
     for (const requirement of requirements) {
-      const prerequisite = relationshipTarget(requirement, resources);
+      const prerequisite = relationshipTarget(requirement, resources, snapshot);
       if (!prerequisite) continue;
       if (!nodes.has(prerequisite.id)) nodes.set(prerequisite.id, prerequisite);
       const key = `${prerequisite.id}\n${resource.id}`;
@@ -372,7 +383,7 @@ export function buildWorkflowGraph(snapshot: ManageSnapshot): WorkflowGraph {
   const order = resourceOrder(snapshot);
   const resources = graphResources(snapshot, order);
   const nodes = new Map(resources.map((node) => [node.id, node]));
-  const edges = graphEdges(resources, nodes);
+  const edges = graphEdges(snapshot, resources, nodes);
   const topology = graphTopology(nodes, edges);
   assignDepths(nodes, topology.incoming, topology.outgoing);
   const nestedNodes = orderedGraphNodes(

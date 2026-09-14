@@ -6,6 +6,17 @@ export interface ConfigReferenceEdge {
 }
 
 
+function pathKey(path: string[]): string {
+    return path.join("\0");
+}
+
+
+function startsWithPath(path: string[], prefix: string[]): boolean {
+    return path.length >= prefix.length
+        && prefix.every((part, index) => path[index] === part);
+}
+
+
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -91,31 +102,55 @@ export function buildConfigDependencyGraph(config: unknown): ConfigReferenceEdge
                 `source=${proxyValue.source}`,
             );
         }
-        const kafka = typeof proxyValue.kafka === "string" && proxyValue.kafka
-            ? proxyValue.kafka
-            : "default";
-        addConfigReference(
-            edges,
-            proxyPath,
-            [...proxyPath, "kafka"],
-            ["traffic", "kafkaClusters", kafka],
-            `kafka=${kafka}`,
-        );
+        const kafka = typeof proxyValue.kafka === "string" ? proxyValue.kafka : "";
+        if (kafka) {
+            addConfigReference(
+                edges,
+                proxyPath,
+                [...proxyPath, "kafka"],
+                ["traffic", "kafkaClusters", kafka],
+                `kafka=${kafka}`,
+            );
+            const topic = typeof proxyValue.kafkaTopic === "string"
+                ? proxyValue.kafkaTopic
+                : "";
+            if (topic) {
+                addConfigReference(
+                    edges,
+                    proxyPath,
+                    [...proxyPath, "kafkaTopic"],
+                    ["traffic", "kafkaClusters", kafka, "topics", topic],
+                    `kafkaTopic=${topic}`,
+                );
+            }
+        }
     });
 
     Object.entries(s3Sources).forEach(([sourceName, sourceValue]) => {
         if (!isRecord(sourceValue)) return;
         const sourcePath = ["traffic", "s3Sources", sourceName];
-        const kafka = typeof sourceValue.kafka === "string" && sourceValue.kafka
-            ? sourceValue.kafka
-            : "default";
-        addConfigReference(
-            edges,
-            sourcePath,
-            [...sourcePath, "kafka"],
-            ["traffic", "kafkaClusters", kafka],
-            `kafka=${kafka}`,
-        );
+        const kafka = typeof sourceValue.kafka === "string" ? sourceValue.kafka : "";
+        if (kafka) {
+            addConfigReference(
+                edges,
+                sourcePath,
+                [...sourcePath, "kafka"],
+                ["traffic", "kafkaClusters", kafka],
+                `kafka=${kafka}`,
+            );
+            const topic = typeof sourceValue.kafkaTopic === "string"
+                ? sourceValue.kafkaTopic
+                : "";
+            if (topic) {
+                addConfigReference(
+                    edges,
+                    sourcePath,
+                    [...sourcePath, "kafkaTopic"],
+                    ["traffic", "kafkaClusters", kafka, "topics", topic],
+                    `kafkaTopic=${topic}`,
+                );
+            }
+        }
     });
 
     Object.entries(replayers).forEach(([replayerName, replayerValue]) => {
@@ -240,4 +275,36 @@ export function buildConfigDependencyGraph(config: unknown): ConfigReferenceEdge
         });
     });
     return edges;
+}
+
+
+export function downstreamConfigReferences(
+    config: unknown,
+    targetPath: string[],
+): ConfigReferenceEdge[] {
+    const references = buildConfigDependencyGraph(config);
+    const removedPaths = new Map([[pathKey(targetPath), targetPath]]);
+    const selected: ConfigReferenceEdge[] = [];
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const reference of references) {
+            // Entries nested inside the selected target disappear with it and
+            // are not separate downstream deletions.
+            if (startsWithPath(reference.fromPath, targetPath)) {
+                continue;
+            }
+            const affected = [...removedPaths.values()].some((removedPath) => (
+                startsWithPath(reference.toPath, removedPath)
+            ));
+            const fromKey = pathKey(reference.fromPath);
+            if (!affected || removedPaths.has(fromKey)) {
+                continue;
+            }
+            selected.push(reference);
+            removedPaths.set(fromKey, reference.fromPath);
+            changed = true;
+        }
+    }
+    return selected;
 }

@@ -12,15 +12,25 @@
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
+    "kafkaClusters": {
+      "default": {
+        "autoCreate": {},
+        "topics": {
+          "proxy1": {}
+        }
+      }
+    },
     "proxies": {
       "proxy1": {
         "source": "source",
+        "kafka": "default",
         "proxyConfig": {
           "listenPort": 9201,
           "tls": {
             "mode": "plaintext"
           }
-        }
+        },
+        "kafkaTopic": "proxy1"
       }
     },
     "replayers": {

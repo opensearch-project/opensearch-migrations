@@ -73,11 +73,16 @@ spec:
               "traffic": {
                 "kafkaClusters": {
                   "default": {
-                    "autoCreate": {}
+                    "autoCreate": {},
+                    "topics": {
+                      "capture-proxy": {}
+                    }
                   }
                 },
                 "proxies": {
                   "capture-proxy": {
+                    "kafka": "default",
+                    "kafkaTopic": "capture-proxy",
                     "source": "source1",
                     "proxyConfig": ({
                       "listenPort": 9201,
@@ -168,11 +173,16 @@ spec:
                 "traffic": {
                   "kafkaClusters": {
                     "default": {
-                      "autoCreate": {}
+                      "autoCreate": {},
+                      "topics": {
+                        "capture-proxy": {}
+                      }
                     }
                   },
                   "proxies": {
                     "capture-proxy": {
+                      "kafka": "default",
+                      "kafkaTopic": "capture-proxy",
                       "source": "source1",
                       "proxyConfig": ({
                         "listenPort": 9201,

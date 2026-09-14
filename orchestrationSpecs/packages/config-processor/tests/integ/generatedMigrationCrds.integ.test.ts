@@ -69,9 +69,19 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
             },
         },
         traffic: {
+            kafkaClusters: {
+                kafka: {
+                    autoCreate: {},
+                    topics: {
+                        "source-proxy": {},
+                    },
+                },
+            },
             proxies: {
                 "source-proxy": {
                     source: "source",
+                    kafka: "kafka",
+                    kafkaTopic: "source-proxy",
                     proxyConfig: {
                         listenPort: 9200,
                     },

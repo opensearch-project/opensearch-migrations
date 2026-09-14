@@ -20,6 +20,24 @@ test("defaults documentation and optional fields on for a new resource type", ()
 test("stores display preferences independently by resource type", () => {
   writeEditorDisplayPreferences("Source cluster", {
     showDocumentation: false,
+    showExpert: false,
+    showOptional: false,
+  });
+
+  expect(readEditorDisplayPreferences("Source cluster")).toEqual({
+    showDocumentation: false,
+    showExpert: false,
+    showOptional: false,
+  });
+  expect(readEditorDisplayPreferences("Target cluster")).toEqual(
+    DEFAULT_EDITOR_DISPLAY_PREFERENCES,
+  );
+});
+
+
+test("expert fields always include optional fields", () => {
+  writeEditorDisplayPreferences("Source cluster", {
+    showDocumentation: false,
     showExpert: true,
     showOptional: false,
   });
@@ -27,11 +45,8 @@ test("stores display preferences independently by resource type", () => {
   expect(readEditorDisplayPreferences("Source cluster")).toEqual({
     showDocumentation: false,
     showExpert: true,
-    showOptional: false,
+    showOptional: true,
   });
-  expect(readEditorDisplayPreferences("Target cluster")).toEqual(
-    DEFAULT_EDITOR_DISPLAY_PREFERENCES,
-  );
 });
 
 

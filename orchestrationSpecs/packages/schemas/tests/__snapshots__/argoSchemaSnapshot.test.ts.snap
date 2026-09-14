@@ -96,24 +96,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow.",
                       "x-expert": true
-                    },
-                    "topicSpecOverrides": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": [
-                          "string",
-                          "number",
-                          "boolean",
-                          "object",
-                          "array",
-                          "null"
-                        ]
-                      },
-                      "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics.",
-                      "x-expert": true
                     }
                   },
-                  "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+                  "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker and node-pool settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
                 },
                 "topics": {
                   "type": "array",
@@ -8062,11 +8047,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$",
                         "description": "Sequence of <HOSTNAME:PORT> values delimited by ','."
                       },
-                      "kafkaTopic": {
-                        "type": "string",
-                        "default": "",
-                        "description": "Empty defaults to the name of the target label"
-                      },
                       "auth": {
                         "oneOf": [
                           {
@@ -8278,6 +8258,38 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "required": [
                       "kafkaConnection"
                     ]
+                  },
+                  "topics": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "specOverrides": {
+                          "$ref": "#/$defs/StrimziKafkaTopicSpec",
+                          "description": "Kafka topic settings merged into the generated Strimzi KafkaTopic.spec. Partition and replica counts are common settings; additional Strimzi fields are available in expert mode."
+                        }
+                      },
+                      "description": "An explicitly declared Kafka topic belonging to this cluster."
+                    },
+                    "default": {},
+                    "description": "Kafka topics declared for this cluster. Each key is a topic name and each value can override that topic's Strimzi KafkaTopic.spec.",
+                    "x-ui-hint": {
+                      "kind": "record",
+                      "addLabel": "Kafka topic",
+                      "keyFormat": "k8s-name",
+                      "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "message": "Use a valid Kubernetes DNS name for the Kafka topic.",
+                      "definitionCollection": {
+                        "ownerAncestorLevels": 1,
+                        "navigation": {
+                          "groupLabel": "Topics",
+                          "groupOrder": 0
+                        },
+                        "definition": {
+                          "typeLabel": "Kafka topic"
+                        }
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -8334,18 +8346,48 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "clusterSpecOverrides": {
                         "$ref": "#/$defs/StrimziKafkaSpec",
-                        "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+                        "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource.",
+                        "x-expert": true
                       },
                       "nodePoolSpecOverrides": {
                         "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
-                        "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
-                      },
-                      "topicSpecOverrides": {
-                        "$ref": "#/$defs/StrimziKafkaTopicSpec",
-                        "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
+                        "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource.",
+                        "x-expert": true
                       }
                     },
-                    "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+                    "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker and node-pool settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+                  },
+                  "topics": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "specOverrides": {
+                          "$ref": "#/$defs/StrimziKafkaTopicSpec",
+                          "description": "Kafka topic settings merged into the generated Strimzi KafkaTopic.spec. Partition and replica counts are common settings; additional Strimzi fields are available in expert mode."
+                        }
+                      },
+                      "description": "An explicitly declared Kafka topic belonging to this cluster."
+                    },
+                    "default": {},
+                    "description": "Kafka topics declared for this cluster. Each key is a topic name and each value can override that topic's Strimzi KafkaTopic.spec.",
+                    "x-ui-hint": {
+                      "kind": "record",
+                      "addLabel": "Kafka topic",
+                      "keyFormat": "k8s-name",
+                      "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "message": "Use a valid Kubernetes DNS name for the Kafka topic.",
+                      "definitionCollection": {
+                        "ownerAncestorLevels": 1,
+                        "navigation": {
+                          "groupLabel": "Topics",
+                          "groupOrder": 0
+                        },
+                        "definition": {
+                          "typeLabel": "Kafka topic"
+                        }
+                      }
+                    }
                   }
                 },
                 "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
@@ -8354,7 +8396,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
           },
           "default": {},
-          "description": "Kafka cluster configurations for live traffic capture/replay. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies and S3 captured traffic sources via 'kafka'.",
+          "description": "Kafka cluster configurations for live traffic capture/replay. Each entry explicitly defines an auto-created or external Kafka cluster referenced by proxies and S3 captured traffic sources via 'kafka'.",
           "x-ui-hint": {
             "kind": "record",
             "addLabel": "Kafka cluster",
@@ -8392,7 +8434,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "kafka": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                "default": "default",
                 "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in traffic.kafkaClusters.",
                 "x-ui-hint": {
                   "kind": "reference",
@@ -8400,20 +8441,32 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "traffic",
                     "kafkaClusters"
                   ],
-                  "emptyMeansDefault": "default",
-                  "message": "A Kafka cluster with default settings will be provided."
+                  "message": "Choose a configured Kafka cluster."
                 }
               },
               "kafkaTopic": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                "default": "",
-                "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record).",
+                "description": "Kafka topic that receives captured traffic. It must be explicitly defined under the selected traffic.kafkaClusters entry.",
                 "x-ui-hint": {
-                  "kind": "text",
-                  "format": "k8s-name",
-                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                  "kind": "reference",
+                  "sourcePathTemplate": [
+                    "traffic",
+                    "kafkaClusters",
+                    {
+                      "valueFrom": [
+                        "..",
+                        "kafka"
+                      ]
+                    },
+                    "topics"
+                  ],
+                  "createReference": {
+                    "label": "Create topic for this proxy",
+                    "valueFromPathSegmentFromEnd": 2,
+                    "description": "Add an explicit topic to the selected Kafka cluster and use it for this capture proxy."
+                  },
+                  "message": "Choose a topic from the selected Kafka cluster or create one for this proxy."
                 }
               },
               "source": {
@@ -9525,6 +9578,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             },
             "required": [
+              "kafka",
+              "kafkaTopic",
               "source",
               "proxyConfig"
             ],
@@ -9582,7 +9637,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "kafka": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                "default": "default",
                 "description": "Label of the Kafka cluster to load captured traffic into. Must match a key in traffic.kafkaClusters.",
                 "x-ui-hint": {
                   "kind": "reference",
@@ -9590,15 +9644,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "traffic",
                     "kafkaClusters"
                   ],
-                  "emptyMeansDefault": "default",
-                  "message": "A Kafka cluster with default settings will be provided."
+                  "message": "Choose a configured Kafka cluster."
                 }
               },
               "kafkaTopic": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                "default": "",
-                "description": "Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."
+                "description": "Kafka topic to load this captured traffic into. It must be explicitly defined under the selected traffic.kafkaClusters entry.",
+                "x-ui-hint": {
+                  "kind": "reference",
+                  "sourcePathTemplate": [
+                    "traffic",
+                    "kafkaClusters",
+                    {
+                      "valueFrom": [
+                        "..",
+                        "kafka"
+                      ]
+                    },
+                    "topics"
+                  ],
+                  "createReference": {
+                    "label": "Create topic for this captured traffic",
+                    "valueFromPathSegmentFromEnd": 2,
+                    "description": "Add an explicit topic to the selected Kafka cluster and use it for this captured-traffic source."
+                  },
+                  "message": "Choose a topic from the selected Kafka cluster or create one for this captured traffic."
+                }
               },
               "sourceLabel": {
                 "type": "string",
@@ -9608,6 +9680,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "required": [
               "s3Uri",
               "awsRegion",
+              "kafka",
+              "kafkaTopic",
               "sourceLabel"
             ],
             "description": "Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow."
@@ -9625,8 +9699,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "sectionId": "section:Live Traffic Migration",
                 "sectionLabel": "Live Traffic Migration",
                 "sectionOrder": 3,
-                "groupId": "group:Live Traffic Migration:Buffer:Kafka Topics",
-                "groupLabel": "Kafka Topics",
+                "groupId": "group:Live Traffic Migration:Buffer:Previously Captured Traffic",
+                "groupLabel": "Previously Captured Traffic",
                 "groupOrder": 1,
                 "parentGroupId": "group:Live Traffic Migration:Buffer",
                 "parentGroupLabel": "Buffer",
@@ -9635,7 +9709,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "resource": {
                 "kind": "CapturedTraffic",
                 "plural": "capturedtraffics",
-                "typeLabel": "Kafka topic",
+                "typeLabel": "Previously captured traffic",
                 "identity": {
                   "kind": "named",
                   "suffix": "-topic"
@@ -11874,7 +11948,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "$ref": "#/$defs/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
     },
     "StrimziKafkaTopicSpec": {
-      "$ref": "#/$defs/io.strimzi.api.kafka.model.topic.KafkaTopicSpec"
+      "type": "object",
+      "properties": {
+        "partitions": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "Number of partitions for the topic. This can be increased after deployment but cannot be decreased.",
+          "x-effective-default": {
+            "label": "1",
+            "value": 1,
+            "description": "New topics use one partition unless this value is overridden."
+          },
+          "x-essential": true
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Replication factor for the topic. Changes to a deployed topic require approval.",
+          "x-effective-default": {
+            "label": "3",
+            "value": 3,
+            "description": "New topics use three replicas unless this value is overridden."
+          },
+          "x-essential": true
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "cleanup.policy": {
+              "type": "string",
+              "enum": [
+                "delete",
+                "compact"
+              ]
+            },
+            "retention.ms": {
+              "type": "integer"
+            },
+            "segment.bytes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false,
+          "x-expert": true
+        }
+      },
+      "additionalProperties": false
     },
     "Kafka420BrokerConfig": {
       "type": "object",

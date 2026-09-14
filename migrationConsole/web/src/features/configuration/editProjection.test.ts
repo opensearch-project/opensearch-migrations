@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import type { ManageNode, ManageSnapshot } from "../../api/client";
 import {
   projectEditSnapshot,
+  removableEditTarget,
   settledRenameResourceId,
 } from "./editProjection";
 import type {
@@ -79,6 +80,40 @@ test("settles a stable-target rename the server republished under a new id", () 
 
   expect(settledRenameResourceId(nodes, sliceRename))
     .toBe("config:snapshotMigrationConfigs:1");
+});
+
+
+test("finds the nearest removable configuration owner for a nested target", () => {
+  const nodes = [{
+    id: "edit:sourceClusters.source",
+    path: ["sourceClusters", "source"],
+    label: "source",
+    valueKind: "object",
+    presence: "required",
+    children: [{
+      id: "edit:sourceClusters.source.snapshots.snap",
+      path: ["sourceClusters", "source", "snapshots", "snap"],
+      label: "snap",
+      valueKind: "object",
+      presence: "required",
+      removable: true,
+      children: [{
+        id: "edit:sourceClusters.source.snapshots.snap.config",
+        path: ["sourceClusters", "source", "snapshots", "snap", "config"],
+        label: "config",
+        valueKind: "object",
+        presence: "required",
+        children: [],
+      }],
+    }],
+  }] as Parameters<typeof removableEditTarget>[0];
+
+  expect(removableEditTarget(
+    nodes,
+    "edit:sourceClusters.source.snapshots.snap.config.create",
+  )).toBe("edit:sourceClusters.source.snapshots.snap");
+  expect(removableEditTarget(nodes, "edit:sourceClusters.source"))
+    .toBeNull();
 });
 
 

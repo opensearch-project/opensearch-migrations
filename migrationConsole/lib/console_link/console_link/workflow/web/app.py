@@ -2,9 +2,10 @@
 
 from contextlib import asynccontextmanager
 import asyncio
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Dict, Optional
 
@@ -46,6 +47,7 @@ from .contracts import (
     ConfigEnvironmentDiagnosticsRequestV1,
     ConfigEnvironmentDiagnosticsV1,
     ConfigurationDocumentV1,
+    ConfigurationSchemaV1,
     ConfigReviewV1,
     ExecuteResetRequestV1,
     ExternalResourceContextRequestV1,
@@ -84,6 +86,12 @@ SSE_MEDIA_TYPE = "text/event-stream"
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class WebAppSettings:
+    workflow_name: str = DEFAULT_WORKFLOW_NAME
+    external_logs_url: Optional[str] = None
+
+
 def create_app(
     static_dir: Optional[Path] = None,
     coordinator: Optional[ObservationCoordinator] = None,
@@ -96,9 +104,19 @@ def create_app(
     resets: Optional[Any] = None,
     logs: Optional[Any] = None,
     runtime_status: Optional[Any] = None,
-    workflow_name: str = DEFAULT_WORKFLOW_NAME,
-    external_logs_url: Optional[str] = None,
+    settings: Optional[WebAppSettings] = None,
+    config_schema_path: Optional[Path] = None,
 ) -> FastAPI:
+    resolved_settings = settings or WebAppSettings()
+    workflow_name = resolved_settings.workflow_name
+    external_logs_url = resolved_settings.external_logs_url
+    resolved_config_schema_path = config_schema_path or Path(
+        os.environ.get(
+            "MIGRATION_UNIFIED_SCHEMA_PATH",
+            "/root/schema/workflowMigration.schema.json",
+        )
+    )
+
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         if coordinator is not None:
@@ -640,6 +658,29 @@ def create_app(
                 status_code=503,
                 detail={
                     "code": "configuration_document_unavailable",
+                    "message": str(error) or type(error).__name__,
+                },
+            ) from error
+
+    @app.get(
+        "/api/v1/config/schema",
+        response_model=ConfigurationSchemaV1,
+        tags=["configuration"],
+    )
+    def load_config_schema() -> ConfigurationSchemaV1:
+        try:
+            schema = json.loads(
+                resolved_config_schema_path.read_text(encoding="utf-8")
+            )
+            if not isinstance(schema, dict):
+                raise ValueError("The unified configuration schema is not an object")
+            return ConfigurationSchemaV1(unified_schema=schema)
+        except Exception as error:
+            logger.exception("Failed to load the unified configuration schema")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "configuration_schema_unavailable",
                     "message": str(error) or type(error).__name__,
                 },
             ) from error

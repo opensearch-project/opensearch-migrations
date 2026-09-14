@@ -28,7 +28,7 @@ from ..resource_tree import build_resource_tree
 from ..services.argo_observation_service import make_argo_observation_service
 from ..services.config_edit_service import ConfigEditService
 from ..services.script_runner import ScriptRunner
-from .app import create_app
+from .app import WebAppSettings, create_app
 from .kubernetes import pin_kubernetes_runtime
 
 
@@ -146,7 +146,6 @@ def run_server(
         app = create_app(
             static_dir=static_dir,
             coordinator=coordinator,
-            workflow_name=workflow_name,
             external_resources=ExternalResourceService(config_service),
             config_documents=configuration_service,
             config_diagnostics=config_service,
@@ -170,9 +169,18 @@ def run_server(
                 namespace=namespace,
                 custom_api=k8s.custom_api,
             ),
-            external_logs_url=cloudwatch_log_group_url(
-                os.environ.get("WORKFLOW_CLOUDWATCH_REGION"),
-                os.environ.get("WORKFLOW_CLOUDWATCH_LOG_GROUP"),
+            settings=WebAppSettings(
+                workflow_name=workflow_name,
+                external_logs_url=cloudwatch_log_group_url(
+                    os.environ.get("WORKFLOW_CLOUDWATCH_REGION"),
+                    os.environ.get("WORKFLOW_CLOUDWATCH_LOG_GROUP"),
+                ),
+            ),
+            config_schema_path=Path(
+                os.environ.get(
+                    "MIGRATION_UNIFIED_SCHEMA_PATH",
+                    "/root/schema/workflowMigration.schema.json",
+                )
             ),
         )
         uvicorn.run(

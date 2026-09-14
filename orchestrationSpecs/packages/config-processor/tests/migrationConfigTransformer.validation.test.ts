@@ -69,11 +69,16 @@ describe("MigrationConfigTransformer validation", () => {
         ],
         traffic: {
             kafkaClusters: {
-                default: {autoCreate: {} },
+                default: {
+                    autoCreate: {},
+                    topics: {proxy1: {}},
+                },
             },
             proxies: {
                 proxy1: {
                     source: "source1",
+                    kafka: "default",
+                    kafkaTopic: "proxy1",
                     proxyConfig: {listenPort: 9201 },
                 },
             },
@@ -322,6 +327,7 @@ describe("MigrationConfigTransformer validation", () => {
                 s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
                 awsRegion: "us-east-1",
                 kafka: "missing",
+                kafkaTopic: "loaded-dump",
                 sourceLabel: "detached-source",
             },
         };
@@ -331,17 +337,15 @@ describe("MigrationConfigTransformer validation", () => {
             .toThrow(/s3Source 'loaded-dump' references unknown kafka cluster 'missing'/,);
     });
 
-    it("should backfill default kafka refs alongside explicit kafka configs", async () => {
+    it("should reject capture proxies without an explicit kafka reference", () => {
         const config = cloneBaseConfig();
         config.traffic.kafkaClusters = {
             kafka: {autoCreate: {}},
         };
         delete config.traffic.proxies.proxy1.kafka;
 
-        expect(() => transformer.validateInput(config)).not.toThrow();
-        const resolved = await transformer.processFromObject(config);
-        expect((resolved.kafkaClusters ?? []).map((cluster) => cluster.name).sort())
-            .toEqual(["default", "kafka"]);
+        expect(() => transformer.validateInput(config))
+            .toThrow(/expected string.*traffic\.proxies\.proxy1\.kafka/i);
     });
 
     it("should require source endpoint when snapshots or capture proxies reference the source", () => {
@@ -367,6 +371,7 @@ describe("MigrationConfigTransformer validation", () => {
         const config = cloneBaseConfig();
         config.traffic.kafkaClusters.default = {
             autoCreate: {},
+            topics: {proxy1: {}},
             existing: {
                 kafkaConnection: "broker:9092",
             },
@@ -376,16 +381,61 @@ describe("MigrationConfigTransformer validation", () => {
             .toThrow(/Kafka cluster configuration must define exactly one of 'existing' or 'autoCreate' at: traffic\.kafkaClusters\.default/,);
     });
 
+    it("should reject capture proxies that reference an undefined topic", () => {
+        const config = cloneBaseConfig();
+        config.traffic.proxies.proxy1.kafkaTopic = "missing-topic";
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Proxy 'proxy1' references unknown topic 'missing-topic' in kafka cluster 'default'/);
+    });
+
+    it("should reject multiple proxy producers for one topic", () => {
+        const config = cloneBaseConfig();
+        config.sourceClusters.source2 = {
+            endpoint: "https://source2.example.com:9200",
+            allowInsecure: true,
+            version: "ES 7.10",
+        };
+        config.traffic.proxies.proxy2 = {
+            source: "source2",
+            kafka: "default",
+            kafkaTopic: "proxy1",
+            proxyConfig: {listenPort: 9202},
+        };
+
+        expect(() => transformer.validateInput(config)).toThrow(
+            /traffic\.proxies\['proxy2'\].*already claimed by traffic\.proxies\['proxy1'\].*at most one producer/,
+        );
+    });
+
+    it("should allow multiple replayers to consume one captured-traffic source", () => {
+        const config = cloneBaseConfig();
+        config.traffic.replayers.replay2 = {
+            fromCapturedTraffic: "proxy1",
+            toTarget: "target1",
+        };
+
+        expect(() => transformer.validateInput(config)).not.toThrow();
+    });
+
     it("should transform s3 captured traffic sources without a live proxy", async () => {
         const config = cloneBaseConfig();
         delete config.traffic.kafkaClusters;
         config.snapshotMigrationConfigs = [];
         config.traffic = {
+            kafkaClusters: {
+                default: {
+                    autoCreate: {},
+                    topics: {"loaded-dump": {}},
+                },
+            },
             s3Sources: {
                 "loaded-dump": {
                     s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
                     awsRegion: "us-east-1",
                     endpoint: "http://localstack:4566",
+                    kafka: "default",
+                    kafkaTopic: "loaded-dump",
                     sourceLabel: "detached-source",
                 },
             },
@@ -982,7 +1032,7 @@ describe("MigrationConfigTransformer validation", () => {
         expect(metadataOnly.configChecksum).not.toEqual(backfillOnly.configChecksum);
     });
 
-    it("should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation", () => {
+    it("should normalize workflow-managed Kafka auth and preserve explicit topic references", () => {
         const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
         const normalized = normalizeUserConfig(parsed);
 
@@ -993,7 +1043,7 @@ describe("MigrationConfigTransformer validation", () => {
                 },
             },
         });
-        expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
+        expect(normalized.traffic?.proxies?.proxy1?.kafkaTopic).toBe("proxy1");
     });
 
     it("should preserve the expert proxy Service type setting", async () => {
@@ -1032,6 +1082,7 @@ describe("MigrationConfigTransformer validation", () => {
                 ...baseConfig.traffic,
                 kafkaClusters: {
                     default: {
+                        topics: baseConfig.traffic.kafkaClusters.default.topics,
                         autoCreate: {
                             auth: {
                                 type: "scram-sha-512",
@@ -1088,14 +1139,6 @@ describe("MigrationConfigTransformer validation", () => {
                         },
                     },
                 },
-                topicSpecOverrides: {
-                    partitions: 1,
-                    replicas: 3,
-                    config: {
-                        "retention.ms": 604800000,
-                        "segment.bytes": 1073741824,
-                    },
-                },
                 clusterSpecOverrides: {
                     kafka: {
                         config: {
@@ -1119,9 +1162,9 @@ describe("MigrationConfigTransformer validation", () => {
                 ...baseConfig.traffic,
                 kafkaClusters: {
                     default: {
+                        topics: baseConfig.traffic.kafkaClusters.default.topics,
                         existing: {
                             kafkaConnection: "broker.example.org:9093",
-                            kafkaTopic: "capture-proxy",
                             auth: {
                                 type: "scram-sha-512",
                                 secretName: "existing-kafka-user-secret",
@@ -1144,6 +1187,7 @@ describe("MigrationConfigTransformer validation", () => {
                 ...baseConfig.traffic,
                 kafkaClusters: {
                     default: {
+                        topics: baseConfig.traffic.kafkaClusters.default.topics,
                         autoCreate: {
                             clusterSpecOverrides: {
                                 kafka: {
@@ -1189,7 +1233,18 @@ describe("MigrationConfigTransformer validation", () => {
                     ...baseConfig.traffic.proxies,
                     proxy2: {
                         source: "source1",
+                        kafka: "default",
+                        kafkaTopic: "proxy2",
                         proxyConfig: {listenPort: 9202 },
+                    },
+                },
+                kafkaClusters: {
+                    default: {
+                        ...baseConfig.traffic.kafkaClusters.default,
+                        topics: {
+                            ...baseConfig.traffic.kafkaClusters.default.topics,
+                            proxy2: {},
+                        },
                     },
                 },
             },

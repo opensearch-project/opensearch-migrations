@@ -638,9 +638,7 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
 
     const normalizedProxies: NonNullable<InputConfig["traffic"]>["proxies"] = {};
     for (const [key, proxy] of Object.entries(traffic.proxies ?? {})) {
-        let normalized = proxy.kafkaTopic === ""
-            ? (({kafkaTopic, ...rest}) => rest)(proxy)
-            : proxy;
+        let normalized = proxy;
 
         // Secure-by-default: inject self-signed TLS when no TLS config is specified.
         // Users can opt out with tls.mode: "plaintext".
@@ -667,13 +665,7 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
 
     const normalizedS3Sources: NonNullable<InputConfig["traffic"]>["s3Sources"] = {};
     for (const [key, s3] of Object.entries(traffic.s3Sources ?? {})) {
-        // Same sentinel-placeholder strip as proxies — empty-string kafkaTopic
-        // means "default to the source name", and the unified schema rejects
-        // empty strings for that field.
-        const normalized = s3.kafkaTopic === ""
-            ? (({kafkaTopic, ...rest}) => rest)(s3)
-            : s3;
-        normalizedS3Sources[key] = normalized;
+        normalizedS3Sources[key] = s3;
     }
 
     return {
@@ -812,19 +804,40 @@ function buildKafkaClientConfig(
     if (!cluster) {
         throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in traffic.kafkaClusters`);
     }
+    const topicDefinition = cluster.topics?.[topic];
+    if (!topicDefinition) {
+        throw new Error(
+            `Kafka topic '${topic}' not found in traffic.kafkaClusters.${kafkaClusterKey}.topics`
+        );
+    }
+    const authoredTopicSpec = topicDefinition.specOverrides ?? {};
+    const topicSpecOverrides = {
+        ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
+        ...authoredTopicSpec,
+        config: {
+            ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES.config,
+            ...(
+                typeof authoredTopicSpec.config === "object"
+                && authoredTopicSpec.config !== null
+                && !Array.isArray(authoredTopicSpec.config)
+                    ? authoredTopicSpec.config
+                    : {}
+            ),
+        },
+    };
     if ('existing' in cluster) {
         const auth = cluster.existing.auth ?? {type: "none" as const};
         return {
             enableMSKAuth: cluster.existing.enableMSKAuth,
             kafkaConnection: cluster.existing.kafkaConnection,
-            kafkaTopic: topic || cluster.existing.kafkaTopic,
+            kafkaTopic: topic,
             managedByWorkflow: false,
             listenerName: "",
             authType: auth.type,
             secretName: "secretName" in auth ? auth.secretName : "",
             caSecretName: "caSecretName" in auth ? auth.caSecretName : "",
             kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
-            topicSpecOverrides: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
+            topicSpecOverrides,
             label: kafkaClusterKey
         };
     }
@@ -842,7 +855,7 @@ function buildKafkaClientConfig(
         secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
         caSecretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-cluster-ca-cert` : "",
         kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
-        topicSpecOverrides: cluster.autoCreate.topicSpecOverrides,
+        topicSpecOverrides,
         label: kafkaClusterKey
     };
 }
@@ -1185,22 +1198,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
     }
 
-    /** Collect auto-created kafka clusters with their aggregated topics from proxies and s3Sources. */
+    /** Build explicitly configured workflow-managed Kafka clusters. */
     private buildKafkaClusters(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        // Aggregate topics per kafka cluster from proxies AND s3Sources
-        const topicsByCluster = new Map<string, Set<string>>();
-        for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
-            const clusterKey = kafkaClusterNameForReference(proxy);
-            if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
-            topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
-        }
-        for (const [s3Name, s3] of Object.entries(userConfig.traffic?.s3Sources || {})) {
-            const clusterKey = kafkaClusterNameForReference(s3);
-            if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
-            topicsByCluster.get(clusterKey)!.add(s3.kafkaTopic || s3Name);
-        }
-
         return Object.entries(kafkaClusters)
             .filter(([_, config]) => 'autoCreate' in config)
             .map(([name, config]) => ({
@@ -1210,7 +1210,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...(config as any).autoCreate,
                     auth: resolveWorkflowManagedKafkaAuth(config as WorkflowManagedKafkaClusterConfig),
                 },
-                topics: [...(topicsByCluster.get(name) ?? [])]
+                topics: Object.keys(config.topics ?? {})
             }));
     }
 
@@ -1222,7 +1222,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             if (!sourceCluster) {
                 throw new Error(`Proxy '${proxyName}' references unknown source cluster '${proxy.source}'`);
             }
-            const topic = proxy.kafkaTopic || proxyName;
+            const topic = proxy.kafkaTopic;
             const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
                 ...sourceCluster,
                 label: proxy.source,
@@ -1492,8 +1492,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             // proxy and s3Source share the same shape for what the replayer cares about:
             // a kafka cluster reference, a topic name, and a sourceLabel.
             const kafkaCluster = kafkaClusterNameForReference(proxy ?? s3Source ?? {});
-            const topicOverride = proxy?.kafkaTopic ?? s3Source?.kafkaTopic ?? "";
-            const topic = topicOverride || sourceName;
+            const topic = proxy?.kafkaTopic ?? s3Source!.kafkaTopic;
             const sourceLabel = proxy?.source ?? s3Source!.sourceLabel;
 
             const replayerConfig = prepareReplayerConfig(
@@ -1525,7 +1524,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const s3Sources = userConfig.traffic?.s3Sources ?? {};
         return Object.entries(s3Sources).map(([name, s3]) => {
             const kafkaCluster = kafkaClusterNameForReference(s3);
-            const topic = s3.kafkaTopic || name;
+            const topic = s3.kafkaTopic;
             return {
                 name,
                 sourceLabel: s3.sourceLabel,

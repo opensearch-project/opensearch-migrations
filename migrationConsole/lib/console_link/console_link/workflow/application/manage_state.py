@@ -14,9 +14,10 @@ from .. import resource_tree as resource_tree_module
 from ..commands.crd_utils import RESETTABLE_PLURALS
 from ..manage_tree_schema import (
     EDIT_ID_BY_TREE_ID,
-    buffer_subgroup_for_plural,
+    buffer_subgroup_for_resource,
+    buffer_subgroup_order_for_resource,
     group_plurals_for,
-    resource_type_label_for_plural,
+    resource_type_label_for_resource,
 )
 from ..manage_tree_status import same_value_state
 from ..resource_tree import (
@@ -261,6 +262,7 @@ class ManageStateService:
     ) -> List[ResourceSection]:
         sections = self._resource_loader(self.namespace)
         steps: Mapping[str, List[Dict[str, Any]]] = {}
+        self.last_config_snapshots = None
         if workflow_data and (workflow_data.get("status") or {}).get("nodes"):
             tree_nodes = build_nested_workflow_tree(dict(workflow_data))
             filtered_tree = filter_tree_nodes(tree_nodes)
@@ -365,13 +367,21 @@ class ManageStateService:
                         if resource.tree_sort_index is not None
                         else 10_000,
                         plural_order.get(resource.plural, 99),
+                        buffer_subgroup_order_for_resource(
+                            resource.plural,
+                            resource.config_parameters or resource.spec,
+                        ),
                         resource.name,
                     ),
                 )
                 for resource in resources:
                     resource_parent = group_draft
-                    subgroup_label = buffer_subgroup_for_plural(
-                        resource.plural
+                    resource_parameters = (
+                        resource.config_parameters or resource.spec
+                    )
+                    subgroup_label = buffer_subgroup_for_resource(
+                        resource.plural,
+                        resource_parameters,
                     )
                     if subgroup_label is not None:
                         subgroup_id = f"{group_id}:{subgroup_label}"
@@ -400,9 +410,13 @@ class ManageStateService:
                     resource_parent.child_ids.append(resource_id)
 
         _rehome_snapshot_resources(drafts, root_ids)
+        _rehome_proxy_capture_topics(drafts)
         _attach_reverse_relationships(drafts)
         nodes = _finalize_nodes(drafts)
         workflow = _workflow_summary(workflow_data)
+        configuration_pending = _configuration_pending(
+            self.last_config_snapshots,
+        )
         semantic = {
             "formatVersion": 1,
             "namespace": self.namespace,
@@ -410,6 +424,7 @@ class ManageStateService:
             "workflow": workflow.to_dict() if workflow else None,
             "rootIds": root_ids,
             "rootRevisions": [nodes[node_id].revision for node_id in root_ids],
+            "configurationPending": configuration_pending,
             "problems": [problem.to_dict() for problem in problems],
         }
         observed_at = _format_datetime(self._clock())
@@ -422,6 +437,7 @@ class ManageStateService:
             workflow=workflow,
             root_ids=tuple(root_ids),
             nodes=nodes,
+            configuration_pending=configuration_pending,
             problems=tuple(problems),
         ))
 
@@ -456,7 +472,10 @@ class ManageStateService:
             comparisons=comparisons,
             resource_plural=resource.plural,
             resource_name=resource.name,
-            resource_type=resource_type_label_for_plural(resource.plural),
+            resource_type=resource_type_label_for_resource(
+                resource.plural,
+                resource.config_parameters or resource.spec,
+            ),
             config_presence=dict(resource.config_presence or {}),
             navigation_key=_snapshot_migration_navigation_key(resource),
         )
@@ -1096,9 +1115,100 @@ def _rehome_snapshot_resources(
             del drafts[section.id]
 
 
+def _draft_state_value(
+    draft: _NodeDraft,
+    path: str,
+    state: str = "pending",
+) -> Optional[Any]:
+    for comparison in draft.comparisons:
+        if comparison.path != path:
+            continue
+        value_state = getattr(comparison, state)
+        return value_state.value if value_state.present else None
+    for detail in draft.details:
+        if detail.label == path and detail.kind == "spec":
+            return detail.value
+    return None
+
+
+def _draft_navigation_value(
+    draft: _NodeDraft,
+    path: str,
+) -> Optional[Any]:
+    presence = draft.config_presence or {}
+    states = []
+    if presence.get("pending", True):
+        states.append("pending")
+    if presence.get("submitted", presence.get("deployed", True)):
+        states.append("submitted")
+    if presence.get("deployed", True):
+        states.append("deployed")
+    for state in states:
+        value = _draft_state_value(draft, path, state)
+        if value is not None:
+            return value
+    return None
+
+
+def _rehome_proxy_capture_topics(
+    drafts: Dict[str, _NodeDraft],
+) -> None:
+    """Present proxy-owned CapturedTraffic CRs as their Kafka topics.
+
+    The CR remains the runtime backing object for logs, status, and reset, but
+    its stable navigation home matches the topic definition used by the editor.
+    """
+    for draft in tuple(drafts.values()):
+        if (
+            draft.resource_plural != "capturedtraffics"
+            or draft.resource_type != "Kafka topic"
+        ):
+            continue
+        cluster_name = str(
+            _draft_navigation_value(draft, "kafkaClusterName") or ""
+        )
+        topic_name = str(_draft_navigation_value(draft, "topicName") or "")
+        cluster = (
+            drafts.get(f"resource:kafkaclusters:{cluster_name}")
+            or drafts.get(f"resource:kafkaconfigs:{cluster_name}")
+        )
+        if cluster is None or not topic_name:
+            continue
+
+        previous_parent = drafts.get(draft.parent_id or "")
+        if previous_parent and draft.id in previous_parent.child_ids:
+            previous_parent.child_ids.remove(draft.id)
+
+        topic_target = (
+            f"edit:traffic.kafkaClusters.{cluster_name}.topics"
+        )
+        topics_id = f"definition-group:{topic_target}"
+        topics = drafts.get(topics_id)
+        if topics is None:
+            topics = _NodeDraft(
+                id=topics_id,
+                parent_id=cluster.id,
+                kind="group",
+                label="Topics",
+                status="ok",
+                capabilities=(
+                    ManageCapability(
+                        kind="edit",
+                        target_id=topic_target,
+                        label="Edit Topics",
+                    ),
+                ),
+            )
+            drafts[topics_id] = topics
+            cluster.child_ids.insert(0, topics_id)
+        draft.parent_id = topics_id
+        draft.label = topic_name
+        topics.child_ids.append(draft.id)
+
+
 def _attach_reverse_relationships(drafts: Mapping[str, _NodeDraft]) -> None:
     for source in tuple(drafts.values()):
-        for relationship in tuple(source.relationships):
+        for index, relationship in enumerate(tuple(source.relationships)):
             if (
                 relationship.direction != "requires"
                 or not relationship.target_id
@@ -1107,6 +1217,17 @@ def _attach_reverse_relationships(drafts: Mapping[str, _NodeDraft]) -> None:
             target = drafts.get(relationship.target_id)
             if target is None:
                 continue
+            if relationship.target_name != target.label:
+                relationship = ManageRelationship(
+                    kind=relationship.kind,
+                    direction=relationship.direction,
+                    target_id=relationship.target_id,
+                    target_name=target.label,
+                    target_plural=relationship.target_plural,
+                    target_phase=relationship.target_phase,
+                    target_status=relationship.target_status,
+                )
+                source.relationships[index] = relationship
             target.relationships.append(ManageRelationship(
                 kind=relationship.kind,
                 direction="required-by",
@@ -1172,6 +1293,18 @@ def _resource_status(
     if diff.get("has_pending_submit_changes") or diff.get("has_submitted_changes"):
         return "changed"
     return phase_status
+
+
+def _configuration_pending(
+    snapshots: Optional[Mapping[str, Any]],
+) -> bool:
+    if snapshots is None:
+        return False
+    submitted = snapshots.get("submitted")
+    pending = snapshots.get("pending")
+    if submitted is None or pending is None:
+        return submitted != pending
+    return submitted.get("workflowConfig") != pending.get("workflowConfig")
 
 
 def _phase_status(phase: Optional[str]) -> str:

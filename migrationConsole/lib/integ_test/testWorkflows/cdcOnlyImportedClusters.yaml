@@ -118,9 +118,18 @@ spec:
                 "targetClusters": { "target1": $target },
                 "snapshotMigrationConfigs": [],
                 "traffic": {
-                  "kafkaClusters": { "default": { "autoCreate": {} } },
+                  "kafkaClusters": {
+                    "default": {
+                      "autoCreate": {},
+                      "topics": {
+                        "capture-proxy": {}
+                      }
+                    }
+                  },
                   "proxies": {
                     "capture-proxy": {
+                      "kafka": "default",
+                      "kafkaTopic": "capture-proxy",
                       "source": "source1",
                       "proxyConfig": ({
                         "listenPort": 9201,

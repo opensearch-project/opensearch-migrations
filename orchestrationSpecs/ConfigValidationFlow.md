@@ -332,7 +332,7 @@ Purpose:
 - validate:
   - `clusterSpecOverrides`
   - `nodePoolSpecOverrides`
-  - `topicSpecOverrides`
+  - `topics.<topic>.specOverrides`
 - replace the loose Strimzi `Kafka.spec.kafka.config` map with the pinned Kafka
   broker config schema
 
@@ -381,7 +381,7 @@ These drive:
 
 - `clusterSpecOverrides`
 - `nodePoolSpecOverrides`
-- `topicSpecOverrides`
+- `topics.<topic>.specOverrides`
 
 ### Kafka Broker Config Strengthening
 

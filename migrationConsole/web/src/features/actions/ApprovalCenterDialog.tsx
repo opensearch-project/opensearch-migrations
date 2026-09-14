@@ -12,6 +12,7 @@ import type {
   ApprovalGateSummary,
 } from "../../api/client";
 import { ModalDialog } from "../../components/ModalDialog";
+import { presentResourceActionText } from "../status/operationPresentation";
 
 
 const STATE_LABELS: Record<ApprovalGateSummary["state"], string> = {
@@ -48,7 +49,11 @@ function ApprovalToggle({
       disabled={disabled}
       onClick={() => onToggle(gate, !gate.approved)}
       role="checkbox"
-      title={gate.disabledReason ?? `Preapprove ${gate.stage}`}
+      title={
+        gate.disabledReason
+          ? presentResourceActionText(gate.disabledReason)
+          : `Preapprove ${gate.stage}`
+      }
       type="button"
     >
       <span aria-hidden="true">

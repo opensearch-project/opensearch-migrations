@@ -9,8 +9,8 @@ import {
   FileOutput,
   LoaderCircle,
   Pencil,
-  RotateCcw,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -21,6 +21,7 @@ import {
   getResetPlan,
 } from "../../api/client";
 import { ModalDialog } from "../../components/ModalDialog";
+import { presentResourceActionText } from "../status/operationPresentation";
 import type { ApprovalCandidate } from "./approvals";
 
 
@@ -211,8 +212,8 @@ export function ApprovalDialog({
               )}
               type="button"
             >
-              <RotateCcw aria-hidden="true" />
-              Reset &amp; resubmit all ({resetCandidates.length})
+              <Trash2 aria-hidden="true" />
+              Delete resources and resubmit all ({resetCandidates.length})
             </button>
           ) : null}
         </>
@@ -245,7 +246,7 @@ export function ApprovalDialog({
                       {waiting
                         ? "Action in progress"
                         : resetRequired
-                          ? "Impossible update / reset required"
+                          ? "Impossible update / resource deletion required"
                           : impossible
                             ? "Impossible update / resource absent"
                             : "Approval required"}
@@ -277,15 +278,17 @@ export function ApprovalDialog({
                       <div className="action-warning">
                         <AlertTriangle aria-hidden="true" />
                         <span>
-                          {candidate.immutableReason ?? review.data.reason}
+                          {presentResourceActionText(
+                            candidate.immutableReason ?? review.data.reason,
+                          )}
                         </span>
                       </div>
                     ) : null}
                     {resetRequired ? (
                       <p className="approval-remedy">
                         The deployed resource must be deleted before this
-                        configuration can be applied. Reset and resubmit
-                        performs both steps as one tracked operation.
+                        configuration can be applied. Delete resource and
+                        resubmit performs both steps as one tracked operation.
                       </p>
                     ) : impossible ? (
                       <p className="approval-remedy">
@@ -345,8 +348,8 @@ export function ApprovalDialog({
                       >
                         {busy
                           ? <LoaderCircle className="spin" aria-hidden="true" />
-                          : <RotateCcw aria-hidden="true" />}
-                        Reset &amp; resubmit
+                          : <Trash2 aria-hidden="true" />}
+                        Delete resource and resubmit
                       </button>
                     ) : !impossible ? (
                       <button
@@ -357,7 +360,13 @@ export function ApprovalDialog({
                           || Boolean(candidate.disabledReason)
                         }
                         onClick={() => void approve(candidate)}
-                        title={candidate.disabledReason ?? undefined}
+                        title={
+                          candidate.disabledReason
+                            ? presentResourceActionText(
+                                candidate.disabledReason,
+                              )
+                            : undefined
+                        }
                         type="button"
                       >
                         {busy
@@ -376,9 +385,10 @@ export function ApprovalDialog({
           <section className="combined-reset-review">
             <header>
               <div>
-                <strong>Combined reset plan</strong>
+                <strong>Combined resource deletion plan</strong>
                 <span>
-                  Review and resubmit all impossible deployed updates together.
+                  Delete resources and resubmit all impossible deployed
+                  updates together.
                 </span>
               </div>
               {combinedPlan.data ? (
@@ -387,14 +397,14 @@ export function ApprovalDialog({
                     combinedPlan.data.targets.length === 1
                       ? "resource"
                       : "resources"
-                  } removed
+                  } to delete
                 </small>
               ) : null}
             </header>
             {combinedPlan.isPending ? (
               <div className="action-review-loading" role="status">
                 <LoaderCircle className="spin" aria-hidden="true" />
-                Building the dependency-safe reset plan
+                Building the dependency-safe resource deletion plan
               </div>
             ) : combinedPlan.isError ? (
               <DialogError
@@ -429,9 +439,11 @@ export function ApprovalDialog({
 export function ResetDialog({
   targetId,
   onClose,
+  onStarted,
 }: Readonly<{
   targetId: string;
   onClose: () => void;
+  onStarted?: () => void;
 }>) {
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
@@ -449,6 +461,7 @@ export function ResetDialog({
       await executeReset(plan.data.token);
       await queryClient.invalidateQueries({ queryKey: ["operations"] });
       onClose();
+      onStarted?.();
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
       if (
@@ -465,12 +478,12 @@ export function ResetDialog({
   return (
     <ModalDialog
       className="action-review-dialog reset-review-dialog"
-      closeLabel="Close reset"
+      closeLabel="Close resource deletion"
       escapeDisabled={submitting}
-      icon={<RotateCcw aria-hidden="true" />}
-      kicker="Dependency-safe reset"
+      icon={<Trash2 aria-hidden="true" />}
+      kicker="Dependency-safe resource deletion"
       onClose={onClose}
-      title="Review reset plan"
+      title="Review resource deletion"
       footer={(
         <>
           <button disabled={submitting} onClick={onClose} type="button">
@@ -484,8 +497,8 @@ export function ResetDialog({
           >
             {submitting
               ? <LoaderCircle className="spin" aria-hidden="true" />
-              : <RotateCcw aria-hidden="true" />}
-            Reset exact plan
+              : <Trash2 aria-hidden="true" />}
+            Delete listed resources
           </button>
         </>
       )}
@@ -501,7 +514,9 @@ export function ResetDialog({
           <>
             <p>
               This exact version-bound plan will delete the following
-              resources in dependency-safe order.
+              resources in dependency-safe order. It does not undo effects in
+              external systems, such as migrated indexes or restored
+              snapshots.
             </p>
             <ol className="reset-target-list">
               {plan.data.targets.map((target) => (
@@ -519,7 +534,7 @@ export function ResetDialog({
             {[...plan.data.messages, ...plan.data.warnings].map((warning) => (
               <div className="action-warning" key={warning}>
                 <AlertTriangle aria-hidden="true" />
-                <span>{warning}</span>
+                <span>{presentResourceActionText(warning)}</span>
               </div>
             ))}
           </>

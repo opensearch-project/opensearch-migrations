@@ -41,12 +41,8 @@ import {
 import {z} from "zod";
 import {parse, stringify} from "yaml";
 import {
-    DEFAULT_AUTO_CREATE_CONFIG,
-    DEFAULT_KAFKA_CLUSTER_NAME,
-    looseKafkaEntriesForConfig,
-} from "./kafkaConfigResolution";
-import {
     buildConfigDependencyGraph,
+    downstreamConfigReferences,
     type ConfigReferenceEdge,
 } from "./configDependencies";
 import {
@@ -104,6 +100,7 @@ import {
     schemaObjectChildren,
     schemaDescription,
     schemaShape,
+    singleKeyUnionBranchFor,
     singleKeyUnionMode,
     singleKeyUnionValueForVariant,
     uiHintAt,
@@ -169,9 +166,9 @@ const DEFAULT_CONFIG_FACTORIES: Record<string, () => Record<string, unknown>> = 
         endpoint: "",
         allowInsecure: false,
     }),
-    "traffic.kafkaClusters": () => ({autoCreate: {}}),
-    "traffic.proxies": () => ({source: "", proxyConfig: {}}),
-    "traffic.s3Sources": () => ({s3Uri: "", awsRegion: "", sourceLabel: ""}),
+    "traffic.kafkaClusters": () => ({autoCreate: {}, topics: {}}),
+    "traffic.proxies": () => ({source: "", kafka: "", kafkaTopic: "", proxyConfig: {}}),
+    "traffic.s3Sources": () => ({s3Uri: "", awsRegion: "", kafka: "", kafkaTopic: "", sourceLabel: ""}),
     "traffic.replayers": () => ({fromCapturedTraffic: "", toTarget: ""}),
     snapshotMigrationConfigs: () => ({
         fromSource: "",
@@ -543,7 +540,7 @@ function snapshotInfoNode(
     });
 }
 
-function kafkaClusterNode(name: string, value: any): EditNode {
+function kafkaClusterNode(name: string, value: any, ctx: EditContext): EditNode {
     const rootPath = ["traffic", "kafkaClusters", name];
     const {modeNode, branchChildren} = singleKeyUnionMode(
         rootPath,
@@ -553,6 +550,20 @@ function kafkaClusterNode(name: string, value: any): EditNode {
         KAFKA_CLUSTER_DESCRIPTION,
         "autoCreate",
     );
+    const selectedBranch = singleKeyUnionBranchFor(
+        KAFKA_CLUSTER_CONFIG,
+        String(modeNode.value),
+    );
+    const topicsNode = selectedBranch
+        ? schemaFieldNodeFor(
+            selectedBranch.optionSchema,
+            rootPath,
+            "topics",
+            value,
+            undefined,
+            ctx.schemaContext,
+        )
+        : undefined;
     return finalizeNode({
         id: `edit:${rootPath.join(".")}`,
         path: rootPath,
@@ -560,41 +571,26 @@ function kafkaClusterNode(name: string, value: any): EditNode {
         valueKind: "object",
         description: KAFKA_CLUSTER_DESCRIPTION,
         status: "ok",
-        children: [modeNode, ...branchChildren],
+        children: [modeNode, ...branchChildren, ...(topicsNode ? [topicsNode] : [])],
     });
 }
 
-function kafkaGroupNode(traffic: Record<string, any> | undefined): EditNode {
+function kafkaGroupNode(
+    traffic: Record<string, any> | undefined,
+    ctx: EditContext,
+): EditNode {
     const path = ["traffic", "kafkaClusters"];
     const authored = isPlainObject(traffic?.kafkaClusters)
         ? traffic.kafkaClusters
         : {};
-    const effective = Object.fromEntries(
-        looseKafkaEntriesForConfig({traffic: traffic ?? {}}),
-    );
-    if (!Object.hasOwn(effective, DEFAULT_KAFKA_CLUSTER_NAME)) {
-        effective[DEFAULT_KAFKA_CLUSTER_NAME] =
-            structuredClone(DEFAULT_AUTO_CREATE_CONFIG);
-    }
     return recordGroupNode({
         path,
         label: "Kafka Clusters",
         description: KAFKA_CLUSTERS_DESCRIPTION,
         inputHint: TRAFFIC_KAFKA_RECORD_HINT,
         essential: true,
-        config: effective,
-        itemNode: (name, value) => {
-            const node = kafkaClusterNode(name, value);
-            if (!Object.hasOwn(authored, name)) {
-                node.implicit = true;
-                node.valueDefaulted = true;
-                node.description = [
-                    "This cluster is implicit until you change one of its settings.",
-                    node.description,
-                ].filter(Boolean).join(" ");
-            }
-            return node;
-        },
+        config: authored,
+        itemNode: (name, value) => kafkaClusterNode(name, value, ctx),
         addLabel: "Kafka cluster",
         addDescription: "Create a Kafka cluster configuration in pending workflow YAML.",
         addInputHint: recordKeyHint(TRAFFIC_KAFKA_RECORD_HINT),
@@ -731,14 +727,14 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
         description: "Kafka clusters and optional pre-recorded traffic sources used as live-traffic buffers.",
         status: "ok",
         children: [
-            kafkaGroupNode(traffic),
+            kafkaGroupNode(traffic, ctx),
             recordGroupNode({
                 path: ["traffic", "s3Sources"],
-                label: "S3 Captured Traffic Sources",
+                label: "Previously Captured Traffic",
                 description: schemaFieldDescription(
                     TRAFFIC_CONFIG,
                     "s3Sources",
-                    "Optional S3 archives loaded into Kafka for replay when you already have captured traffic and do not need a live capture proxy.",
+                    "Previously captured traffic archives loaded from S3 into an explicitly selected Kafka topic for replay.",
                 ),
                 inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
                 expert: true,
@@ -1639,6 +1635,14 @@ function renameableConfigPath(path: string[]): boolean {
     ) {
         return true;
     }
+    if (
+        path.length === 5
+        && path[0] === "traffic"
+        && path[1] === "kafkaClusters"
+        && path[3] === "topics"
+    ) {
+        return true;
+    }
     return (
         path.length === 5
         && path[0] === "sourceClusters"
@@ -1730,6 +1734,26 @@ function sourceSnapshotsRemovedByPath(config: any, path: string[]): {sourceName:
 
 function setAtPath(config: any, path: string[], value: unknown): void {
     const {parent, key} = parentAtPath(config, path);
+    if (
+        key === "kafka"
+        && path.length === 4
+        && path[0] === "traffic"
+        && ["proxies", "s3Sources"].includes(path[1])
+    ) {
+        const selectedCluster = config?.traffic?.kafkaClusters?.[String(value)];
+        const selectedTopics = isPlainObject(selectedCluster?.topics)
+            ? selectedCluster.topics
+            : {};
+        if (
+            typeof parent.kafkaTopic === "string"
+            && parent.kafkaTopic
+            && !Object.hasOwn(selectedTopics, parent.kafkaTopic)
+        ) {
+            parent.kafkaTopic = "";
+        }
+        parent[key] = value;
+        return;
+    }
     if (
         key === "fromSource" &&
         path.length === 3 &&
@@ -1833,30 +1857,36 @@ function setAtPath(config: any, path: string[], value: unknown): void {
     parent[key] = value;
 }
 
-function removeAtPath(config: any, path: string[]): void {
+function removeAtPath(
+    config: any,
+    path: string[],
+    referencingResources: "delete" | "clear-references" = "delete",
+): void {
     if (path.length < 2) {
         throw new Error("Only named config entries can be removed");
     }
-    const removedSourceName = sourceClusterRemovedByPath(path);
-    const removedSourceSnapshots = sourceSnapshotsRemovedByPath(config, path);
+    if (referencingResources === "clear-references") {
+        const referenceFields = buildConfigDependencyGraph(config)
+            .filter((reference) => (
+                startsWithConfigPath(reference.toPath, path)
+                && !startsWithConfigPath(reference.fromPath, path)
+            ))
+            .map((reference) => reference.fromFieldPath);
+        removeConfigReferencePaths(config, referenceFields);
+    } else {
+        const downstreamPaths = downstreamConfigReferences(config, path)
+            .map((reference) => reference.fromPath);
+        removeConfigReferencePaths(config, downstreamPaths);
+    }
     const {parent, key} = parentAtPath(config, path);
     if (!parent || typeof parent !== "object" || !(key in parent)) {
         throw new Error(`Config entry does not exist at path ${path.join(".")}`);
     }
     if (Array.isArray(parent)) {
         parent.splice(Number(key), 1);
-        if (removedSourceSnapshots) {
-            removePerSnapshotConfigReferences(config, removedSourceSnapshots.sourceName, removedSourceSnapshots.snapshotNames);
-        }
         return;
     }
     delete parent[key];
-    if (removedSourceName) {
-        removeSourceClusterReferences(config, removedSourceName);
-    }
-    if (removedSourceSnapshots) {
-        removePerSnapshotConfigReferences(config, removedSourceSnapshots.sourceName, removedSourceSnapshots.snapshotNames);
-    }
 }
 
 function unsetAtPath(config: any, path: string[]): void {
@@ -2044,7 +2074,11 @@ export function applyEditOperation(
     } else if (operation.op === "unset") {
         unsetAtPath(nextConfig, operation.path);
     } else if (operation.op === "removeConfig") {
-        removeAtPath(nextConfig, operation.path);
+        removeAtPath(
+            nextConfig,
+            operation.path,
+            operation.referencingResources,
+        );
     } else if (operation.op === "renameConfig") {
         renameAtPath(nextConfig, operation.path, operation.newName);
     } else if (operation.op === "add") {

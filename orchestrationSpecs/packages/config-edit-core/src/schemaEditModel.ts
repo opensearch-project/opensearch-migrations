@@ -61,6 +61,9 @@ export interface EditNode {
     validation?: {
         pattern?: string;
         message?: string;
+        minimum?: number;
+        maximum?: number;
+        integer?: boolean;
     };
     diagnostics?: EditDiagnostic[];
     collapsed?: boolean;
@@ -100,7 +103,11 @@ export interface EditStateV1 {
 export type EditOperation =
     | { op: "set"; path: string[]; value: unknown }
     | { op: "unset"; path: string[] }
-    | { op: "removeConfig"; path: string[] }
+    | {
+        op: "removeConfig";
+        path: string[];
+        referencingResources?: "delete" | "clear-references";
+    }
     | { op: "renameConfig"; path: string[]; newName: string }
     | { op: "add"; path: string[]; value: unknown };
 
@@ -542,8 +549,18 @@ function resolveInputHint(
             },
         }
         : inputHint;
+    const resolvedSourcePaths = inputHint.kind === "reference"
+        ? resolveReferenceSourcePaths(inputHint, currentPath, context)
+        : [];
+    const hintWithResolvedPath = (
+        inputHint.kind === "reference"
+        && !inputHint.sourcePath
+        && resolvedSourcePaths.length === 1
+    )
+        ? {...resolvedHint, sourcePath: resolvedSourcePaths[0]}
+        : resolvedHint;
     const options = referenceOptions ?? resolveReferenceOptions(inputHint, currentPath, context);
-    return options ? {...resolvedHint, options} : resolvedHint;
+    return options ? {...hintWithResolvedPath, options} : hintWithResolvedPath;
 }
 
 function schemaConstructorName(schema: any): string {
@@ -608,8 +625,10 @@ export function resolveJsonSchemaRef(schema: JsonSchema | undefined, root: JsonS
         }
     }
     const resolved = isJsonSchemaObject(current) ? current : schema;
+    const {$ref: _ref, ...referenceAnnotations} = schema;
     return {
         ...resolved,
+        ...referenceAnnotations,
         description: schema.description ?? resolved.description,
     };
 }
@@ -1220,7 +1239,20 @@ function jsonSchemaFieldNode(
         return mark(booleanNode(path, key, value === true, description, expert, presence));
     }
     if (valueType === "number" || valueType === "string") {
-        return mark(scalarNode(path, key, value ?? "", description, userRequired, jsonSchemaInputHint(resolved, path, context), valueType, expert, presence, externalRef));
+        const node = scalarNode(path, key, value ?? "", description, userRequired, jsonSchemaInputHint(resolved, path, context), valueType, expert, presence, externalRef);
+        if (valueType === "number") {
+            node.validation = {
+                ...node.validation,
+                ...(typeof resolved.minimum === "number"
+                    ? {minimum: resolved.minimum}
+                    : {}),
+                ...(typeof resolved.maximum === "number"
+                    ? {maximum: resolved.maximum}
+                    : {}),
+                integer: jsonSchemaType(resolved) === "integer",
+            };
+        }
+        return mark(node);
     }
     if (externalRef?.selection?.target === "objectRef") {
         return mark(objectRefNode(path, key, value, description, userRequired, externalRef));
@@ -1341,17 +1373,28 @@ export function singleKeyUnionBranches(schema: any): SingleKeyUnionBranch[] {
     if (!options.length) {
         return [];
     }
-    const branches = options.map(optionSchema => {
-        const shape = schemaShape(optionSchema);
-        const keys = Object.keys(shape ?? {});
-        if (keys.length !== 1) {
+    const shapes = options.map(optionSchema => schemaShape(optionSchema));
+    if (!shapes.every(Boolean)) {
+        return [];
+    }
+    const sharedKeys = shapes.reduce<Set<string>>((shared, shape, index) => {
+        const keys = new Set(Object.keys(shape ?? {}));
+        return index === 0
+            ? keys
+            : new Set([...shared].filter(key => keys.has(key)));
+    }, new Set());
+    const branches = options.map((optionSchema, index) => {
+        const shape = shapes[index]!;
+        const selectorKeys = Object.keys(shape)
+            .filter(key => !sharedKeys.has(key));
+        if (selectorKeys.length !== 1) {
             return undefined;
         }
-        const value = keys[0];
+        const value = selectorKeys[0];
         return {
             value,
             optionSchema,
-            fieldSchema: shape![value],
+            fieldSchema: shape[value],
             description: schemaDescription(optionSchema),
         };
     });
@@ -2386,6 +2429,12 @@ export function childSchemaAtPath(schema: any, path: string[]): any | undefined 
         return childSchemaAtPath(shape[part], rest);
     }
 
+    const optionFields = schemaOptions(schema)
+        .map(optionSchema => schemaShape(optionSchema)?.[part]);
+    if (optionFields.length > 0 && optionFields.every(Boolean)) {
+        return childSchemaAtPath(optionFields[0], rest);
+    }
+
     const keyedBranch = singleKeyUnionBranches(schema).find(branch => branch.value === part);
     if (keyedBranch) {
         return childSchemaAtPath(keyedBranch.fieldSchema, rest);
@@ -2427,7 +2476,18 @@ export function singleKeyUnionValueForVariant(schema: any, existing: any, varian
     if (!branch) {
         throw new Error(`Unknown variant: ${String(variant)}`);
     }
+    const branchValues = new Set(singleKeyUnionBranches(schema).map(item => item.value));
+    const sharedValues = Object.fromEntries(
+        Object.keys(schemaShape(branch.optionSchema) ?? {}).flatMap(key => (
+            !branchValues.has(key)
+            && isPlainObject(existing)
+            && Object.hasOwn(existing, key)
+                ? [[key, existing[key]]]
+                : []
+        )),
+    );
     return {
+        ...sharedValues,
         [branch.value]: isPlainObject(existing?.[branch.value]) ? existing[branch.value] : {},
     };
 }

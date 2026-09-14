@@ -48,6 +48,194 @@ function resourceVisible(node: ManageNode, mode: ResourceViewMode): boolean {
 }
 
 
+type ResourceValueState = Exclude<ResourceViewMode, "all">;
+
+
+function navigationState(
+  node: ManageNode,
+  mode: ResourceViewMode,
+): ResourceValueState {
+  if (mode !== "all") return mode;
+  const presence = node.configPresence ?? {};
+  if (presence.pending ?? true) return "pending";
+  if (presence.submitted ?? presence.deployed ?? true) return "submitted";
+  return "deployed";
+}
+
+
+function comparisonValue(
+  node: ManageNode,
+  path: string,
+  state: ResourceValueState,
+): string | null | undefined {
+  const comparison = node.comparisons?.find(
+    (candidate) => candidate.path === path,
+  );
+  if (!comparison) return undefined;
+  const valueState = comparison[state];
+  return valueState.present && typeof valueState.value === "string"
+    ? valueState.value
+    : null;
+}
+
+
+function detailValue(node: ManageNode, label: string): string | undefined {
+  const detail = node.details?.find(
+    (candidate) => candidate.kind === "spec" && candidate.label === label,
+  );
+  return typeof detail?.value === "string" ? detail.value : undefined;
+}
+
+
+function clusterNameForNode(
+  snapshot: ManageSnapshot,
+  node: ManageNode,
+): string | undefined {
+  const parent = node.parentId ? snapshot.nodes[node.parentId] : undefined;
+  const cluster = parent?.parentId
+    ? snapshot.nodes[parent.parentId]
+    : undefined;
+  return (
+    cluster?.kind === "resource"
+    && ["kafkaclusters", "kafkaconfigs"].includes(
+      cluster.resourcePlural ?? "",
+    )
+  )
+    ? cluster.resourceName ?? cluster.label
+    : undefined;
+}
+
+
+function topicValue(
+  snapshot: ManageSnapshot,
+  node: ManageNode,
+  path: "kafkaClusterName" | "topicName",
+  state: ResourceValueState,
+): string | undefined {
+  const compared = comparisonValue(node, path, state);
+  if (compared !== undefined) return compared ?? undefined;
+  if (path === "topicName") {
+    return node.label || detailValue(node, path);
+  }
+  return clusterNameForNode(snapshot, node) ?? detailValue(node, path);
+}
+
+
+function emptyTopicGroup(
+  id: string,
+  clusterId: string,
+  revision: string,
+): ManageNode {
+  return {
+    id,
+    revision: `${revision}:${id}`,
+    parentId: clusterId,
+    childIds: [],
+    kind: "group",
+    label: "Topics",
+    description: null,
+    status: "ok",
+    phase: null,
+    valueSummary: null,
+    activityAt: null,
+    diagnostics: [],
+    capabilities: [],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: null,
+    resourceName: null,
+    resourceType: null,
+    configPresence: {},
+    configState: null,
+    navigationKey: [],
+  };
+}
+
+
+function projectKafkaTopicNavigation(
+  snapshot: ManageSnapshot,
+  mode: ResourceViewMode,
+): ManageSnapshot {
+  const nodes = Object.fromEntries(
+    Object.entries(snapshot.nodes).map(([nodeId, node]) => [
+      nodeId,
+      { ...node, childIds: [...(node.childIds ?? [])] },
+    ]),
+  ) as ManageSnapshot["nodes"];
+  const topicNodes = Object.values(nodes).filter(
+    (node) => (
+      node.kind === "resource"
+      && node.resourcePlural === "capturedtraffics"
+      && node.resourceType === "Kafka topic"
+    ),
+  );
+
+  topicNodes.forEach((node) => {
+    const state = navigationState(node, mode);
+    const clusterName = topicValue(snapshot, node, "kafkaClusterName", state);
+    const topicName = topicValue(snapshot, node, "topicName", state);
+    if (!clusterName || !topicName) return;
+    const cluster = (
+      nodes[`resource:kafkaclusters:${clusterName}`]
+      ?? nodes[`resource:kafkaconfigs:${clusterName}`]
+    );
+    if (!cluster) return;
+
+    if (node.parentId && nodes[node.parentId]) {
+      nodes[node.parentId] = {
+        ...nodes[node.parentId],
+        childIds: (nodes[node.parentId].childIds ?? []).filter(
+          (childId) => childId !== node.id,
+        ),
+      };
+    }
+    const topicTarget = `edit:traffic.kafkaClusters.${clusterName}.topics`;
+    const groupId = `definition-group:${topicTarget}`;
+    const group = nodes[groupId]
+      ?? emptyTopicGroup(groupId, cluster.id, snapshot.revision);
+    nodes[groupId] = {
+      ...group,
+      parentId: cluster.id,
+      childIds: [...new Set([...(group.childIds ?? []), node.id])],
+    };
+    nodes[cluster.id] = {
+      ...cluster,
+      childIds: [...new Set([...(cluster.childIds ?? []), groupId])],
+    };
+    nodes[node.id] = {
+      ...node,
+      revision: `${node.revision}:navigation:${state}:${clusterName}:${topicName}`,
+      parentId: groupId,
+      label: topicName,
+    };
+  });
+
+  Object.values(nodes)
+    .filter((node) => (
+      node.kind === "group"
+      && node.id.startsWith(
+        "definition-group:edit:traffic.kafkaClusters.",
+      )
+      && node.id.endsWith(".topics")
+      && (node.childIds ?? []).length === 0
+    ))
+    .forEach((group) => {
+      if (group.parentId && nodes[group.parentId]) {
+        nodes[group.parentId] = {
+          ...nodes[group.parentId],
+          childIds: (nodes[group.parentId].childIds ?? []).filter(
+            (childId) => childId !== group.id,
+          ),
+        };
+      }
+      delete nodes[group.id];
+    });
+
+  return { ...snapshot, nodes };
+}
+
+
 function includeDescendants(
   snapshot: ManageSnapshot,
   nodeId: string,
@@ -79,17 +267,18 @@ export function projectResourceView(
   snapshot: ManageSnapshot,
   mode: ResourceViewMode,
 ): ManageSnapshot {
-  if (mode === "all") return snapshot;
+  const navigated = projectKafkaTopicNavigation(snapshot, mode);
+  if (mode === "all") return navigated;
   const included = new Set<string>();
-  Object.values(snapshot.nodes).forEach((node) => {
+  Object.values(navigated.nodes).forEach((node) => {
     if (node.kind !== "resource" || !resourceVisible(node, mode)) return;
     included.add(node.id);
-    includeAncestors(snapshot, node, included);
-    includeDescendants(snapshot, node.id, included);
+    includeAncestors(navigated, node, included);
+    includeDescendants(navigated, node.id, included);
   });
   const nodes = Object.fromEntries(
     [...included].flatMap((nodeId) => {
-      const node = snapshot.nodes[nodeId];
+      const node = navigated.nodes[nodeId];
       if (!node) return [];
       return [[nodeId, {
         ...node,
@@ -98,9 +287,9 @@ export function projectResourceView(
     }),
   );
   return {
-    ...snapshot,
+    ...navigated,
     nodes,
-    rootIds: snapshot.rootIds.filter((rootId) => included.has(rootId)),
+    rootIds: navigated.rootIds.filter((rootId) => included.has(rootId)),
   };
 }
 

@@ -67,7 +67,7 @@ from console_link.workflow.application.runtime_status import (
     RuntimeStatusMetrics,
     RuntimeStatusSection,
 )
-from console_link.workflow.web.app import create_app
+from console_link.workflow.web.app import WebAppSettings, create_app
 from console_link.workflow.web.openapi import main as generate_openapi
 
 
@@ -646,10 +646,12 @@ def test_log_routes_use_node_capability_and_server_issued_targets(tmp_path):
         static_dir=_static_bundle(tmp_path),
         coordinator=coordinator,
         logs=logs,
-        external_logs_url=(
-            "https://console.aws.amazon.com/cloudwatch/home"
-            "?region=us-east-2#logsV2:log-groups/log-group/"
-            "$252Fmigration-assistant-dev-us-east-2$252Flogs"
+        settings=WebAppSettings(
+            external_logs_url=(
+                "https://console.aws.amazon.com/cloudwatch/home"
+                "?region=us-east-2#logsV2:log-groups/log-group/"
+                "$252Fmigration-assistant-dev-us-east-2$252Flogs"
+            ),
         ),
     )
 
@@ -1021,7 +1023,7 @@ def test_vap_reset_saves_then_submits_a_new_workflow_without_approving_old_gate(
         resets=resets,
         operations=operations,
         config_documents=submissions,
-        workflow_name="migration-test",
+        settings=WebAppSettings(workflow_name="migration-test"),
     )
 
     with TestClient(app) as client:
@@ -1331,6 +1333,34 @@ def test_config_document_load_and_save_are_revisioned_and_invalidate_state(
     assert coordinator.config_invalidations == ["12"]
 
 
+def test_config_schema_exposes_the_cluster_enriched_editor_schema(tmp_path):
+    schema_path = tmp_path / "workflowMigration.schema.json"
+    schema_path.write_text(
+        json.dumps({
+            "$id": "workflowMigration.schema.json",
+            "type": "object",
+            "properties": {"traffic": {"type": "object"}},
+        }),
+        encoding="utf-8",
+    )
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        config_schema_path=schema_path,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config/schema")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "unifiedSchema": {
+            "$id": "workflowMigration.schema.json",
+            "type": "object",
+            "properties": {"traffic": {"type": "object"}},
+        }
+    }
+
+
 def test_config_document_conflict_returns_the_current_saved_document(tmp_path):
     documents = _Documents()
 
@@ -1436,7 +1466,7 @@ def test_config_review_and_submit_start_a_tracked_operation(tmp_path):
         static_dir=_static_bundle(tmp_path),
         config_documents=submissions,
         operations=operations,
-        workflow_name="migration-test",
+        settings=WebAppSettings(workflow_name="migration-test"),
     )
 
     with TestClient(app) as client:
@@ -1502,7 +1532,7 @@ def test_config_preflight_reports_blocking_and_nonblocking_admission_results(
     app = create_app(
         static_dir=_static_bundle(tmp_path),
         config_documents=submissions,
-        workflow_name="migration-test",
+        settings=WebAppSettings(workflow_name="migration-test"),
     )
 
     with TestClient(app) as client:
@@ -1573,7 +1603,7 @@ def test_config_preflight_reports_preparation_failures_without_plain_500(
     app = create_app(
         static_dir=_static_bundle(tmp_path),
         config_documents=submissions,
-        workflow_name="migration-test",
+        settings=WebAppSettings(workflow_name="migration-test"),
     )
 
     with TestClient(app) as client:

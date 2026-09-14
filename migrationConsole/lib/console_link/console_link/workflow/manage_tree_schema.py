@@ -22,7 +22,7 @@ CAPTURE_GROUP = "Capture"
 BUFFER_GROUP = "Buffer"
 REPLAY_GROUP = "Replay"
 KAFKA_CLUSTERS_GROUP = "Kafka Clusters"
-KAFKA_TOPICS_GROUP = "Kafka Topics"
+PREVIOUSLY_CAPTURED_TRAFFIC_GROUP = "Previously Captured Traffic"
 
 
 RESOURCE_SECTIONS: List[Tuple[str, List[Tuple[List[str], str]]]] = [
@@ -67,7 +67,10 @@ RESOURCE_TYPE_LABELS: Dict[str, str] = {
 BUFFER_SUBGROUP_BY_PLURAL: Dict[str, str] = {
     "kafkaconfigs": KAFKA_CLUSTERS_GROUP,
     "kafkaclusters": KAFKA_CLUSTERS_GROUP,
-    "capturedtraffics": KAFKA_TOPICS_GROUP,
+}
+BUFFER_SUBGROUP_ORDER: Dict[str, int] = {
+    KAFKA_CLUSTERS_GROUP: 0,
+    PREVIOUSLY_CAPTURED_TRAFFIC_GROUP: 1,
 }
 
 EDIT_ID_BY_TREE_ID: Dict[str, str] = {
@@ -93,7 +96,7 @@ EDIT_ID_BY_TREE_ID: Dict[str, str] = {
     ): "edit:traffic.kafkaClusters",
     (
         f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{BUFFER_GROUP}:"
-        f"{KAFKA_TOPICS_GROUP}"
+        f"{PREVIOUSLY_CAPTURED_TRAFFIC_GROUP}"
     ): "edit:traffic.s3Sources",
     (
         f"group:{LIVE_TRAFFIC_MIGRATION_SECTION}:{REPLAY_GROUP}"
@@ -125,3 +128,33 @@ def resource_type_label_for_plural(plural: str) -> Optional[str]:
 
 def buffer_subgroup_for_plural(plural: str) -> Optional[str]:
     return BUFFER_SUBGROUP_BY_PLURAL.get(plural)
+
+
+def buffer_subgroup_for_resource(
+    plural: str,
+    parameters: Optional[Dict[str, object]] = None,
+) -> Optional[str]:
+    if plural != "capturedtraffics":
+        return buffer_subgroup_for_plural(plural)
+    if (parameters or {}).get("sourceKind") == "proxy":
+        return None
+    return PREVIOUSLY_CAPTURED_TRAFFIC_GROUP
+
+
+def buffer_subgroup_order_for_resource(
+    plural: str,
+    parameters: Optional[Dict[str, object]] = None,
+) -> int:
+    label = buffer_subgroup_for_resource(plural, parameters)
+    return BUFFER_SUBGROUP_ORDER.get(label or "", 99)
+
+
+def resource_type_label_for_resource(
+    plural: str,
+    parameters: Optional[Dict[str, object]] = None,
+) -> Optional[str]:
+    if plural == "capturedtraffics":
+        if (parameters or {}).get("sourceKind") == "proxy":
+            return "Kafka topic"
+        return "Previously captured traffic"
+    return resource_type_label_for_plural(plural)

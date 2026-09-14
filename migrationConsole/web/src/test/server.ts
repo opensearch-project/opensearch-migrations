@@ -11,7 +11,6 @@ const defaultRawConfig = `sourceClusters:
 targetClusters:
   target:
     endpoint: https://target.example.com:9200
-    version: OS 2.15
 snapshotMigrationConfigs: []
 `;
 
@@ -90,6 +89,14 @@ export const server = setupServer(
       modelVersion: "1",
       persistedRevision: "config-base-1",
       rawYaml: defaultRawConfig,
+    }),
+  ),
+  http.get("*/api/v1/config/schema", () =>
+    HttpResponse.json({
+      unifiedSchema: {
+        type: "object",
+        properties: {},
+      },
     }),
   ),
   http.put("*/api/v1/config/document", async ({ request }) => {

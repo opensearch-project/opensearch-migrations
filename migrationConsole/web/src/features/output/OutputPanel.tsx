@@ -22,6 +22,7 @@ import {
 import { ModalDialog } from "../../components/ModalDialog";
 import { useEscapeCancel } from "../../hooks/useEscapeCancel";
 import type { ApprovalCandidate } from "../actions/approvals";
+import { presentResourceActionText } from "../status/operationPresentation";
 
 
 function displayContent(content: string, contentType: string): string {
@@ -199,7 +200,11 @@ export function OutputPanel({
                 || Boolean(approval.disabledReason)
               }
               onClick={() => void approve()}
-              title={approval.disabledReason ?? undefined}
+              title={
+                approval.disabledReason
+                  ? presentResourceActionText(approval.disabledReason)
+                  : undefined
+              }
               type="button"
             >
               {approving
