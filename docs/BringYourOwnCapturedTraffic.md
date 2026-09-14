@@ -44,10 +44,6 @@ The exporter must preserve every field that can affect replay behavior. The arch
 - the permitted Kafka `LogAppendTime` backward-movement allowance `S`; and
 - integrity information that detects omitted, duplicated, reordered, or corrupted archive records.
 
-The authoritative `writerNodeId` for `NoMoreWrites` is carried in Kafka record headers, and its
-authoritative partition is the archived Kafka record's partition. Preserving only the protobuf
-value is therefore insufficient.
-
 Source Kafka offsets are retained as archive validation and diagnostic data. Importing creates a
 new Kafka log, so it cannot recreate the physical source offsets or leader epochs. The replayer
 uses the destination topic's offsets for processing and commits.
@@ -109,7 +105,9 @@ rather than replacing them with the destination broker's current time.
 
 The replayer uses the archived `E` and `S` values and applies the normal broker-time expiration
 rules. This mode assumes the source Kafka brokers satisfied the declared skew bound while the
-capture was produced.
+capture was produced. The archived record timestamps also reproduce the deterministic
+source-response boundary used by retry policy; the import broker's append time does not replace
+them.
 
 ### `rebase-without-expiration`
 
@@ -119,7 +117,12 @@ timestamps.
 
 In this mode, broker-time heartbeat expiration is disabled. Rebasing timestamps must never authorize
 expiration under the original `E + S` proof, because the rebased values do not describe the source
-capture timeline.
+capture timeline. The destination timestamps drive the source-response boundary used by retry
+policy, but not source-run expiration.
+
+Choosing this mode also accepts that an archive ending with an incomplete connection and no
+terminal `CloseObservation` may remain unresolved indefinitely. End of archive is not completion
+evidence.
 
 The selected timestamp mode is immutable for one imported capture and is passed explicitly to the
 replayer. Proxy and replayer configuration must agree about the applicable protocol parameters.
@@ -131,7 +134,7 @@ record-accounting paths used for live capture:
 
 - the destination offsets control `Commit` and `Retain`;
 - record headers retain their protocol meaning;
-- `WriterPartitionHeartbeat` and `NoMoreWrites` retain their protocol meaning;
+- `WriterPartitionHeartbeat` retains its protocol meaning;
 - records may be replayed more than once after restart or reassignment; and
 - end of archive does not complete unresolved HTTP assembly or other work.
 
@@ -203,13 +206,11 @@ The following tests are required:
    `S`.
 5. `rebase-without-expiration` uses destination timestamps and cannot perform broker-time
    expiration.
-6. A header-carried `writerNodeId` and record-metadata partition for `NoMoreWrites` survive export
-   and import.
-7. Imported mixed records retain the same per-observation processing and whole-record commit
+6. Imported mixed records retain the same per-observation processing and whole-record commit
    behavior as live records.
-8. Restart and partition reassignment demonstrate at-least-once behavior without introducing an
+7. Restart and partition reassignment demonstrate at-least-once behavior without introducing an
    archive-specific deduplication protocol.
-9. A failed or ambiguous load does not automatically append a second copy to the same destination
+8. A failed or ambiguous load does not automatically append a second copy to the same destination
    topic.
-10. A full live-capture export/import/replay produces the same replay-visible protocol input as the
+9. A full live-capture export/import/replay produces the same replay-visible protocol input as the
     original capture.

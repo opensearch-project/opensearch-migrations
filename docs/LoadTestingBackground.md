@@ -460,7 +460,7 @@ and OpenSearch Benchmark tooling where it fits.
 
 - [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md) — current top-level
   capture-and-replay design contract.
-- [`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md) — current proxy scaling, manifests, and
+- [`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md) — current proxy scaling, heartbeats, and
   failure protocol.
 - [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md) —
   current replayer processing, reassignment, and commit design.
