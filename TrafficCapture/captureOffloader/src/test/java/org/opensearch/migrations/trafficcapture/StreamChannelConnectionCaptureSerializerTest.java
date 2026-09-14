@@ -22,7 +22,7 @@ import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
@@ -52,16 +52,16 @@ class StreamChannelConnectionCaptureSerializerTest {
     private static final String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
     private static final String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
 
-    private static int getEstimatedTrafficRecordByteSize(int readWriteEventCount, int averageDataPacketSize) {
+    private static int getEstimatedTrafficStreamByteSize(int readWriteEventCount, int averageDataPacketSize) {
         var fixedTimestamp = Timestamp.newBuilder()
             .setSeconds(REFERENCE_TIMESTAMP.getEpochSecond())
             .setNanos(REFERENCE_TIMESTAMP.getNano())
             .build();
 
-        return TrafficRecord.newBuilder()
-            .setWriterNodeId(TEST_NODE_ID_STRING)
+        return TrafficStream.newBuilder()
+            .setNodeId(TEST_NODE_ID_STRING)
             .setConnectionId(TEST_TRAFFIC_RECORD_ID_STRING)
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -81,13 +81,13 @@ class StreamChannelConnectionCaptureSerializerTest {
             ) * readWriteEventCount) + averageDataPacketSize * readWriteEventCount;
     }
 
-    private static TrafficRecord makeSampleTrafficRecord(Instant t) {
+    private static TrafficStream makeSampleTrafficStream(Instant t) {
         var fixedTimestamp = Timestamp.newBuilder().setSeconds(t.getEpochSecond()).setNanos(t.getNano()).build();
-        return TrafficRecord.newBuilder()
-            .setWriterNodeId(TEST_NODE_ID_STRING)
+        return TrafficStream.newBuilder()
+            .setNodeId(TEST_NODE_ID_STRING)
             .setConnectionId(TEST_TRAFFIC_RECORD_ID_STRING)
             .setNumberOfThisLastChunk(1)
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -99,7 +99,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     )
                     .build()
             )
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -107,7 +107,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     .setRead(ReadObservation.newBuilder().build())
                     .build()
             )
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -117,7 +117,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     )
                     .build()
             )
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -125,7 +125,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     .setConnectionException(ConnectionExceptionObservation.newBuilder().build())
                     .build()
             )
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -135,7 +135,7 @@ class StreamChannelConnectionCaptureSerializerTest {
                     )
                     .build()
             )
-            .addObservations(
+            .addSubStream(
                 TrafficObservation.newBuilder()
                     .setTs(fixedTimestamp)
                     .setManifestCycle(0)
@@ -146,7 +146,7 @@ class StreamChannelConnectionCaptureSerializerTest {
             .build();
     }
 
-    private static int getIndexForTrafficRecord(TrafficRecord s) {
+    private static int getIndexForTrafficStream(TrafficStream s) {
         return s.hasNumber() ? s.getNumber() : s.getNumberOfThisLastChunk();
     }
 
@@ -172,19 +172,19 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         var outputBuffersList = new ArrayList<>(outputBuffersCreated);
 
-        var reconstitutedTrafficRecordsList = new ArrayList<TrafficRecord>();
+        var reconstitutedTrafficStreamsList = new ArrayList<TrafficStream>();
         for (int i = 0; i < expectedChunks; ++i) {
-            reconstitutedTrafficRecordsList.add(TrafficRecord.parseFrom(outputBuffersList.get(i)));
+            reconstitutedTrafficStreamsList.add(TrafficStream.parseFrom(outputBuffersList.get(i)));
         }
-        reconstitutedTrafficRecordsList.sort(
-            Comparator.comparingInt(StreamChannelConnectionCaptureSerializerTest::getIndexForTrafficRecord)
+        reconstitutedTrafficStreamsList.sort(
+            Comparator.comparingInt(StreamChannelConnectionCaptureSerializerTest::getIndexForTrafficStream)
         );
         int totalSize = 0;
         for (int i = 0; i < expectedChunks; ++i) {
-            var reconstitutedTrafficRecord = reconstitutedTrafficRecordsList.get(i);
-            int dataSize = reconstitutedTrafficRecord.getObservations(0).getReadSegment().getData().size();
+            var reconstitutedTrafficStream = reconstitutedTrafficStreamsList.get(i);
+            int dataSize = reconstitutedTrafficStream.getSubStream(0).getReadSegment().getData().size();
             totalSize += dataSize;
-            Assertions.assertEquals(i + 1, getIndexForTrafficRecord(reconstitutedTrafficRecord));
+            Assertions.assertEquals(i + 1, getIndexForTrafficStream(reconstitutedTrafficStream));
             Assertions.assertTrue(dataSize <= bufferSize);
         }
         Assertions.assertEquals(fakeDataBytes.length, totalSize);
@@ -198,7 +198,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         // Picking buffer to half size to require chunking
         var serializer = createSerializerWithTestHandler(
             outputBuffersCreated,
-            getEstimatedTrafficRecordByteSize(1, packetBytes.length) / 2
+            getEstimatedTrafficStreamByteSize(1, packetBytes.length) / 2
         );
 
         var bb = Unpooled.wrappedBuffer(packetBytes);
@@ -209,8 +209,8 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         List<TrafficObservation> observations = new ArrayList<>();
         for (ByteBuffer buffer : outputBuffersCreated) {
-            var trafficStream = TrafficRecord.parseFrom(buffer);
-            observations.add(trafficStream.getObservations(0));
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.add(trafficStream.getSubStream(0));
         }
 
         StringBuilder reconstructedData = new StringBuilder();
@@ -232,11 +232,11 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
 
         var streamOverheadBytes = CodedOutputStream.computeStringSize(
-            TrafficRecord.CONNECTIONID_FIELD_NUMBER,
+            TrafficStream.CONNECTIONID_FIELD_NUMBER,
             TEST_TRAFFIC_RECORD_ID_STRING
-        ) + CodedOutputStream.computeStringSize(TrafficRecord.WRITERNODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
+        ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
         var spaceNeededForFlush = CodedOutputStream.computeInt32Size(
-            TrafficRecord.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
             packetData.length()
         );
 
@@ -262,8 +262,8 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         List<TrafficObservation> observations = new ArrayList<>();
         for (ByteBuffer buffer : outputBuffersCreated) {
-            var trafficStream = TrafficRecord.parseFrom(buffer);
-            observations.add(trafficStream.getObservations(0));
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.add(trafficStream.getSubStream(0));
         }
 
         StringBuilder reconstructedData = new StringBuilder();
@@ -283,11 +283,11 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
 
         var streamOverheadBytes = CodedOutputStream.computeStringSize(
-            TrafficRecord.CONNECTIONID_FIELD_NUMBER,
+            TrafficStream.CONNECTIONID_FIELD_NUMBER,
             TEST_TRAFFIC_RECORD_ID_STRING
-        ) + CodedOutputStream.computeStringSize(TrafficRecord.WRITERNODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
+        ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
         var spaceNeededForFlush = CodedOutputStream.computeInt32Size(
-            TrafficRecord.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
             1
         );
 
@@ -318,7 +318,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         // Picking small buffer that can only hold one write observation and no other observations
         var serializer = createSerializerWithTestHandler(
             outputBuffersCreated,
-            getEstimatedTrafficRecordByteSize(1, packetBytes.length) - CloseObservation.newBuilder()
+            getEstimatedTrafficStreamByteSize(1, packetBytes.length) - CloseObservation.newBuilder()
                 .build()
                 .getSerializedSize()
         );
@@ -333,8 +333,8 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertEquals(2, outputBuffersCreated.size());
         List<TrafficObservation> observations = new ArrayList<>();
         for (ByteBuffer buffer : outputBuffersCreated) {
-            var trafficStream = TrafficRecord.parseFrom(buffer);
-            observations.addAll(trafficStream.getObservationsList());
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.addAll(trafficStream.getSubStreamList());
         }
         Assertions.assertEquals(2, observations.size());
         Assertions.assertTrue(observations.get(0).hasWrite());
@@ -346,7 +346,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         InterruptedException {
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
         // Picking small buffer size that can only hold two empty message
-        var serializer = createSerializerWithTestHandler(outputBuffersCreated, getEstimatedTrafficRecordByteSize(2, 0));
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, getEstimatedTrafficStreamByteSize(2, 0));
         var bb = Unpooled.buffer(0);
         serializer.addWriteEvent(REFERENCE_TIMESTAMP, bb);
         serializer.addWriteEvent(REFERENCE_TIMESTAMP, bb);
@@ -355,9 +355,9 @@ class StreamChannelConnectionCaptureSerializerTest {
         bb.release();
 
         var outputBuffersList = new ArrayList<>(outputBuffersCreated);
-        TrafficRecord reconstitutedTrafficRecord = TrafficRecord.parseFrom(outputBuffersList.get(0));
-        Assertions.assertEquals(0, reconstitutedTrafficRecord.getObservations(0).getWrite().getData().size());
-        Assertions.assertEquals(0, reconstitutedTrafficRecord.getObservations(1).getWrite().getData().size());
+        TrafficStream reconstitutedTrafficStream = TrafficStream.parseFrom(outputBuffersList.get(0));
+        Assertions.assertEquals(0, reconstitutedTrafficStream.getSubStream(0).getWrite().getData().size());
+        Assertions.assertEquals(0, reconstitutedTrafficStream.getSubStream(1).getWrite().getData().size());
     }
 
     @ParameterizedTest
@@ -373,9 +373,9 @@ class StreamChannelConnectionCaptureSerializerTest {
         Assertions.assertTrue(dataBytes.length >= numberOfChunks);
 
         var streamOverheadBytes = CodedOutputStream.computeStringSize(
-            TrafficRecord.CONNECTIONID_FIELD_NUMBER,
+            TrafficStream.CONNECTIONID_FIELD_NUMBER,
             TEST_TRAFFIC_RECORD_ID_STRING
-        ) + CodedOutputStream.computeStringSize(TrafficRecord.WRITERNODEID_FIELD_NUMBER, TEST_NODE_ID_STRING) + 2;
+        ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING) + 2;
 
         var bufferSizeToGetDesiredChunks = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(
             REFERENCE_TIMESTAMP,
@@ -397,8 +397,8 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         List<TrafficObservation> observations = new ArrayList<>();
         for (ByteBuffer buffer : outputBuffersCreated) {
-            var trafficStream = TrafficRecord.parseFrom(buffer);
-            observations.add(trafficStream.getObservations(0));
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.add(trafficStream.getSubStream(0));
         }
 
         StringBuilder reconstructedData = new StringBuilder();
@@ -465,7 +465,7 @@ class StreamChannelConnectionCaptureSerializerTest {
     @Test
     public void testThatReadCanBeDeserialized() throws IOException, ExecutionException, InterruptedException {
         // these are only here as a debugging aid
-        var groundTruth = makeSampleTrafficRecord(REFERENCE_TIMESTAMP);
+        var groundTruth = makeSampleTrafficStream(REFERENCE_TIMESTAMP);
         System.err.println("groundTruth: " + groundTruth);
         // Pasting this into `base64 -d | protoc --decode_raw` will also show the structure
         var groundTruthBytes = groundTruth.toByteArray();
@@ -489,14 +489,14 @@ class StreamChannelConnectionCaptureSerializerTest {
         var outputBuffersList = new ArrayList<>(outputBuffersCreated);
         Assertions.assertEquals(1, outputBuffersCreated.size());
         var onlyBuffer = outputBuffersList.get(0);
-        var reconstitutedTrafficRecord = TrafficRecord.parseFrom(onlyBuffer);
-        Assertions.assertEquals(TEST_TRAFFIC_RECORD_ID_STRING, reconstitutedTrafficRecord.getConnectionId());
-        Assertions.assertEquals(TEST_NODE_ID_STRING, reconstitutedTrafficRecord.getWriterNodeId());
-        Assertions.assertEquals(6, reconstitutedTrafficRecord.getObservationsCount());
-        Assertions.assertEquals(1, reconstitutedTrafficRecord.getNumberOfThisLastChunk());
-        Assertions.assertFalse(reconstitutedTrafficRecord.hasNumber());
+        var reconstitutedTrafficStream = TrafficStream.parseFrom(onlyBuffer);
+        Assertions.assertEquals(TEST_TRAFFIC_RECORD_ID_STRING, reconstitutedTrafficStream.getConnectionId());
+        Assertions.assertEquals(TEST_NODE_ID_STRING, reconstitutedTrafficStream.getNodeId());
+        Assertions.assertEquals(6, reconstitutedTrafficStream.getSubStreamCount());
+        Assertions.assertEquals(1, reconstitutedTrafficStream.getNumberOfThisLastChunk());
+        Assertions.assertFalse(reconstitutedTrafficStream.hasNumber());
 
-        Assertions.assertEquals(groundTruth, reconstitutedTrafficRecord);
+        Assertions.assertEquals(groundTruth, reconstitutedTrafficStream);
     }
 
     @Test
@@ -518,13 +518,13 @@ class StreamChannelConnectionCaptureSerializerTest {
         serializer.addCloseEvent(REFERENCE_TIMESTAMP);
         serializer.flushCommitAndResetStream(true).get();
 
-        var record = TrafficRecord.parseFrom(outputBuffers.element());
-        Assertions.assertEquals(2, record.getObservationsCount());
-        Assertions.assertTrue(record.getObservations(0).hasManifestCycle());
-        Assertions.assertEquals(41, record.getObservations(0).getManifestCycle());
-        Assertions.assertEquals(1, record.getObservations(0).getConnectionObservationSequence());
-        Assertions.assertEquals(42, record.getObservations(1).getManifestCycle());
-        Assertions.assertEquals(2, record.getObservations(1).getConnectionObservationSequence());
+        var record = TrafficStream.parseFrom(outputBuffers.element());
+        Assertions.assertEquals(2, record.getSubStreamCount());
+        Assertions.assertTrue(record.getSubStream(0).hasManifestCycle());
+        Assertions.assertEquals(41, record.getSubStream(0).getManifestCycle());
+        Assertions.assertEquals(1, record.getSubStream(0).getConnectionObservationSequence());
+        Assertions.assertEquals(42, record.getSubStream(1).getManifestCycle());
+        Assertions.assertEquals(2, record.getSubStream(1).getConnectionObservationSequence());
     }
 
     @Test
@@ -536,7 +536,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         // Picking buffer to half size to require chunking
         var serializer = createSerializerWithTestHandler(
             outputBuffersCreated,
-            getEstimatedTrafficRecordByteSize(1, packetBytes.length) / 2
+            getEstimatedTrafficStreamByteSize(1, packetBytes.length) / 2
         );
 
         var bb = Unpooled.wrappedBuffer(packetBytes);
@@ -547,8 +547,8 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         List<TrafficObservation> observations = new ArrayList<>();
         for (ByteBuffer buffer : outputBuffersCreated) {
-            var trafficStream = TrafficRecord.parseFrom(buffer);
-            observations.addAll(trafficStream.getObservationsList());
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.addAll(trafficStream.getSubStreamList());
         }
 
         int foundEndOfSegments = 0;
@@ -585,8 +585,8 @@ class StreamChannelConnectionCaptureSerializerTest {
 
         List<TrafficObservation> observations = new ArrayList<>();
         for (ByteBuffer buffer : outputBuffersCreated) {
-            var trafficStream = TrafficRecord.parseFrom(buffer);
-            observations.addAll(trafficStream.getObservationsList());
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.addAll(trafficStream.getSubStreamList());
         }
 
         int foundEndOfSegments = 0;
@@ -612,7 +612,7 @@ class StreamChannelConnectionCaptureSerializerTest {
             () -> new StreamChannelConnectionCaptureSerializer<>(
                 "a" + tooLargeNodeId,
                 realKafkaConnectionId,
-                new StreamManager(getEstimatedTrafficRecordByteSize(0, 0), outputBuffersCreated)
+                new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated)
             )
         );
     }
@@ -750,7 +750,7 @@ class StreamChannelConnectionCaptureSerializerTest {
         new StreamChannelConnectionCaptureSerializer<>(
             realNodeId,
             realKafkaConnectionId,
-            new StreamManager(getEstimatedTrafficRecordByteSize(0, 0), outputBuffersCreated)
+            new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated)
         );
     }
 

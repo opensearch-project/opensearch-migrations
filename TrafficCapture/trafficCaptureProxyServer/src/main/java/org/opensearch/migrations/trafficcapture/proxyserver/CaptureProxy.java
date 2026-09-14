@@ -125,8 +125,8 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--maxTrafficBufferSize" },
             arity = 1,
-            description = "The maximum number of bytes that will be written to a single TrafficRecord.")
-        public int maximumTrafficRecordSize = 1024 * 1024;
+            description = "The maximum number of bytes that will be written to a single TrafficStream.")
+        public int maximumTrafficStreamSize = 1024 * 1024;
         @Parameter(required = false,
             names = { "--insecureDestination" },
             arity = 0,
@@ -391,7 +391,7 @@ public class CaptureProxy {
                     assignmentTracker,
                     params.minimumActiveProxyCount,
                     params.kafakTopicName,
-                    params.maximumTrafficRecordSize,
+                    params.maximumTrafficStreamSize,
                     Duration.ofSeconds(params.livenessSnapshotIntervalSeconds),
                     Duration.ofSeconds(params.manifestExpirationIntervalSeconds),
                     captureProcessState::requiredCaptureFailed,

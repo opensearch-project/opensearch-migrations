@@ -19,7 +19,7 @@ import org.opensearch.migrations.trafficcapture.IOrderlyRetirableCaptureFactory;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -625,14 +625,14 @@ public class KafkaCaptureFactory implements
     }
 
     private boolean isTerminalRecord(byte[] payload) throws InvalidProtocolBufferException {
-        var record = TrafficRecord.parseFrom(payload);
+        var record = TrafficStream.parseFrom(payload);
         var finalChunk = record.hasNumberOfThisLastChunk();
-        var closeCount = record.getObservationsList()
+        var closeCount = record.getSubStreamList()
             .stream()
             .filter(observation -> observation.hasClose())
             .count();
         var closeIsLast = closeCount == 1
-            && record.getObservations(record.getObservationsCount() - 1).hasClose();
+            && record.getSubStream(record.getSubStreamCount() - 1).hasClose();
         if (finalChunk != closeIsLast) {
             var failure = new IllegalStateException(
                 "A connection's final Kafka record must contain exactly one terminal CloseObservation as its last observation"

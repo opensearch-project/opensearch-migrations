@@ -70,8 +70,6 @@ message TrafficObservation {
 }
 
 message TrafficStream {
-  option deprecated = true;
-
   string connectionId = 1; // persistent identifier for all stream objects within a single connection
   string nodeId = 5; // unique namespace such as a nodeId or computer mac address
   optional int32 priorRequestsReceived = 6;
@@ -79,19 +77,6 @@ message TrafficStream {
                                                         // have yet to have EOM observations after them
   optional int32 partition = 8; // explicit Kafka partition containing this record
   repeated TrafficObservation subStream = 2;
-  oneof index {
-    int32 number = 3;
-    int32 numberOfThisLastChunk = 4;
-  }
-}
-
-message TrafficRecord {
-  string connectionId = 1;
-  string writerNodeId = 5;
-  optional int32 priorRequestsReceived = 6;
-  optional bool lastObservationWasUnterminatedRead = 7;
-  optional int32 partition = 8;
-  repeated TrafficObservation observations = 2;
   oneof index {
     int32 number = 3;
     int32 numberOfThisLastChunk = 4;

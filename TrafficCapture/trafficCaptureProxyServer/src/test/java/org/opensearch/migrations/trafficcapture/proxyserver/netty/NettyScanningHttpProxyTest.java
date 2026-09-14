@@ -35,7 +35,7 @@ import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -112,12 +112,12 @@ class NettyScanningHttpProxyTest {
             }
 
             interactionsCapturedCountdown.await();
-            var recordedRecords = captureFactory.getRecordedRecords();
-            Assertions.assertEquals(1, recordedRecords.size());
-            var recordedTrafficRecords = captureFactory.getRecordedTrafficRecordsStream().toArray(TrafficRecord[]::new);
-            Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_RECORDS, recordedTrafficRecords.length);
-            log.info("Recorded traffic record:\n" + recordedTrafficRecords[0]);
-            var coalescedTrafficList = coalesceObservations(recordedTrafficRecords[0]);
+            var recordedStreams = captureFactory.getRecordedStreams();
+            Assertions.assertEquals(1, recordedStreams.size());
+            var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
+            Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_RECORDS, recordedTrafficStreams.length);
+            log.info("Recorded traffic record:\n" + recordedTrafficStreams[0]);
+            var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
             Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
             int counter = 0;
             final var expectedResponseMessage = normalizeMessage(EXPECTED_RESPONSE_STRING);
@@ -131,7 +131,7 @@ class NettyScanningHttpProxyTest {
                 counter++;
             }
 
-            var observations = recordedTrafficRecords[0].getObservationsList();
+            var observations = recordedTrafficStreams[0].getSubStreamList();
             var eomIndices = IntStream.range(0, observations.size())
                 .filter(i -> observations.get(i).hasEndOfMessageIndicator())
                 .toArray();
@@ -168,12 +168,12 @@ class NettyScanningHttpProxyTest {
 
             assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
             Assertions.assertTrue(tlsFailureCaptured.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            var failedTlsConnection = captureFactory.getRecordedTrafficRecordsStream()
+            var failedTlsConnection = captureFactory.getRecordedTrafficStreamsStream()
                 .findFirst()
                 .orElseThrow();
             Assertions.assertEquals(
                 1,
-                failedTlsConnection.getObservationsList()
+                failedTlsConnection.getSubStreamList()
                     .stream()
                     .filter(observation -> observation.hasClose())
                     .count()
@@ -253,11 +253,11 @@ class NettyScanningHttpProxyTest {
         return s.replaceAll("Date: .*", "Date: SOMETHING");
     }
 
-    private List<byte[]> coalesceObservations(TrafficRecord recordedTrafficRecord) throws IOException {
+    private List<byte[]> coalesceObservations(TrafficStream recordedTrafficStream) throws IOException {
         var rval = new ArrayList<byte[]>();
         boolean lastWasRead = true;
         try (var accumOutputStream = new ByteArrayOutputStream()) {
-            for (var obs : recordedTrafficRecord.getObservationsList()) {
+            for (var obs : recordedTrafficStream.getSubStreamList()) {
                 if (!obs.hasRead() && !obs.hasTs()) {
                     continue;
                 }

@@ -16,7 +16,7 @@ import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
 import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.proxyserver.RootCaptureContext;
 
 import io.netty.buffer.Unpooled;
@@ -158,7 +158,7 @@ class ProxyForwardingHandlersTest {
         Assertions.assertEquals(
             1,
             capture.records.stream()
-                .flatMap(record -> record.getObservationsList().stream())
+                .flatMap(record -> record.getSubStreamList().stream())
                 .filter(observation -> observation.hasClose())
                 .count()
         );
@@ -166,7 +166,7 @@ class ProxyForwardingHandlersTest {
 
     private static class TerminalTrackingStreamManager
         extends OrderedStreamLifecyleManager<Void> {
-        private final List<TrafficRecord> records = new ArrayList<>();
+        private final List<TrafficStream> records = new ArrayList<>();
 
         @Override
         public CodedOutputStreamAndByteBufferWrapper createStream() {
@@ -181,7 +181,7 @@ class ProxyForwardingHandlersTest {
             try {
                 var stream = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
                 stream.getOutputStream().flush();
-                records.add(TrafficRecord.parseFrom(stream.getByteBuffer().flip()));
+                records.add(TrafficStream.parseFrom(stream.getByteBuffer().flip()));
                 return java.util.concurrent.CompletableFuture.completedFuture(null);
             } catch (IOException e) {
                 return java.util.concurrent.CompletableFuture.failedFuture(e);

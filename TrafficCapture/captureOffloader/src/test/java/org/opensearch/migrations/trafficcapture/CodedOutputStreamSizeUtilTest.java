@@ -73,11 +73,11 @@ class CodedOutputStreamSizeUtilTest {
     @Test
     void testBytesNeededForObservationAndClosingIndex() {
         int observationContentSize = 50;
-        int numberOfTrafficRecordsSoFar = 10;
+        int numberOfTrafficStreamsSoFar = 10;
 
         int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
             observationContentSize,
-            numberOfTrafficRecordsSoFar
+            numberOfTrafficStreamsSoFar
         );
         Assertions.assertEquals(54, result);
     }
@@ -85,11 +85,11 @@ class CodedOutputStreamSizeUtilTest {
     @Test
     void testBytesNeededForObservationAndClosingIndex_WithZeroContent() {
         int observationContentSize = 0;
-        int numberOfTrafficRecordsSoFar = 0;
+        int numberOfTrafficStreamsSoFar = 0;
 
         int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
             observationContentSize,
-            numberOfTrafficRecordsSoFar
+            numberOfTrafficStreamsSoFar
         );
         Assertions.assertEquals(4, result);
     }

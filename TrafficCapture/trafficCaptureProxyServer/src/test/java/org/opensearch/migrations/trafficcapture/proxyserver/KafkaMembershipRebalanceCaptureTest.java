@@ -30,7 +30,7 @@ import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.protos.LivenessSnapshotChunk;
 import org.opensearch.migrations.trafficcapture.protos.NoMoreWrites;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
@@ -256,7 +256,7 @@ class KafkaMembershipRebalanceCaptureTest {
             retirement.get(WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 
             var records = readThroughCurrentEnd(reader);
-            var trafficRecord = records.stream()
+            var trafficStream = records.stream()
                 .filter(record -> connectionId.equals(record.key()))
                 .filter(record -> CaptureKafkaPublisher.isRecordType(
                     record.headers(),
@@ -264,8 +264,8 @@ class KafkaMembershipRebalanceCaptureTest {
                 ))
                 .findFirst()
                 .orElseThrow();
-            var traffic = TrafficRecord.parseFrom(trafficRecord.value());
-            var writerNodeId = traffic.getWriterNodeId();
+            var traffic = TrafficStream.parseFrom(trafficStream.value());
+            var writerNodeId = traffic.getNodeId();
             Assertions.assertEquals("activation-retirement:1", writerNodeId);
 
             for (int partition = 0; partition < 4; ++partition) {
@@ -288,7 +288,7 @@ class KafkaMembershipRebalanceCaptureTest {
                 })
                 .max(java.util.Comparator.comparingLong(ConsumerRecord::offset))
                 .orElseThrow();
-            Assertions.assertTrue(trafficRecord.offset() < finalManifest.offset());
+            Assertions.assertTrue(trafficStream.offset() < finalManifest.offset());
             Assertions.assertNull(harness.captureFailure().get());
             Assertions.assertNull(harness.unstableFailure().get());
         } finally {
@@ -373,36 +373,36 @@ class KafkaMembershipRebalanceCaptureTest {
                 ))
                 .map(record -> {
                     try {
-                        return Map.entry(record, TrafficRecord.parseFrom(record.value()));
+                        return Map.entry(record, TrafficStream.parseFrom(record.value()));
                     } catch (Exception e) {
                         throw new IllegalStateException(e);
                     }
                 })
-                .filter(entry -> entry.getValue().getWriterNodeId().startsWith(
+                .filter(entry -> entry.getValue().getNodeId().startsWith(
                     "activation-composed-retirement:"
                 ))
                 .toList();
             Assertions.assertEquals(
                 1,
                 activationTraffic.stream()
-                    .flatMap(entry -> entry.getValue().getObservationsList().stream())
+                    .flatMap(entry -> entry.getValue().getSubStreamList().stream())
                     .filter(observation -> observation.hasClose())
                     .count()
             );
             var terminalTraffic = activationTraffic.stream()
-                .filter(entry -> entry.getValue().getObservationsList()
+                .filter(entry -> entry.getValue().getSubStreamList()
                     .stream()
                     .anyMatch(observation -> observation.hasClose()))
                 .findFirst()
                 .orElseThrow();
-            var trafficRecord = terminalTraffic.getKey();
+            var trafficStream = terminalTraffic.getKey();
             var traffic = terminalTraffic.getValue();
             Assertions.assertTrue(
-                traffic.getObservations(traffic.getObservationsCount() - 1).hasClose()
+                traffic.getSubStream(traffic.getSubStreamCount() - 1).hasClose()
             );
 
             for (int partition = 0; partition < 4; ++partition) {
-                assertTerminalWriterOrdering(records, traffic.getWriterNodeId(), partition);
+                assertTerminalWriterOrdering(records, traffic.getNodeId(), partition);
             }
             var finalManifest = records.stream()
                 .filter(record -> record.partition() == traffic.getPartition())
@@ -412,7 +412,7 @@ class KafkaMembershipRebalanceCaptureTest {
                 ))
                 .filter(record -> {
                     try {
-                        return traffic.getWriterNodeId().equals(
+                        return traffic.getNodeId().equals(
                             LivenessSnapshotChunk.parseFrom(record.value()).getWriterNodeId()
                         );
                     } catch (Exception e) {
@@ -421,7 +421,7 @@ class KafkaMembershipRebalanceCaptureTest {
                 })
                 .max(java.util.Comparator.comparingLong(ConsumerRecord::offset))
                 .orElseThrow();
-            Assertions.assertTrue(trafficRecord.offset() < finalManifest.offset());
+            Assertions.assertTrue(trafficStream.offset() < finalManifest.offset());
             Assertions.assertNull(harness.captureFailure().get());
             Assertions.assertNull(harness.unstableFailure().get());
         } finally {
@@ -560,11 +560,11 @@ class KafkaMembershipRebalanceCaptureTest {
                         record.headers(),
                         CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
                     )) {
-                    return TrafficRecord.parseFrom(record.value()).getWriterNodeId();
+                    return TrafficStream.parseFrom(record.value()).getNodeId();
                 }
             }
         }
-        throw new AssertionError("Timed out waiting for TrafficRecord for " + connectionId);
+        throw new AssertionError("Timed out waiting for TrafficStream for " + connectionId);
     }
 
     private static String awaitReplacementWriter(
@@ -598,10 +598,10 @@ class KafkaMembershipRebalanceCaptureTest {
                     record.headers(),
                     CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
                 )) {
-                return TrafficRecord.parseFrom(record.value()).getWriterNodeId();
+                return TrafficStream.parseFrom(record.value()).getNodeId();
             }
         }
-        throw new AssertionError("No TrafficRecord was published for " + connectionId);
+        throw new AssertionError("No TrafficStream was published for " + connectionId);
     }
 
     private static void assignAllPartitions(KafkaConsumer<String, byte[]> reader, String topic) {
@@ -698,7 +698,7 @@ class KafkaMembershipRebalanceCaptureTest {
                 record.headers(),
                 CaptureKafkaPublisher.TRAFFIC_RECORD_TYPE
             )) {
-                return writerNodeId.equals(TrafficRecord.parseFrom(record.value()).getWriterNodeId());
+                return writerNodeId.equals(TrafficStream.parseFrom(record.value()).getNodeId());
             }
             if (CaptureKafkaPublisher.isRecordType(
                 record.headers(),

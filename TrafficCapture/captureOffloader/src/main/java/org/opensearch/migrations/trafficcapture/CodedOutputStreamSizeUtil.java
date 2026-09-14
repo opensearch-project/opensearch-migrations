@@ -3,7 +3,7 @@ package org.opensearch.migrations.trafficcapture;
 import java.time.Instant;
 
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficRecord;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
@@ -30,7 +30,7 @@ public class CodedOutputStreamSizeUtil {
     /**
      * This function calculates the maximum bytes that would be needed to store a [Read/Write]SegmentObservation, if constructed
      * from the given ByteBuf and associated segment field numbers and values passed in. This estimate is essentially
-     * the max size needed in the CodedOutputStream to store the provided ByteBuf data and its associated TrafficRecord
+     * the max size needed in the CodedOutputStream to store the provided ByteBuf data and its associated TrafficStream
      * overhead. The actual required bytes could be marginally smaller.
      */
     public static int maxBytesNeededForASegmentedObservation(
@@ -81,21 +81,21 @@ public class CodedOutputStreamSizeUtil {
 
     /**
      * This function determines the number of bytes needed to store a TrafficObservation and a closing index for a
-     * TrafficRecord, from the provided input.
+     * TrafficStream, from the provided input.
      */
     public static int bytesNeededForObservationAndClosingIndex(
         int observationContentSize,
-        int numberOfTrafficRecordsSoFar
+        int numberOfTrafficStreamsSoFar
     ) {
         int observationTagSize = CodedOutputStream.computeUInt32Size(
-            TrafficRecord.OBSERVATIONS_FIELD_NUMBER,
+            TrafficStream.SUBSTREAM_FIELD_NUMBER,
             observationContentSize
         );
 
-        // Size for TrafficRecord index added when flushing, use arbitrary field to calculate
+        // Size for TrafficStream index added when flushing, use arbitrary field to calculate
         int indexSize = CodedOutputStream.computeInt32Size(
-            TrafficRecord.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
-            numberOfTrafficRecordsSoFar
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            numberOfTrafficStreamsSoFar
         );
 
         return observationTagSize + observationContentSize + indexSize;
