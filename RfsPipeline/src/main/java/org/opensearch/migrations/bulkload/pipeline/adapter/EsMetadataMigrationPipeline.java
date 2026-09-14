@@ -18,12 +18,28 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class EsMetadataMigrationPipeline {
 
+    private static final int DEFAULT_INDEX_MIGRATION_CONCURRENCY = 5;
+
     private final GlobalMetadataSource source;
     private final GlobalMetadataSink sink;
+    private final int indexMigrationConcurrency;
 
     public EsMetadataMigrationPipeline(GlobalMetadataSource source, GlobalMetadataSink sink) {
+        this(source, sink, DEFAULT_INDEX_MIGRATION_CONCURRENCY);
+    }
+
+    public EsMetadataMigrationPipeline(
+        GlobalMetadataSource source,
+        GlobalMetadataSink sink,
+        int indexMigrationConcurrency
+    ) {
         this.source = Objects.requireNonNull(source, "source must not be null");
         this.sink = Objects.requireNonNull(sink, "sink must not be null");
+        if (indexMigrationConcurrency < 1) {
+            throw new IllegalArgumentException(
+                "indexMigrationConcurrency must be >= 1, got " + indexMigrationConcurrency);
+        }
+        this.indexMigrationConcurrency = indexMigrationConcurrency;
     }
 
     /**
@@ -63,7 +79,7 @@ public class EsMetadataMigrationPipeline {
         return Mono.from(sink.writeGlobalMetadata(globalMetadata))
             .thenMany(
                 Flux.fromIterable(indices)
-                    .concatMap(indexName -> migrateIndexMetadata(indexName).thenReturn(indexName))
+                    .flatMap(indexName -> migrateIndexMetadata(indexName).thenReturn(indexName), indexMigrationConcurrency)
             )
             .doOnComplete(() -> log.info("Full metadata migration complete"));
     }
