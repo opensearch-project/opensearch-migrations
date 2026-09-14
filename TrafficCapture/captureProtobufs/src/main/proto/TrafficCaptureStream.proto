@@ -74,7 +74,7 @@ message TrafficStream {
   optional int32 priorRequestsReceived = 6;
   optional bool lastObservationWasUnterminatedRead = 7; // there were previous Read observations encountered that
                                                         // have yet to have EOM observations after them
-  optional int32 partition = 8; // explicit Kafka partition containing this record
+  reserved 8; // the Kafka partition comes only from Kafka record metadata
   repeated TrafficObservation subStream = 2;
   oneof index {
     int32 number = 3;
@@ -84,7 +84,7 @@ message TrafficStream {
 
 message WriterPartitionHeartbeat {
   string writerNodeId = 1;
-  int32 partition = 2;
+  reserved 2; // the Kafka partition comes only from Kafka record metadata
   int64 heartbeatIntervalMillis = 3; // informational only
   optional int64 emittedAtMillis = 4; // diagnostic only
 }
@@ -92,4 +92,14 @@ message WriterPartitionHeartbeat {
 message CaptureCapabilityProbe {
   string writerNodeId = 1;
   string probeId = 2;
+}
+
+// Every Kafka application-record value uses this envelope. The active oneof field identifies the
+// payload type without relying on Kafka headers or attempting multiple protobuf decodes.
+message CaptureRecord {
+  oneof payload {
+    TrafficStream trafficStream = 1;
+    WriterPartitionHeartbeat writerPartitionHeartbeat = 2;
+    CaptureCapabilityProbe captureCapabilityProbe = 3;
+  }
 }

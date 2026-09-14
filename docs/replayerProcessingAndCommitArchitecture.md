@@ -44,6 +44,9 @@ The replayer architecture must make these properties straightforward to reason a
     active target connection turn has unresolved source-response input for retry policy.
 12. Correctness-relevant asynchronous work has a required typed return path to the owner that must
     act on its result.
+13. Proxy-side periodic connection-record publication affects only where `TrafficStream` records
+    end. The replayer reconstructs solely from record and observation order and does not depend on
+    the proxy's configured flush interval.
 
 This architecture requires:
 
@@ -204,6 +207,13 @@ wait for that work before applying the next observation. A later completion does
 observation replay intake applies next. A replayer may restart at any committed cursor position, so
 reconstruction depends only on the ordered stream from that point and the protocol records that
 follow it.
+
+A proxy may close a `TrafficStream` because of its configured periodic connection-record flush,
+record size, Critical Mutation Traffic publication, or connection close. None of those boundaries
+is an HTTP boundary. One request or response may span several records, and one record may contain
+the end of one HTTP message followed by observations for the next message on the connection.
+Replay intake uses `connectionObservationSequence` and encoded observation order rather than
+inferring semantics from record closure.
 
 ### 3.4 Per-connection admission and execution queues
 
@@ -496,6 +506,7 @@ It accepts commit requests from replay intake.
 
 Replay intake:
 
+- decodes the `CaptureRecord` envelope and handles its active `payload` case;
 - decodes `TrafficStream` and its ordered `TrafficObservation` values;
 - validates that each connection's `connectionObservationSequence` follows the protocol's required
   progression;
@@ -516,6 +527,10 @@ reconstruction.
 
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,
 expiration, request, target, tuple, or record-completion state.
+
+`CaptureRecord.payload` is the record-type discriminator. Replay intake does not infer the type by
+trying several protobuf decoders and does not depend on a Kafka record-type header. An envelope with
+no recognized payload is a protocol violation.
 
 `WriterPartitionHeartbeat` updates only that writer and partition's accepted broker-time baseline.
 It creates no downstream request, connection, or tuple work. After replay intake applies that
@@ -538,6 +553,10 @@ expiration earlier.
 
 `WriterPartitionHeartbeat.heartbeatIntervalMillis` is informational. Replay intake does not derive
 expiration authority from it; the replayer uses its separately configured `E` and `S` values.
+
+The proxy's `trafficStreamFlushInterval` `F` is not part of replay configuration. Replay intake
+does not need to know why a `TrafficStream` ended and does not convert record boundaries into HTTP,
+connection-lifecycle, expiration, or commit events.
 
 An incomplete request that closes or expires before it can be reconstituted produces no tuple.
 Ending that incomplete assembly allows its associated Kafka-record processing to finish.
@@ -611,7 +630,10 @@ that depends on them. A single record may therefore be associated with:
 
 The record is closed to new associations only after every observation in it has been applied.
 When applying the record creates no unfinished association, the closed record is immediately
-eligible to emit its commit request. Heartbeats and capability probes commonly follow this path.
+eligible to emit its commit request. Heartbeats, capability probes, and a periodically published
+`TrafficStream` containing only a connection-open observation or other already-finished connection
+activity follow this path. A connection-open observation does not keep its Kafka record associated
+with the connection for the connection's lifetime.
 
 ### 6.2 Mixed records
 
@@ -939,15 +961,29 @@ closes the retry window. Replay intake emits `SourceResponseUnavailableForRetry`
 the crossing record's payload. A captured close or broker-time expiration that ends the incomplete
 response may make the retry input unavailable earlier.
 
+The boundary is deliberately based on Kafka records. A complete response that occurs later in the
+same `TrafficStream` as the request-completing observation is applied before any higher-offset
+record can establish `R`, so it is available to retry policy even when its source timestamps span
+more than `W`. This is deterministic because the same record bytes always produce the same result.
+
+The proxy's periodic connection-record interval `F` limits which observations may share one
+connection record, but the replayer does not use `F` and does not infer source elapsed duration from
+it. `F` does not bound producer queueing or broker append latency. `W` begins with `B`, after Kafka
+appends the request-completing record. A later boundary may additionally wait for the first
+higher-offset record after `B + W`; periodic `WriterPartitionHeartbeat` records normally provide
+that progress on an otherwise quiet partition.
+
 ```mermaid
 flowchart LR
+    F["proxy record boundary<br/>observations at or after t0 + F enter a successor"]
     B["offset b<br/>complete request reconstructed<br/>LogAppendTime B"]
     M["higher offsets are applied in order"]
-    C["complete source response<br/>freeze it for retry"]
+    C["complete source response in the same record<br/>or before the crossing<br/>freeze it for retry"]
     R["first offset r with R - B >= W"]
     U["before applying r's payload<br/>freeze unavailable for retry"]
     L["later response data may still<br/>complete the tuple source response"]
 
+    F --> B
     B --> M
     M -->|"response completes first"| C
     M -->|"timestamp boundary first"| R
@@ -990,6 +1026,11 @@ source accumulators, or tuple-only work. A hard count or byte cap can still dead
 intake before a record needed to complete, close, or expire retained state. The design therefore
 accepts that extreme traffic density or record size may exhaust memory rather than introducing
 such a deadlock by construction.
+
+Periodic proxy publication prevents a quiet or low-volume connection from retaining one nonempty
+record until connection close. It does not create a replayer memory ceiling: a record can still be
+large, Kafka can return large batches, and final source-response and tuple work may remain active
+after retry policy stops waiting.
 
 The deterministic boundary requires a later record. In normal live operation, periodic
 `WriterPartitionHeartbeat` records provide progress even when application traffic is idle. A
@@ -1195,6 +1236,10 @@ The replay-intake owner applies each partition's records in increasing offset or
 record's observations in encoded order. Asynchronous work returns messages; it does not re-enter
 and mutate source assembly directly.
 
+Periodic proxy publication may add record boundaries inside a request or response, but it does not
+change observation sequence values or their encoded order. Replay intake therefore reconstructs
+the same HTTP messages across those boundaries.
+
 ### 12.2 Target requests cannot overtake
 
 Replay intake sends reconstituted requests and the captured close in order. The connection owner
@@ -1316,6 +1361,8 @@ output, and Kafka-record completion remain independent and may continue afterwar
   the connection owner after tuple durability.
 - A record containing only `WriterPartitionHeartbeat` or `CaptureCapabilityProbe` becomes
   immediately commit-eligible after replay intake applies it.
+- Each valid Kafka application record contains one recognized `CaptureRecord.payload` case.
+  An envelope with no recognized payload follows the protocol-violation path.
 - The first non-probe Kafka record encountered for a writer and partition establishes its
   process-local broker-time starting point. A first heartbeat supplies the exact baseline; a first
   traffic record supplies `T` for the conservative `E + 2S` fallback until a heartbeat is
@@ -1374,6 +1421,15 @@ output, and Kafka-record completion remain independent and may continue afterwar
 - Replay intake applies an entire accepted poll result before recomputing demand; overshoot beyond
   `N` does not discard or reorder records.
 - `B` is taken from the record containing the final observation needed to reconstruct the request.
+- A request or response split by periodic proxy publication reconstructs exactly as it would
+  without that record boundary.
+- A periodically published `TrafficStream` containing only a connection-open observation or other
+  already-finished connection activity becomes immediately commit-eligible after replay intake
+  applies it; it does not wait for connection close.
+- Restart at a successor record created by a periodic flush uses its continuity fields to discard
+  an incomplete preceding request or response exactly as for a size-triggered flush.
+- A complete response later in the request-completing record is available to retry policy even
+  when its source timestamps span more than `W`.
 - A complete response before the first higher-offset record satisfying `R - B >= W` is frozen for
   every retry decision.
 - The crossing record sends `SourceResponseUnavailableForRetry` before its payload is applied.
@@ -1383,6 +1439,8 @@ output, and Kafka-record completion remain independent and may continue afterwar
 - `WriterPartitionHeartbeat`, `CaptureCapabilityProbe`, and `TrafficStream` records can each
   establish `R`.
 - Preserved archive timestamps reproduce the same crossing offset and retry input.
+- The replayer neither receives nor consults the proxy's `F`; identical Kafka records produce
+  identical replay decisions regardless of the proxy configuration that created their boundaries.
 - Target permits saturate and recover without losing completion.
 - A very large poll batch can exceed `N` but remains ordered and fully processed.
 - No hard record or byte cap prevents a readable partition from reaching the record that resolves

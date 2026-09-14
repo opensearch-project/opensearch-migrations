@@ -48,6 +48,10 @@ Source Kafka offsets are retained as archive validation and diagnostic data. Imp
 new Kafka log, so it cannot recreate the physical source offsets or leader epochs. The replayer
 uses the destination topic's offsets for processing and commits.
 
+The live proxy's `trafficStreamFlushInterval` does not need to be replayed as configuration.
+Its observable effect is the exact `TrafficStream` record boundaries already preserved by the
+archive. The exporter and importer must not merge or split archived application records.
+
 ## Export completion
 
 An export uses fixed per-partition start and end offsets. It is complete only when every record in
@@ -99,9 +103,15 @@ timestampMode: z
 
 ### `preserve`
 
-`preserve` is the default. The importer writes the archived original `LogAppendTime` as the
-destination record timestamp. The dedicated import topic must retain producer-supplied timestamps
-rather than replacing them with the destination broker's current time.
+`preserve` is the default. The importer writes the archived original `LogAppendTime` numeric value
+as the destination record timestamp. The dedicated import topic must retain producer-supplied
+timestamps rather than replacing them with the destination broker's current time.
+
+Kafka reports the destination record's timestamp type according to the destination topic's timestamp
+configuration. It cannot report the imported producer-supplied value as a newly assigned
+`LogAppendTime`. The archive therefore preserves the source record's original timestamp type as
+archive metadata, while replay in `preserve` mode treats the imported numeric timestamp as the
+archived source broker time.
 
 The replayer uses the archived `E` and `S` values and applies the normal broker-time expiration
 rules. This mode assumes the source Kafka brokers satisfied the declared skew bound while the
@@ -133,10 +143,16 @@ After import, the replayer processes the destination Kafka records through the s
 record-accounting paths used for live capture:
 
 - the destination offsets control `Commit` and `Retain`;
-- record headers retain their protocol meaning;
+- each raw record value retains its `CaptureRecord.payload` discriminator;
+- record headers are preserved exactly, but they do not identify the capture-record payload type;
 - `WriterPartitionHeartbeat` retains its protocol meaning;
 - records may be replayed more than once after restart or reassignment; and
 - end of archive does not complete unresolved HTTP assembly or other work.
+
+The importer preserves records exactly rather than recreating the proxy's periodic connection
+flush schedule. A request or response split across archived records reconstructs from the same
+ordered observations, and a complete response in the same archived record as request completion
+has the same retry-policy meaning as it did in the live topic.
 
 Retry policy for target HTTP requests is outside the scope of this architecture. Imported traffic
 uses the same configured behavior as live traffic. Any retry remains part of the same target
@@ -197,8 +213,10 @@ capture coordination protocol.
 
 The following tests are required:
 
-1. A record round trip preserves partition, raw nullable key/value, timestamp, timestamp type, and
-   duplicate ordered headers.
+1. An archive-codec round trip preserves partition, raw nullable key/value, original timestamp,
+   original timestamp-type metadata, and duplicate ordered headers. Import in `preserve` mode keeps
+   the archived numeric timestamp; it does not claim that Kafka reports the destination record with
+   the source record's original timestamp type.
 2. A multi-partition archive round trip preserves every partition's record order.
 3. Import rejects unsupported protocol versions, missing partitions, gaps, duplicates, reordering,
    and integrity failures.
@@ -214,3 +232,10 @@ The following tests are required:
    topic.
 9. A full live-capture export/import/replay produces the same replay-visible protocol input as the
     original capture.
+10. Import preserves every original `TrafficStream` boundary; it neither combines records created
+    by separate periodic flushes nor splits one archived record.
+11. Preserving those record boundaries and archived timestamps reproduces the same request record
+    timestamp `B`, boundary-crossing record timestamp `R`, and source-response input selected for
+    retry policy.
+12. Export and import preserve the complete `CaptureRecord` envelope and each of its three recognized
+    `payload` cases without relying on Kafka headers for record-type discrimination.
