@@ -38,7 +38,6 @@ public class CodedOutputStreamSizeUtil {
         int observationFieldNumber,
         int dataFieldNumber,
         ByteBuf buf,
-        long manifestCycle,
         long connectionObservationSequence
     ) {
         // Timestamp required bytes
@@ -46,12 +45,10 @@ public class CodedOutputStreamSizeUtil {
         int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize)
             + tsContentSize;
 
-        int orderingMetadataSize =
-            CodedOutputStream.computeUInt64Size(TrafficObservation.MANIFESTCYCLE_FIELD_NUMBER, manifestCycle)
-                + CodedOutputStream.computeUInt64Size(
-                    TrafficObservation.CONNECTIONOBSERVATIONSEQUENCE_FIELD_NUMBER,
-                    connectionObservationSequence
-                );
+        int orderingMetadataSize = CodedOutputStream.computeUInt64Size(
+            TrafficObservation.CONNECTIONOBSERVATIONSEQUENCE_FIELD_NUMBER,
+            connectionObservationSequence
+        );
 
         // Capture required bytes
         int dataSize = computeByteBufRemainingSize(dataFieldNumber, buf);

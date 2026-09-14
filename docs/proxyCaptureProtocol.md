@@ -341,8 +341,9 @@ Its default timing is:
   observations, Kafka acknowledgements, publisher callback quiescence, and producer closure;
 - 30 seconds for a high-severity diagnostic, thread dump, and explicit log flushing if orderly
   retirement is still incomplete;
-- `System.exit` at 270 seconds; and
-- a watchdog `Runtime.halt` at 300 seconds if shutdown hooks do not finish.
+- the shutdown hook is expected to return by 270 seconds; and
+- an independent watchdog invokes `Runtime.halt` at 300 seconds if the shutdown hook does not
+  finish.
 
 Each interval is independently configurable, but their configured sum must fit within the
 deployment's process-termination grace period. The natural-drain interval, forced-retirement
@@ -355,7 +356,7 @@ flowchart LR
     T0["t0<br/>close listener, leave group<br/>begin natural drain"]
     T60["t0 + 60s<br/>force-close remaining connections"]
     T240["t0 + 240s<br/>retirement deadline missed<br/>ERROR, thread dump, flush logs"]
-    T270["t0 + 270s<br/>System.exit"]
+    T270["t0 + 270s<br/>shutdown hook should have returned"]
     T300["t0 + 300s<br/>Runtime.halt if still alive"]
 
     T0 -->|"natural drain"| T60
@@ -364,7 +365,9 @@ flowchart LR
     T270 -->|"bounded shutdown hooks"| T300
 ```
 
-If retirement finishes before `System.exit`, the proxy closes the producer and exits normally.
+If retirement finishes before the shutdown-hook completion boundary, the proxy closes the producer,
+stops its event loops, and lets the shutdown hook return so the JVM exits normally. The hook does
+not call `System.exit` after JVM shutdown has already begun.
 Missing the 240-second orderly-retirement deadline is a high-severity failure even if cleanup
 finishes during the diagnostic interval. An application-visible Kafka failure or expiration of the
 current heartbeat acknowledgement deadline `E`, whichever occurs first, makes retirement
@@ -607,13 +610,14 @@ OPEN -> RETIRING -> RETIRED
 - `RETIRED` rejects every submission.
 
 Publisher initialization and shutdown are completion-gated lifecycle operations. The composition
-root owns any newly created producer and executor until publisher construction succeeds. A failed
-initialization closes and joins both before returning failure; successful construction transfers
-their sole lifecycle ownership to `CaptureKafkaPublisher`. Clean process shutdown first runs the
-§4.3 retirement barrier for every used partition. Only after every publisher lane is `RETIRED`
-does publisher shutdown close the producer and terminate its executor. A capture failure may
-instead close the producer without claiming orderly retirement. Publisher shutdown completes only
-after callback quiescence, producer closure, and executor termination. There is no optional no-op
+root owns a newly created producer until publisher construction succeeds. The publisher owns its
+serialized publisher executor and its separate heartbeat-deadline scheduler. Failed initialization
+closes every resource that was created before returning failure; successful construction transfers
+sole producer ownership to `CaptureKafkaPublisher`. Clean process shutdown first runs the §4.3
+retirement barrier for every used partition. Only after every publisher lane is `RETIRED` does
+publisher shutdown close the producer and terminate both executors. A capture failure may instead
+close the producer without claiming orderly retirement. Publisher shutdown completes only after
+callback quiescence, producer closure, and both executors terminate. There is no optional no-op
 lifecycle callback or default method that can omit this cleanup.
 
 ### 4.3 Writer-partition publisher retirement barrier
@@ -719,10 +723,12 @@ periodic callbacks coalesce into the next run. A failed, ambiguous, or late hear
 capture gate, so no later heartbeat is authoritative.
 
 Each `(writerNodeId, partition)` also has a local monotonic heartbeat acknowledgement deadline. The
-initial deadline starts when the initial heartbeat is submitted. When an acknowledgement is
-processed and accepted, the proxy sets the next deadline to `E` after that local monotonic
-acceptance time. If the deadline expires before the required acknowledgement is processed, the
-first expiration task atomically compromises the process. A later Kafka
+initial deadline starts when the initial heartbeat is submitted. Kafka's acknowledgement callback
+and a separate deadline scheduler atomically determine whether acknowledgement arrival or deadline
+expiration happened first; publisher-lane backlog cannot change that result. When an
+acknowledgement is processed and accepted, the proxy sets the next deadline to `E` after that local
+monotonic acceptance time. If the deadline expires before Kafka invokes the required
+acknowledgement callback, the expiration atomically compromises the process. A later Kafka
 acknowledgement cannot update capture state, renew the deadline, activate an assignment, or complete
 publisher retirement. This local deadline is independent of the broker `LogAppendTime` validation in
 §5.4.
@@ -1274,8 +1280,8 @@ addendum also specifies:
   and accepted.
 - A heartbeat is one Kafka record with no connection identities, chunks, or connection-lifecycle
   sequence.
-- Publisher initialization failure closes its producer and executor; repeated failed starts leave
-  no publisher threads behind.
+- Publisher initialization failure closes its producer and both executors; repeated failed starts
+  leave no publisher or heartbeat-deadline threads behind.
 - Registry addition precedes acceptance of the connection's first `TrafficObservation`.
 - Netty close caused by remote closure, local closure, or channel failure produces exactly one
   terminal connection observation after every earlier observation in the connection's event-loop
@@ -1388,8 +1394,9 @@ addendum also specifies:
   publishing and heartbeating under its existing identities without membership.
 - A draining proxy allows 60 seconds by default for natural close, then force-closes remaining
   connections and allows 180 seconds for retirement and publisher quiescence. If still incomplete,
-  it emits and flushes an error and thread dump, calls `System.exit` at 270 seconds, and is halted by
-  a watchdog at 300 seconds if shutdown hooks hang. Every interval is configurable.
+  it emits and flushes an error and thread dump, expects the shutdown hook to return by 270 seconds,
+  and is halted by an independent watchdog at 300 seconds if the hook hangs. Every interval is
+  configurable.
 - An older writer identity emits periodic heartbeats until its connections drain, then retires its
   publisher lane locally.
 - Rapid rebalances may leave several writer identities draining concurrently without sharing
@@ -1424,8 +1431,9 @@ addendum also specifies:
   notifications and acknowledgements are idempotent; controller failover reconstructs the durable
   acknowledgement; and deadline expiration terminates without forwarding the blocked traffic.
 - Verify the 60-second natural drain, force-close transition, 240-second orderly-retirement
-  deadline, bounded diagnostic flush, `System.exit` at 270 seconds, and watchdog
-  `Runtime.halt` at 300 seconds. Verify that each interval is configurable and that orderly
+  deadline, bounded diagnostic flush, expected shutdown-hook completion at 270 seconds, and
+  watchdog `Runtime.halt` at 300 seconds. Verify that the hook does not call `System.exit` after JVM
+  shutdown has begun, that each interval is configurable, and that orderly
   retirement fails on the first application-visible Kafka failure or heartbeat acknowledgement
   deadline expiration.
   Verify that later acknowledgements cannot activate an assignment or complete publisher
@@ -1515,9 +1523,9 @@ The design is complete when:
 - Group-member departure only causes group rebalance; it has no replay meaning.
 - The maximum whole-connection lifetime defaults to 60 minutes.
 - Orderly shutdown while capture and Kafka remain trustworthy uses a 60-second natural drain,
-  force-closes remaining connections, calls `System.exit` at 270 seconds if retirement is still
-  incomplete, and has a five-minute internal watchdog hard stop; capture-compromise and
-  unstable-process failures do not use that retirement path.
+  force-closes remaining connections, expects the shutdown hook to return by 270 seconds, and has a
+  five-minute internal watchdog hard stop; the hook does not call `System.exit` after JVM shutdown
+  has begun. Capture-compromise and unstable-process failures do not use that retirement path.
 - Recovery after a capture gap starts a new capture and replay run.
 - In managed Kubernetes, a compromised process never captures again. A `fail-closed` process may
   be replaced in the current run because it forwarded no uncaptured traffic. Once uncaptured

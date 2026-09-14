@@ -2,7 +2,6 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.Objects;
 import java.util.Properties;
 
 import com.beust.jcommander.Parameter;
@@ -137,9 +136,7 @@ public class KafkaConfig {
 
     public static Properties buildMembershipConsumerProperties(
         KafkaParameters params,
-        String nodeId,
-        String topic,
-        CaptureMembershipAssignmentTracker assignmentTracker
+        String topic
     ) throws IOException {
         var kafkaProps = loadKafkaProperties(params.kafkaPropertyFile);
         kafkaProps.remove(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
@@ -162,15 +159,6 @@ public class KafkaConfig {
         kafkaProps.put(ConsumerConfig.GROUP_ID_CONFIG, "capture-proxy-membership-" + topic);
         kafkaProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         kafkaProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        kafkaProps.put(
-            ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
-            CaptureCooperativeStickyAssignor.class.getName()
-        );
-        kafkaProps.put(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG, nodeId);
-        kafkaProps.put(
-            CaptureCooperativeStickyAssignor.ASSIGNMENT_TRACKER_CONFIG,
-            Objects.requireNonNull(assignmentTracker)
-        );
         applySaslAuthProperties(
             kafkaProps,
             params.getEffectiveKafkaAuthType(),

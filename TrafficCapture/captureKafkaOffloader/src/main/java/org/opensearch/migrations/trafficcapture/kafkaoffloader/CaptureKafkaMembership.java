@@ -28,8 +28,6 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
     private final String topic;
     private final CaptureRoutingState routingState;
     private final CaptureAssignmentPublisher publisher;
-    private final CaptureMembershipAssignmentTracker assignmentTracker;
-    private final int minimumActiveProxyCount;
     private final Runnable initialAssignmentCallback;
     private final Consumer<Throwable> membershipFailureCallback;
     private final Consumer<Throwable> unstableProcessFailureCallback;
@@ -45,8 +43,6 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         String topic,
         CaptureRoutingState routingState,
         CaptureAssignmentPublisher publisher,
-        CaptureMembershipAssignmentTracker assignmentTracker,
-        int minimumActiveProxyCount,
         Runnable initialAssignmentCallback,
         Consumer<Throwable> membershipFailureCallback,
         Consumer<Throwable> unstableProcessFailureCallback
@@ -56,11 +52,6 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         this.routingState = Objects.requireNonNull(routingState);
         kafkaAssignment.addAll(routingState.assignedPartitions());
         this.publisher = Objects.requireNonNull(publisher);
-        this.assignmentTracker = Objects.requireNonNull(assignmentTracker);
-        if (minimumActiveProxyCount <= 0) {
-            throw new IllegalArgumentException("minimumActiveProxyCount must be positive");
-        }
-        this.minimumActiveProxyCount = minimumActiveProxyCount;
         this.initialAssignmentCallback = Objects.requireNonNull(initialAssignmentCallback);
         this.membershipFailureCallback = Objects.requireNonNull(membershipFailureCallback);
         this.unstableProcessFailureCallback = Objects.requireNonNull(unstableProcessFailureCallback);
@@ -90,10 +81,6 @@ public final class CaptureKafkaMembership implements ConsumerRebalanceListener, 
         kafkaAssignment.addAll(partitionNumbers(partitions));
         consumer.pause(partitions);
         if (kafkaAssignment.isEmpty()) {
-            return;
-        }
-        boolean minimumSatisfied = assignmentTracker.satisfiesMinimum(minimumActiveProxyCount);
-        if (!initialAssignmentReported.get() && !minimumSatisfied) {
             return;
         }
         var assignmentSnapshot = List.copyOf(kafkaAssignment);

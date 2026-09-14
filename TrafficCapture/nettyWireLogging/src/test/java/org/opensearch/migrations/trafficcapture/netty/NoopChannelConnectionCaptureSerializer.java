@@ -4,10 +4,12 @@ import java.io.IOException;
 import java.net.SocketAddress;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.concurrent.EventExecutor;
 
 /**
  * Plain Java test implementation whose methods deliberately do nothing unless a test overrides
@@ -15,6 +17,12 @@ import io.netty.buffer.ByteBuf;
  */
 abstract class NoopChannelConnectionCaptureSerializer<T>
     implements IChannelConnectionCaptureSerializer<T> {
+
+    @Override
+    public void bindToConnectionEventLoop(
+        EventExecutor eventLoop,
+        Consumer<Throwable> asynchronousFailureHandler
+    ) {}
 
     @Override
     public void validateCriticalMutationTrafficAcknowledgement(T acknowledgement) {}

@@ -16,11 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CaptureKafkaWriteGateTest {
     @Test
-    void tripWaitsForAnAcceptedSubmissionAndRejectsEveryLaterSubmission() throws Exception {
+    void tripDoesNotWaitForAnAcceptedSubmissionAndRejectsEveryLaterSubmission() throws Exception {
         var gate = new CaptureKafkaWriteGate();
         var submissionStarted = new CountDownLatch(1);
         var releaseSubmission = new CountDownLatch(1);
-        var tripFinished = new CountDownLatch(1);
         var terminalFailure = new IllegalStateException("evicted");
         var laterSubmissionRan = new AtomicBoolean();
 
@@ -30,25 +29,17 @@ class CaptureKafkaWriteGateTest {
                 await(releaseSubmission);
             }));
             assertTrue(submissionStarted.await(1, TimeUnit.SECONDS));
-            var trip = executor.submit(() -> {
-                try {
-                    return gate.trip(terminalFailure);
-                } finally {
-                    tripFinished.countDown();
-                }
-            });
+            var trip = executor.submit(() -> gate.trip(terminalFailure));
 
-            assertFalse(tripFinished.await(50, TimeUnit.MILLISECONDS));
+            assertSame(terminalFailure, trip.get(1, TimeUnit.SECONDS));
+            assertSame(
+                terminalFailure,
+                gate.submitIfWritable(() -> laterSubmissionRan.set(true))
+            );
+            assertFalse(laterSubmissionRan.get());
             releaseSubmission.countDown();
             assertNull(accepted.get(1, TimeUnit.SECONDS));
-            assertSame(terminalFailure, trip.get(1, TimeUnit.SECONDS));
         }
-
-        assertSame(
-            terminalFailure,
-            gate.submitIfWritable(() -> laterSubmissionRan.set(true))
-        );
-        assertFalse(laterSubmissionRan.get());
     }
 
     @Test
