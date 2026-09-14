@@ -4,8 +4,17 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureReadiness;
 import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 
 import com.beust.jcommander.ParameterException;
@@ -84,7 +93,7 @@ public class CaptureProxySetupTest {
     }
 
     @Test
-    void minimumActiveProxyCountDefaultsToOneAndIsConfigurable() {
+    void captureProtocolTimingDefaultsToFiveTenAndThirtySecondsAndIsConfigurable() {
         var defaults = CaptureProxy.parseArgs(new String[] {
             "--destinationUri", "invalid:9200",
             "--listenPort", "80",
@@ -94,32 +103,37 @@ public class CaptureProxySetupTest {
             "--destinationUri", "invalid:9200",
             "--listenPort", "80",
             "--noCapture",
-            "--minimum-active-proxy-count", "3"
+            "--traffic-stream-flush-interval-seconds", "7",
+            "--heartbeat-interval-seconds", "11",
+            "--heartbeat-expiration-interval-seconds", "31"
         });
 
-        Assertions.assertEquals(1, defaults.minimumActiveProxyCount);
-        Assertions.assertEquals(3, configured.minimumActiveProxyCount);
+        Assertions.assertEquals(5, defaults.trafficStreamFlushIntervalSeconds);
+        Assertions.assertEquals(10, defaults.heartbeatIntervalSeconds);
+        Assertions.assertEquals(30, defaults.heartbeatExpirationIntervalSeconds);
+        Assertions.assertEquals(7, configured.trafficStreamFlushIntervalSeconds);
+        Assertions.assertEquals(11, configured.heartbeatIntervalSeconds);
+        Assertions.assertEquals(31, configured.heartbeatExpirationIntervalSeconds);
     }
 
     @Test
-    void manifestTimingDefaultsToThirtyAndSixtySecondsAndIsConfigurable() {
-        var defaults = CaptureProxy.parseArgs(new String[] {
-            "--destinationUri", "invalid:9200",
-            "--listenPort", "80",
-            "--noCapture"
-        });
-        var configured = CaptureProxy.parseArgs(new String[] {
-            "--destinationUri", "invalid:9200",
-            "--listenPort", "80",
-            "--noCapture",
-            "--liveness-snapshot-interval-seconds", "15",
-            "--manifest-expiration-interval-seconds", "45"
-        });
+    void firstUsableAssignmentBlocksStartupUntilCaptureIsReady() throws Exception {
+        var captureFactory = new ReadinessCaptureFactory();
+        var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var startupBarrier = executor.submit(
+                () -> CaptureProxy.awaitCaptureReadiness(captureFactory, captureProcessState)
+            );
 
-        Assertions.assertEquals(30, defaults.livenessSnapshotIntervalSeconds);
-        Assertions.assertEquals(60, defaults.manifestExpirationIntervalSeconds);
-        Assertions.assertEquals(15, configured.livenessSnapshotIntervalSeconds);
-        Assertions.assertEquals(45, configured.manifestExpirationIntervalSeconds);
+            Assertions.assertTrue(captureFactory.readinessRequested.await(1, TimeUnit.SECONDS));
+            Assertions.assertFalse(startupBarrier.isDone());
+
+            captureFactory.ready.complete(null);
+            startupBarrier.get(1, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -277,5 +291,23 @@ public class CaptureProxySetupTest {
     public void testConvertStringToUriExplicit443() {
         URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:443");
         Assertions.assertEquals(443, uri.getPort());
+    }
+
+    private static class ReadinessCaptureFactory
+        implements IConnectionCaptureFactory<Void>, IConnectionCaptureReadiness {
+        private final CountDownLatch readinessRequested = new CountDownLatch(1);
+        private final CompletableFuture<Void> ready = new CompletableFuture<>();
+
+        @Override
+        public IChannelConnectionCaptureSerializer<Void> createOffloader(IConnectionContext ctx)
+            throws IOException {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
+        public CompletableFuture<Void> readyForConnections() {
+            readinessRequested.countDown();
+            return ready;
+        }
     }
 }

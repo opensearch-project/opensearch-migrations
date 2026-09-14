@@ -102,13 +102,38 @@ public class KafkaConfigTest {
     }
 
     @Test
-    void membershipConsumerPropertiesCannotBeRedirectedOrChangedToAnEagerAssignor() throws IOException {
+    void membershipConsumerPropertiesSetGroupIdentityWithoutForcingAnAssignmentStrategy()
+        throws IOException {
         var propertyFile = tempDir.resolve("consumer.properties");
         Files.writeString(
             propertyFile,
             ConsumerConfig.GROUP_ID_CONFIG
                 + "=wrong-group\n"
-                + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG
+        );
+        var params = new KafkaConfig.KafkaParameters();
+        params.kafkaPropertyFile = propertyFile.toString();
+        params.kafkaBrokers = "broker:9092";
+        params.kafkaClientId = "capture";
+
+        var properties = KafkaConfig.buildMembershipConsumerProperties(
+            params,
+            "traffic"
+        );
+
+        assertEquals("broker:9092", properties.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        assertEquals("capture-membership", properties.get(ConsumerConfig.CLIENT_ID_CONFIG));
+        assertEquals("capture-proxy-membership-traffic", properties.get(ConsumerConfig.GROUP_ID_CONFIG));
+        assertEquals(false, properties.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
+        assertFalse(properties.containsKey(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG));
+    }
+
+    @Test
+    void membershipConsumerPropertiesPreserveAnExplicitKafkaAssignmentStrategy()
+        throws IOException {
+        var propertyFile = tempDir.resolve("consumer.properties");
+        Files.writeString(
+            propertyFile,
+            ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG
                 + "=org.apache.kafka.clients.consumer.RangeAssignor\n"
         );
         var params = new KafkaConfig.KafkaParameters();
@@ -116,26 +141,11 @@ public class KafkaConfigTest {
         params.kafkaBrokers = "broker:9092";
         params.kafkaClientId = "capture";
 
-        var assignmentTracker = new CaptureMembershipAssignmentTracker();
-        var properties = KafkaConfig.buildMembershipConsumerProperties(
-            params,
-            "node-a",
-            "traffic",
-            assignmentTracker
-        );
+        var properties = KafkaConfig.buildMembershipConsumerProperties(params, "traffic");
 
-        assertEquals("broker:9092", properties.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
-        assertEquals("capture-membership", properties.get(ConsumerConfig.CLIENT_ID_CONFIG));
-        assertEquals("capture-proxy-membership-traffic", properties.get(ConsumerConfig.GROUP_ID_CONFIG));
         assertEquals(
-            CaptureCooperativeStickyAssignor.class.getName(),
+            "org.apache.kafka.clients.consumer.RangeAssignor",
             properties.get(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG)
         );
-        assertEquals("node-a", properties.get(CaptureCooperativeStickyAssignor.NODE_ID_CONFIG));
-        assertEquals(
-            assignmentTracker,
-            properties.get(CaptureCooperativeStickyAssignor.ASSIGNMENT_TRACKER_CONFIG)
-        );
-        assertEquals(false, properties.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
     }
 }
