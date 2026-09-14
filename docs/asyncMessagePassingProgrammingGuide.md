@@ -90,15 +90,21 @@ immutable input
     -> returned stage completes with a typed value
 ```
 
-For replay intake, producers append immutable inputs to a thread-safe queue and wake the Kafka
-executor:
+For replay intake, producers append immutable inputs to a thread-safe queue. The Kafka executor
+drains that queue before and after its bounded Kafka consumer calls:
 
 ```text
 Netty or tuple completion
-    -> ConcurrentLinkedQueue.add(immutable owner input)
-    -> wake Kafka executor
+    -> threadSafeQueue.add(immutable owner input)
+    -> Kafka executor returns from its bounded Kafka call
     -> Kafka executor, as the sole consumer, applies queued inputs one at a time
 ```
+
+Ordinary replay-intake submission does not call `Consumer.wakeup()`. Completion-handling latency is
+therefore bounded by the Kafka call timeout. During a revocation or shutdown grace interval, the
+Kafka executor pumps the restricted completion and control queue directly as defined by the
+replayer design. A future implementation that introduces `Consumer.wakeup()` must account for its
+effect on every Kafka call, including commit calls, and requires a separate reviewed design.
 
 The concurrent queue makes submission thread-safe. It does not permit producers to mutate replay
 intake state. If inputs require a total order, the component design must establish that order

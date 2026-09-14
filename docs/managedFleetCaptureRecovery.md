@@ -1,6 +1,7 @@
 # Managed Fleet Capture Recovery
 
-**Status: managed terminal-failure and fresh-run contract (2026-09-14).**
+**Status: managed terminal-failure and fresh-run design contract; implementation conformance is
+incomplete (2026-09-14).**
 
 This document extends the standalone
 [Proxy Capture Protocol](proxyCaptureProtocol.md) for a controller-managed Kubernetes fleet. The
@@ -53,6 +54,10 @@ Managed operation requires:
   reason-specific halt code; the replayer's final in-process OpenTelemetry metric remains
   best-effort; and
 - an uncaptured source interval starts a new capture and replay run with a fresh source snapshot.
+
+The wire records and controller behavior in this document are target requirements. A deployment
+must not claim this managed contract until its proxy, replayer, archive tooling, checkpoints, and
+controller all implement the same session-fenced protocol version.
 
 Any terminal capture failure after a permitted retry terminates the entire capture workflow. A
 `fail-closed` proxy terminates immediately. A `fail-open` proxy immediately
@@ -158,6 +163,13 @@ affected incomplete records, and raises a high-severity alarm. It must not conti
 incomplete state using an invalid timestamp proof. Replay processing that does not depend on that
 proof may continue.
 
+This requirement constrains managed Kafka offerings as well as self-hosted brokers. A deployment
+may use broker-time expiration with a managed service only when the provider supplies an
+operationally enforceable and attestable bound that satisfies `S`. A service-level objective that
+does not bound backward `LogAppendTime` movement is insufficient. Without such a bound, the
+deployment may continue ordinary replay but must disable broker-time expiration and accept that
+hard-crash accumulators can remain retained.
+
 ### 2.2 Replayer fatal-termination alarming
 
 The replayer cannot guarantee export of a final OpenTelemetry metric before
@@ -167,11 +179,13 @@ handler still attempts
 `replayFatalFailures{reason=event_loop_terminated}` before logging and termination, but fleet
 alarming does not depend upon that attempt succeeding or being exported.
 
-Fatal event-loop-owner loss uses `Runtime.halt(80)`. Code `80` is reserved for that reason and is
-distinct from the replayer's normal `System.exit` codes. Kubernetes observes this as a container
-termination. For a workload whose Pod restart policy restarts the container, the Pod normally
-remains while the kubelet records the terminated container state and increments its restart count;
-this is a container termination and restart, not necessarily Pod deletion.
+Fatal event-loop-owner loss uses exit code `80`, which is reserved for that reason and is distinct
+from the replayer's normal and other fatal exit codes. The bounded fatal-termination path may begin
+with `System.exit(80)` so shutdown hooks can flush diagnostics; it invokes `Runtime.halt(80)` if
+that bound expires. Kubernetes observes either path as a container termination. For a workload
+whose Pod restart policy restarts the container, the Pod normally remains while the kubelet records
+the terminated container state and increments its restart count; this is a container termination
+and restart, not necessarily Pod deletion.
 
 Every managed deployment runs kube-state-metrics or an equivalent independent observer and exports:
 
@@ -233,6 +247,9 @@ connections use:
 ```text
 writerNodeId = captureActivationId + ":" + assignmentSequence
 ```
+
+The initial numeric value has no protocol meaning. Only strict increase and non-reuse within one
+`captureActivationId` are required.
 
 Every new assignment creates a `writerNodeId` that cannot be reused within the
 `captureActivationId`. Existing connections permanently retain their original `writerNodeId`.
@@ -1063,7 +1080,7 @@ frozen the old grant ledger:
 5. on failed or ambiguous delivery, retry the identical persisted payload rather than allocating a
    new session or sequence;
 6. retain every incomplete partition obligation and durably record each acknowledged
-   reset offset; and
+   reset offset;
 7. issue no new capture grant until every reset copy is acknowledged; and
 8. persist the immutable replay-boundary plan containing those reset offsets before any grant.
 
@@ -1547,6 +1564,10 @@ Before a Kubernetes deployment can claim this contract:
    controller-acknowledgement deadline. The correctness contract is already fixed: capture closes
    locally at once, no uncaptured source traffic is forwarded before durable acknowledgement, and
    deadline expiration terminates the proxy.
+9. Enumerate the exact producer outcomes eligible for `CAPTURE_RETRYING` and reconcile them with the
+   base rule that an application-visible failure, timeout, or ambiguous outcome closes capture
+   permanently. The retrying state is not implementable from the phrase “definite uncompromised
+   transient failure” alone.
 
 Automatic recovery within a failed workflow additionally requires:
 
