@@ -1,7 +1,6 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
 import java.io.IOException;
-import java.net.SocketAddress;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -28,53 +27,13 @@ abstract class NoopChannelConnectionCaptureSerializer<T>
     public void validateCriticalMutationTrafficAcknowledgement(T acknowledgement) {}
 
     @Override
-    public void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {}
-
-    @Override
-    public void addConnectEvent(Instant timestamp, SocketAddress remote, SocketAddress local)
-        throws IOException {}
-
-    @Override
-    public void addDisconnectEvent(Instant timestamp) throws IOException {}
-
-    @Override
     public void addCloseEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addDeregisterEvent(Instant timestamp) throws IOException {}
 
     @Override
     public void addReadEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
 
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
-
-    @Override
-    public void addFlushEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelRegisteredEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelUnregisteredEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelActiveEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelInactiveEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelReadEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelReadCompleteEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addUserEventTriggeredEvent(Instant timestamp) throws IOException {}
-
-    @Override
-    public void addChannelWritabilityChangedEvent(Instant timestamp) throws IOException {}
 
     @Override
     public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {}

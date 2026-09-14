@@ -2,7 +2,6 @@ package org.opensearch.migrations.trafficcapture;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.GatheringByteChannel;
 import java.time.Duration;
@@ -552,32 +551,12 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     @Override
-    public void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addConnectEvent(Instant timestamp, SocketAddress remote, SocketAddress local) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addDisconnectEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
     public void addCloseEvent(Instant timestamp) throws IOException {
         beginSubstreamObservation(timestamp, TrafficObservation.CLOSE_FIELD_NUMBER, 1);
         getOrCreateCodedOutputStream().writeMessage(
             TrafficObservation.CLOSE_FIELD_NUMBER,
             CloseObservation.getDefaultInstance()
         );
-    }
-
-    @Override
-    public void addDeregisterEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     private void addStringMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, @NonNull String str)
@@ -749,51 +728,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
         addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, timestamp, buffer);
-    }
-
-    @Override
-    public void addFlushEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelRegisteredEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelUnregisteredEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelActiveEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelInactiveEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelReadEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelReadCompleteEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addUserEventTriggeredEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
-    }
-
-    @Override
-    public void addChannelWritabilityChangedEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override

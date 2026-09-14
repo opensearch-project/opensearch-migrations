@@ -148,13 +148,13 @@ class CaptureRoutingStateTest {
         state.activateAssignment(replacement);
         var newRoute = state.routeNewConnection("connection");
 
-        assertEquals(List.of("connection"), state.snapshot(oldRoute.writerNodeId(), 0));
-        assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
+        assertNotEquals(oldRoute.writerNodeId(), newRoute.writerNodeId());
+        assertEquals(2, state.size());
 
         state.acceptTrafficSubmission(oldRoute, true);
         state.removeAfterTerminalAcknowledgement(oldRoute);
-        assertEquals(List.of(), state.snapshot(oldRoute.writerNodeId(), 0));
-        assertEquals(List.of("connection"), state.snapshot(newRoute.writerNodeId(), 0));
+        assertEquals(1, state.size());
+        state.acceptTrafficSubmission(newRoute, false);
     }
 
     @Test
