@@ -24,7 +24,7 @@
     "eslint-config-prettier": "^10.1.8",
     "peggy": "^5.1.0",
     "prettier": "^3.9.6",
-    "vitest": "^4.1.9"
+    "vitest": "^5.0.1"
   },
   "optionalDependencies": {
     "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20260707.2",
