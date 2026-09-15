@@ -381,6 +381,10 @@ public class SolrBackupSource implements DocumentSource {
         if (source == null) {
             source = "{}".getBytes(StandardCharsets.UTF_8);
         }
-        return new Document(id, source, Document.Operation.UPSERT, Map.of(), Map.of());
+        return new Document(id, source, Document.Operation.UPSERT, Map.of(),
+            // Solr resumes by Lucene doc id (see readDocumentsFromReader), so the position has to
+            // travel with the document; without it the pipeline falls back to counting emitted
+            // documents and a successor seeks to the wrong place.
+            Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, change.getLuceneDocNumber()));
     }
 }

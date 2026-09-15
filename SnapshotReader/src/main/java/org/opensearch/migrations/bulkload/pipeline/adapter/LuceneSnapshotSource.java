@@ -4,6 +4,8 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -185,8 +187,17 @@ public class LuceneSnapshotSource implements DocumentSource {
         return IndexMetadataConverter.convert(collectionName, meta);
     }
 
+    /** Live Lucene doc count per partition, captured while the reader was open during the read. */
+    private final Map<String, Long> liveDocCounts = new ConcurrentHashMap<>();
+
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+    public OptionalLong countLiveDocuments(Partition partition) {
+        var cached = liveDocCounts.get(partition.name());
+        return cached == null ? OptionalLong.empty() : OptionalLong.of(cached);
+    }
+
+    @Override
+    public Flux<Document> readDocuments(Partition partition, long startingPosition) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
         if (entry == null) {
@@ -205,26 +216,30 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
-                return readRegularDocuments(entry, partition, startingDocOffset);
+                return readRegularDocuments(entry, partition, startingPosition);
             }
-            log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
+            log.info("Reading delta documents from {} (mode={}, position={})", partition, deltaMode, startingPosition);
+            // The checkpoint is a Lucene doc number, not an ordinal into this stream, so filter by
+            // position rather than skip(n). Documents exactly at the checkpoint are retained:
+            // successors restart at the last processed position to handle 1:many doc splits.
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
-                .skip(startingDocOffset)
+                .filter(change -> change.getLuceneDocNumber() >= startingPosition)
                 .map(luceneAdapter::fromLucene);
         }
 
-        return readRegularDocuments(entry, partition, startingDocOffset);
+        return readRegularDocuments(entry, partition, startingPosition);
     }
 
     private Flux<Document> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
+        SnapshotExtractor.ShardEntry entry, Partition partition, long startingPosition
     ) {
-        log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
+        log.info("Reading documents from {} starting at Lucene docId {}", partition, startingPosition);
         var esPartition = (EsShardPartition) partition;
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingPosition), mappingContext, useRecoverySource,
+                count -> liveDocCounts.put(partition.name(), count))
             .map(luceneAdapter::fromLucene);
     }
 
@@ -243,5 +258,6 @@ public class LuceneSnapshotSource implements DocumentSource {
     public void close() {
         shardEntryCache.clear();
         previousShardEntryCache.clear();
+        liveDocCounts.clear();
     }
 }
