@@ -170,6 +170,8 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo '. /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
+    echo 'loadtest util completions bash > /usr/share/bash-completion/completions/loadtest' >> ~/.bashrc && \
+    echo '. /usr/share/bash-completion/completions/loadtest' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc
 
 # Set ENV to control startup script in /bin/sh mode

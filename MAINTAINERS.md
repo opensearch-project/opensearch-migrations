@@ -27,4 +27,4 @@ This document contains a list of maintainers in this repo. See [opensearch-proje
 | Chris Helma        | [chelma](https://github.com/chelma)                     | Amazon      |
 | Tanner Lewis       | [lewijacn](https://github.com/lewijacn)                 | Amazon      |
 | Mikayla Thompson   | [mikaylathompson](https://github.com/mikaylathompson)   | Amazon      |
-| Peter Nied         | [peternied](https://github.com/peternied)               | Amazon      |
+| Peter Nied         | [peternied](https://github.com/peternied)               | Airbnb      |

@@ -5,6 +5,12 @@ conditionalPackageInstalls:
 
 useDedicatedKarpenterPool: false
 
+# EKS Auto Mode NodeClass that the dedicated search NodePool references. "default" is the one EKS
+# provisions for its built-in NodePools; it only exists while at least one of those is enabled, and
+# it cannot carry user tags. Set this to the migration assistant release's aws.nodeClassName when
+# deploying onto a cluster bootstrapped with --tags.
+nodeClassName: default
+
 # Override to restrict instance types in the dedicated search NodePool.
 # If empty, allows any c/m/r instance gen 6+.
 # nodePoolInstanceTypes:

@@ -23,7 +23,7 @@ docker ps -q -f name=^buildkitd$ | grep -q . || docker run -d --privileged \
   --dns 8.8.8.8 \
   --network local-migrations-network \
   -p 1234:1234 \
-  -v ./buildkitd.toml:/etc/buildkit/buildkitd.toml \
+  -v "$MIGRATIONS_REPO_ROOT_DIR/buildImages/buildkitd.toml":/etc/buildkit/buildkitd.toml \
   --restart=always \
   moby/buildkit:latest \
   --addr tcp://0.0.0.0:1234 \
@@ -36,6 +36,8 @@ until nc -z localhost 1234 2>/dev/null; do
   i=$((i+1))
   if [ "$i" -ge 60 ]; then
     echo "buildkitd did not become ready within 60 seconds" >&2
+    echo "--- docker logs buildkitd (last 20 lines) ---" >&2
+    docker logs --tail 20 buildkitd >&2 2>&1 || true
     exit 1
   fi
   sleep 1
@@ -50,8 +52,10 @@ case $(uname -m) in
   *)       PLATFORM=$(uname -m) ;;
 esac
 
-echo "Building general and test images"
-"$MIGRATIONS_REPO_ROOT_DIR/gradlew" "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
+# buildKitLoadTestAll_* is listed separately: buildImagesToRegistry_* no longer builds the k6
+# scripts image, because load-test images are their own aggregate (see buildImages/build.gradle).
+echo "Building general, test and load test images"
+"$MIGRATIONS_REPO_ROOT_DIR/gradlew" "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" "buildKitLoadTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr773TestImage
 
 echo "Registry contents:"
 curl http://localhost:5001/v2/_catalog

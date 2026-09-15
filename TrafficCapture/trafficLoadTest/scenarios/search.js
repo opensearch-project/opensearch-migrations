@@ -10,14 +10,13 @@
  *        When deep paging is disabled the remainder falls back to flat search.
  *
  * Key environment variables (see k6-config/search-steady.env for load-profile defaults):
- *   SCENARIO              — document schema to use: "nyc_taxis" (default) or "logs_data"
+ *   SCHEMA              — document schema to use: "nyc_taxis" (default) or "logs_data"
  *   CAPTURE_PROXY_URL     — HTTPS endpoint of the Capture Proxy
- *   INDEX_NAME            — target OpenSearch index; defaults to the value of SCENARIO
+ *   INDEX_NAME            — target OpenSearch index; defaults to the value of SCHEMA
  *   SEARCH_RATE           — target requests/second (arrival rate)
  *   SEARCH_VUS            — pre-allocated VUs
  *   SEARCH_MAX_VUS        — max VUs k6 may spin up to meet the rate
  *   DURATION              — test duration (e.g. "5m")
- *   SEED_DOC_COUNT        — expected document count (informational; used for setup sampling)
  *   DEEP_PAGING_ENABLED   — "true" to activate scroll / search_after steps (default false)
  *   PAGING_MODE           — "scroll" or "search_after" (default "scroll")
  *   SCROLL_PAGES          — max pages per scroll sequence (default 3)
@@ -36,7 +35,7 @@
  *                            e.g. '[{"duration":"2m","target":100},{"duration":"1m","target":0}]'
  */
 
-import http from 'k6/http';
+import http from '../lib/http-client.js';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
@@ -44,6 +43,7 @@ import * as logsDocs         from '../lib/data/logs_data/documents.js';
 import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
 import * as logsQueries      from '../lib/data/logs_data/queries.js';
 import { pinned, spread } from '../lib/connection-control.js';
+import { CFG } from '../lib/config.js';
 
 // ── Custom metrics ──────────────────────────────────────────────────────────
 // k6 remote-write appends the type suffix; names here must NOT include suffixes.
@@ -59,39 +59,33 @@ const searchAfterPages   = new Counter('search_after_pages');
 const searchErrors       = new Rate('search_errors');
 const deepPagingErrors   = new Rate('search_deep_paging_errors');
 
-// ── Scenario selection ──────────────────────────────────────────────────────
-// All open() calls must happen at init time — k6 does not allow deferred file reads.
-const SCENARIO = __ENV.SCENARIO || 'nyc_taxis';
-const docs     = SCENARIO === 'logs_data' ? logsDocs    : nycTaxisDocs;
-const queries  = SCENARIO === 'logs_data' ? logsQueries : nycTaxisQueries;
-
-const MAPPINGS = {
-  nyc_taxis: open('../data/nyc_taxis/mapping.json'),
-  logs_data: open('../data/logs_data/mapping.json'),
-};
-const INDEX_MAPPING = MAPPINGS[SCENARIO] || MAPPINGS['nyc_taxis'];
+// ── Schema selection ────────────────────────────────────────────────────────
+const SCHEMA = CFG.SCHEMA || 'nyc_taxis';
+const docs     = SCHEMA === 'logs_data' ? logsDocs    : nycTaxisDocs;
+const queries  = SCHEMA === 'logs_data' ? logsQueries : nycTaxisQueries;
+const INDEX_MAPPING = docs.mapping;
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const PROXY_URL          = __ENV.CAPTURE_PROXY_URL      || 'https://capture-proxy:9200';
-const INDEX              = __ENV.INDEX_NAME             || SCENARIO;
-const RATE               = parseInt(__ENV.SEARCH_RATE      || '50');
-const VUS                = parseInt(__ENV.SEARCH_VUS       || '30');
-const MAX_VUS            = parseInt(__ENV.SEARCH_MAX_VUS   || '150');
-const DURATION           = __ENV.DURATION               || '5m';
-const DEEP_PAGING        = (__ENV.DEEP_PAGING_ENABLED    || 'false') === 'true';
-const PAGING_MODE        = __ENV.PAGING_MODE            || 'scroll';
-const SCROLL_PAGES       = parseInt(__ENV.SCROLL_PAGES          || '3');
-const SEARCH_AFTER_PAGES = parseInt(__ENV.SEARCH_AFTER_PAGES    || '3');
-const CONNECTION_MODE    = __ENV.CONNECTION_MODE               || 'pinned';
-const NO_CONNECTION_REUSE = (__ENV.NO_CONNECTION_REUSE || 'false') === 'true';
-const EXECUTOR           = __ENV.EXECUTOR                      || 'constant-arrival-rate';
-const RAMP_STAGES        = __ENV.RAMP_STAGES
-  ? JSON.parse(__ENV.RAMP_STAGES)
+const PROXY_URL          = CFG.CAPTURE_PROXY_URL      || 'https://capture-proxy:9201';
+const INDEX              = CFG.INDEX_NAME             || SCHEMA;
+const RATE               = parseInt(CFG.SEARCH_RATE      || '50');
+const VUS                = parseInt(CFG.SEARCH_VUS       || '30');
+const MAX_VUS            = parseInt(CFG.SEARCH_MAX_VUS   || '150');
+const DURATION           = CFG.DURATION               || '5m';
+const DEEP_PAGING        = (CFG.DEEP_PAGING_ENABLED    || 'false') === 'true';
+const PAGING_MODE        = CFG.PAGING_MODE            || 'scroll';
+const SCROLL_PAGES       = parseInt(CFG.SCROLL_PAGES          || '3');
+const SEARCH_AFTER_PAGES = parseInt(CFG.SEARCH_AFTER_PAGES    || '3');
+const CONNECTION_MODE    = CFG.CONNECTION_MODE               || 'pinned';
+const NO_CONNECTION_REUSE = (CFG.NO_CONNECTION_REUSE || 'false') === 'true';
+const EXECUTOR           = CFG.EXECUTOR                      || 'constant-arrival-rate';
+const RAMP_STAGES        = CFG.RAMP_STAGES
+  ? JSON.parse(CFG.RAMP_STAGES)
   : [{ duration: DURATION, target: RATE }];
-const FLAT_FRACTION      = parseFloat(__ENV.SEARCH_FLAT_FRACTION   || '0.60');
-const AGG_FRACTION       = parseFloat(__ENV.SEARCH_AGG_FRACTION    || '0.20');
-const UPDATE_FRACTION    = parseFloat(__ENV.SEARCH_UPDATE_FRACTION || '0.10');
-const WRITE_FRACTION     = parseFloat(__ENV.SEARCH_WRITE_FRACTION  || '0.05');
+const FLAT_FRACTION      = parseFloat(CFG.SEARCH_FLAT_FRACTION   || '0.60');
+const AGG_FRACTION       = parseFloat(CFG.SEARCH_AGG_FRACTION    || '0.20');
+const UPDATE_FRACTION    = parseFloat(CFG.SEARCH_UPDATE_FRACTION || '0.10');
+const WRITE_FRACTION     = parseFloat(CFG.SEARCH_WRITE_FRACTION  || '0.05');
 
 // Precomputed cumulative dispatch thresholds
 const T_AGG    = FLAT_FRACTION;
@@ -162,7 +156,7 @@ export function setup() {
     if (createRes.status !== 200) {
       console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
     } else {
-      console.log(`setup: created index ${INDEX} with ${SCENARIO} mapping`);
+      console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
     }
   } else {
     console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);

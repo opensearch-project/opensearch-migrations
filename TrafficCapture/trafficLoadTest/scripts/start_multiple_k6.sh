@@ -1,39 +1,53 @@
 #!/usr/bin/env bash
-# NOTE: the below assumes a running stack of capture-proxy, kafka, proxy target as started up in the run_test_*.sh
-# scripts with --with-setup but without --teardown option (if latter is set, the setup is only available during the
-# current run of run_test_*.sh
+# Launch several concurrent k6 runs (as independent Workflows) against the running data plane, to
+# exercise multiple simultaneous load tests. Unlike the old docker-compose version, the runs live
+# in the cluster — no background processes to babysit; list/stop them with the console CLI.
+#
+# Assumes the data plane is up (deployCdcLoadTestConfig.sh up).
+#
+# Usage:
+#   ./scripts/start_multiple_k6.sh           # submit the default fleet, then wait (Ctrl+C stops all)
+#   ./scripts/start_multiple_k6.sh --no-wait # submit and return immediately
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-pids=()
+WAIT=true
+[[ "${1:-}" == "--no-wait" ]] && WAIT=false
 
-cleanup() {
-    trap - EXIT          # prevent re-entry if kill triggers another EXIT
-    [[ ${#pids[@]} -eq 0 ]] && return
-    echo "Stopping all k6 runs..."
-    kill "${pids[@]}" 2>/dev/null || true
-    wait "${pids[@]}" 2>/dev/null || true
-}
-trap cleanup EXIT
+# scenario:config pairs to launch concurrently
+FLEET=(
+  ingest:ingest-steady
+  ingest:ingest-ramp
+  ingest:ingest-burst
+  search:search-steady
+  search:search-ramp
+  search:search-burst
+  search:search-deep-paging
+)
 
-start_k6() {
-    local env_file=$1 scenario=$2
-    load_k6_env "$env_file"
-    echo "Starting $env_file"
-    "${DOCKER_COMPOSE[@]}" run --rm -T "${env_flags[@]}" \
-        k6 run --out=opentelemetry "/scripts/scenarios/${scenario}.js" &
-    pids+=($!)
-}
+cleanup() { trap - EXIT INT; echo "Stopping all k6 runs..."; k6_stop_all; }
 
-start_k6 "k6-config/ingest-steady.env"      ingest
-start_k6 "k6-config/ingest-ramp.env"        ingest
-start_k6 "k6-config/ingest-burst.env"       ingest
-start_k6 "k6-config/search-steady.env"      search
-start_k6 "k6-config/search-ramp.env"        search
-start_k6 "k6-config/search-burst.env"       search
-start_k6 "k6-config/search-deep-paging.env" search
+echo "Submitting ${#FLEET[@]} concurrent k6 runs..."
+for spec in "${FLEET[@]}"; do
+  scenario="${spec%%:*}"; config="${spec##*:}"
+  name=$(submit_k6 --scenario "$scenario" --config "$config" --extra-args --no-thresholds || true)
+  echo "  ${scenario}/${config} → ${name:-<submit failed>}"
+done
 
-echo "All ${#pids[@]} k6 runs started. Ctrl+C to stop all."
-wait "${pids[@]}"
+echo ""
+k6_list || true
+
+if $WAIT; then
+  trap cleanup EXIT INT
+  echo ""
+  echo "All runs submitted. Ctrl+C to stop all (or: kubectl delete wf -l app=k6-load-test)."
+  # Wait until no active runs remain.
+  while true; do
+    sleep 15
+    [[ "$(k6_active_count)" -eq 0 ]] && { echo "All runs finished."; trap - EXIT INT; break; }
+  done
+else
+  echo "Submitted (--no-wait). Manage with: kubectl get/delete wf -l app=k6-load-test"
+fi

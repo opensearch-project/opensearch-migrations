@@ -127,6 +127,24 @@ def buildKitProjects = [
         ]
 ]
 
+def k6Entry = [
+    // Load-test-only k6 runtime for the Kubernetes integration. It contains a pinned
+    // k6 executable with the Valkey-compatible xk6-redis extension plus the scenarios,
+    // libs, schemas and presets under /scripts.
+    serviceName: "k6Runner",
+    contextDir: "TrafficCapture/trafficLoadTest",
+    imageName:  "k6_runner",
+    imageTag:   "latest",
+    // The xk6 stage compiles k6, so it needs Go module access. Pass the builder's own GOPROXY
+    // through rather than naming a mirror here; empty is identical to unset, which is the Go
+    // default. Networks that block proxy.golang.org set GOPROXY in the environment instead.
+    buildArgs: [
+        GOPROXY: System.getenv("GOPROXY") ?: ""
+    ]
+]
+
+
+
 // custom solr image since solr 6.x does not bring arm64 / multiplatform
 // build loads jar, which needs to be pulled from archive, which can be slow
 def solr660Entry = [
@@ -252,6 +270,11 @@ def testBuildKitProjects = [
     *(excludeESCustomTestImages ? [] : customESEntries),
 ]
 
+// k6 load test only images
+def loadTestBuildKitProjects = [
+        k6Entry
+]
+
 // Test-only images: not required for main MA operations, excluded with -PskipTestImages=true
 if (!rootProject.findProperty('skipTestImages')?.toString()?.toBoolean()) {
     buildKitProjects << [
@@ -274,8 +297,17 @@ buildKitProjects.each { cfg ->
 testBuildKitProjects.each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)
 }
+loadTestBuildKitProjects.each { cfg ->
+    cfg.repoName = getRepoNameIfPublishing(cfg)
+}
 
 def testBuildKitServiceNames = testBuildKitProjects.collect { "buildKit_${it.serviceName}".toString() } as Set
+def loadTestBuildKitServiceNames = loadTestBuildKitProjects.collect { "buildKit_${it.serviceName}".toString() } as Set
+// Every BuildKit image. Used as the dependency-resolution pool for the bake
+// aggregates and as the imageName -> serviceName map for Jib base-image pinning.
+// It is a lookup set, not a build set — each bake task builds only its
+// selectedProjects plus their transitive buildKit_ prerequisites.
+def allBuildKitProjects = buildKitProjects + testBuildKitProjects + loadTestBuildKitProjects
 
 gradle.projectsEvaluated {
     def imageHelper = new RegistryImageBuildUtils()
@@ -284,7 +316,7 @@ gradle.projectsEvaluated {
 
     imageHelper.applyBuildKitConfigurations(
             rootProject,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             publishedRegistry,
             intermediateRegistry
     )
@@ -292,7 +324,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeAll",
             buildKitProjects,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             "multi",
             publishedRegistry,
             intermediateRegistry
@@ -301,7 +333,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeAll_amd64",
             buildKitProjects,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             "amd64",
             publishedRegistry,
             intermediateRegistry
@@ -310,7 +342,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeAll_arm64",
             buildKitProjects,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             "arm64",
             publishedRegistry,
             intermediateRegistry
@@ -319,7 +351,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeTestAll",
             testBuildKitProjects,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             "multi",
             publishedRegistry,
             intermediateRegistry
@@ -328,7 +360,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeTestAll_amd64",
             testBuildKitProjects,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             "amd64",
             publishedRegistry,
             intermediateRegistry
@@ -337,7 +369,7 @@ gradle.projectsEvaluated {
             rootProject,
             "buildKitBakeTestAll_arm64",
             testBuildKitProjects,
-            buildKitProjects + testBuildKitProjects,
+            allBuildKitProjects,
             "arm64",
             publishedRegistry,
             intermediateRegistry
@@ -347,7 +379,7 @@ gradle.projectsEvaluated {
             jibProjects,
             publishedRegistry,
             intermediateRegistry,
-            buildKitProjects + testBuildKitProjects
+            allBuildKitProjects
     )
 }
 
@@ -377,30 +409,44 @@ tasks.register("jibAll_arm64") {
 
 tasks.register("buildKitAll") {
     group = "build"
-    description = "Build all BuildKit multi-arch images (excludes test images)"
+    description = "Build all BuildKit multi-arch images (excludes test and load test images)"
     dependsOn rootProject.tasks.matching {
         it.name.startsWith("buildKit_") &&
                 !it.name.endsWith("_amd64") &&
                 !it.name.endsWith("_arm64") &&
-                !testBuildKitServiceNames.contains(it.name)
+                !testBuildKitServiceNames.contains(it.name) &&
+                !loadTestBuildKitServiceNames.contains(it.name)
     }
 }
 
 tasks.register("buildKitAll_amd64") {
     group = "build"
-    description = "Build all BuildKit amd64 images (excludes test images)"
+    description = "Build all BuildKit amd64 images (excludes test and load test images)"
     dependsOn rootProject.tasks.matching {
         it.name.startsWith("buildKit_") && it.name.endsWith("_amd64") &&
-                !testBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', ''))
+                !testBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', '')) &&
+                !loadTestBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', ''))
     }
 }
 
 tasks.register("buildKitAll_arm64") {
     group = "build"
-    description = "Build all BuildKit arm64 images (excludes test images)"
+    description = "Build all BuildKit arm64 images (excludes test and load test images)"
     dependsOn rootProject.tasks.matching {
         it.name.startsWith("buildKit_") && it.name.endsWith("_arm64") &&
-                !testBuildKitServiceNames.contains(it.name.replaceAll('_arm64$', ''))
+                !testBuildKitServiceNames.contains(it.name.replaceAll('_arm64$', '')) &&
+                !loadTestBuildKitServiceNames.contains(it.name.replaceAll('_arm64$', ''))
+    }
+}
+
+tasks.register("buildKitLoadTestAll") {
+    group = "build"
+    description = "Build all load test BuildKit multi-arch images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") &&
+                !it.name.endsWith("_amd64") &&
+                !it.name.endsWith("_arm64") &&
+                loadTestBuildKitServiceNames.contains(it.name)
     }
 }
 
@@ -415,12 +461,30 @@ tasks.register("buildKitTestAll") {
     }
 }
 
+tasks.register("buildKitLoadTestAll_amd64") {
+    group = "build"
+    description = "Build all load test BuildKit amd64 images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") && it.name.endsWith("_amd64") &&
+                loadTestBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', ''))
+    }
+}
+
 tasks.register("buildKitTestAll_amd64") {
     group = "build"
     description = "Build all test BuildKit amd64 images"
     dependsOn rootProject.tasks.matching {
         it.name.startsWith("buildKit_") && it.name.endsWith("_amd64") &&
                 testBuildKitServiceNames.contains(it.name.replaceAll('_amd64$', ''))
+    }
+}
+
+tasks.register("buildKitLoadTestAll_arm64") {
+    group = "build"
+    description = "Build all load test BuildKit arm64 images"
+    dependsOn rootProject.tasks.matching {
+        it.name.startsWith("buildKit_") && it.name.endsWith("_arm64") &&
+                loadTestBuildKitServiceNames.contains(it.name.replaceAll('_arm64$', ''))
     }
 }
 

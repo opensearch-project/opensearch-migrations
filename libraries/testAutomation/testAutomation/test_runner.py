@@ -10,6 +10,7 @@ import os
 import random
 import re
 import string
+import subprocess
 import sys
 from tabulate import tabulate
 from typing import List, Optional, Tuple
@@ -21,6 +22,20 @@ VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "ES_
                          "SOLR_8.11", "SOLR_9.8"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
+# Release name of the standalone k6LoadTest chart. It matches the default in
+# deployment/k8s/installK6Chart.sh, and is passed to that script explicitly for BOTH the install
+# and the uninstall, which is the contract that script states: a caller that names the release must
+# name the same one in both directions.
+K6_RELEASE_NAME = "k6-load-test"
+# ECR format: <account>.dkr.ecr.<region>.amazonaws.com/<repo>. An ECR registry flattens every image
+# into one repo (tag "migrations_<image>_latest"), while any other registry keeps the
+# "<prefix>migrations/<image>" layout — both image lookups below branch on this.
+ECR_REGISTRY_PATTERN = r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/"
+# Test IDs reserved for load tests (see the ID convention in integ_test/conftest.py). Selecting one
+# of these is the sole trigger for installing the standalone k6LoadTest chart — the cases cannot
+# submit TestRuns without it. Every other run stays free of k6, which is why this is a range check
+# and not an unconditional install.
+LOAD_TEST_ID_PREFIX = "008"
 
 
 class TargetType(str, Enum):
@@ -72,7 +87,9 @@ class TestRunner:
                  transform_image_context: str = "",
                  capture_proxy_service_type: str = "LoadBalancer",
                  trace_test_ids: Optional[List[str]] = None, trace_values_file: str = None,
-                 trace_backend: str = "") -> None:
+                 trace_backend: str = "",
+                 k6_chart_path: str = "", k6_install_script: str = "",
+                 k6_runner_image: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -90,6 +107,9 @@ class TestRunner:
         self.trace_test_ids = trace_test_ids or []
         self.trace_values_file = trace_values_file
         self.trace_backend = trace_backend
+        self.k6_chart_path = k6_chart_path
+        self.k6_install_script = k6_install_script
+        self.k6_runner_image = k6_runner_image
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -349,7 +369,12 @@ class TestRunner:
              dependency order and strips stuck finalizers.
           3. helm uninstall ma — tears down the umbrella chart (10m timeout).
 
-        Test-scaffolding extras (steps 4-7):
+        Test-scaffolding extras (steps 3b-7):
+
+          3b. installK6Chart.sh uninstall — only for runs that installed it.
+             Removes the cluster-scoped k6-operator objects (CRDs, ClusterRoles)
+             that step 6 cannot reach. Through the same script as the install,
+             so the release name has one owner.
 
           4. cleanup_clusters — source/target test cluster helm releases.
           5. delete_all_pvcs — any non-Kafka residual PVCs (timeout governed
@@ -361,10 +386,13 @@ class TestRunner:
              aborted the Jenkins post block and left CFN stacks behind; the
              outer infra teardown (EKS/kind delete) finishes the job.
 
-        Re-raises HelmCommandFailed if step 3 fails. Namespace-delete
-        timeout is not treated as a hard failure.
+        Raises HelmCommandFailed if step 3 or step 3b fails, naming the
+        releases that failed. Namespace-delete timeout is not treated as a
+        hard failure.
         """
-        helm_uninstall_error = None
+        # (release, exception) per failed uninstall. Two releases come down here and they fail for
+        # different reasons, so the error raised at the end must name the one that actually failed.
+        helm_uninstall_errors: List[Tuple[str, Exception]] = []
 
         # 1. Dashboards (ACK controller alive).
         self.k8s_service.cleanup_ack_dashboard_crs()
@@ -384,7 +412,16 @@ class TestRunner:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
             logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
-            helm_uninstall_error = e
+            helm_uninstall_errors.append((MA_RELEASE_NAME, e))
+
+        # 3b. Teardown of the test-only k6 load-test release. It is a separate chart with its own
+        # release name, so step 3 cannot reach it.
+        if self._load_test_requested():
+            try:
+                self._uninstall_load_test_chart()
+            except Exception as e:
+                logger.error(f"Helm uninstall of '{K6_RELEASE_NAME}' release failed: {e}")
+                helm_uninstall_errors.append((K6_RELEASE_NAME, e))
 
         # 4. Test-only source/target clusters.
         self.cleanup_clusters()
@@ -415,16 +452,60 @@ class TestRunner:
         ma_gone = self.k8s_service.wait_for_namespace_deleted(
             self.k8s_service.namespace, timeout_seconds=120)
 
-        if helm_uninstall_error:
+        if helm_uninstall_errors:
+            names = ", ".join(f"'{release}'" for release, _ in helm_uninstall_errors)
             raise HelmCommandFailed(
-                f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "
+                f"Helm uninstall failed for: {names}. "
                 f"This may indicate webhook or finalizer issues (e.g. Kyverno)."
-            ) from helm_uninstall_error
+            ) from helm_uninstall_errors[0][1]
 
         return ma_gone and kyverno_gone and not residual_pvcs
 
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
+
+    def _load_test_requested(self) -> bool:
+        """True when this run selects a load-test case (008x) and therefore needs the k6LoadTest
+        chart. The selected IDs are the only trigger — there is no separate opt-in flag."""
+        return any(tid.startswith(LOAD_TEST_ID_PREFIX) for tid in self.test_ids)
+
+    def _k6_chart_cmd(self, command: str) -> List[str]:
+        """Base argv for deployment/k8s/installK6Chart.sh. Context, namespace and release are the
+        only options that both commands accept; install adds the chart and image options on top."""
+        cmd = [self.k6_install_script, command,
+               "--namespace", self.k8s_service.namespace,
+               "--release", K6_RELEASE_NAME]
+        if self.k8s_service.kube_context:
+            cmd += ["--context", self.k8s_service.kube_context]
+        return cmd
+
+    def _install_load_test_chart(self) -> None:
+        """Install the standalone k6LoadTest chart (operator + example TestRuns + RBAC).
+
+        The install itself lives in deployment/k8s/installK6Chart.sh, shared with
+        deployCdcLoadTestConfig.sh, so subchart vendoring and image resolution (mirror repository,
+        digest pins, the ECR flat-repo layout) have exactly one implementation.
+        """
+        cmd = self._k6_chart_cmd("install") + ["--chart", self.k6_chart_path]
+        if self.registry_prefix:
+            cmd += ["--registry-prefix", self.registry_prefix]
+        if self.k6_runner_image:
+            cmd += ["--runner-image", self.k6_runner_image]
+        logger.info("Installing k6 load-test chart: %s", " ".join(cmd))
+        if subprocess.run(cmd).returncode != 0:
+            raise HelmCommandFailed("Helm install of k6LoadTest chart failed")
+
+    def _uninstall_load_test_chart(self) -> None:
+        """Remove the k6LoadTest release through the script that installed it.
+
+        Not a direct helm_uninstall: the script owns the release lifecycle, so the two directions
+        cannot drift. An absent release is success there, so this is safe on a run that never got
+        as far as the install. Raises HelmCommandFailed on a real helm failure.
+        """
+        cmd = self._k6_chart_cmd("uninstall")
+        logger.info("Uninstalling k6 load-test chart: %s", " ".join(cmd))
+        if subprocess.run(cmd).returncode != 0:
+            raise HelmCommandFailed(f"Helm uninstall of the '{K6_RELEASE_NAME}' release failed")
 
     def run(self, skip_delete: bool = False, keep_workflows: bool = False,
             reuse_clusters: bool = False, test_reports_dir: str = None, copy_logs: bool = False) -> None:
@@ -446,9 +527,7 @@ class TestRunner:
                     chart_values = {}
                     if self.registry_prefix:
                         logger.info(f"Setting registry prefix to: {self.registry_prefix}")
-                        # ECR format: <account>.dkr.ecr.<region>.amazonaws.com/<repo>
-                        ecr_pattern = r"^\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/"
-                        is_ecr = re.match(ecr_pattern, self.registry_prefix) is not None
+                        is_ecr = re.match(ECR_REGISTRY_PATTERN, self.registry_prefix) is not None
                         if is_ecr:
                             repo = self.registry_prefix.rstrip("/")
                             mc_tag = "migrations_migration_console_latest"
@@ -493,6 +572,13 @@ class TestRunner:
                         raise HelmCommandFailed("Helm install of Migrations Assistant chart failed")
 
                 self.k8s_service.wait_for_all_healthy_pods()
+
+                # Install the standalone k6 load-test chart so load-test cases (Test008*) can submit
+                # TestRuns. Kept separate from the migration chart and installed only for runs that
+                # ask for it, so a normal run has no operator/scenarios/RBAC, cannot trigger a load
+                # test, and does not pay for the k6-operator install.
+                if self._load_test_requested():
+                    self._install_load_test_chart()
 
                 test_report = self.run_tests(source_version=source_version,
                                              target_version=target_version,
@@ -713,6 +799,44 @@ def parse_args(argv=None) -> argparse.Namespace:
              "If not set, uses the current kubectl context."
     )
     parser.add_argument(
+        "--verify-resource-tags",
+        action="store_true",
+        help="After the tests, verify that the deployer tags on the CloudFormation stack reached "
+             "every AWS resource the deployment created -- including the EC2 instances, EBS volumes "
+             "and load balancers that EKS Auto Mode creates at runtime, which CloudFormation stack "
+             "tags never touch. Needs --ma-stack-name and --aws-region. The expected tags are read "
+             "from the stack, so there is nothing to configure. Can also be run on its own later: "
+             "pipenv run verify-tags --stack-name <stack> --region <region> --kube-context <ctx>"
+    )
+    parser.add_argument(
+        "--ma-stack-name",
+        type=str,
+        default=None,
+        help="Migration Assistant CloudFormation stack name (for --verify-resource-tags)."
+    )
+    parser.add_argument(
+        "--aws-region",
+        type=str,
+        default=None,
+        help="AWS region of the deployment (for --verify-resource-tags). "
+             "Falls back to AWS_REGION / AWS_CFN_REGION."
+    )
+    parser.add_argument(
+        "--eks-cluster-name",
+        type=str,
+        default=None,
+        help="EKS cluster name (for --verify-resource-tags). Enables the CloudTrail sweep, which "
+             "fails on ANY resource-creating call by the cluster role whose request omitted the "
+             "tags -- catching resource types the other checks do not enumerate."
+    )
+    parser.add_argument(
+        "--cloudtrail-wait-seconds",
+        type=int,
+        default=300,
+        help="Wait before the CloudTrail sweep. Management events lag 5-15 minutes, so without "
+             "this the newest creates look clean."
+    )
+    parser.add_argument(
         "--speedup-factor",
         type=int,
         default=20,
@@ -748,6 +872,16 @@ def parse_args(argv=None) -> argparse.Namespace:
         default="LoadBalancer",
         help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind tests."
     )
+    parser.add_argument(
+        "--k6-runner-image",
+        type=str,
+        default="",
+        help="Complete reference to the combined k6 load-test runner (migrations/k6_runner), which "
+             "contains the pinned k6 extensions, scenarios, and presets. Accepts a tag "
+             "or a digest pin, e.g. '<ecr-repo>:migrations_k6_runner_latest' or "
+             "'<repo>@sha256:...'. Only used by load-test cases (008x). Without it the reference is "
+             "derived from --registry-prefix."
+    )
     args = parser.parse_args(argv)
     if args.trace_test_ids:
         if not args.trace_values_file:
@@ -778,6 +912,8 @@ def main() -> None:
     helm_k8s_base_path = "../../deployment/k8s"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
+    k6_chart_path = f"{helm_charts_base_path}/components/k6LoadTest"
+    k6_install_script = f"{helm_k8s_base_path}/installK6Chart.sh"
 
     target_type = TargetType(args.target_type)
     if "all" in args.source_version and len(args.source_version) > 1:
@@ -807,7 +943,10 @@ def main() -> None:
                              capture_proxy_service_type=args.capture_proxy_service_type,
                              trace_test_ids=args.trace_test_ids,
                              trace_values_file=args.trace_values_file,
-                             trace_backend=args.trace_backend or "")
+                             trace_backend=args.trace_backend or "",
+                             k6_chart_path=k6_chart_path,
+                             k6_install_script=k6_install_script,
+                             k6_runner_image=args.k6_runner_image)
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()
@@ -838,6 +977,36 @@ def main() -> None:
                     reuse_clusters=reuse_clusters,
                     test_reports_dir=args.test_reports_dir,
                     copy_logs=args.copy_logs)
+
+    # Deliberately after the tests, not before: the load balancer, PVC volumes and any scaled-up
+    # nodes only exist once a migration has actually run, so checking earlier would silently verify
+    # a much smaller set of resources. Requires --skip-delete (as the EKS pipelines use), otherwise
+    # the resources are already gone.
+    if args.verify_resource_tags:
+        # Bare import, matching `from k8s_service import ...` above: this file is executed as a
+        # script (`python3 testAutomation/test_runner.py`), so it has no parent package and a
+        # relative import fails with "attempted relative import with no known parent package".
+        from resource_tag_verifier import (expected_tags_from_stack, format_report,
+                                           verify_resource_tags)
+        region = args.aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_CFN_REGION")
+        if not region:
+            sys.exit("error: --verify-resource-tags needs --aws-region (or AWS_REGION set)")
+        if not args.ma_stack_name:
+            sys.exit("error: --verify-resource-tags needs --ma-stack-name")
+        # The expected tags come from the stack itself, so nothing about them is configured here or
+        # in any CI job -- whoever deployed chose them, and this asserts they propagated.
+        expected = expected_tags_from_stack(args.ma_stack_name, region)
+        if not expected:
+            sys.exit(f"error: stack {args.ma_stack_name} carries no deployer tags -- "
+                     "was it created with --tags?")
+        result = verify_resource_tags(expected, region,
+                                      kube_context=args.kube_context,
+                                      stack_name=args.ma_stack_name,
+                                      cluster_name=args.eks_cluster_name,
+                                      cloudtrail_wait_seconds=args.cloudtrail_wait_seconds)
+        logger.info("Resource tag verification:\n%s", format_report(result, expected))
+        if not result.ok:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

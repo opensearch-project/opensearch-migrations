@@ -1,12 +1,15 @@
 /**
  * Log event document generator.
  *
- * Produces synthetic structured log entries matching data/logs_data/mapping.json.
+ * Produces synthetic structured log entries matching mapping.json in this folder.
  * Field distribution is weighted toward realistic production traffic shapes
  * (INFO-heavy log levels, 2xx-heavy status codes).
  */
 
 import { randomElement, randomInt, randomBulkBatch as _randomBulkBatch } from '../../doc-utils.js';
+
+// The index mapping this generator's documents are shaped for.
+export const mapping = open('./mapping.json');
 
 // Weighted toward INFO to reflect typical production log volumes
 export const LEVELS       = ['DEBUG', 'INFO', 'INFO', 'INFO', 'WARN', 'ERROR', 'FATAL'];

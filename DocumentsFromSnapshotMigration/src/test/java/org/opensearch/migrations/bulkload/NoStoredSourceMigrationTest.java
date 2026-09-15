@@ -2193,6 +2193,202 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     }
 
     /**
+     * ES-7.10 only. Regression guard for reverse-derivation from a copy_to FAN-IN target
+     * when the source field has its own Lucene footprint (keyword doc_values).
+     * <p>
+     * {@code alpha} and {@code beta} are both keyword (doc_values on) and both copy_to the
+     * shared target {@code shared}. Because two sources fan into {@code shared}, it holds the
+     * UNION of their values with no record of who contributed what. Each document populates
+     * only one of the two source fields:
+     * <ul>
+     *   <li>doc 1: {@code alpha} populated, {@code beta} absent.</li>
+     *   <li>doc 2: {@code alpha} absent, {@code beta} populated.</li>
+     * </ul>
+     * The populated field must recover from its own doc_values chain. The ABSENT field must
+     * stay absent: since it has its own footprint, its absence from tiers 1-4 proves the
+     * document genuinely had no value, so reverse-deriving it from the fan-in {@code shared}
+     * target would fabricate the sibling's value. This is exactly the behavior the PR fix
+     * ("Don't reverse-derive source fields from copy_to fan-in targets") introduces.
+     */
+    @ParameterizedTest(name = "copyToFanInNoFabrication: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testCopyToFanInNoFabricationForFootprintedSource(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "copy_to_fanin_test";
+
+            // alpha & beta: keyword (doc_values on by default), both copy_to "shared".
+            // shared: keyword fan-in target (two contributing sources).
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"alpha\":{\"type\":\"keyword\",\"copy_to\":[\"shared\"]},"
+                + "\"beta\":{\"type\":\"keyword\",\"copy_to\":[\"shared\"]},"
+                + "\"shared\":{\"type\":\"keyword\"}"
+                + "}";
+
+            // Sourceless so reconstruction runs; keyword doc_values still recover own values.
+            String sourceFilterJson = "\"_source\":{\"enabled\":false}";
+
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+
+            // doc 1: only alpha. doc 2: only beta.
+            String doc1 = "{\"alpha\":\"alpha-one\"}";
+            String doc2 = "{\"beta\":\"beta-two\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc1, null, null);
+            sourceOps.createDocument(indexName, "2", doc2, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target keeps both copy_to declarations and OMITS the source filter so we can
+            // read exactly what RFS wrote.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search?size=10").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertEquals(2, hits.size(), "Expected 2 docs migrated. Response: " + response);
+
+            JsonNode src1 = null;
+            JsonNode src2 = null;
+            for (JsonNode hit : hits) {
+                String id = hit.path("_id").asText();
+                if ("1".equals(id)) src1 = hit.path("_source");
+                else if ("2".equals(id)) src2 = hit.path("_source");
+            }
+            assertNotNull(src1, "missing doc id=1. Response: " + response);
+            assertNotNull(src2, "missing doc id=2. Response: " + response);
+
+            // doc 1: alpha recovers from its own doc_values; beta must NOT be fabricated from
+            // the shared fan-in target, and the shared target must not surface in _source.
+            assertEquals("alpha-one", src1.path("alpha").asText(),
+                "doc 1: alpha must recover from its own doc_values. _source=" + src1);
+            assertTrue(src1.path("beta").isMissingNode() || src1.path("beta").asText().isEmpty(),
+                "doc 1: beta has its own footprint and was absent; it must NOT be fabricated from the "
+                    + "fan-in copy_to target. _source=" + src1);
+            assertTrue(src1.path("shared").isMissingNode(),
+                "doc 1: shared (copy_to target) must not appear in reconstructed _source. _source=" + src1);
+
+            // doc 2: symmetric — beta recovers from own doc_values; alpha must NOT be fabricated.
+            assertEquals("beta-two", src2.path("beta").asText(),
+                "doc 2: beta must recover from its own doc_values. _source=" + src2);
+            assertTrue(src2.path("alpha").isMissingNode() || src2.path("alpha").asText().isEmpty(),
+                "doc 2: alpha has its own footprint and was absent; it must NOT be fabricated from the "
+                    + "fan-in copy_to target. _source=" + src2);
+            assertTrue(src2.path("shared").isMissingNode(),
+                "doc 2: shared (copy_to target) must not appear in reconstructed _source. _source=" + src2);
+        }
+    }
+
+    /**
+     * ES-7.10 only. If all sources feeding a fan-in target have indexing and doc values disabled,
+     * preserve the target directly instead of assigning its value to an unknown contributor.
+     */
+    @ParameterizedTest(name = "copyToFanInTargetOnlyRecovery: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testCopyToFanInPreservesTargetWhenSourcesHaveNoLuceneFootprint(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "copy_to_fanin_target_only_test";
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"alpha\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,"
+                    + "\"copy_to\":[\"shared\"]},"
+                + "\"beta\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,"
+                    + "\"copy_to\":[\"shared\"]},"
+                + "\"shared\":{\"type\":\"keyword\"}"
+                + "}";
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"_source\":{\"enabled\":false}," + propertiesJson + "}}";
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", "{\"alpha\":\"red\"}", null, null);
+            sourceOps.post("/_refresh", null);
+
+            String sourceSearchResponse = sourceOps.post("/" + indexName + "/_search",
+                "{\"query\":{\"term\":{\"shared\":\"red\"}}}").getValue();
+            JsonNode sourceTotal = MAPPER.readTree(sourceSearchResponse).path("hits").path("total");
+            assertEquals(1, sourceTotal.path("value").asInt(),
+                "Fixture must index alpha's copied value under shared. Response: " + sourceSearchResponse);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String targetSearchResponse = targetOps.post("/" + indexName + "/_search",
+                "{\"query\":{\"term\":{\"shared\":\"red\"}}}").getValue();
+            JsonNode hits = MAPPER.readTree(targetSearchResponse).path("hits").path("hits");
+            assertEquals(1, hits.size(),
+                "Migrated document must remain searchable as shared=red. Response: " + targetSearchResponse);
+
+            JsonNode source = hits.get(0).path("_source");
+            assertEquals(MAPPER.readTree("{\"shared\":\"red\"}"), source,
+                "Synthetic source should contain only the recoverable target. _source=" + source);
+        }
+    }
+
+    /**
      * ES-7.10 only. STRICT per-element reconstruction guard for non-nested
      * object arrays whose text+text subfields are NOT in _source and whose
      * doc_values are disabled. The reconstructor must rely on the term

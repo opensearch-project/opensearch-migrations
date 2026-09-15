@@ -7,11 +7,12 @@ setup(
     packages=find_packages(exclude=("tests")),
     install_requires=["requests", "boto3", "pyyaml", "Click", "cerberus",
                       "kubernetes", "rich>=14.0.0", "ruamel.yaml", "pydantic", "awscli",
-                      "ijson", "psutil", "textual"],
+                      "ijson", "psutil", "textual==7.0.0"],
     entry_points={
         "console_scripts": [
             "console = console_link.cli:main",
             "workflow = console_link.workflow.cli:main",
+            "loadtest = console_link.loadtest.cli:main",
         ],
     },
     classifiers=[

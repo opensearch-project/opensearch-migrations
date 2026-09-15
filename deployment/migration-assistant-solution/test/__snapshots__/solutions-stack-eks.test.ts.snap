@@ -647,6 +647,136 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::EKS::PodIdentityAssociation",
     },
+    "EKSInfraAutoModeTagPropagationPolicy30F6625C": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ec2:CreateFleet",
+                "ec2:RunInstances",
+                "ec2:CreateLaunchTemplate",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+                "StringLike": {
+                  "aws:RequestTag/eks:kubernetes-node-class-name": "*",
+                  "aws:RequestTag/eks:kubernetes-node-pool-name": "*",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "Compute",
+            },
+            {
+              "Action": [
+                "ec2:CreateVolume",
+                "ec2:CreateSnapshot",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ec2:*:*:volume/*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ec2:*:*:snapshot/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "Storage",
+            },
+            {
+              "Action": "ec2:CreateNetworkInterface",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+                "StringLike": {
+                  "aws:RequestTag/eks:kubernetes-cni-node-name": "*",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "Networking",
+            },
+            {
+              "Action": [
+                "elasticloadbalancing:CreateLoadBalancer",
+                "elasticloadbalancing:CreateTargetGroup",
+                "elasticloadbalancing:CreateListener",
+                "elasticloadbalancing:CreateRule",
+                "ec2:CreateSecurityGroup",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "LoadBalancer",
+            },
+            {
+              "Action": [
+                "shield:CreateProtection",
+                "shield:TagResource",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":shield::*:protection/*",
+                  ],
+                ],
+              },
+              "Sid": "Shield",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AutoModeTagPropagationPolicy",
+        "Roles": [
+          {
+            "Ref": "EKSInfraMigrationsEKSClusterRole243C21EF",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "EKSInfraBuildImagesPodIdentityAssociation596A820C": {
       "DependsOn": [
         "EKSInfraMigrationsEKSClusterAccountReadonlyAccess3FCE8696",
@@ -1748,6 +1878,136 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         "ServiceAccount": "argo-workflow-executor",
       },
       "Type": "AWS::EKS::PodIdentityAssociation",
+    },
+    "EKSInfraAutoModeTagPropagationPolicy30F6625C": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ec2:CreateFleet",
+                "ec2:RunInstances",
+                "ec2:CreateLaunchTemplate",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+                "StringLike": {
+                  "aws:RequestTag/eks:kubernetes-node-class-name": "*",
+                  "aws:RequestTag/eks:kubernetes-node-pool-name": "*",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "Compute",
+            },
+            {
+              "Action": [
+                "ec2:CreateVolume",
+                "ec2:CreateSnapshot",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ec2:*:*:volume/*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ec2:*:*:snapshot/*",
+                    ],
+                  ],
+                },
+              ],
+              "Sid": "Storage",
+            },
+            {
+              "Action": "ec2:CreateNetworkInterface",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+                "StringLike": {
+                  "aws:RequestTag/eks:kubernetes-cni-node-name": "*",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "Networking",
+            },
+            {
+              "Action": [
+                "elasticloadbalancing:CreateLoadBalancer",
+                "elasticloadbalancing:CreateTargetGroup",
+                "elasticloadbalancing:CreateListener",
+                "elasticloadbalancing:CreateRule",
+                "ec2:CreateSecurityGroup",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "LoadBalancer",
+            },
+            {
+              "Action": [
+                "shield:CreateProtection",
+                "shield:TagResource",
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestTag/eks:eks-cluster-name": "\${aws:PrincipalTag/eks:eks-cluster-name}",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":shield::*:protection/*",
+                  ],
+                ],
+              },
+              "Sid": "Shield",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "AutoModeTagPropagationPolicy",
+        "Roles": [
+          {
+            "Ref": "EKSInfraMigrationsEKSClusterRole243C21EF",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "EKSInfraBuildImagesPodIdentityAssociation596A820C": {
       "DependsOn": [

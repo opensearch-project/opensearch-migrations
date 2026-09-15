@@ -13,3 +13,21 @@ data:
   # parameters and fails resolution if the key is absent. Empty defaults to
   # "aws" in the workflow parameter definition.
   cloudProvider: {{ .Values.cloudProvider | default "aws" | quote }}
+
+  # aws.resourceTags as a single "Key=Value,Key2=Value2" string -- the format the
+  # aws-load-balancer-additional-resource-tags annotation expects, so any number of tags fits in
+  # one value. Workflow templates that create a Service of type LoadBalancer stamp this onto it,
+  # which is the ONLY way to tag an EKS Auto Mode NLB: Auto Mode's load balancing controller is
+  # EKS-managed (its --default-tags flag is unreachable) and, unlike ALBs via
+  # IngressClassParams.spec.tags, Services have no cluster-wide params object.
+  #
+  # Rendered unconditionally, and empty when no tags are set, for the same reason as
+  # cloudProvider above: Argo v4 fails configMapKeyRef resolution on a missing key even with
+  # optional:true. Consumers must treat "" as "add no annotation".
+  #
+  # Ranging over a map yields keys in sorted order, so this is stable across renders.
+  {{- $pairs := list }}
+  {{- range $key, $value := .Values.aws.resourceTags }}
+  {{- $pairs = append $pairs (printf "%s=%s" $key (toString $value)) }}
+  {{- end }}
+  awsResourceTags: {{ join "," $pairs | quote }}
