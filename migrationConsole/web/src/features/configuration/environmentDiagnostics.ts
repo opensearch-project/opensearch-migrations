@@ -25,14 +25,14 @@ export type EnvironmentDiagnosticLifecycle =
 
 export interface EnvironmentDiagnosticState {
   diagnostics: ConfigEnvironmentDiagnostics["diagnostics"];
-  fingerprint: string | null;
+  nonce: string | null;
   lifecycle: EnvironmentDiagnosticLifecycle;
 }
 
 
 const NOT_CHECKED: EnvironmentDiagnosticState = {
   diagnostics: [],
-  fingerprint: null,
+  nonce: null,
   lifecycle: "not-checked",
 };
 
@@ -82,7 +82,7 @@ function hashSignature(signature: string): string {
 }
 
 
-export function environmentDiagnosticFingerprint(
+export function environmentDiagnosticNonce(
   nodes: EditNode[],
 ): string | null {
   const signature = externalReferenceSignature(nodes);
@@ -112,60 +112,60 @@ export function useEnvironmentDiagnostics(
 ): EnvironmentDiagnosticState {
   const nodes = draft?.editState.nodes;
   const rawDocument = draft?.rawDocument;
-  const fingerprint = useMemo(
+  const nonce = useMemo(
     () => nodes
-      ? environmentDiagnosticFingerprint(nodes)
+      ? environmentDiagnosticNonce(nodes)
       : null,
     [nodes],
   );
   const [state, setState] = useState<EnvironmentDiagnosticState>(NOT_CHECKED);
   const [request, setRequest] = useState<{
-    fingerprint: string;
+    nonce: string;
     rawYaml: string;
   } | null>(null);
 
   useEffect(() => {
     setRequest((current) => {
-      if (!rawDocument || !fingerprint) return null;
-      if (current?.fingerprint === fingerprint) return current;
+      if (!rawDocument || !nonce) return null;
+      if (current?.nonce === nonce) return current;
       return {
-        fingerprint,
+        nonce,
         rawYaml: rawDocument,
       };
     });
-  }, [fingerprint, rawDocument]);
+  }, [nonce, rawDocument]);
 
   useEffect(() => {
     if (!request) {
       setState(NOT_CHECKED);
       return;
     }
-    const { fingerprint: requestFingerprint, rawYaml } = request;
+    const { nonce: requestNonce, rawYaml } = request;
     const controller = new AbortController();
     setState((current) => ({
       diagnostics: current.diagnostics,
-      fingerprint: requestFingerprint,
+      nonce: requestNonce,
       lifecycle: current.lifecycle === "not-checked"
         ? "not-checked"
         : "stale",
     }));
     const timer = globalThis.setTimeout(() => {
       setState((current) => ({
-        diagnostics: current.fingerprint === requestFingerprint
+        diagnostics: current.nonce === requestNonce
           ? current.diagnostics
           : [],
-        fingerprint: requestFingerprint,
+        nonce: requestNonce,
         lifecycle: "checking",
       }));
       void diagnoseConfigurationEnvironment(
         rawYaml,
-        requestFingerprint,
+        requestNonce,
         controller.signal,
       ).then((result) => {
-        if (result.draftFingerprint !== requestFingerprint) return;
+        if (result.draftNonce !== requestNonce) return;
         setState({
           diagnostics: result.diagnostics,
-          fingerprint: requestFingerprint,
+          nonce: requestNonce,
           lifecycle: result.status,
         });
       }).catch((error: unknown) => {
@@ -181,7 +181,7 @@ export function useEnvironmentDiagnostics(
             message: error instanceof Error ? error.message : String(error),
             path: [],
           }],
-          fingerprint: requestFingerprint,
+          nonce: requestNonce,
           lifecycle: "warning",
         });
       });

@@ -12,6 +12,10 @@ from console_link.workflow.application.config_documents import (
     ConfigurationDocument,
     ConfigurationDocumentConflict,
 )
+from console_link.workflow.application.connectivity import (
+    ConnectivityTarget,
+    PreparedConnectivityChecks,
+)
 from console_link.workflow.application.config_review import ConfigReviewChange
 from console_link.workflow.application.config_submission import (
     PreparedConfigSubmission,
@@ -1271,7 +1275,7 @@ class _ConfigDiagnostics:
         }
 
 
-def test_config_diagnostics_echo_the_browser_fingerprint(tmp_path):
+def test_config_diagnostics_echo_the_browser_nonce(tmp_path):
     diagnostics = _ConfigDiagnostics()
     app = create_app(
         static_dir=_static_bundle(tmp_path),
@@ -1283,13 +1287,13 @@ def test_config_diagnostics_echo_the_browser_fingerprint(tmp_path):
             "/api/v1/config/diagnostics",
             json={
                 "rawYaml": "sourceClusters: {}\n",
-                "draftFingerprint": "browser:12:7",
+                "draftNonce": "browser:12:7",
             },
         )
 
     assert response.status_code == 200
     assert response.json() == {
-        "draftFingerprint": "browser:12:7",
+        "draftNonce": "browser:12:7",
         "status": "error",
         "diagnostics": [{
             "severity": "error",
@@ -1298,6 +1302,88 @@ def test_config_diagnostics_echo_the_browser_fingerprint(tmp_path):
         }],
     }
     assert diagnostics.raw_yaml == "sourceClusters: {}\n"
+
+
+class _Connectivity:
+    def __init__(self):
+        self.prepared = None
+        self.ran = None
+
+    def prepare(self, raw_yaml, config_nonce):
+        self.prepared = (raw_yaml, config_nonce)
+        return PreparedConnectivityChecks(
+            config_nonce=config_nonce,
+            targets=(
+                ConnectivityTarget(
+                    id="source:source",
+                    kind="source",
+                    ref_name="source",
+                    label="Source source",
+                    edit_path=("sourceClusters", "source"),
+                    client_config={"endpoint": "https://source.example"},
+                ),
+            ),
+        )
+
+    def run(self, prepared, target_ids):
+        self.ran = (prepared, target_ids)
+        return {
+            "configNonce": prepared.config_nonce,
+            "status": "valid",
+            "summary": "All 1 applicable connectivity checks passed.",
+            "checks": [],
+        }
+
+
+def test_connectivity_inventory_and_checks_use_strict_draft_nonce(tmp_path):
+    connectivity = _Connectivity()
+    operations = _Operations()
+    operations.operation = Operation(
+        id="operation-connectivity",
+        kind="connectivity-check",
+        label="Check source:source",
+        status="queued",
+        target_ids=("source:source",),
+        created_at="2026-09-16T13:00:00Z",
+        updated_at="2026-09-16T13:00:00Z",
+        message="Queued",
+    )
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        connectivity=connectivity,
+        operations=operations,
+    )
+
+    with TestClient(app) as client:
+        inventory = client.post(
+            "/api/v1/config/connectivity/inventory",
+            json={"rawYaml": "sourceClusters: {}\n", "configNonce": "nonce-1"},
+        )
+        started = client.post(
+            "/api/v1/config/connectivity/checks",
+            json={
+                "rawYaml": "sourceClusters: {}\n",
+                "configNonce": "nonce-1",
+                "targetIds": ["source:source"],
+            },
+        )
+
+    assert inventory.status_code == 200
+    assert inventory.json() == {
+        "configNonce": "nonce-1",
+        "targets": [{
+            "id": "source:source",
+            "kind": "source",
+            "refName": "source",
+            "label": "Source source",
+            "editPath": ["sourceClusters", "source"],
+        }],
+    }
+    assert started.status_code == 202
+    assert operations.started["kind"] == "connectivity-check"
+    result = operations.started["worker"]()
+    assert result.result["configNonce"] == "nonce-1"
+    assert connectivity.ran[1] == ["source:source"]
 
 
 def test_config_document_load_and_save_are_revisioned_and_invalidate_state(

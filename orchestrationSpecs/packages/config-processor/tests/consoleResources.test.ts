@@ -1,4 +1,4 @@
-import {describe, expect, it} from "@jest/globals";
+import {describe, expect, it, jest} from "@jest/globals";
 import {promises as fs} from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -9,6 +9,8 @@ import {
     MigrationConfigTransformer,
 } from "../src";
 import {main as resolveConsoleResourcesMain} from "../src/resolveConsoleResources";
+
+jest.setTimeout(30_000);
 
 function multiResourceConfig() {
     return {

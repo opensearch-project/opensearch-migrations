@@ -378,6 +378,15 @@ class ConfigEditService:
             "diagnostics": diagnostics,
         }
 
+    def resolve_console_resources(self, raw_yaml: str) -> Dict[str, Any]:
+        """Strictly resolve configured resources for console and API consumers."""
+        if not raw_yaml.strip():
+            raise ValueError("No workflow configuration is available to check")
+        return self._run_resolve_console_resources(
+            _parse_raw_yaml(raw_yaml),
+            "--user-config",
+        )
+
     @staticmethod
     def _require_valid_edit_state(
         edit_state: Dict[str, Any],

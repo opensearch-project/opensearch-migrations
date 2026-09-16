@@ -185,6 +185,23 @@ def test_load_pending_resolved_config_uses_config_processor():
     assert args[3:] == ("--workflow-name", "migration")
 
 
+def test_resolve_console_resources_uses_strict_user_config():
+    runner = MagicMock()
+    runner.run_config_processor_node_script.return_value = (
+        '{"sources":[],"targets":[],"kafkas":[],"consumerGroups":[]}'
+    )
+    service = ConfigEditService(namespace="test", runner=runner)
+
+    result = service.resolve_console_resources(
+        "sourceClusters: {}\ntargetClusters: {}\n"
+    )
+
+    assert result["sources"] == []
+    args = runner.run_config_processor_node_script.call_args.args
+    assert args[:2] == ("resolveConsoleResources", "--user-config")
+    assert args[2].endswith(".json")
+
+
 def test_save_validation_uses_schema_projection_without_external_checks():
     service = ConfigEditService(namespace="test", store=FakeStore())
     service._run_edit_state = MagicMock(return_value={

@@ -13,7 +13,9 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleDashed,
   CircleCheck,
+  LoaderCircle,
   Pencil,
   Plus,
   Search,
@@ -36,6 +38,10 @@ import type {
   ResourceValidationState,
 } from "../configuration/editProjection";
 import { fieldValidationProblem } from "../configuration/fieldValidation";
+import type {
+  ConnectivityNavigationStates,
+  ConnectivityStatus,
+} from "../configuration/connectivityChecks";
 import { resourceIdForRenameOption } from "./resourceRenameMatching";
 import {
   resolveTreeLayoutOffset,
@@ -69,6 +75,7 @@ interface ResourceTreeProps {
   resourceAdds: ResourceAddController | null;
   changeStates: Record<string, ResourceDraftChangeState>;
   validationStates: Record<string, ResourceValidationState>;
+  connectivityStates?: ConnectivityNavigationStates;
 }
 
 
@@ -187,6 +194,7 @@ interface TreeRowProps {
   draftChangeAncestor: boolean;
   validationErrorAncestor: boolean;
   validationErrorItem: boolean;
+  connectivityStatus?: ConnectivityStatus;
   renaming: boolean;
   renameValue: string;
   onAddResource: (optionId: string, nodeId: string) => void;
@@ -238,6 +246,7 @@ const TreeRow = memo(function TreeRow({
   draftChangeAncestor,
   validationErrorAncestor,
   validationErrorItem,
+  connectivityStatus,
   renaming,
   renameValue,
   onAddResource,
@@ -600,6 +609,27 @@ const TreeRow = memo(function TreeRow({
             ) : null}
           </span>
           <span className="tree-row-tools">
+        {configurationOnly && connectivityStatus ? (
+          <span
+            aria-label={`Connectivity ${connectivityStatus.replaceAll("_", " ")}`}
+            className={[
+              "tree-connectivity-indicator",
+              `connectivity-${connectivityStatus}`,
+            ].join(" ")}
+            title={`Connectivity: ${connectivityStatus.replaceAll("_", " ")}`}
+          >
+            {connectivityStatus === "checking" ? (
+              <LoaderCircle className="spin" aria-hidden="true" />
+            ) : connectivityStatus === "valid"
+              || connectivityStatus === "not_applicable" ? (
+                <CircleCheck aria-hidden="true" />
+              ) : connectivityStatus === "failed" ? (
+                <TriangleAlert aria-hidden="true" />
+              ) : (
+                <CircleDashed aria-hidden="true" />
+              )}
+          </span>
+        ) : null}
         {addOptions.length === 1 ? (
           <button
             aria-label={`Add ${addOptions[0].label}`}
@@ -824,6 +854,7 @@ export function ResourceTree({
   resourceAdds,
   changeStates,
   validationStates,
+  connectivityStates = {},
 }: Readonly<ResourceTreeProps>) {
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(
@@ -1692,6 +1723,17 @@ export function ResourceTree({
                 validationErrorItem={
                   validationErrorPaths.items.has(row.node.id)
                 }
+                connectivityStatus={(
+                  row.node.capabilities
+                    .find((capability) => capability.kind === "edit")
+                    ?.editTargetId
+                    ? connectivityStates[
+                      row.node.capabilities.find(
+                        (capability) => capability.kind === "edit",
+                      )?.editTargetId ?? ""
+                    ]
+                    : undefined
+                )}
                 renameValue={
                   inlineRename?.nodeId === row.node.id
                     ? inlineRename.name

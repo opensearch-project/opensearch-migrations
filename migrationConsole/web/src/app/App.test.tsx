@@ -4699,9 +4699,9 @@ snapshotMigrationConfigs: []
     })),
     http.post("*/api/v1/config/diagnostics", async ({ request }) => {
       diagnosticRequests += 1;
-      const body = await request.json() as { draftFingerprint: string };
+      const body = await request.json() as { draftNonce: string };
       return HttpResponse.json({
-        draftFingerprint: body.draftFingerprint,
+        draftNonce: body.draftNonce,
         status: "valid",
         diagnostics: [],
       });

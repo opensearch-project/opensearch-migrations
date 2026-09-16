@@ -1669,6 +1669,38 @@ button.secondary-button:hover:not(:disabled) {
   background: transparent;
 }
 
+.tree-connectivity-indicator {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 3px;
+  color: #687780;
+}
+
+.tree-connectivity-indicator svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tree-connectivity-indicator.connectivity-valid,
+.tree-connectivity-indicator.connectivity-not_applicable {
+  color: #277741;
+}
+
+.tree-connectivity-indicator.connectivity-partially_verified {
+  color: #6b7727;
+}
+
+.tree-connectivity-indicator.connectivity-failed {
+  color: var(--danger);
+  background: #fff0ef;
+}
+
+.tree-connectivity-indicator.connectivity-checking {
+  color: var(--accent);
+}
+
 .tree-row-tools {
   position: relative;
   display: inline-flex;
@@ -4445,6 +4477,303 @@ button.secondary-button:hover:not(:disabled) {
 
 .environment-diagnostics.status-error > header svg {
   color: var(--danger);
+}
+
+.connectivity-panel {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 7px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: #f6f8fa;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.connectivity-panel > header,
+.connectivity-list-item > header,
+.connectivity-log-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connectivity-panel > header > svg,
+.connectivity-list-item > header > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.connectivity-panel > header > div,
+.connectivity-list-item > header > div {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.connectivity-panel > header span,
+.connectivity-list-item > header span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.connectivity-panel button,
+.connectivity-list-item button,
+.connectivity-log-heading button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 650;
+}
+
+.connectivity-panel button svg,
+.connectivity-list-item button svg,
+.connectivity-log-heading button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.connectivity-panel > p,
+.connectivity-list-item > p {
+  margin: 0 0 0 25px;
+}
+
+.connectivity-panel.status-valid {
+  border-bottom-color: #9fc7ab;
+  color: #215c35;
+  background: #edf8f0;
+}
+
+.connectivity-panel.status-partially_verified {
+  border-bottom-color: #c8d29b;
+  color: #4e5e22;
+  background: #f4f8e8;
+}
+
+.connectivity-panel.status-failed {
+  border-bottom-color: #d9a09b;
+  color: #772f29;
+  background: #fff0ef;
+}
+
+.connectivity-stage-list {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  margin: 2px 0 0 25px;
+  list-style: none;
+}
+
+.connectivity-stage-list li {
+  display: grid;
+  gap: 1px;
+  padding-left: 9px;
+  border-left: 3px solid #aeb8be;
+}
+
+.connectivity-stage-list li.status-passed {
+  border-left-color: #58a36e;
+}
+
+.connectivity-stage-list li.status-partially_verified {
+  border-left-color: #a2b35c;
+}
+
+.connectivity-stage-list li.status-failed {
+  border-left-color: var(--danger);
+}
+
+.connectivity-stage-list span {
+  color: inherit;
+  font-size: 11px;
+}
+
+.connectivity-context {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 3px 0 0 25px;
+  font-size: 11px;
+}
+
+.connectivity-context dt {
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.connectivity-context dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.connectivity-log-details {
+  margin-left: 25px;
+}
+
+.connectivity-log-details summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.connectivity-log-heading {
+  justify-content: space-between;
+  margin-top: 7px;
+}
+
+.connectivity-log-details pre,
+.standalone-connectivity-logs pre {
+  min-height: 90px;
+  max-height: 320px;
+  padding: 10px;
+  overflow: auto;
+  resize: vertical;
+  border: 1px solid #263541;
+  border-radius: 4px;
+  color: #d8e2e8;
+  background: #17232b;
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}
+
+.connectivity-dialog {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+}
+
+.connectivity-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 18px;
+  overflow: auto;
+}
+
+.connectivity-overall {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-subtle);
+}
+
+.connectivity-overall > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.connectivity-overall > div {
+  display: grid;
+  gap: 1px;
+}
+
+.connectivity-overall span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.connectivity-overall p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.connectivity-overall.status-valid {
+  border-color: #9fc7ab;
+  color: #215c35;
+  background: #edf8f0;
+}
+
+.connectivity-overall.status-partially_verified {
+  border-color: #c8d29b;
+  color: #4e5e22;
+  background: #f4f8e8;
+}
+
+.connectivity-overall.status-failed {
+  border-color: #d9a09b;
+  color: #772f29;
+  background: #fff0ef;
+}
+
+.connectivity-list-item {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.connectivity-list-item.status-failed {
+  border-color: #d9a09b;
+  background: #fff7f6;
+}
+
+.connectivity-list-item.status-partially_verified {
+  border-color: #c8d29b;
+  background: #f8faef;
+}
+
+.connectivity-empty {
+  margin: 18px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.standalone-connectivity-logs {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 100vh;
+  padding: 18px;
+  color: var(--text);
+  background: var(--surface-subtle);
+}
+
+.standalone-connectivity-logs > header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.standalone-connectivity-logs > header svg {
+  width: 24px;
+}
+
+.standalone-connectivity-logs h1,
+.standalone-connectivity-logs p {
+  margin: 0;
+}
+
+.standalone-connectivity-logs > header span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.standalone-connectivity-logs h1 {
+  font-size: 18px;
+}
+
+.standalone-connectivity-logs > p {
+  padding: 10px 0;
+}
+
+.standalone-connectivity-logs pre {
+  max-height: none;
+  min-height: 0;
+  resize: none;
 }
 
 .raw-config-repair {

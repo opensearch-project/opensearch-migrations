@@ -13,6 +13,10 @@ export type ConfigurationSchema =
   components["schemas"]["ConfigurationSchemaV1"];
 export type ConfigEnvironmentDiagnostics =
   components["schemas"]["ConfigEnvironmentDiagnosticsV1"];
+export type ConnectivityInventory =
+  components["schemas"]["ConnectivityInventoryV1"];
+export type ConnectivityTarget =
+  components["schemas"]["ConnectivityTargetV1"];
 export type ConfigReview = components["schemas"]["ConfigReviewV1"];
 export type AdmissionPreflight =
   components["schemas"]["AdmissionPreflightV1"];
@@ -196,7 +200,7 @@ export async function saveConfigurationDocument(
 
 export async function diagnoseConfigurationEnvironment(
   rawYaml: string,
-  draftFingerprint: string,
+  draftNonce: string,
   signal?: AbortSignal,
 ): Promise<ConfigEnvironmentDiagnostics> {
   const { data, error, response } = await client.POST(
@@ -204,7 +208,7 @@ export async function diagnoseConfigurationEnvironment(
     {
       body: {
         rawYaml,
-        draftFingerprint,
+        draftNonce,
       },
       signal,
     },
@@ -213,6 +217,50 @@ export async function diagnoseConfigurationEnvironment(
     throw new ConfigApiError(
       response.status,
       "Configuration environment checks could not be completed",
+      error,
+    );
+  }
+  return data;
+}
+
+export async function getConnectivityInventory(
+  rawYaml: string,
+  configNonce: string,
+  signal?: AbortSignal,
+): Promise<ConnectivityInventory> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/config/connectivity/inventory",
+    {
+      body: { rawYaml, configNonce },
+      signal,
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Connectivity inventory is unavailable",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function startConnectivityChecks(
+  rawYaml: string,
+  configNonce: string,
+  targetIds: string[] = [],
+): Promise<Operation> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/config/connectivity/checks",
+    {
+      body: { rawYaml, configNonce, targetIds },
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Connectivity checks could not be started",
       error,
     );
   }

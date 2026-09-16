@@ -9,7 +9,7 @@ import {
   type BrowserConfigDraft,
 } from "./browserDraft";
 import {
-  environmentDiagnosticFingerprint,
+  environmentDiagnosticNonce,
   useEnvironmentDiagnostics,
 } from "./environmentDiagnostics";
 
@@ -46,7 +46,7 @@ function Harness({
 
 
 describe("configuration environment diagnostics", () => {
-  it("fingerprints only configured external references", () => {
+  it("changes the nonce only for configured external references", () => {
     const initial = createBrowserConfigDraft(document);
     const unrelated = applyBrowserEditOperation(initial, {
       op: "set",
@@ -65,10 +65,10 @@ describe("configuration environment diagnostics", () => {
       value: "other-creds",
     });
 
-    expect(environmentDiagnosticFingerprint(unrelated.editState.nodes))
-      .toBe(environmentDiagnosticFingerprint(initial.editState.nodes));
-    expect(environmentDiagnosticFingerprint(changedReference.editState.nodes))
-      .not.toBe(environmentDiagnosticFingerprint(initial.editState.nodes));
+    expect(environmentDiagnosticNonce(unrelated.editState.nodes))
+      .toBe(environmentDiagnosticNonce(initial.editState.nodes));
+    expect(environmentDiagnosticNonce(changedReference.editState.nodes))
+      .not.toBe(environmentDiagnosticNonce(initial.editState.nodes));
   });
 
   it("keeps a superseded response from replacing newer diagnostics", async () => {
@@ -79,13 +79,13 @@ describe("configuration environment diagnostics", () => {
     server.use(
       http.post("*/api/v1/config/diagnostics", async ({ request }) => {
         const body = await request.json() as {
-          draftFingerprint: string;
+          draftNonce: string;
           rawYaml: string;
         };
         if (body.rawYaml.includes("source-creds")) {
           await firstPending;
           return HttpResponse.json({
-            draftFingerprint: body.draftFingerprint,
+            draftNonce: body.draftNonce,
             status: "error",
             diagnostics: [{
               severity: "error",
@@ -95,7 +95,7 @@ describe("configuration environment diagnostics", () => {
           });
         }
         return HttpResponse.json({
-          draftFingerprint: body.draftFingerprint,
+          draftNonce: body.draftNonce,
           status: "valid",
           diagnostics: [],
         });

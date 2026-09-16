@@ -17,6 +17,7 @@ import {
   ChevronsDown,
   LoaderCircle,
   Link2,
+  Network,
   Pencil,
   Plus,
   Save,
@@ -56,6 +57,12 @@ import {
   readEditorDisplayPreferences,
   writeEditorDisplayPreferences,
 } from "./editorPreferences";
+import {
+  ConnectivityDialog,
+  ConnectivityPanel,
+  useConnectivityChecks,
+  type ConnectivityNavigationStates,
+} from "./connectivityChecks";
 import {
   diagnosticsForScope,
   useEnvironmentDiagnostics,
@@ -103,6 +110,9 @@ interface ConfigEditorProps {
     returnLabel: string,
   ) => boolean;
   onInitialRemovalHandled?: () => void;
+  onConnectivityStatesChange?: (
+    states: ConnectivityNavigationStates,
+  ) => void;
   onSubmitted: () => void;
   removalState?: string | null;
   resourceId: string;
@@ -2190,6 +2200,7 @@ export function ConfigEditor({
   onNavigateEditTarget,
   onNavigateCreatedEditTarget,
   onInitialRemovalHandled,
+  onConnectivityStatesChange,
   onSubmitted,
   removalState,
   resourceId,
@@ -2218,6 +2229,7 @@ export function ConfigEditor({
   const [selectedId, setSelectedId] = useState<string | null>(
     initialTargetId ?? null,
   );
+  const [connectivityDialogOpen, setConnectivityDialogOpen] = useState(false);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(
     initialTargetId ?? null,
   );
@@ -2351,6 +2363,14 @@ export function ConfigEditor({
     () => target ? editScope(nodes, target.id) : null,
     [nodes, target],
   );
+  const connectivity = useConnectivityChecks(
+    draft,
+    scope?.path ?? null,
+  );
+  useEffect(() => {
+    onConnectivityStatesChange?.(connectivity.navigationStates);
+    return () => onConnectivityStatesChange?.({});
+  }, [connectivity.navigationStates, onConnectivityStatesChange]);
   const scopedEnvironmentDiagnostics = useMemo(
     () => diagnosticsForScope(
       environmentDiagnostics.diagnostics,
@@ -3771,6 +3791,14 @@ export function ConfigEditor({
         </div> : null}
         <div className="config-toolbar-actions">
           <button
+            onClick={() => setConnectivityDialogOpen(true)}
+            title="Check source, target, and repository connectivity"
+            type="button"
+          >
+            <Network aria-hidden="true" />
+            <span>Connectivity</span>
+          </button>
+          <button
             aria-label="Revert unsaved changes"
             disabled={
               actionPending
@@ -3838,10 +3866,29 @@ export function ConfigEditor({
           <button onClick={() => setNotice("")} type="button">Dismiss</button>
         </div>
       ) : null}
-      {environmentDiagnostics.fingerprint ? (
+      {environmentDiagnostics.nonce ? (
         <EnvironmentDiagnostics
           diagnostics={scopedEnvironmentDiagnostics}
           lifecycle={environmentDiagnostics.lifecycle}
+        />
+      ) : null}
+      {connectivity.selectedState ? (
+        <ConnectivityPanel
+          onCheck={() => {
+            void connectivity.start([
+              connectivity.selectedState?.target.id ?? "",
+            ]);
+          }}
+          state={connectivity.selectedState}
+        />
+      ) : null}
+      {connectivityDialogOpen ? (
+        <ConnectivityDialog
+          loading={connectivity.inventoryLoading}
+          onCheck={(targetIds) => void connectivity.start(targetIds)}
+          onClose={() => setConnectivityDialogOpen(false)}
+          problem={connectivity.inventoryProblem}
+          states={connectivity.states}
         />
       ) : null}
       {draft.rawYaml !== undefined ? (

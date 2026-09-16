@@ -63,6 +63,10 @@ import {
   markBrowserConfigDraftStale,
   type BrowserConfigDraft,
 } from "../features/configuration/browserDraft";
+import {
+  StandaloneConnectivityLogs,
+  type ConnectivityNavigationStates,
+} from "../features/configuration/connectivityChecks";
 import type {
   PendingResourceAddition,
   PendingResourceRename,
@@ -312,6 +316,8 @@ function ManageApp() {
   const promptedApprovals = promptedApprovalsRef.current;
   const [resourceAdds, setResourceAdds] =
     useState<ResourceAddController | null>(null);
+  const [connectivityStates, setConnectivityStates] =
+    useState<ConnectivityNavigationStates>({});
   const [pendingResourceAdditions, setPendingResourceAdditions] =
     useState<PendingResourceAddition[]>([]);
   const [pendingResourceRenames, setPendingResourceRenames] =
@@ -1576,6 +1582,7 @@ function ManageApp() {
                 </header>
                 <ResourceTree
                   changeStates={resourceDraftChanges}
+                  connectivityStates={connectivityStates}
                   onSelect={selectNode}
                   presentation={editContext ? "configuration" : "runtime"}
                   resourceAdds={editContext ? resourceAdds : null}
@@ -1649,6 +1656,7 @@ function ManageApp() {
                           : current
                       ));
                     }}
+                    onConnectivityStatesChange={setConnectivityStates}
                     onSubmitted={() => {
                       setLinkedNavigation([]);
                       setEditContext(null);
@@ -1748,6 +1756,9 @@ function StandaloneLogs({ nodeId }: Readonly<{ nodeId: string }>) {
 
 export function App() {
   const params = new URLSearchParams(globalThis.location.search);
+  if (globalThis.location.pathname === "/connectivity-logs") {
+    return <StandaloneConnectivityLogs />;
+  }
   const standaloneNodeId = (
     globalThis.location.pathname === "/logs"
       ? params.get("nodeId")

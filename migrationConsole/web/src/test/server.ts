@@ -111,13 +111,37 @@ export const server = setupServer(
   }),
   http.post("*/api/v1/config/diagnostics", async ({ request }) => {
     const body = await request.json() as {
-      draftFingerprint: string;
+      draftNonce: string;
     };
     return HttpResponse.json({
-      draftFingerprint: body.draftFingerprint,
+      draftNonce: body.draftNonce,
       status: "valid",
       diagnostics: [],
     });
+  }),
+  http.post("*/api/v1/config/connectivity/inventory", async ({ request }) => {
+    const body = await request.json() as { configNonce: string };
+    return HttpResponse.json({
+      configNonce: body.configNonce,
+      targets: [],
+    });
+  }),
+  http.post("*/api/v1/config/connectivity/checks", async ({ request }) => {
+    const body = await request.json() as {
+      configNonce: string;
+      targetIds: string[];
+    };
+    return HttpResponse.json({
+      id: "operation-connectivity",
+      kind: "connectivity-check",
+      label: "Check configured connections",
+      status: "queued",
+      targetIds: body.targetIds,
+      createdAt: "2026-09-16T13:00:00Z",
+      updatedAt: "2026-09-16T13:00:00Z",
+      message: "Queued",
+      result: {},
+    }, { status: 202 });
   }),
   http.post("*/api/v1/config/review", async ({ request }) => {
     const body = await request.json() as {

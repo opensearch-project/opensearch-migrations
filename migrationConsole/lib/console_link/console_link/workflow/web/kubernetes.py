@@ -30,6 +30,7 @@ class PinnedKubernetesRuntime:
         self.context_name = context_name
         self.api_client = api_client
         self.core_api = client.CoreV1Api(api_client)
+        self.batch_api = client.BatchV1Api(api_client)
         self.custom_api = client.CustomObjectsApi(api_client)
         self.kubeconfig_path = kubeconfig_path
         self._previous_kubeconfig = previous_kubeconfig

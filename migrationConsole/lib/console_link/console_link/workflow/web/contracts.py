@@ -267,13 +267,36 @@ class SaveConfigurationDocumentRequestV1(WebModel):
 
 class ConfigEnvironmentDiagnosticsRequestV1(WebModel):
     raw_yaml: str
-    draft_fingerprint: str
+    draft_nonce: str
 
 
 class ConfigEnvironmentDiagnosticsV1(WebModel):
-    draft_fingerprint: str
+    draft_nonce: str
     status: Literal["valid", "warning", "error"]
     diagnostics: List[EditDiagnosticV1] = Field(default_factory=list)
+
+
+class ConnectivityInventoryRequestV1(WebModel):
+    raw_yaml: str
+    config_nonce: str
+
+
+class ConnectivityTargetV1(WebModel):
+    id: str
+    kind: Literal["source", "target", "repository"]
+    ref_name: str
+    label: str
+    edit_path: List[str] = Field(default_factory=list)
+    provider: Optional[Literal["s3", "gcs"]] = None
+
+
+class ConnectivityInventoryV1(WebModel):
+    config_nonce: str
+    targets: List[ConnectivityTargetV1] = Field(default_factory=list)
+
+
+class StartConnectivityChecksRequestV1(ConnectivityInventoryRequestV1):
+    target_ids: List[str] = Field(default_factory=list)
 
 
 class PersistedRevisionRequestV1(WebModel):

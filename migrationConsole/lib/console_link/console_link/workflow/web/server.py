@@ -12,6 +12,10 @@ import uvicorn
 from ..application.manage_state import ManageStateService
 from ..application.observations import ObservationCoordinator
 from ..application.config_documents import ConfigurationDocumentService
+from ..application.connectivity import (
+    ConnectivityCheckService,
+    RepositoryCheckJobRunner,
+)
 from ..application.config_submission import SavedConfigSubmissionService
 from ..application.external_resources import ExternalResourceService
 from ..application.outputs import OutputService
@@ -119,6 +123,16 @@ def run_server(
             refresh_interval=refresh_interval,
         )
         operation_manager = OperationManager()
+        connectivity_service = ConnectivityCheckService(
+            namespace=namespace,
+            config_service=config_service,
+            core_api=k8s.core_api,
+            repository_runner=RepositoryCheckJobRunner(
+                namespace=namespace,
+                core_api=k8s.core_api,
+                batch_api=k8s.batch_api,
+            ),
+        )
         log_streams = LogStreamService(
             KubernetesLogSource(
                 namespace=namespace,
@@ -149,6 +163,7 @@ def run_server(
             external_resources=ExternalResourceService(config_service),
             config_documents=configuration_service,
             config_diagnostics=config_service,
+            connectivity=connectivity_service,
             outputs=OutputService(
                 namespace=namespace,
                 custom_api=k8s.custom_api,

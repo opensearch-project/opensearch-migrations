@@ -46,6 +46,9 @@ from .contracts import (
     ApprovalReviewV1,
     ConfigEnvironmentDiagnosticsRequestV1,
     ConfigEnvironmentDiagnosticsV1,
+    ConnectivityInventoryRequestV1,
+    ConnectivityInventoryV1,
+    ConnectivityTargetV1,
     ConfigurationDocumentV1,
     ConfigurationSchemaV1,
     ConfigReviewV1,
@@ -77,6 +80,7 @@ from .contracts import (
     SetPreapprovalRequestV1,
     SetPreapprovalResponseV1,
     StartLogStreamRequestV1,
+    StartConnectivityChecksRequestV1,
 )
 
 
@@ -98,6 +102,7 @@ def create_app(
     external_resources: Optional[Any] = None,
     config_documents: Optional[Any] = None,
     config_diagnostics: Optional[Any] = None,
+    connectivity: Optional[Any] = None,
     outputs: Optional[Any] = None,
     operations: Optional[Any] = None,
     approvals: Optional[Any] = None,
@@ -241,6 +246,14 @@ def create_app(
                 detail="Configuration diagnostics are not configured",
             )
         return config_diagnostics
+
+    def connectivity_service():
+        if connectivity is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Configuration connectivity checks are not configured",
+            )
+        return connectivity
 
     def submission_service():
         service = document_service()
@@ -753,10 +766,102 @@ def create_app(
                 },
             ) from error
         return ConfigEnvironmentDiagnosticsV1(
-            draft_fingerprint=request_body.draft_fingerprint,
+            draft_nonce=request_body.draft_nonce,
             status=result["status"],
             diagnostics=result.get("diagnostics") or [],
         )
+
+    @app.post(
+        "/api/v1/config/connectivity/inventory",
+        response_model=ConnectivityInventoryV1,
+        response_model_exclude_none=True,
+        tags=["configuration"],
+    )
+    def connectivity_inventory(
+        request_body: ConnectivityInventoryRequestV1,
+    ) -> ConnectivityInventoryV1:
+        try:
+            prepared = connectivity_service().prepare(
+                request_body.raw_yaml,
+                request_body.config_nonce,
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "connectivity_config_invalid",
+                    "message": (
+                        "Connectivity checks require a valid configuration. "
+                        f"{error}"
+                    ),
+                },
+            ) from error
+        return ConnectivityInventoryV1(
+            config_nonce=prepared.config_nonce,
+            targets=[
+                ConnectivityTargetV1.model_validate(target.inventory_dict())
+                for target in prepared.targets
+            ],
+        )
+
+    @app.post(
+        "/api/v1/config/connectivity/checks",
+        response_model=OperationV1,
+        response_model_exclude_none=True,
+        status_code=202,
+        tags=["configuration"],
+    )
+    def start_connectivity_checks(
+        request_body: StartConnectivityChecksRequestV1,
+    ) -> OperationV1:
+        try:
+            prepared = connectivity_service().prepare(
+                request_body.raw_yaml,
+                request_body.config_nonce,
+            )
+            available_ids = {target.id for target in prepared.targets}
+            missing = sorted(set(request_body.target_ids) - available_ids)
+            if missing:
+                raise ValueError(
+                    "Connectivity target was not found in the current "
+                    "configuration: " + ", ".join(missing)
+                )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "connectivity_config_invalid",
+                    "message": str(error),
+                },
+            ) from error
+
+        selected_ids = tuple(
+            request_body.target_ids
+            or [target.id for target in prepared.targets]
+        )
+
+        def worker() -> OperationWorkResult:
+            result = connectivity_service().run(
+                prepared,
+                request_body.target_ids,
+            )
+            return OperationWorkResult(
+                waiting=False,
+                message=str(result.get("summary") or "Checks completed"),
+                result=result,
+            )
+
+        operation = operation_service().start(
+            kind="connectivity-check",
+            label=(
+                f"Check {selected_ids[0]}"
+                if len(selected_ids) == 1
+                else f"Check {len(selected_ids)} configured connections"
+            ),
+            target_ids=selected_ids,
+            worker=worker,
+        )
+        return OperationV1.from_domain(operation)
 
     @app.post(
         "/api/v1/config/review",
