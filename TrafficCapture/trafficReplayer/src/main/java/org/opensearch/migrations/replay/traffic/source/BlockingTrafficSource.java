@@ -155,10 +155,14 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     .log();
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
-                    log.trace("acquiring readGate semaphore (w/out timeout)");
+                    // During rebalances, partitions are revoked and getNextRequiredTouch() returns empty.
+                    // Without a timeout here, poll() is never called, max.poll.interval.ms expires,
+                    // and the consumer is kicked — cascading to all other consumers in the group.
+                    log.trace("acquiring readGate semaphore (with keepalive timeout)");
                     try (var waitContext = blockContext.createWaitForSignalContext()) {
-                        readGate.acquire();
+                        readGate.tryAcquire(30, TimeUnit.SECONDS);
                     }
+                    underlyingSource.touch(blockContext);
                 } else {
                     var nextInstant = nextTouchOp.get();
                     final var nowTime = Instant.now();

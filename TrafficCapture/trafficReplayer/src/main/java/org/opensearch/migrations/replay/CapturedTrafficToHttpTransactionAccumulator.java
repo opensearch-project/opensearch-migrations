@@ -6,6 +6,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -54,9 +58,12 @@ import lombok.extern.slf4j.Slf4j;
 public class CapturedTrafficToHttpTransactionAccumulator {
 
     public static final Duration EXPIRATION_GRANULARITY = Duration.ofSeconds(1);
+    private static final Duration WALL_CLOCK_EXPIRY_INTERVAL = Duration.ofSeconds(30);
     private final ExpiringTrafficStreamMap liveStreams;
     private final SpanWrappingAccumulationCallbacks listener;
     private final Duration connectionTimeout;
+    private final ScheduledExecutorService expiryWatchdog;
+    private final ScheduledFuture<?> expiryWatchdogFuture;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -159,6 +166,29 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             }
         });
         this.listener = new SpanWrappingAccumulationCallbacks(accumulationCallbacks);
+        this.expiryWatchdog = Executors.newSingleThreadScheduledExecutor(r -> {
+            var t = new Thread(r, "accumulator-expiry-watchdog");
+            t.setDaemon(true);
+            return t;
+        });
+        this.expiryWatchdogFuture = expiryWatchdog.scheduleAtFixedRate(
+            this::runWallClockExpiry,
+            WALL_CLOCK_EXPIRY_INTERVAL.toMillis(),
+            WALL_CLOCK_EXPIRY_INTERVAL.toMillis(),
+            TimeUnit.MILLISECONDS
+        );
+    }
+
+    void runWallClockExpiry() {
+        try {
+            int expired = liveStreams.expireByWallClock();
+            if (expired > 0) {
+                log.atInfo().setMessage("Wall-clock expiry watchdog swept {} stale connections")
+                    .addArgument(expired).log();
+            }
+        } catch (Exception e) {
+            log.atError().setCause(e).setMessage("Wall-clock expiry watchdog failed — deadlock-breaking is impaired").log();
+        }
     }
 
     @AllArgsConstructor
@@ -639,6 +669,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void close() {
+        expiryWatchdogFuture.cancel(false);
+        expiryWatchdog.shutdownNow();
+        try {
+            expiryWatchdog.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         liveStreams.values().forEach(accum -> {
             requestsTerminatedUponAccumulatorCloseCounter.incrementAndGet();
             fireAccumulationsCallbacksAndClose(
