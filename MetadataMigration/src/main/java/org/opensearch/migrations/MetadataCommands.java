@@ -6,11 +6,15 @@ public enum MetadataCommands {
     MIGRATE,
 
     /** Inspects items from a source to determine which can be placed on a target cluster */
-    EVALUATE;
+    EVALUATE,
+
+    /** Checks list and read access to a configured snapshot repository */
+    CHECK_REPOSITORY;
 
     public static MetadataCommands fromString(String s) {
+        String normalized = s.replace('-', '_');
         for (var command : values()) {
-            if (command.name().equalsIgnoreCase(s)) {
+            if (command.name().equalsIgnoreCase(normalized)) {
                 return command;
             }
         }

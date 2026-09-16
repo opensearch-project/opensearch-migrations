@@ -956,6 +956,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return await this.transformSync(processedInput);
     }
 
+    async resolveForConsoleResources(rawData: unknown): Promise<{
+        userConfig: NormalizedUserConfig;
+        workflowConfig: OutputConfig;
+    }> {
+        const userConfig = await this.preprocessInput(this.validateInput(rawData));
+        const workflowConfig = this.validateOutput(await this.transformSync(userConfig));
+        return {userConfig, workflowConfig};
+    }
+
     private async preprocessInput(input: NormalizedUserConfig): Promise<NormalizedUserConfig> {
         const processedSourceClusters = {...input.sourceClusters};
 

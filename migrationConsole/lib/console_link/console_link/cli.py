@@ -380,10 +380,10 @@ def cluster_group(ctx):
         raise click.UsageError("Neither source nor target cluster is defined.")
 
 
-def _cluster_label(name: str, cluster) -> str:
+def _cluster_label(name: str, cluster, detect_collection_type: bool = True) -> str:
     """Return a display label, e.g. 'TARGET CLUSTER (Amazon OpenSearch Serverless, Collection type: VECTOR)'."""
     if cluster and cluster.is_serverless:
-        collection_type = cluster.detect_serverless_collection_type()
+        collection_type = cluster.detect_serverless_collection_type() if detect_collection_type else None
         if collection_type:
             return f"{name} ({cluster.display_name}, Collection type: {collection_type})"
         return f"{name} ({cluster.display_name})"
@@ -442,15 +442,23 @@ def connection_check_cmd(ctx, cluster, source_selector, target_selector, proxy_s
     if cluster:
         selected_cluster = resolve_named_cluster(ctx, cluster, source_selector, target_selector, proxy_selector)
         result = clusters_.connection_check(selected_cluster)
-        click.echo(result.connection_message)
+        click.echo(json.dumps(result.to_dict()) if ctx.json else result.connection_message)
         return
     required_roles = (ResourceRole.SOURCE, ResourceRole.TARGET)
     source_cluster = resolve_cluster_resource(ctx, ResourceRole.SOURCE, source_selector, hint_roles=required_roles)
     target_cluster = resolve_cluster_resource(ctx, ResourceRole.TARGET, target_selector, hint_roles=required_roles)
-    click.echo(_cluster_label("SOURCE CLUSTER", source_cluster))
-    click.echo(clusters_.connection_check(source_cluster).connection_message)
-    click.echo(_cluster_label("TARGET CLUSTER", target_cluster))
-    click.echo(clusters_.connection_check(target_cluster).connection_message)
+    source_result = clusters_.connection_check(source_cluster)
+    target_result = clusters_.connection_check(target_cluster)
+    if ctx.json:
+        click.echo(json.dumps({
+            "source_cluster": source_result.to_dict(),
+            "target_cluster": target_result.to_dict(),
+        }))
+        return
+    click.echo(_cluster_label("SOURCE CLUSTER", source_cluster, detect_collection_type=False))
+    click.echo(source_result.connection_message)
+    click.echo(_cluster_label("TARGET CLUSTER", target_cluster, detect_collection_type=False))
+    click.echo(target_result.connection_message)
 
 
 @cluster_group.command(name="run-test-benchmarks")

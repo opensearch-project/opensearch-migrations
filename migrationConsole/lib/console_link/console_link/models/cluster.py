@@ -147,6 +147,7 @@ SCHEMA = {
         "schema": {
             "endpoint": {"type": "string", "required": True},
             "allow_insecure": {"type": "boolean", "required": False},
+            "ca_cert_path": {"type": "string", "required": False},
             "version": {"type": "string", "required": False},
             "solr_context_path": {"type": "string", "required": False},
             SIGV4_SIGNING_ENDPOINT_KEY: {"type": "string", "required": False},
@@ -207,12 +208,24 @@ class Cluster:
     auth_details: Optional[Dict[str, Any]] = None
     client_cert_details: Optional[Dict[str, Any]] = None
     allow_insecure: bool = False
+    ca_cert_path: Optional[str] = None
     solr_context_path: str = DEFAULT_SOLR_CONTEXT_PATH
     client_options: Optional[ClientOptions] = None
     _client_cert_paths: Optional[tuple[str, str]] = None
 
     def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
-        logger.info(f"Initializing cluster with config: {config}")
+        logger.info(
+            "Initializing cluster client for endpoint %s with auth type %s",
+            config.get("endpoint"),
+            next(
+                (
+                    auth.name.lower()
+                    for auth in AuthMethod
+                    if auth.name.lower() in config
+                ),
+                "unknown",
+            ),
+        )
         v = Validator(SCHEMA)
         if not v.validate({'cluster': config}):
             raise ValueError("Invalid config file for cluster", v.errors)
@@ -223,6 +236,7 @@ class Cluster:
         self.solr_context_path = normalize_solr_context_path(config.get("solr_context_path"))
         self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
             "https") else config.get("allow_insecure", True)
+        self.ca_cert_path = config.get("ca_cert_path")
         if 'no_auth' in config:
             self.auth_type = AuthMethod.NO_AUTH
         elif 'basic_auth' in config:
@@ -424,7 +438,7 @@ class Cluster:
         client_cert = self._get_client_cert_files()
 
         request_kwargs = {
-            "verify": (not self.allow_insecure),
+            "verify": self.ca_cert_path or (not self.allow_insecure),
             "params": params,
             "auth": auth,
             "data": data,

@@ -399,6 +399,30 @@ def test_cluster_api_call_uses_client_cert_paths():
     assert session.request_kwargs["cert"] == ("/tmp/client.crt", "/tmp/client.key")
 
 
+def test_cluster_api_call_uses_configured_ca_cert_path():
+    class FakeSession:
+        def __init__(self):
+            self.request_kwargs = None
+
+        def request(self, *args, **kwargs):
+            self.request_kwargs = kwargs
+            response = requests.Response()
+            response.status_code = 200
+            response._content = b"{}"
+            return response
+
+    cluster = Cluster({
+        "endpoint": "https://source.example.com",
+        "ca_cert_path": "/tmp/source-ca.crt",
+        "no_auth": None,
+    })
+    session = FakeSession()
+
+    cluster.call_api("/", session=session)
+
+    assert session.request_kwargs["verify"] == "/tmp/source-ca.crt"
+
+
 def test_cluster_client_cert_can_be_loaded_from_k8s_secret(mocker):
     kubectl_runner = mocker.patch("console_link.models.cluster.KubectlRunner")
     kubectl_runner.return_value.read_secret.return_value = {

@@ -27,6 +27,7 @@ function multiResourceConfig() {
                         repoA: {
                             awsRegion: "us-east-2",
                             repoPathUri: "s3://bucket-a",
+                            endpoint: "localstack://localstack.ma.svc.cluster.local:4566",
                         },
                     },
                     snapshots: {
@@ -422,7 +423,23 @@ describe("console resources", () => {
         const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), "console-resources-cli-test-"));
         const inputFile = path.join(outputDir, "workflow.yaml");
         const outputFile = path.join(outputDir, "consoleResources.json");
-        await fs.writeFile(inputFile, JSON.stringify(multiResourceConfig(), null, 2));
+        const config = multiResourceConfig();
+        config.sourceClusters.unused = {
+            endpoint: "https://unused-source.example.com",
+            version: "OS 2.19.0",
+            snapshotInfo: {
+                repos: {
+                    emptyRepo: {
+                        repoPathUri: "gs://empty-repository",
+                    },
+                },
+                snapshots: {},
+            },
+        };
+        config.targetClusters["unused-target"] = {
+            endpoint: "https://unused-target.example.com",
+        };
+        await fs.writeFile(inputFile, JSON.stringify(config, null, 2));
 
         await resolveConsoleResourcesMain([
             "--user-config", inputFile,
@@ -432,7 +449,53 @@ describe("console resources", () => {
 
         const resources = JSON.parse(await fs.readFile(outputFile, "utf8"));
         expect(resources.workflowName).toBe("workflow-from-cli");
-        expect(resources.sources.map((source: any) => source.refName)).toEqual(["sourcea", "sourceb"]);
+        expect(resources.sources.map((source: any) => source.refName)).toEqual(["sourcea", "sourceb", "unused"]);
+        expect(resources.targets.map((target: any) => target.refName)).toEqual(
+            ["targetx", "targety", "unused-target"],
+        );
         expect(resources.kafkas.map((kafka: any) => kafka.refName)).toEqual(["default", "my-kafka"]);
+        expect(resources.sources.find((source: any) => source.refName === "sourcea")).toEqual(
+            expect.objectContaining({
+                editPath: ["sourceClusters", "sourcea"],
+                repositories: [{
+                    refName: "repoA",
+                    provider: "s3",
+                    editPath: ["sourceClusters", "sourcea", "snapshotInfo", "repos", "repoA"],
+                    clientConfig: {
+                        repo_uri: "s3://bucket-a",
+                        s3_region: "us-east-2",
+                        endpoint: "http://localstack.ma.svc.cluster.local:4566",
+                        use_local_stack: true,
+                    },
+                    snapshots: [{
+                        refName: "snapA",
+                        generated: true,
+                        editPath: ["sourceClusters", "sourcea", "snapshotInfo", "snapshots", "snapA"],
+                    }],
+                }],
+            }),
+        );
+        expect(resources.sources.find((source: any) => source.refName === "unused")).toEqual({
+            refName: "unused",
+            aliases: ["unused"],
+            clientConfig: {
+                endpoint: "https://unused-source.example.com",
+                version: "OS 2.19.0",
+                allow_insecure: false,
+                no_auth: null,
+            },
+            displayFields: expect.any(Array),
+            editPath: ["sourceClusters", "unused"],
+            repositories: [{
+                refName: "emptyRepo",
+                provider: "gcs",
+                editPath: ["sourceClusters", "unused", "snapshotInfo", "repos", "emptyRepo"],
+                clientConfig: {
+                    repo_uri: "gs://empty-repository",
+                },
+                snapshots: [],
+            }],
+            source: "config",
+        });
     });
 });
