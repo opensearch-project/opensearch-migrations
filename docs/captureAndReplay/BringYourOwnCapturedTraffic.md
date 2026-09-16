@@ -22,10 +22,9 @@ They do not preserve enough information for the hardened protocol described here
 Bring-your-own captured traffic is supported only when the archive was produced by a capture proxy
 that uses the same capture-protocol version as the importing replayer.
 
-The archive records its protocol and build versions. The importer rejects an unsupported protocol
-version before publishing any application records.
-
-Compatibility across different capture-protocol versions is out of scope.
+The archive records its protocol and build versions, and the importer rejects an unsupported
+protocol version before publishing any application records. Compatibility across different
+capture-protocol versions is out of scope.
 
 ## Required fidelity
 
@@ -46,12 +45,12 @@ The exporter must preserve every field that can affect replay behavior. The arch
 - integrity information that detects omitted, duplicated, reordered, or corrupted archive records.
 
 Source Kafka offsets are retained as archive validation and diagnostic data. Importing creates a
-new Kafka log, so it cannot recreate the physical source offsets or leader epochs. The replayer
+new Kafka log, so the physical source offsets and leader epochs cannot be recreated. The replayer
 uses the destination topic's offsets for processing and commits.
 
-The live proxy's `trafficStreamFlushInterval` does not need to be replayed as configuration.
-Its observable effect is the exact `TrafficStream` record boundaries already preserved by the
-archive. The exporter and importer must not merge or split archived application records.
+The live proxy's `trafficStreamFlushInterval` does not need to be replayed as configuration: its
+observable effect is exactly the `TrafficStream` record boundaries the archive already preserves.
+The exporter and importer must not merge or split archived application records.
 
 ## Export completion
 
@@ -59,8 +58,8 @@ An export uses fixed per-partition start and end offsets. It is complete only wh
 the declared ranges has been archived and the archive integrity data has been finalized. The
 archive format defines the endpoint convention unambiguously.
 
-Reaching the current end of a Kafka partition is not protocol completion evidence. The selected end
-offsets define the export boundary.
+Reaching the current end of a Kafka partition is not completion evidence. The selected end offsets
+define the export boundary.
 
 The archive also declares one end mode:
 
@@ -69,8 +68,8 @@ The archive also declares one end mode:
 - `range` means that the fixed offsets delimit an arbitrary range from a capture that may continue
   outside the archive.
 
-The exporter must not infer `finalized` from a quiet topic, a timeout, or the current partition end.
-The workflow or operator must certify it explicitly. The format has no implicit default.
+The exporter must not infer `finalized` from a quiet topic, a timeout, or the current partition
+end. The workflow or operator must certify it explicitly. The format has no implicit default.
 
 The exporter must not silently skip a record it cannot decode. The value is archived as raw bytes;
 protocol decoding and validation can occur separately.
@@ -118,8 +117,8 @@ timestampMode: z
 as the destination record timestamp. The dedicated import topic must retain producer-supplied
 timestamps rather than replacing them with the destination broker's current time.
 
-Kafka reports the destination record's timestamp type according to the destination topic's timestamp
-configuration. It cannot report the imported producer-supplied value as a newly assigned
+Kafka reports the destination record's timestamp type according to the destination topic's
+configuration; it cannot report the imported producer-supplied value as a newly assigned
 `LogAppendTime`. The archive therefore preserves the source record's original timestamp type as
 archive metadata, while replay in `preserve` mode treats the imported numeric timestamp as the
 archived source broker time.
@@ -136,14 +135,14 @@ them.
 cannot be preserved or trusted. The destination Kafka broker supplies the imported records'
 timestamps.
 
-In this mode, broker-time heartbeat expiration is disabled. Rebasing timestamps must never authorize
-expiration under the original `E + S` proof, because the rebased values do not describe the source
-capture timeline. The destination timestamps drive the source-response boundary used by retry
-policy, but not source-run expiration.
+In this mode, broker-time heartbeat expiration is disabled. Rebased timestamps must never authorize
+expiration under the original `E + S` proof, because they do not describe the source capture
+timeline. The destination timestamps drive the source-response boundary used by retry policy, but
+not source-run expiration.
 
 For a `range` archive, choosing this mode also accepts that an archive ending with an incomplete
-connection and no terminal `CloseObservation` may remain unresolved indefinitely. End of a range
-is not completion evidence. A `finalized` archive uses the explicit partition-end rule below.
+connection and no terminal `CloseObservation` may remain unresolved indefinitely. End of a range is
+not completion evidence. A `finalized` archive uses the explicit partition-end rule below.
 
 The selected timestamp mode is immutable for one imported capture and is passed explicitly to the
 replayer. Proxy and replayer configuration must agree about the applicable protocol parameters.

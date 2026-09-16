@@ -6,7 +6,7 @@
 
 This guide defines how Java components pass immutable inputs between state owners while preserving
 typed completion paths. Component architecture documents define the messages, state, and required
-ordering. This guide defines the programming pattern used to connect them.
+ordering. This guide defines the programming pattern that connects them.
 
 The reusable classes are in `org.opensearch.migrations.utils.async`:
 
@@ -20,9 +20,10 @@ A **state owner** is the only component permitted to mutate a particular set of 
 arrive from several threads or asynchronous operations, but the owner applies them one at a time
 using its existing execution environment.
 
-An **owner input** is an immutable value submitted to that execution environment. For this
-application, the execution environment is normally a Netty event loop or a thread-safe queue whose
-only consumer is the owning Kafka thread.
+An **owner input** is an immutable value submitted to that execution environment. In this
+application, the execution environment is normally a Netty event loop or a thread-safe queue with
+exactly one consuming thread, such as the dedicated Kafka thread or the dedicated replay-intake
+thread.
 
 A **handler** accepts one input and context and eventually produces one typed output.
 
@@ -90,29 +91,32 @@ immutable input
     -> returned stage completes with a typed value
 ```
 
-For replay intake, Netty event loops and other asynchronous completion threads append immutable
-inputs to a thread-safe queue. The Kafka executor drains that queue before and after its bounded
-Kafka consumer calls:
+For replay intake, the Kafka thread, Netty event loops, and tuple I/O append immutable inputs to
+the thread-safe replay-intake input queue. Only the dedicated replay-intake thread removes and
+applies them:
 
 ```text
-Netty or tuple completion
-    -> threadSafeQueue.add(immutable owner input)
-    -> Kafka executor returns from its bounded Kafka call
-    -> Kafka executor removes and applies queued inputs one at a time
+Kafka, Netty, or tuple completion
+    -> replayIntakeInputQueue.add(immutable owner input)
+    -> replay-intake thread removes and applies queued inputs one at a time
 ```
 
-Submitting threads enqueue immutable replay-intake inputs. The Kafka thread drains that queue
-between bounded Kafka client calls and while servicing revocation or shutdown. Submission never
-mutates replay-intake state directly.
+The Kafka source has the mirror-image arrangement. Replay intake submits typed messages to the
+Kafka-source input queue, and only the dedicated Kafka thread removes and applies them between its
+bounded Kafka client calls. `KafkaConsumer.wakeup()` carries no application state; it only prompts
+a long poll to return so the Kafka thread can inspect its queue. Submission never mutates another
+owner's state directly.
 
 The concurrent queue makes submission thread-safe. It does not permit submitting threads to mutate
-replay-intake state. If inputs require a total order, the component design must establish that order
+the owner's state. If inputs require a total order, the component design must establish that order
 before or while admitting them; the queue type alone is not the proof.
 
 The replayer therefore uses:
 
-- the dedicated Kafka executor for Kafka consumer state;
-- a thread-safe replay-intake input queue drained only by the Kafka executor;
+- the dedicated Kafka thread for Kafka consumer state, draining the Kafka-source input queue
+  between bounded Kafka client calls;
+- the dedicated replay-intake thread, the only consumer of the replay-intake input queue, for
+  source reconstruction and Kafka-record accounting;
 - each connection's selected Netty event loop for connection and request-replay state; and
 - the tuple writer's existing asynchronous I/O.
 
@@ -167,9 +171,9 @@ response, or commit result. Catch the operation's expected failures and return t
 value.
 
 A synchronous throw, null stage, exceptional completion, rejected required submission, or owner
-thread violation is unexpected. The adapter to the Netty event loop, Kafka executor, or other
-owner reports it to the application process supervisor. Production does not recover the failed
-owner and continue.
+thread violation is unexpected. The adapter to the Netty event loop, Kafka thread, replay-intake
+thread, or other owner reports it to the application process supervisor. Production does not
+recover the failed owner and continue.
 
 ## 7. Ordering
 
@@ -199,8 +203,8 @@ generation:
    cancellation.
 
 The owner receives either input through its normal submission path, finds matching work in its own
-state, and begins the component-defined action. The Netty event loop, Kafka executor, and shared
-replay-intake queue remain active so unrelated partition generations can continue.
+state, and begins the component-defined action. The Netty event loops, Kafka thread, and
+replay-intake thread remain active so unrelated partition generations can continue.
 
 Do not implement scoped cancellation by killing an owner thread, replacing unrelated queued
 inputs, or relying only on shared mutable state. If another owner must wait for cleanup, the
@@ -228,8 +232,8 @@ Do not:
 - use detached callbacks for correctness-required actions;
 - convert unexpected exceptions into ordinary domain success;
 - ignore a returned stage when another action depends on its result;
-- block a Netty event loop or the Kafka executor on `Future.get`, `join`, a semaphore, or network
-  I/O outside the Kafka client's required blocking calls;
+- block a Netty event loop, the Kafka thread, or the replay-intake thread on `Future.get`, `join`,
+  a semaphore, or network I/O outside the Kafka client's required blocking calls;
 - assume asynchronous completion order matches submission order;
 - pass mutable state through an owner input; or
 - add default interface methods that silently choose completion or failure behavior.

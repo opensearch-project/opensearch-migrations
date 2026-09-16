@@ -27,9 +27,8 @@ Kafka-record disposition.
 ## 1. Shared terms
 
 A **state owner** is the only component allowed to change one named group of mutable state. The
-owner applies one input completely before it begins applying the next input to that state. This
-does not mean that the asynchronous work started by the first input must finish before the second
-input is applied.
+owner applies one input completely before it begins the next input to that state. Asynchronous
+work started by the first input does not have to finish before the second input is applied.
 
 An **owner input** is an immutable value delivered to the execution environment used by the owner:
 
@@ -53,10 +52,10 @@ The design distinguishes these identities:
 | `ConnectionProcessingId` | One process-local source-assembly and target-connection lifetime for a `CapturedConnectionId` |
 | `ReplayRequestId` | One reconstituted request within a `ConnectionProcessingId` |
 
-`ConnectionProcessingId` is necessary because heartbeat expiration can end one process-local
-connection lifetime while target and tuple work from that lifetime continues. A later observation
-for the same `CapturedConnectionId` may start a separate lifetime. The two lifetimes must never
-share source accumulators, a target channel, a request registry, or completion messages.
+`ConnectionProcessingId` exists because heartbeat expiration can end one process-local connection
+lifetime while target and tuple work from that lifetime continues. A later observation for the
+same `CapturedConnectionId` may start a separate lifetime. The two lifetimes must never share
+source accumulators, a target channel, a request registry, or completion messages.
 
 None of these process-local identities is added to the capture protobuf.
 
@@ -73,26 +72,28 @@ The Kafka source and replay intake exchange immutable messages through thread-sa
 Kafka thread calls `KafkaConsumer`. Only the replay-intake thread changes replay-intake state.
 Neither waits for the other to run arbitrary work.
 
-Replay intake requests Kafka input one partition batch at a time. For each partition generation,
-at most one `RequestNextPartitionBatch` may be outstanding. The Kafka source resumes only
-partitions with an outstanding request. When one `poll()` returns records, the source groups them
-by partition, pauses each partition represented in the result before the next poll, and sends one
-`PartitionRecordBatch` for each partition to replay intake. Replay intake fully applies that batch
-before requesting another batch for the same partition.
+Kafka input flows one partition batch at a time. Replay intake keeps at most one
+`RequestNextPartitionBatch` outstanding per partition generation. The Kafka source resumes only
+partitions with an outstanding request; when one `poll()` returns records, it groups them by
+partition, pauses each partition represented in the result before the next poll, and answers each
+outstanding request with one `PartitionRecordBatch`. Replay intake fully applies a batch before
+requesting the next batch for the same partition. The
+[Kafka Source and Replay Intake Low-Level Design](replayerKafkaSourceAndIntakeLowLevelDesign.md)
+defines the mechanics.
 
-The Kafka source may remain in a long `poll()` while every partition is paused. Submitting a
-Kafka-source message therefore also prompts the source through `KafkaConsumer.wakeup()`. The
-message queue carries the work; wakeup only asks the Kafka thread to inspect that queue. Wakeup is
-deferred while a rebalance callback or another Kafka operation is running. A deferred wakeup is
-coalesced and issued when that protected operation finishes.
+The Kafka source may sit in a long `poll()` while every partition is paused, so submitting a
+Kafka-source message also prompts the source through `KafkaConsumer.wakeup()`. The queue carries
+the work; wakeup only asks the Kafka thread to inspect that queue. Wakeup is deferred while a
+rebalance callback or another Kafka operation is running, then coalesced and issued when that
+protected operation finishes.
 
 `onPartitionsAssigned` pauses the complete resulting assignment before returning, because Kafka
 does not preserve pause state across assignment changes. A wakeup issued after a revocation
 callback may cause the surrounding poll to return before assignment is delivered. The next poll
 continues that rebalance; the assignment callback is delayed, not lost.
 
-A target-connection owner and its request-replay owners also use one thread. Messages between them
-are still typed and explicit so that completion and cleanup cannot be hidden in detached callbacks.
+A target-connection owner and its request-replay owners share one thread. Messages between them
+are still typed and explicit so that completion and cleanup cannot hide in detached callbacks.
 
 ## 3. Main processing path
 
@@ -112,7 +113,7 @@ flowchart TD
     Durable["Tuple writer reports durable output"]
     Finish["Request-processing completion returns<br/>through connection owner to replay intake"]
     Ready["Every associated Kafka record with no remaining work<br/>emits one record-processing-finished message"]
-    Commit["Kafka source advances and commits<br/>the completed observed-record prefix"]
+    Commit["Kafka source commits consecutive completed records<br/>beginning with the earliest uncommitted record"]
 
     Demand --> Poll
     Poll --> Register
@@ -159,7 +160,7 @@ switches contain no default branch.
 
 Unexpected throws, exceptional completion, owner-thread violations, rejected required submission,
 and impossible state transitions are process-fatal. Recoverable target, tuple, expiration,
-revocation, and retry outcomes are values rather than exceptions.
+revocation, and retry outcomes are values, not exceptions.
 
 ## 5. Required completion paths
 
@@ -187,7 +188,7 @@ record path
     -> replay intake applies every observation
     -> every record association finishes
     -> one record-processing-finished message reaches Kafka source
-    -> Kafka source advances only the completed observed-record prefix
+    -> Kafka source advances only across consecutive completed records beginning with the earliest uncommitted record
 ```
 
 Normal completion of an inner asynchronous operation is not enough. The returned stage for a
@@ -251,13 +252,12 @@ The combined implementation must prove:
 
 - each mutable value has one named owner;
 - every admitted request produces at most one connection-turn completion and at most one
-  request-processing completion;
+  request-processing completion, and every normally completed request produces both;
 - replay intake has at most one outstanding Kafka batch request for each partition generation;
 - every delivered partition batch matches exactly one outstanding request and is applied before
   replay intake requests the next batch for that partition;
 - a queued Kafka-source input wakes a long poll without interrupting rebalance callback work or
   another Kafka operation;
-- every normally completed request produces both;
 - no request-processing completion occurs before tuple durability;
 - no record-processing-finished message occurs while the record has unfinished associated work;
 - one record shared by several requests cannot finish after only one request;

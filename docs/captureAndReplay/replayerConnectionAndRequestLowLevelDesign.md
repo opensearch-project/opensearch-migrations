@@ -75,9 +75,8 @@ process supervisor
 ```
 
 The first use submits one initialization-and-admission task to the selected event loop. Replay
-intake publishes the owner reference for later routing only after that task has been accepted by
-the event loop. Later messages submitted from replay intake to the same owner use the same event
-loop.
+intake publishes the owner reference for later routing only after the event loop has accepted that
+task. Later messages from replay intake to the same owner use the same event loop.
 
 Mutable state is never read or changed off that event loop. Every public owner entry point asserts
 event-loop affinity inside its submitted task.
@@ -234,7 +233,8 @@ When that time arrives, the connection owner:
 3. sends `BeginRequestPreparation` to the request owner; and
 4. schedules the next admission entry's preparation timer.
 
-The owner does not wait for preparation to finish before scheduling preparation of a later entry.
+The owner does not wait for one preparation to finish before scheduling preparation of a later
+entry.
 
 A close entry moves to the execution queue already prepared when its admission time is reached.
 
@@ -350,9 +350,12 @@ tuple output, regardless of whether its HTTP or bulk-item result is successful.
 `NoTargetResponseObtained` means no target response was obtained. It is not an unsuccessful HTTP
 response.
 
-The first accepted target write causes the request owner to report `FirstTargetWriteSubmitted` to
-the connection owner. The connection owner then submits exactly one
-`ConnectionRequestStarted` to replay intake. Retries do not emit another started message.
+The first accepted target write is what makes a request **started** for demand accounting: it is
+the canonical trigger for `ConnectionRequestStarted` referenced by the mid- and top-level designs.
+When Netty accepts the request's first target write, the request owner reports
+`FirstTargetWriteSubmitted` to the connection owner, and the connection owner submits exactly one
+`ConnectionRequestStarted` to replay intake. A request that is queued, prepared, or holds the turn
+but has not yet had a write accepted is not started. Retries do not emit another started message.
 
 If required submission of `ConnectionRequestStarted` fails, the process terminates. The target
 write is not reclassified as unsent.

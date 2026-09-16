@@ -46,7 +46,7 @@ The proposed top-level Java components are:
 | `KafkaSourceOwner` | Every Kafka consumer call, assignment lifecycle, pause state, observed-record commit order |
 | `KafkaSourceInputQueue` | Thread-safe submission of immutable messages to the Kafka source |
 | `PartitionSourceState` | One currently assigned partition generation, its outstanding batch request, and its independent pause reasons |
-| `ObservedRecordCommitQueue` | Observed Kafka record order and contiguous completed prefix |
+| `ObservedRecordCommitQueue` | Observed Kafka record order and consecutive finished records at the head of the queue |
 | `ReplayIntakeInputQueue` | Thread-safe submission of immutable Kafka batches, lifecycle inputs, completion inputs, and cleanup inputs |
 | `ReplayIntakeOwner` | Decode and apply records; own source reconstruction, broker-time state, demand, and record associations |
 | `PartitionIntakeState` | All replay-intake state for one partition generation |
@@ -151,9 +151,7 @@ different partitions and does not need one.
 
 The Kafka thread, Netty event loops, and tuple I/O may submit immutable inputs to
 `ReplayIntakeInputQueue`. Only the replay-intake thread removes those inputs and changes
-replay-intake state.
-
-The queue does not own replay state.
+replay-intake state. The queue does not own replay state.
 
 The sealed input family initially contains:
 
@@ -201,7 +199,7 @@ replay-intake fields it can change and would bypass the exhaustive switch over t
 types.
 
 Inputs sent from one Netty event loop to this queue preserve that sender's submission order.
-Correctness must not depend on a total order between independent event loops. Messages carry
+Correctness must not depend on a total order between independent event loops; messages carry
 request and generation identities so replay intake can apply a valid completion regardless of
 which independent connection completed first.
 
@@ -266,10 +264,11 @@ The owner calls `pause()` or `resume()` only when the effective state changes. C
 never clears another.
 
 There is no record-count or byte-count ownership limit. The batch request limits the number of
-application-level batches in flight, not the size of one Kafka result. A single batch may still
-exhaust memory. The design does not refuse a batch partway through, because a later record in that
-batch may be the heartbeat, close, response, or broker-time evidence needed to release earlier
-work.
+application-level batches in flight, not the size of one Kafka result, so a single batch may still
+exhaust memory. The design does not refuse a batch partway through: a later record in that batch
+may be the heartbeat, close, response, or broker-time evidence needed to release earlier work, so
+a hard cap could deadlock the replayer. This is the one place this trade-off is made; later
+sections rely on it rather than restating it.
 
 ### 5.2 Assignment
 
@@ -333,9 +332,9 @@ messages.
 An empty poll completes no request. A result for a partition that had no outstanding request is an
 internal invariant failure.
 
-Replay intake fully applies the batch before it may request the next batch for that partition.
-Consequently, the application holds at most one delivered-but-not-yet-applied batch per partition
-generation. This is not a byte or record ceiling.
+Replay intake fully applies the batch before it may request the next batch for that partition, so
+the application holds at most one delivered-but-not-yet-applied batch per partition generation.
+That is a batch-count property, not the byte or record ceiling that §5.1 rules out.
 
 ### 5.4 Poll interruption and queued source messages
 
@@ -807,10 +806,8 @@ An empty Kafka poll is invisible to replay intake and does not change the reques
 continues trying to satisfy the same request.
 
 One batch may raise `requestSupplyCount` above `N`. Replay intake still applies that entire batch,
-but it does not request another one unless the condition becomes true again. The design still has
-no hard record-count or byte-count ownership cap: one batch or incomplete source traffic may
-exhaust memory, because refusing part of an accepted batch could withhold the heartbeat, close,
-response, or broker-time evidence needed to release earlier work and deadlock the replayer.
+but it does not request another one unless the condition becomes true again. As §5.1 explains,
+there is deliberately no hard record-count or byte-count cap behind this rule.
 
 ## 14. Finalized archive partition end
 
@@ -932,7 +929,7 @@ the process supervisor immediately.
   a tuple.
 - A heartbeat-only or probe-only record completes immediately after application.
 - Record completion is emitted exactly once.
-- Physical Kafka offset gaps do not block the observed-record prefix.
+- Physical Kafka offset gaps do not block advancement across finished records at the head of the observed-record queue.
 
 ### 17.2 Source reconstruction
 
