@@ -299,6 +299,16 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "metadataMigrationOtelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "metadataMigrationOtelTraceCollectorEndpoint": "",
       "metadataMigrationOutput": "HUMAN_READABLE",
+      "metadataMigrationResources": {
+        "limits": {
+          "cpu": "500m",
+          "memory": "1800Mi",
+        },
+        "requests": {
+          "cpu": "500m",
+          "memory": "1800Mi",
+        },
+      },
       "metadataMigrationTransformerConfig": "",
       "metadataMigrationTransformerConfigBase64": "",
       "metadataMigrationTransformerConfigFile": "",

@@ -215,7 +215,48 @@ describe("MigrationConfigTransformer validation", () => {
         expect(migration?.documentBackfillConfig?.skipApproval).toBe(false);
     });
 
-    it("should reject rogue key in nested object (snapshotInfo)", () => {
+    it('should carry metadata memory overrides from user input into populated workflow resources', async () => {
+        const config = cloneBaseConfig();
+        const inputResources = {
+            requests: {
+                memory: "3Gi"
+            },
+            limits: {
+                memory: "4Gi"
+            }
+        };
+        const expectedResources = {
+            requests: {
+                cpu: "500m",
+                memory: "3Gi"
+            },
+            limits: {
+                cpu: "500m",
+                memory: "4Gi"
+            }
+        };
+        config.snapshotMigrationConfigs[0].slices["slice-0"] = {
+            metadataMigrationConfig: {
+                resources: inputResources
+            }
+        };
+
+        expect(
+            config.snapshotMigrationConfigs[0].slices["slice-0"].metadataMigrationConfig.resources
+        ).toEqual(inputResources);
+
+        const normalized = normalizeUserConfig(OVERALL_MIGRATION_CONFIG.parse(config));
+        expect(
+            normalized.snapshotMigrationConfigs[0].metadataMigrationConfig!.resources
+        ).toEqual(expectedResources);
+
+        const result = await transformer.processFromObject(config);
+        const metadataConfig = result.snapshotMigrations?.[0]?.metadataMigrationConfig as any;
+
+        expect(metadataConfig?.resources).toEqual(expectedResources);
+    });
+
+    it('should reject rogue key in nested object (snapshotInfo)', () => {
         const configWithRogueInNested = {
             ...baseConfig,
             sourceClusters: {

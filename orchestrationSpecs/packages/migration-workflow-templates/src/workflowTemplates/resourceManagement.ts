@@ -437,6 +437,7 @@ function makeSnapshotMigrationManifest(
             snapshotRepoUseLocalStack: makeDirectTypeProxy(expr.dig(snapshotRepo, ["useLocalStack"], false)),
             metadataMigrationJvmArgs: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "jvmArgs"], expr.literal(""))),
             metadataMigrationLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
+            metadataMigrationResources: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "resources"], expr.makeDict({}))),
             metadataMigrationComponentTemplateAllowlist: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "componentTemplateAllowlist"], expr.literal([]))),
             metadataMigrationIndexAllowlist: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "indexAllowlist"], expr.literal([]))),
             metadataMigrationIndexTemplateAllowlist: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "indexTemplateAllowlist"], expr.literal([]))),
