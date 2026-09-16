@@ -8,6 +8,14 @@ to Kafka for later replay. It covers the controller-less deployment. Managed-fle
 behavior and fresh-run recovery are specified separately in
 [`managedFleetCaptureRecovery.md`](managedFleetCaptureRecovery.md).
 
+**Strict capture** guarantees that every request classified as Critical Mutation Traffic that the
+proxy permits to reach the source has a complete, durably acknowledged representation in Kafka that
+can be reconstituted and replayed to the target. Strict capture therefore uses `fail-closed`: if
+capture becomes compromised, existing and new connections cannot continue forwarding uncaptured
+traffic. Non-strict operation uses `fail-open`, permanently abandons capture in that process, and
+allows existing and new connections to continue forwarding to the source without the replay
+guarantee.
+
 The design deliberately separates three concerns:
 
 1. Kafka group membership load-balances partitions for new connections.
@@ -1004,15 +1012,16 @@ separate transitions:
    no source-bound traffic that has not already passed the capture-before-forward gate may be
    forwarded.
 2. The proxy immediately reports the compromise on an authenticated control path. The report
-   identifies the exact resource, process, Pod, capture activation, Kafka topic, and controller fence.
+   identifies the exact resource, process, Pod, capture activation, Kafka topic, and current
+   controller recovery generation.
    Because one capture activation can be compromised only once, retries for that exact activation
    are idempotent and require no second event identity.
 3. The controller durably marks capture incomplete and terminal for that activation before it
    acknowledges the report. Merely receiving a notification, scraping a metric, or observing an
    unhealthy endpoint is not acknowledgement.
 4. Only after the proxy receives an authenticated acknowledgement matching its current activation
-   and controller fence may surviving existing connections and new connections forward without
-   capture. The proxy then enters `PASS_THROUGH_COMPROMISED`.
+   and the current controller recovery generation may surviving existing connections and new
+   connections forward without capture. The proxy then enters `PASS_THROUGH_COMPROMISED`.
 5. If acknowledgement does not arrive within the configured finite controller-acknowledgement
    deadline, the proxy terminates without forwarding the blocked traffic.
 

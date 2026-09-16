@@ -96,6 +96,14 @@ flowchart LR
 The **source** is the service receiving traffic during capture. The **target** is the service
 receiving reconstructed requests during replay.
 
+**Strict capture** guarantees that every request classified as Critical Mutation Traffic that the
+proxy permits to reach the source has a complete, durably acknowledged representation in Kafka that
+can be reconstituted and replayed to the target. Strict capture therefore uses `fail-closed`: if
+capture becomes compromised, existing and new connections cannot continue forwarding uncaptured
+traffic. Non-strict operation uses `fail-open`, permanently abandons capture in that process, and
+allows existing and new connections to continue forwarding to the source without the replay
+guarantee.
+
 The **terminal connection observation** is `CloseObservation`. `DisconnectObservation` and
 `ConnectionExceptionObservation` are non-terminal diagnostics and do not end source
 reconstruction.
@@ -265,10 +273,10 @@ Every local connection registry, publisher lane, and broker-time baseline is key
 Every Kafka application-record value is one `CaptureRecord` protobuf envelope. Its `payload`
 `oneof` identifies exactly one of these payloads:
 
-- `TrafficStream` contains one or more `TrafficObservation` values for one connection.
-- `TrafficObservation` records captured network or connection-lifecycle activity. Each observation
-  carries `ts`, the proxy-recorded source event time retained for replay scheduling, and the
-  connection-local sequence needed by this protocol.
+- `TrafficStream`, containing one or more `TrafficObservation` values for one connection:
+  - each `TrafficObservation` records captured network or connection-lifecycle activity and carries
+    `ts`, the proxy-recorded source event time retained for replay scheduling, and the
+    connection-local sequence needed by this protocol;
 - `WriterPartitionHeartbeat` periodically proves that one `(writerNodeId, partition)` can still
   publish acknowledged records. It identifies the writer; the partition is the Kafka partition that
   contains the record. It carries no connection state. Its `heartbeatIntervalMillis` field reports
