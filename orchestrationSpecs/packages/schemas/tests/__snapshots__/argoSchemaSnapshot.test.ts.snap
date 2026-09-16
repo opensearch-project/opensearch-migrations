@@ -2848,6 +2848,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "resources": {
                       "type": "object",
+                      "nullable": true,
                       "properties": {
                         "limits": {
                           "type": "object",
@@ -5960,6 +5961,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               },
               "resources": {
                 "type": "object",
+                "nullable": true,
                 "properties": {
                   "limits": {
                     "type": "object",

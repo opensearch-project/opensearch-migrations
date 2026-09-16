@@ -1821,12 +1821,12 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .externalRef(LOGGING_CONFIG_MAP_EXTERNAL_REF)
         .expert(),
     resources: z.preprocess(
-        (v) => v == null ? undefined : deepmerge(
+        (v) => deepmerge(
             DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
-            v as Partial<typeof DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI>
+            (v ?? {}) as Partial<typeof DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI>
         ),
         CPU_MEMORY_RESOURCE_REQUIREMENTS
-    ).optional()
+    )
         .describe("Kubernetes resource limits and requests for the metadata migration container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
