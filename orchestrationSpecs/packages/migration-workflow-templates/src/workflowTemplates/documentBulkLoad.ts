@@ -10,6 +10,7 @@ import {
     ARGO_FILE_SOURCE_VOLUME_MOUNT,
     ARGO_RFS_OPTIONS,
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
+    ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {ResourceManagement} from "./resourceManagement";
@@ -75,34 +76,55 @@ function makeParamsDict(
     sourceEndpoint?: BaseExpression<string>
 ) {
     const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
+    const optionsDict = expr.deserializeRecord(options);
     const failedDocumentStreamParams = expr.makeDict({
         // The SnapshotMigration's own UID is the failed-document-stream session id: it uniquely
         // identifies this backfill (so multiple backfills in one workflow never share a session=
         // prefix) and is exactly what the console reads back from the SnapshotMigration it reports on.
         failedDocumentStreamSessionId: snapshotMigrationUid
     });
+
+    // A backfill that names its own source describes it entirely through sourceConfig, and
+    // RfsMigrateDocuments rejects the snapshot arguments alongside an explicit kind.
+    const readsAnExplicitSource = expr.not(
+        expr.isEmpty(expr.dig(optionsDict, ["sourceKind"], (""))));
+    const processOptions = expr.ternary(
+        readsAnExplicitSource,
+        expr.omit(optionsDict, ...ARGO_RFS_WORKFLOW_OPTION_KEYS, ...ARGO_RFS_LEGACY_SOURCE_OPTION_KEYS),
+        expr.omit(optionsDict, ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
+    );
+    const snapshotSourceParams = expr.ternary(
+        readsAnExplicitSource,
+        expr.makeDict({}),
+        expr.mergeDicts(
+            expr.makeDict({
+                snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+                sourceVersion: sourceVersion
+            }),
+            makeRepoParamDict(
+                expr.omit(repoConfig, "s3RoleArn"),
+                true)
+        )
+    );
+
     const base = expr.mergeDicts(
         expr.mergeDicts(
             expr.mergeDicts(
                 makeTargetParamDict(targetConfig),
                 makeRfsCoordinatorParamDict(rfsCoordinatorConfig)
             ),
-            expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
+            processOptions
         ),
         expr.mergeDicts(
             expr.mergeDicts(
                 expr.makeDict({
-                    snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                    sourceVersion: sourceVersion,
                     sessionName: sessionName,
                     luceneDir: "/tmp",
                     cleanLocalDirs: true
                 }),
                 failedDocumentStreamParams
             ),
-            makeRepoParamDict(
-                expr.omit(repoConfig, "s3RoleArn"),
-                true)
+            snapshotSourceParams
         )
     );
     return base;
