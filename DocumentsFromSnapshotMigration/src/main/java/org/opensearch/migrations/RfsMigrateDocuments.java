@@ -501,15 +501,22 @@ public class RfsMigrateDocuments {
         }
 
         var parsedUri = RepoUri.parse(args.repoUri);
-        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
-            throw new ParameterException(
-                "If an s3 repo is being used, --s3-region and --local-dir must be set."
-            );
-        }
-        if (parsedUri instanceof RepoUri.GcsRepoUri && args.localDir == null) {
-            throw new ParameterException(
-                "If a GCS repo is being used, --local-dir must be set."
-            );
+        switch (parsedUri) {
+            case RepoUri.S3RepoUri s -> {
+                if (args.localDir == null || args.s3Region == null) {
+                    throw new ParameterException(
+                        "If an s3 repo is being used, --s3-region and --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.GcsRepoUri g -> {
+                if (args.localDir == null) {
+                    throw new ParameterException(
+                        "If a GCS repo is being used, --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
         }
         
         // Validate delta mode parameters
