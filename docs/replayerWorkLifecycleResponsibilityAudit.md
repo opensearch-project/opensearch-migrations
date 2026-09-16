@@ -2,7 +2,7 @@
 
 **Status:** Temporary current-implementation audit, not a protocol or architecture authority.
 Retain it while reconciling the current code with
-[replayerProcessingAndCommitArchitecture.md](replayerProcessingAndCommitArchitecture.md), then
+[replayerProcessingAndCommitArchitecture.md](captureAndReplay/replayerProcessingAndCommitArchitecture.md), then
 remove it after every responsibility and regression test has a verified owner in the replacement
 implementation.
 
