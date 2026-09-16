@@ -59,6 +59,7 @@ cfn_stack_name=""
 vpc_id=""
 subnet_ids=""
 eks_access_principal_arn=""
+grant_eks_access_only=false
 skip_cfn_deploy=false
 tls_mode="none"
 pca_arn=""
@@ -95,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --vpc-id) vpc_id="$2"; shift 2 ;;
     --subnet-ids) subnet_ids="$2"; shift 2 ;;
     --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
+    --grant-eks-access-only) grant_eks_access_only=true; shift 1 ;;
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
     --version) version="$2"; shift 2 ;;
     --create-vpc-endpoints)
@@ -170,6 +172,12 @@ while [[ $# -gt 0 ]]; do
       echo "                                            to the EKS cluster. Useful after a fresh CFN deploy when"
       echo "                                            the deploying principal needs kubectl access, or to grant"
       echo "                                            access to a CI role or teammate."
+      echo "  --grant-eks-access-only                   Add the --eks-access-principal-arn access entry to an"
+      echo "                                            ALREADY-bootstrapped cluster and exit -- no image mirroring,"
+      echo "                                            no Helm install. Use this to add an admin later WITHOUT"
+      echo "                                            re-running the whole bootstrap. Requires"
+      echo "                                            --eks-access-principal-arn. The cluster must already exist;"
+      echo "                                            it is resolved from CloudFormation exports (respects --stage)."
       echo ""
       echo "Deployment options:"
       echo "  --namespace <val>                         K8s namespace (default: $namespace)"
@@ -249,6 +257,10 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "  # Bootstrap only (CloudFormation stack already deployed):"
       echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
+      echo ""
+      echo "  # Add an admin to an existing cluster WITHOUT re-running the whole bootstrap:"
+      echo "  $0 --grant-eks-access-only --stage dev --region us-east-1 \\"
+      echo "     --eks-access-principal-arn arn:aws:iam::123456789012:role/AnotherAdmin"
       echo ""
       echo "  # Tag every created resource, including the nodes and volumes EKS creates later:"
       echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1 \\"
@@ -385,11 +397,25 @@ validate_args() {
     echo "Error: --deploy-create-vpc-cfn and --deploy-import-vpc-cfn are mutually exclusive." >&2
     exit 1
   fi
-  if [[ "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" ]]; then
-    echo "Error: One of --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, or --skip-cfn-deploy is required." >&2
+  # --grant-eks-access-only only adds an EKS access entry to an existing cluster, so it must not be
+  # combined with a deploy/skip-deploy/build, and it needs a principal to grant.
+  if [[ "$grant_eks_access_only" == "true" ]]; then
+    if [[ "$deploy_cfn" == "true" || "$skip_cfn_deploy" == "true" || "$build" == "true" ]]; then
+      echo "Error: --grant-eks-access-only cannot be combined with --deploy-*-cfn, --skip-cfn-deploy, or --build." >&2
+      echo "  It only adds an EKS access entry to an already-bootstrapped cluster, then exits." >&2
+      exit 1
+    fi
+    if [[ -z "$eks_access_principal_arn" ]]; then
+      echo "Error: --grant-eks-access-only requires --eks-access-principal-arn <arn>." >&2
+      exit 1
+    fi
+  fi
+  if [[ "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" && "$grant_eks_access_only" == "false" ]]; then
+    echo "Error: One of --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, --skip-cfn-deploy, or --grant-eks-access-only is required." >&2
     echo "  Use --deploy-create-vpc-cfn to create a new VPC and EKS cluster." >&2
     echo "  Use --deploy-import-vpc-cfn to deploy into an existing VPC." >&2
     echo "  Use --skip-cfn-deploy if the stack is already deployed." >&2
+    echo "  Use --grant-eks-access-only to add EKS access to an existing cluster without re-bootstrapping." >&2
     exit 1
   fi
   if [[ "$deploy_cfn" == "true" && "$skip_cfn_deploy" == "true" ]]; then
@@ -993,6 +1019,13 @@ if [[ -n "$eks_access_principal_arn" ]]; then
     --access-scope type=cluster \
     ${region:+--region "$region"}
   echo "EKS access configured for $eks_access_principal_arn"
+fi
+
+# In grant-only mode, adding the access entry above is the whole job. Exit before image mirroring and
+# the Helm install so an admin can be added long after the initial bootstrap.
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  echo "Done -- EKS access entry applied. Skipped image mirroring and Helm install (--grant-eks-access-only)."
+  exit 0
 fi
 
 # =============================================================================
