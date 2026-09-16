@@ -90,22 +90,23 @@ immutable input
     -> returned stage completes with a typed value
 ```
 
-For replay intake, producers append immutable inputs to a thread-safe queue. The Kafka executor
-drains that queue before and after its bounded Kafka consumer calls:
+For replay intake, Netty event loops and other asynchronous completion threads append immutable
+inputs to a thread-safe queue. The Kafka executor drains that queue before and after its bounded
+Kafka consumer calls:
 
 ```text
 Netty or tuple completion
     -> threadSafeQueue.add(immutable owner input)
     -> Kafka executor returns from its bounded Kafka call
-    -> Kafka executor, as the sole consumer, applies queued inputs one at a time
+    -> Kafka executor removes and applies queued inputs one at a time
 ```
 
-Producers enqueue immutable replay-intake inputs. The Kafka thread drains that queue between
-bounded Kafka client calls and while servicing revocation or shutdown. Submission never
+Submitting threads enqueue immutable replay-intake inputs. The Kafka thread drains that queue
+between bounded Kafka client calls and while servicing revocation or shutdown. Submission never
 mutates replay-intake state directly.
 
-The concurrent queue makes submission thread-safe. It does not permit producers to mutate replay
-intake state. If inputs require a total order, the component design must establish that order
+The concurrent queue makes submission thread-safe. It does not permit submitting threads to mutate
+replay-intake state. If inputs require a total order, the component design must establish that order
 before or while admitting them; the queue type alone is not the proof.
 
 The replayer therefore uses:

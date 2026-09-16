@@ -671,6 +671,12 @@ The terminal `CloseObservation` establishes a replayer validation cutoff:
 
 This is a replayer validation rule, not Kafka producer fencing.
 
+Detection is best effort over the Kafka history and process-local state available to the running
+replayer. The replayer does not persist a tombstone for every closed connection or scan backward
+from its committed cursor. If the close is already in the committed prefix after restart, an
+invalid later observation may be treated as fresh reconstruction. The proxy's connection-retirement
+invariant prevents that stream in correct operation.
+
 A `CloseObservation` unambiguously states that Netty has ended that connection. Remote closure,
 local closure, and unrecoverable channel failure all close the real Netty channel and therefore
 produce the normal terminal `CloseObservation`. `DisconnectObservation` and
@@ -1500,7 +1506,7 @@ The full acceptance suite must also prove:
 
 ## 16. Companion documents
 
-This architecture is refined by three progressively detailed companion documents:
+This architecture is refined by progressively detailed companion documents:
 
 1. [**Proxy Capture Protocol**](proxyCaptureProtocol.md): group assignment, capability checks,
    heartbeat publication, bounded connection-record buffering, connection retirement, publication
@@ -1508,6 +1514,8 @@ This architecture is refined by three progressively detailed companion documents
 2. [**Replayer Processing and Commit Architecture**](replayerProcessingAndCommitArchitecture.md):
    record handling, HTTP assembly, target replay, tuple output, expiration, commit accounting,
    rebalance, shutdown, asynchronous ownership, cancellation, cleanup, and owner-affinity checks.
+   Its class and message contracts begin at
+   [**Replayer Low-Level Design**](replayerLowLevelDesign.md).
 3. [**Managed Fleet Capture Recovery**](managedFleetCaptureRecovery.md): controller
    responsibilities, durable state, snapshot boundaries, and explicitly unresolved recovery
    mechanisms.

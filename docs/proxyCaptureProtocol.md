@@ -869,7 +869,9 @@ For one captured client connection emitted by writer identity X on partition P:
 
 The terminal connection observation is the traffic-observation cutoff for the connection.
 `connectionId` is unique within its `writerNodeId`. Heartbeats never reopen, complete, or retire a
-connection.
+connection. Replayer detection of a later observation is best effort over the history available
+from its current committed cursor; it requires no durable closed-connection tombstone. The proxy
+ordering and retirement invariant is what prevents the invalid stream in correct operation.
 
 Kafka record composition does not weaken this rule. A Kafka record may contain several
 observations, but the replayer can commit only the whole record. The record remains uncommitted
