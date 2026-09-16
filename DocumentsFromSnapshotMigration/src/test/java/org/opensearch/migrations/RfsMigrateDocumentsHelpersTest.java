@@ -322,6 +322,23 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_acceptsGcsRepoWithLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "gs://bucket/key";
+        args.localDir = "/tmp/gcs";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void validateArgs_rejectsGcsRepoWithoutLocalDir() {
+        var args = validEsArgs();
+        args.repoUri = "gs://bucket/key";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("If a GCS repo is being used, --local-dir must be set."));
+    }
+
+    @Test
     void validateArgs_rejectsMissingSnapshotName() {
         var args = validEsArgs();
         args.snapshotName = null;
