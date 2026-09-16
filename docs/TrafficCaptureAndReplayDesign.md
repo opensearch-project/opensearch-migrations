@@ -3,8 +3,8 @@
 > **Reference status:** This document is a product and component overview. It predates the hardened
 > scaling and failure protocol and is not authoritative for capture or replay correctness. See
 > [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md),
-> [`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md), and
-> [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md) for
+> [`captureAndReplay/proxyCaptureProtocol.md`](captureAndReplay/proxyCaptureProtocol.md), and
+> [`captureAndReplay/replayerProcessingAndCommitArchitecture.md`](captureAndReplay/replayerProcessingAndCommitArchitecture.md) for
 > the current design contracts.
 
 ## Overview

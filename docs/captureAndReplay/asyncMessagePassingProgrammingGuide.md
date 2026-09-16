@@ -248,7 +248,7 @@ Tests for a linked path should prove:
 8. long-running work remains visible to the activity monitor.
 
 The focused utility tests are in
-`coreUtilities/src/test/java/org/opensearch/migrations/utils/async/AsyncLinkTest.java`.
+`../../coreUtilities/src/test/java/org/opensearch/migrations/utils/async/AsyncLinkTest.java`.
 
 Run them with:
 

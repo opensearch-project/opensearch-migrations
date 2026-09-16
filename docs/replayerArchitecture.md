@@ -3,8 +3,8 @@
 > **Reference status:** This document describes the existing replayer implementation and earlier
 > planned changes. It is retained as an implementation reference during the hardening work, but it
 > is not the protocol or target-architecture authority. See
-> [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md) and
-> [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md).
+> [`captureAndReplay/captureAndReplayArchitecture.md`](captureAndReplay/captureAndReplayArchitecture.md) and
+> [`captureAndReplay/replayerProcessingAndCommitArchitecture.md`](captureAndReplay/replayerProcessingAndCommitArchitecture.md).
 
 ## Design Goals and Invariants
 

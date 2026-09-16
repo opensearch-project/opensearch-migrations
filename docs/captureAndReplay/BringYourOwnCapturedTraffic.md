@@ -7,9 +7,9 @@ live capture proxy.
 
 The capture and replay protocol remains defined by:
 
-- [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md);
-- [`proxyCaptureProtocol.md`](./proxyCaptureProtocol.md); and
-- [`replayerProcessingAndCommitArchitecture.md`](./replayerProcessingAndCommitArchitecture.md).
+- [`captureAndReplayArchitecture.md`](captureAndReplayArchitecture.md);
+- [`proxyCaptureProtocol.md`](proxyCaptureProtocol.md); and
+- [`replayerProcessingAndCommitArchitecture.md`](replayerProcessingAndCommitArchitecture.md).
 
 An imported archive is another representation of the Kafka application records produced by a
 compatible capture proxy. It does not define a second replay protocol.
@@ -224,7 +224,7 @@ permissions.
 
 The current tools are not the hardened archive implementation:
 
-- `migrationConsole/kafkaExport.sh` currently disables timestamp output.
+- `../../migrationConsole/kafkaExport.sh` currently disables timestamp output.
 - `Base64Formatter` currently exports a UTF-8 key and base64 value only.
 - `KafkaLoader` currently reconstructs a record without its source partition, original timestamp,
   or headers.
