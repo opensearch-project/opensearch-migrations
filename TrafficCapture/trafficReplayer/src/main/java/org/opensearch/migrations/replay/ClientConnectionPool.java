@@ -208,7 +208,10 @@ public class ClientConnectionPool {
                                 .addArgument(session::calculateSizeSlowly)
                                 .log();
                         }
-                        session.schedule.clear();
+                        session.schedule.drainWithCancellation(
+                            new java.util.concurrent.CancellationException(
+                                "Connection closed with pending work for " + session.getChannelKeyContext()));
+                        session.scheduleSequencer.cancelAllWork();
                         session.onClose.accept(session);
                         return channelFuture.channel();
                     }, () -> "clearing work");
