@@ -419,6 +419,21 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_solr_rejectsGcsRepoUpFront() {
+        // Solr supports only file:// and s3:// for its backup location. Without an
+        // exhaustive switch, gs:// passed validation here and failed much later in
+        // buildSolrSourceFactory, after the migration had already started.
+        var args = new RfsMigrateDocuments.Args();
+        args.sourceVersion = Version.fromString("SOLR_8.11");
+        args.repoUri = "gs://bucket/key";
+        args.localDir = "/tmp/gcs";
+        args.coordinatorArgs.host = "http://localhost:9200";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("file:// or s3://"));
+    }
+
+    @Test
     void validateArgs_solr_rejectsMissingBackupSource() {
         var args = new RfsMigrateDocuments.Args();
         args.sourceVersion = Version.fromString("SOLR_8.11");
