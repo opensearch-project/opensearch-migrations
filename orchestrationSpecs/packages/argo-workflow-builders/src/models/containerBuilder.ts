@@ -349,7 +349,7 @@ export class ContainerBuilder<
             ...((Array.isArray(allVolumes) ? allVolumes.length > 0 : true) && { volumes: allVolumes }),
             container: {
                 ...this.bodyScope,
-                env: this.envScope as Record<string, ExpressionOrConfigMapValue<any>>,
+                env: this.envScope as Record<string, ExpressionOrConfigMapValue<string>>,
                 ...((Array.isArray(allVolumeMounts) ? allVolumeMounts.length > 0 : true) && { volumeMounts: allVolumeMounts })
             }
         };
