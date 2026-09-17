@@ -284,7 +284,7 @@ export class ContainerBuilder<
         retry?: RetryParameters;
         sync?: SynchronizationConfig | undefined;
         podConfig?: PodConfigData;
-    }): ContainerBuilder<ParentWorkflowScope, InputParamsScope, NewBody, NewVolume, NewEnv, NewOutput, NewBrands> {
+    }): ContainerBuilder<ParentWorkflowScope, InputParamsScope, NewBody, NewVolume, NewEnv, NewOutput, NewBrands, ArtifactScope> {
         return new ContainerBuilder(
             this.parentWorkflowScope,
             this.inputsScope,
@@ -577,7 +577,8 @@ export class ContainerBuilder<
         VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands,
+        ArtifactScope
     > {
         return this.addEnvVarUnchecked(name as string, value) as any;
     }
@@ -593,7 +594,8 @@ export class ContainerBuilder<
         VolumeScope,
         ExtendScope<EnvScope, R>,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands,
+        ArtifactScope
     > {
         return new ContainerBuilder(
             this.parentWorkflowScope,
@@ -611,32 +613,39 @@ export class ContainerBuilder<
 
     addEnvVars<NewEnvScope extends DataOrConfigMapScope>(
         builderFn: (
-            cb: ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, {}, OutputParamsScope, PodConfigBrands>
-        ) => ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
-    ): ScopeIsEmptyConstraint<EnvScope,
-        ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
-    > {
-        const emptyEnvBuilder = new ContainerBuilder<
+            cb: ContainerBuilder<
+                ParentWorkflowScope,
+                InputParamsScope,
+                ContainerScope,
+                VolumeScope,
+                {},
+                OutputParamsScope,
+                PodConfigBrands,
+                ArtifactScope
+            >
+        ) => ContainerBuilder<
             ParentWorkflowScope,
             InputParamsScope,
             ContainerScope,
             VolumeScope,
-            {},
+            NewEnvScope,
             OutputParamsScope,
             PodConfigBrands,
             ArtifactScope
-        >(
-            this.parentWorkflowScope,
-            this.inputsScope,
-            this.bodyScope,
-            this.volumeScope,
-            {},
-            this.outputsScope,
-            this.retryParameters,
-            this.synchronization,
-            this.podConfig,
-            this.outputArtifacts
-        );
+        >
+    ): ScopeIsEmptyConstraint<EnvScope,
+        ContainerBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            ContainerScope,
+            VolumeScope,
+            NewEnvScope,
+            OutputParamsScope,
+            PodConfigBrands,
+            ArtifactScope
+        >
+    > {
+        const emptyEnvBuilder = this.withUpdates({env: {}});
         return builderFn(emptyEnvBuilder) as any;
     }
 
@@ -653,7 +662,8 @@ export class ContainerBuilder<
         VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands,
+        ArtifactScope
     > {
         const currentEnv = (this.bodyScope as any).env || {};
         const newEnvScope = {
@@ -696,7 +706,8 @@ export class ContainerBuilder<
             VolumeScope,
             ModifiedInputs,
             OutputParamsScope,
-            PodConfigBrands
+            PodConfigBrands,
+            ArtifactScope
         >> {
         const envVars = modifierFn(this.inputs);
 

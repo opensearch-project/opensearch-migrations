@@ -59,7 +59,7 @@ export type WorkflowAndTemplatesScope<
         currentTemplateName?: string
     };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
-export type DataOrConfigMapScope = Record<string, ExpressionOrConfigMapValue<PlainObject>>;
+export type DataOrConfigMapScope = Record<string, ExpressionOrConfigMapValue<any>>;
 export type GenericScope = Record<string, any>;
 export type TasksOutputsScope = Record<string, TasksWithOutputs<any, any>>;
 export type TemplateSignaturesScopeTyped<Sigs extends Record<string, { inputs: any; outputs?: any }>> = {

@@ -165,7 +165,9 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     const result: any[] = [];
     Object.entries(envVars).forEach(([key, value]) => {
         const transformedValue = transformExpressionsDeep(value);
-        const v = ("configMapKeyRef" in value || "secretKeyRef" in value) ?
+        const isValueFrom = typeof value === "object" && value !== null &&
+            ("configMapKeyRef" in value || "secretKeyRef" in value);
+        const v = isValueFrom ?
             { valueFrom: _.omit(transformedValue, "type") } :
             { value: transformedValue };
         result.push({name: key, ...v});
