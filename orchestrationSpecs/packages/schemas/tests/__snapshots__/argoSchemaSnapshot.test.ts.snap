@@ -848,7 +848,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -873,7 +873,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2027,6 +2027,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                               "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2047,6 +2052,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                               "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2319,7 +2329,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2344,7 +2354,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -3141,7 +3151,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -3166,7 +3176,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -4438,6 +4448,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                                 "description": "Memory allocation for the container."
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4458,6 +4473,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                                 "description": "Memory allocation for the container."
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4975,7 +4995,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -5000,7 +5020,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -5660,7 +5680,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -5685,7 +5705,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -6252,7 +6272,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -6277,7 +6297,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [

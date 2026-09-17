@@ -33,6 +33,32 @@ describe("metadata migration resources", () => {
         });
     });
 
+    it("preserves optional ephemeral storage overrides", () => {
+        const parsed = USER_METADATA_WORKFLOW_OPTIONS.parse({
+            resources: {
+                limits: {
+                    "ephemeral-storage": "2Gi",
+                },
+                requests: {
+                    "ephemeral-storage": "1Gi",
+                },
+            },
+        });
+
+        expect(parsed.resources).toEqual({
+            limits: {
+                cpu: "500m",
+                memory: "1800Mi",
+                "ephemeral-storage": "2Gi",
+            },
+            requests: {
+                cpu: "500m",
+                memory: "1800Mi",
+                "ephemeral-storage": "1Gi",
+            },
+        });
+    });
+
     it.each([
         ["metadata", USER_METADATA_WORKFLOW_OPTIONS, DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI],
         ["document backfill", USER_RFS_WORKFLOW_OPTIONS, DEFAULT_RESOURCES.RFS],

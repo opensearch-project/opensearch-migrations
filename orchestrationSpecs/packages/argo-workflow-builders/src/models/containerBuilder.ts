@@ -149,6 +149,27 @@ export type ContainerRequirement = "resources";
 type BrandsForRequirements<Requirements extends ContainerRequirement> =
     "resources" extends Requirements ? HasResources : {};
 
+export type PodSpecPatchDefinition<ProvidedRequirements extends ContainerRequirement = never> = {
+    patch: AllowLiteralOrExpression<string>;
+    satisfies: readonly ProvidedRequirements[];
+};
+
+export function definePodSpecPatch<ProvidedRequirements extends ContainerRequirement = never>(
+    patch: AllowLiteralOrExpression<string>,
+    options?: { satisfies: readonly ProvidedRequirements[] }
+): PodSpecPatchDefinition<ProvidedRequirements> {
+    return {
+        patch,
+        satisfies: options?.satisfies ?? []
+    };
+}
+
+function isPodSpecPatchDefinition<ProvidedRequirements extends ContainerRequirement>(
+    value: AllowLiteralOrExpression<string> | PodSpecPatchDefinition<ProvidedRequirements>
+): value is PodSpecPatchDefinition<ProvidedRequirements> {
+    return typeof value === "object" && value !== null && "patch" in value && "satisfies" in value;
+}
+
 // Runtime storage for pod config (not tracked in type system individually)
 type PodConfigData = {
     metadata?: PodMetadata;
@@ -791,8 +812,8 @@ export class ContainerBuilder<
 
     addPodSpecPatch<ProvidedRequirements extends ContainerRequirement = never>(
         this: PodConfigBrands extends HasPodSpecPatch ? never : this,
-        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>,
-        _options?: { satisfies: readonly ProvidedRequirements[] }
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) =>
+            AllowLiteralOrExpression<string> | PodSpecPatchDefinition<ProvidedRequirements>
     ): ContainerBuilder<
         ParentWorkflowScope,
         InputParamsScope,
@@ -802,6 +823,7 @@ export class ContainerBuilder<
         OutputParamsScope,
         PodConfigBrands & HasPodSpecPatch & BrandsForRequirements<ProvidedRequirements>
     > {
+        const definition = builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs });
         return this.withUpdates<
             ContainerScope,
             VolumeScope,
@@ -811,7 +833,7 @@ export class ContainerBuilder<
         >({
             podConfig: {
                 ...this.podConfig,
-                podSpecPatch: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs })
+                podSpecPatch: isPodSpecPatchDefinition(definition) ? definition.patch : definition
             }
         });
     }
