@@ -1,7 +1,9 @@
 import {
     DEFAULT_RESOURCES,
     USER_METADATA_WORKFLOW_OPTIONS,
+    USER_RFS_WORKFLOW_OPTIONS,
 } from "../src";
+import {zodSchemaToJsonSchema} from "../src/getSchemaFromZod";
 
 describe("metadata migration resources", () => {
     it("uses the Java migration console resources when omitted", () => {
@@ -29,5 +31,14 @@ describe("metadata migration resources", () => {
                 memory: "1800Mi",
             },
         });
+    });
+
+    it.each([
+        ["metadata", USER_METADATA_WORKFLOW_OPTIONS, DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI],
+        ["document backfill", USER_RFS_WORKFLOW_OPTIONS, DEFAULT_RESOURCES.RFS],
+    ])("exports the %s resource default to JSON Schema", (_name, schema, expectedDefault) => {
+        const jsonSchema = zodSchemaToJsonSchema(schema);
+
+        expect(jsonSchema.properties?.resources?.default).toEqual(expectedDefault);
     });
 });

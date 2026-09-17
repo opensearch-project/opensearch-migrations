@@ -1830,7 +1830,8 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe("Kubernetes resource limits and requests for the metadata migration container. " +
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
-            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
+            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
+        .default(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI),
     skipEvaluateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
     skipMigrateApproval: z.boolean().optional()
@@ -1955,7 +1956,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
             "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified.")
-        .expert()
+        .default(DEFAULT_RESOURCES.RFS)
+        .expert(),
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
