@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements. See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License. You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+  NYC Taxis workload schema for Apache Solr Orbit.
+  Field layout ported from the upstream Rally Tracks / OpenSearch Benchmark workload.
+-->
+<schema name="nyc_taxis" version="1.6">
+  <!-- Field Types -->
+
+  <!-- String: exact match, no tokenization -->
+  <fieldType name="string" class="solr.StrField" sortMissingLast="true" docValues="true" />
+
+  <!-- Boolean -->
+  <fieldType name="boolean" class="solr.BoolField" sortMissingLast="true" />
+
+  <!-- Binary -->
+  <fieldType name="binary" class="solr.BinaryField" />
+
+  <!-- Point-based numeric types (for range queries, sorting) -->
+  <fieldType name="pint" class="solr.IntPointField" docValues="true" />
+  <fieldType name="plong" class="solr.LongPointField" docValues="true" />
+  <fieldType name="pfloat" class="solr.FloatPointField" docValues="true" />
+  <fieldType name="pdouble" class="solr.DoublePointField" docValues="true" />
+  <fieldType name="pdate" class="solr.DatePointField" docValues="true" />
+
+  <!-- Text: analyzed for full-text search -->
+  <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100" multiValued="true">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory" />
+      <filter class="solr.StopFilterFactory" words="stopwords.txt" ignoreCase="true" />
+      <filter class="solr.LowerCaseFilterFactory" />
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory" />
+      <filter class="solr.StopFilterFactory" words="stopwords.txt" ignoreCase="true" />
+      <filter class="solr.SynonymGraphFilterFactory" expand="true" ignoreCase="true" synonyms="synonyms.txt" />
+      <filter class="solr.LowerCaseFilterFactory" />
+    </analyzer>
+  </fieldType>
+
+  <!-- Spatial: lat/lon point -->
+  <fieldType name="location_rpt" class="solr.SpatialRecursivePrefixTreeFieldType"
+             geo="true" distErrPct="0.025" maxDistErr="0.001" distanceUnits="kilometers" />
+
+  <!-- Fields -->
+  <!-- Required fields for SolrCloud -->
+  <field name="id" type="string" indexed="true" stored="true" required="true" />
+  <field name="_version_" type="plong" indexed="true" stored="false" docValues="true" />
+  <field name="_root_" type="string" indexed="true" stored="false" docValues="false" />
+  <field name="_text_" type="text_general" indexed="true" stored="false" multiValued="true" />
+
+  <!-- Workload fields -->
+  <field name="surcharge" type="pdouble" indexed="true" stored="true" />
+  <field name="dropoff_datetime" type="pdate" indexed="true" stored="true" />
+  <field name="trip_type" type="string" indexed="true" stored="true" docValues="true" />
+  <field name="mta_tax" type="pdouble" indexed="true" stored="true" />
+  <field name="rate_code_id" type="string" indexed="true" stored="true" docValues="true" />
+  <field name="passenger_count" type="pint" indexed="true" stored="true" />
+  <field name="pickup_datetime" type="pdate" indexed="true" stored="true" />
+  <field name="tolls_amount" type="pdouble" indexed="true" stored="true" />
+  <field name="tip_amount" type="pdouble" indexed="true" stored="true" />
+  <field name="payment_type" type="string" indexed="true" stored="true" docValues="true" />
+  <field name="extra" type="pdouble" indexed="true" stored="true" />
+  <field name="vendor_id" type="string" indexed="true" stored="true" docValues="true" />
+  <field name="store_and_fwd_flag" type="string" indexed="true" stored="true" docValues="true" />
+  <field name="improvement_surcharge" type="pdouble" indexed="true" stored="true" />
+  <field name="fare_amount" type="pdouble" indexed="true" stored="true" />
+  <field name="ehail_fee" type="pdouble" indexed="true" stored="true" />
+  <field name="cab_color" type="string" indexed="true" stored="true" docValues="true" />
+  <field name="dropoff_location" type="location_rpt" indexed="true" stored="true" />
+  <field name="vendor_name" type="text_general" indexed="true" stored="true" />
+  <field name="total_amount" type="pdouble" indexed="true" stored="true" />
+  <field name="trip_distance" type="pdouble" indexed="true" stored="true" />
+  <field name="pickup_location" type="location_rpt" indexed="true" stored="true" />
+
+  <!-- Unique Key -->
+  <uniqueKey>id</uniqueKey>
+
+  <!-- Copy Fields for Multi-Field Support -->
+
+
+  <!-- Copy field for default search -->
+  <copyField source="*" dest="_text_" />
+</schema>
