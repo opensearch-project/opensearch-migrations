@@ -657,6 +657,29 @@ describe('Pod Config - PodSpecPatch', () => {
         expect(template.podSpecPatch).toBe('{"terminationGracePeriodSeconds": 30}');
     });
 
+    it('should allow podSpecPatch to provide resources without rendering duplicate container resources', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-patch-resources',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addPodSpecPatchWithResources(() =>
+                    '{"containers":[{"name":"main","resources":{"requests":{"cpu":"100m"}}}]}'
+                )
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.container.resources).toBeUndefined();
+        expect(template.podSpecPatch).toContain('"resources"');
+    });
+
     it('should reject duplicate addPodSpecPatch calls at compile time', () => {
         WorkflowBuilder.create({
             k8sResourceName: 'test-duplicate-patch',

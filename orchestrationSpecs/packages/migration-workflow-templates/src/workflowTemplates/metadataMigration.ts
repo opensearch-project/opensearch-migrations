@@ -1,7 +1,6 @@
 import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
-    DEFAULT_RESOURCES,
     ARGO_METADATA_OPTIONS,
     ARGO_METADATA_WORKFLOW_OPTION_KEYS,
     NAMED_TARGET_CLUSTER_CONFIG,
@@ -202,19 +201,6 @@ type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
     taskK8sLabel: InputParamDef<string, false>;
 };
 
-function makeMetadataDefaultResourcesExpression() {
-    return expr.makeDict({
-        limits: expr.makeDict({
-            cpu: expr.literal(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI.limits.cpu),
-            memory: expr.literal(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI.limits.memory),
-        }),
-        requests: expr.makeDict({
-            cpu: expr.literal(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI.requests.cpu),
-            memory: expr.literal(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI.requests.memory),
-        })
-    });
-}
-
 function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
     return expr.asString(expr.serialize(expr.makeDict({
@@ -228,7 +214,7 @@ function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTe
                 expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
                 expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
             ),
-            resources: expr.dig(metadataConfig, ["resources"], makeMetadataDefaultResourcesExpression()),
+            resources: expr.get(metadataConfig, "resources"),
         }))
     })));
 }
@@ -241,7 +227,7 @@ function buildMetadataContainer<
     const {inputs} = builder;
     return builder
         .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
-        .addPodSpecPatch(({inputs}) => makeMetadataPodSpecPatch(inputs))
+        .addPodSpecPatchWithResources(({inputs}) => makeMetadataPodSpecPatch(inputs))
         .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
             expr.ternary(
                 expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
@@ -252,7 +238,6 @@ function buildMetadataContainer<
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
-        .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
             inputs.commandMode,
