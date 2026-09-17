@@ -156,6 +156,7 @@ type PodSpecPatchValue<T> =
     | (Omit<BaseExpression<any, any>, "_resultType"> & { readonly _resultType: T });
 
 export type PodSpecPatchOverlay = {
+    terminationGracePeriodSeconds?: PodSpecPatchValue<number>;
     volumes?: PodSpecPatchValue<Volume[]>;
     mainContainer?: {
         resources?: PodSpecPatchValue<ResourceRequirements>;
@@ -179,12 +180,6 @@ function podSpecPatchValueExpression<T>(value: PodSpecPatchValue<T>): BaseExpres
     return isExpression(value) ? value : expr.templateValue(value);
 }
 
-function isPodSpecPatchOverlay(
-    value: AllowLiteralOrExpression<string> | PodSpecPatchOverlay
-): value is PodSpecPatchOverlay {
-    return typeof value === "object" && value !== null && !isExpression(value);
-}
-
 function renderPodSpecPatchOverlay(overlay: PodSpecPatchOverlay): AllowLiteralOrExpression<string> {
     const mainContainer = overlay.mainContainer;
     const mainContainerExpression = mainContainer === undefined
@@ -200,6 +195,12 @@ function renderPodSpecPatchOverlay(overlay: PodSpecPatchOverlay): AllowLiteralOr
         });
 
     return expr.asString(expr.serialize(expr.makeDict({
+        ...(overlay.terminationGracePeriodSeconds === undefined
+            ? {}
+            : {
+                terminationGracePeriodSeconds:
+                    podSpecPatchValueExpression(overlay.terminationGracePeriodSeconds)
+            }),
         ...(overlay.volumes === undefined
             ? {}
             : {volumes: podSpecPatchValueExpression(overlay.volumes)}),
@@ -850,7 +851,7 @@ export class ContainerBuilder<
     }
 
     addPodSpecPatch<
-        Patch extends AllowLiteralOrExpression<string> | PodSpecPatchOverlay
+        Patch extends PodSpecPatchOverlay
     >(
         this: PodConfigBrands extends HasPodSpecPatch ? never : this,
         builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) =>
@@ -874,7 +875,7 @@ export class ContainerBuilder<
         >({
             podConfig: {
                 ...this.podConfig,
-                podSpecPatch: isPodSpecPatchOverlay(patch) ? renderPodSpecPatchOverlay(patch) : patch
+                podSpecPatch: renderPodSpecPatchOverlay(patch)
             }
         });
     }
