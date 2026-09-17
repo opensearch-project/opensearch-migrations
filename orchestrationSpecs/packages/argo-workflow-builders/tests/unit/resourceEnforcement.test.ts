@@ -24,7 +24,7 @@ function exampleResourcesExpression() {
     });
 }
 
-describe('Resource Enforcement', () => {
+describe('Resource Rendering', () => {
     it('should allow container with resources and verify resources block', () => {
         const wf = WorkflowBuilder.create({
             k8sResourceName: 'test-workflow',
@@ -61,31 +61,24 @@ describe('Resource Enforcement', () => {
         expect(testTemplate.container.resources).toStrictEqual(EXAMPLE_RESOURCES);
     });
 
-    it('should show compile-time error for container without resources', () => {
-        // NOTE: This test demonstrates that TypeScript shows a compile-time error
-        // when resources are missing. The @ts-expect-error directive below confirms
-        // that TypeScript correctly identifies the missing resources at compile-time.
-        //
-        // This is a COMPILE-TIME check using branded types - the code shows
-        // red squiggles in your IDE before you even run the code!
-        
-        WorkflowBuilder.create({
+    it('should allow Kubernetes-optional resources to be omitted', () => {
+        const wf = WorkflowBuilder.create({
             k8sResourceName: 'test-workflow',
             serviceAccountName: 'default'
         })
-        .addTemplate('test', (
-            t => t.addContainer(
-                // @ts-expect-error - addResources() is missing causing compile error
-                c => c
+        .addTemplate('test', t => t
+            .addContainer(c => c
                     .addImageInfo('nginx:latest', 'IfNotPresent')
                     .addCommand(['echo', 'hello'])
                     .addArgs(['world'])
             )
-        ));
-        
-        // The @ts-expect-error above proves the type system is working correctly
-        // If you remove it, you'll see the red squiggles in your IDE
-        expect(true).toBe(true);
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const testTemplate = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(testTemplate.container.resources).toBeUndefined();
     });
 
     it.skip('should merge multiple resource specifications and verify merged result', () => {

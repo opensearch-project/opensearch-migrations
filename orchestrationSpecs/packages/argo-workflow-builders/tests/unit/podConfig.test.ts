@@ -1,4 +1,10 @@
-import { WorkflowBuilder, renderWorkflowTemplate, typeToken, defineParam, definePodSpecPatch } from '../../src';
+import {
+    WorkflowBuilder,
+    renderWorkflowTemplate,
+    typeToken,
+    defineParam,
+    PodSpecPatchOverlay
+} from '../../src';
 
 const EXAMPLE_RESOURCES = {
     requests: { cpu: "100m", memory: "128Mi" },
@@ -657,7 +663,7 @@ describe('Pod Config - PodSpecPatch', () => {
         expect(template.podSpecPatch).toBe('{"terminationGracePeriodSeconds": 30}');
     });
 
-    it('should allow podSpecPatch to provide resources without rendering duplicate container resources', () => {
+    it('should render a typed podSpecPatch overlay with the Argo main-container merge key', () => {
         const wf = WorkflowBuilder.create({
             k8sResourceName: 'test-patch-resources',
             serviceAccountName: 'default'
@@ -666,10 +672,13 @@ describe('Pod Config - PodSpecPatch', () => {
             .addContainer(c => c
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
-                .addPodSpecPatch(() => definePodSpecPatch(
-                    '{"containers":[{"name":"main","resources":{"requests":{"cpu":"100m"}}}]}',
-                    { satisfies: ['resources'] }
-                ))
+                .addPodSpecPatch(() => ({
+                    volumes: [{name: 'scratch', emptyDir: {}}],
+                    mainContainer: {
+                        resources: {requests: {cpu: '100m'}},
+                        volumeMounts: [{name: 'scratch', mountPath: '/scratch'}],
+                    },
+                }))
             )
         )
         .getFullScope();
@@ -678,23 +687,33 @@ describe('Pod Config - PodSpecPatch', () => {
         const template = rendered.spec.templates.find((t: any) => t.name === 'test');
 
         expect(template.container.resources).toBeUndefined();
+        expect(template.podSpecPatch).toContain('"volumes"');
+        expect(template.podSpecPatch).toContain('"name", \'main\'');
         expect(template.podSpecPatch).toContain('"resources"');
+        expect(template.podSpecPatch).toContain('"volumeMounts"');
     });
 
-    it('should not treat an ordinary podSpecPatch as satisfying resource requirements', () => {
-        WorkflowBuilder.create({
-            k8sResourceName: 'test-patch-without-resources',
-            serviceAccountName: 'default'
-        })
-        .addTemplate('test', t => t
-            // @ts-expect-error - podSpecPatch does not declare that it supplies resources
-            .addContainer(c => c
-                .addImageInfo('nginx:latest', 'IfNotPresent')
-                .addCommand(['echo'])
-                .addPodSpecPatch(() => '{"terminationGracePeriodSeconds": 30}')
-            )
-        );
-        expect(true).toBe(true);
+    it('should keep pod fields, container fields, and the Argo merge key separate', () => {
+        const invalidPodOverlay: PodSpecPatchOverlay = {
+            // @ts-expect-error - resources belong to the main container
+            resources: EXAMPLE_RESOURCES,
+        };
+        const invalidContainerOverlay: PodSpecPatchOverlay = {
+            mainContainer: {
+                // @ts-expect-error - the renderer owns the main container name
+                name: 'alternate',
+            },
+        };
+        const invalidValueOverlay: PodSpecPatchOverlay = {
+            mainContainer: {
+                // @ts-expect-error - resources retain their Kubernetes value shape
+                resources: '100m',
+            },
+        };
+
+        expect(invalidPodOverlay).toBeDefined();
+        expect(invalidContainerOverlay).toBeDefined();
+        expect(invalidValueOverlay).toBeDefined();
     });
 
     it('should reject duplicate addPodSpecPatch calls at compile time', () => {

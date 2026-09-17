@@ -32,7 +32,7 @@ import {
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
 import {StepsBuilder} from "./stepsBuilder";
-import {ContainerBuilder, HasResources} from "./containerBuilder";
+import {ContainerBuilder} from "./containerBuilder";
 import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
@@ -267,13 +267,13 @@ export class TemplateBuilder<
             ParentWorkflowScope,
             InputParamsScope,
             GenericScope &
-            // The main container name is supplied by Argo and resources may be
-            // supplied either directly or through podSpecPatch.
-            Omit<Container, "name" | "resources">,
+            // Argo supplies the main container name. Kubernetes makes all other
+            // container fields optional, so the builder validates their shape
+            // without maintaining a second set of completion traits.
+            Omit<Container, "name">,
             any,
             any,
-            any,
-            HasResources
+            any
         >,
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
