@@ -10,13 +10,13 @@ import {
     BaseExpression,
     ContainerBuilder,
     defineParam,
-    definePodSpecPatch,
     defineRequiredParam,
     expr,
     InputParameterSource,
     InputParamDef,
     InputParamsToExpressions,
     INTERNAL,
+    PodSpecPatchOverlay,
     selectInputsForRegister,
     Serialized,
     typeToken,
@@ -202,25 +202,23 @@ type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
     taskK8sLabel: InputParamDef<string, false>;
 };
 
-function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>) {
+function makeMetadataPodSpecPatch(
+    inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>
+) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
-    return definePodSpecPatch(
-        expr.asString(expr.serialize(expr.makeDict({
-            volumes: expr.concatArrays(
-                expr.templateValue(METADATA_STATIC_VOLUMES),
-                expr.dig(metadataConfig, ["fileSourceVolumes"], [])
+    return {
+        volumes: expr.concatArrays(
+            expr.templateValue(METADATA_STATIC_VOLUMES),
+            expr.dig(metadataConfig, ["fileSourceVolumes"], [])
+        ),
+        mainContainer: {
+            volumeMounts: expr.concatArrays(
+                expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
+                expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
             ),
-            containers: expr.toArray(expr.makeDict({
-                name: "main",
-                volumeMounts: expr.concatArrays(
-                    expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
-                    expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
-                ),
-                resources: expr.get(metadataConfig, "resources"),
-            }))
-        }))),
-        {satisfies: ["resources"]}
-    );
+            resources: expr.get(metadataConfig, "resources"),
+        },
+    } satisfies PodSpecPatchOverlay;
 }
 
 function buildMetadataContainer<

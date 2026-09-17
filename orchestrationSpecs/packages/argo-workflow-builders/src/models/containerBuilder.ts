@@ -24,10 +24,18 @@ import {inputsToEnvVars, TypescriptError} from "../utils";
 import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, BaseExpression, expr, makeDirectTypeProxy, toExpression} from "./expression";
+import {
+    AllowLiteralOrExpression,
+    BaseExpression,
+    expr,
+    isExpression,
+    makeDirectTypeProxy,
+    toExpression
+} from "./expression";
 import {TypeToken} from "./sharedTypes";
 import {SynchronizationConfig} from "./synchronization";
 import {assertNoBareTemplateString} from "./templateLiteralGuard";
+import {ResourceRequirements, Volume, VolumeMount} from "@opensearch-migrations/k8s-types";
 
 export type IMAGE_PULL_POLICY = "Always" | "Never" | "IfNotPresent";
 
@@ -142,32 +150,64 @@ type HasPodSpecPatch = { __hasPodSpecPatch: true };
 type HasRetryStrategy = { __hasRetryStrategy: true };
 type HasSynchronization = { __hasSynchronization: true };
 type HasAllowDisruption = { __hasAllowDisruption: true };
-export type HasResources = { __hasResources: true };
 
-export type ContainerRequirement = "resources";
+type PodSpecPatchValue<T> =
+    | T
+    | (Omit<BaseExpression<any, any>, "_resultType"> & { readonly _resultType: T });
 
-type BrandsForRequirements<Requirements extends ContainerRequirement> =
-    "resources" extends Requirements ? HasResources : {};
-
-export type PodSpecPatchDefinition<ProvidedRequirements extends ContainerRequirement = never> = {
-    patch: AllowLiteralOrExpression<string>;
-    satisfies: readonly ProvidedRequirements[];
+export type PodSpecPatchOverlay = {
+    terminationGracePeriodSeconds?: PodSpecPatchValue<number>;
+    volumes?: PodSpecPatchValue<Volume[]>;
+    mainContainer?: {
+        resources?: PodSpecPatchValue<ResourceRequirements>;
+        volumeMounts?: PodSpecPatchValue<VolumeMount[]>;
+    };
 };
 
-export function definePodSpecPatch<ProvidedRequirements extends ContainerRequirement = never>(
-    patch: AllowLiteralOrExpression<string>,
-    options?: { satisfies: readonly ProvidedRequirements[] }
-): PodSpecPatchDefinition<ProvidedRequirements> {
-    return {
-        patch,
-        satisfies: options?.satisfies ?? []
-    };
+type MainContainerFromPodSpecPatch<Patch> =
+    Patch extends { mainContainer: infer MainContainer } ? MainContainer : {};
+
+type PodSpecPatchOutput<Patch> = {
+    readonly __podSpecPatchMainContainer: MainContainerFromPodSpecPatch<Patch>;
+};
+
+type MainContainerFromPodConfigState<State> =
+    State extends { readonly __podSpecPatchMainContainer: infer MainContainer }
+        ? MainContainer
+        : {};
+
+function podSpecPatchValueExpression<T>(value: PodSpecPatchValue<T>): BaseExpression<any, any> {
+    return isExpression(value) ? value : expr.templateValue(value);
 }
 
-function isPodSpecPatchDefinition<ProvidedRequirements extends ContainerRequirement>(
-    value: AllowLiteralOrExpression<string> | PodSpecPatchDefinition<ProvidedRequirements>
-): value is PodSpecPatchDefinition<ProvidedRequirements> {
-    return typeof value === "object" && value !== null && "patch" in value && "satisfies" in value;
+function renderPodSpecPatchOverlay(overlay: PodSpecPatchOverlay): AllowLiteralOrExpression<string> {
+    const mainContainer = overlay.mainContainer;
+    const mainContainerExpression = mainContainer === undefined
+        ? undefined
+        : expr.makeDict({
+            name: "main",
+            ...(mainContainer.volumeMounts === undefined
+                ? {}
+                : {volumeMounts: podSpecPatchValueExpression(mainContainer.volumeMounts)}),
+            ...(mainContainer.resources === undefined
+                ? {}
+                : {resources: podSpecPatchValueExpression(mainContainer.resources)}),
+        });
+
+    return expr.asString(expr.serialize(expr.makeDict({
+        ...(overlay.terminationGracePeriodSeconds === undefined
+            ? {}
+            : {
+                terminationGracePeriodSeconds:
+                    podSpecPatchValueExpression(overlay.terminationGracePeriodSeconds)
+            }),
+        ...(overlay.volumes === undefined
+            ? {}
+            : {volumes: podSpecPatchValueExpression(overlay.volumes)}),
+        ...(mainContainerExpression === undefined
+            ? {}
+            : {containers: expr.toArray(mainContainerExpression)}),
+    })));
 }
 
 // Runtime storage for pod config (not tracked in type system individually)
@@ -206,8 +246,6 @@ export class ContainerBuilder<
     ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands, any>,
     GenericScope
 > {
-    declare readonly __podConfigBrands: PodConfigBrands;
-
     constructor(
         parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
@@ -247,7 +285,7 @@ export class ContainerBuilder<
         retry?: RetryParameters;
         sync?: SynchronizationConfig | undefined;
         podConfig?: PodConfigData;
-    }): ContainerBuilder<ParentWorkflowScope, InputParamsScope, NewBody, NewVolume, NewEnv, NewOutput, NewBrands> {
+    }): ContainerBuilder<ParentWorkflowScope, InputParamsScope, NewBody, NewVolume, NewEnv, NewOutput, NewBrands, ArtifactScope> {
         return new ContainerBuilder(
             this.parentWorkflowScope,
             this.inputsScope,
@@ -312,7 +350,7 @@ export class ContainerBuilder<
             ...((Array.isArray(allVolumes) ? allVolumes.length > 0 : true) && { volumes: allVolumes }),
             container: {
                 ...this.bodyScope,
-                env: this.envScope as Record<string, ExpressionOrConfigMapValue<any>>,
+                env: this.envScope as Record<string, ExpressionOrConfigMapValue<string>>,
                 ...((Array.isArray(allVolumeMounts) ? allVolumeMounts.length > 0 : true) && { volumeMounts: allVolumeMounts })
             }
         };
@@ -540,7 +578,8 @@ export class ContainerBuilder<
         VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands,
+        ArtifactScope
     > {
         return this.addEnvVarUnchecked(name as string, value) as any;
     }
@@ -556,7 +595,8 @@ export class ContainerBuilder<
         VolumeScope,
         ExtendScope<EnvScope, R>,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands,
+        ArtifactScope
     > {
         return new ContainerBuilder(
             this.parentWorkflowScope,
@@ -574,32 +614,39 @@ export class ContainerBuilder<
 
     addEnvVars<NewEnvScope extends DataOrConfigMapScope>(
         builderFn: (
-            cb: ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, {}, OutputParamsScope, PodConfigBrands>
-        ) => ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
-    ): ScopeIsEmptyConstraint<EnvScope,
-        ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
-    > {
-        const emptyEnvBuilder = new ContainerBuilder<
+            cb: ContainerBuilder<
+                ParentWorkflowScope,
+                InputParamsScope,
+                ContainerScope,
+                VolumeScope,
+                {},
+                OutputParamsScope,
+                PodConfigBrands,
+                ArtifactScope
+            >
+        ) => ContainerBuilder<
             ParentWorkflowScope,
             InputParamsScope,
             ContainerScope,
             VolumeScope,
-            {},
+            NewEnvScope,
             OutputParamsScope,
             PodConfigBrands,
             ArtifactScope
-        >(
-            this.parentWorkflowScope,
-            this.inputsScope,
-            this.bodyScope,
-            this.volumeScope,
-            {},
-            this.outputsScope,
-            this.retryParameters,
-            this.synchronization,
-            this.podConfig,
-            this.outputArtifacts
-        );
+        >
+    ): ScopeIsEmptyConstraint<EnvScope,
+        ContainerBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            ContainerScope,
+            VolumeScope,
+            NewEnvScope,
+            OutputParamsScope,
+            PodConfigBrands,
+            ArtifactScope
+        >
+    > {
+        const emptyEnvBuilder = this.withUpdates({env: {}});
         return builderFn(emptyEnvBuilder) as any;
     }
 
@@ -616,7 +663,8 @@ export class ContainerBuilder<
         VolumeScope,
         ExtendScope<EnvScope, { [K in Name]: ExpressionOrConfigMapValue<string> }>,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands,
+        ArtifactScope
     > {
         const currentEnv = (this.bodyScope as any).env || {};
         const newEnvScope = {
@@ -659,7 +707,8 @@ export class ContainerBuilder<
             VolumeScope,
             ModifiedInputs,
             OutputParamsScope,
-            PodConfigBrands
+            PodConfigBrands,
+            ArtifactScope
         >> {
         const envVars = modifierFn(this.inputs);
 
@@ -692,19 +741,10 @@ export class ContainerBuilder<
         VolumeScope,
         EnvScope,
         OutputParamsScope,
-        PodConfigBrands & HasResources
+        PodConfigBrands
     > {
         const mergedResources = resources;
-        return new ContainerBuilder<
-            ParentWorkflowScope,
-            InputParamsScope,
-            ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
-            VolumeScope,
-            EnvScope,
-            OutputParamsScope,
-            PodConfigBrands & HasResources,
-            ArtifactScope
-        >(
+        return new ContainerBuilder(
             {...this.parentWorkflowScope},
             this.inputsScope,
             {...this.bodyScope, resources: mergedResources} as ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
@@ -810,10 +850,12 @@ export class ContainerBuilder<
         return this.withUpdates({ podConfig: { ...this.podConfig, hostAliases: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
     }
 
-    addPodSpecPatch<ProvidedRequirements extends ContainerRequirement = never>(
+    addPodSpecPatch<
+        Patch extends PodSpecPatchOverlay
+    >(
         this: PodConfigBrands extends HasPodSpecPatch ? never : this,
         builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) =>
-            AllowLiteralOrExpression<string> | PodSpecPatchDefinition<ProvidedRequirements>
+            Patch
     ): ContainerBuilder<
         ParentWorkflowScope,
         InputParamsScope,
@@ -821,19 +863,19 @@ export class ContainerBuilder<
         VolumeScope,
         EnvScope,
         OutputParamsScope,
-        PodConfigBrands & HasPodSpecPatch & BrandsForRequirements<ProvidedRequirements>
+        PodConfigBrands & HasPodSpecPatch & PodSpecPatchOutput<Patch>
     > {
-        const definition = builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs });
+        const patch = builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs });
         return this.withUpdates<
             ContainerScope,
             VolumeScope,
             EnvScope,
             OutputParamsScope,
-            PodConfigBrands & HasPodSpecPatch & BrandsForRequirements<ProvidedRequirements>
+            PodConfigBrands & HasPodSpecPatch & PodSpecPatchOutput<Patch>
         >({
             podConfig: {
                 ...this.podConfig,
-                podSpecPatch: isPodSpecPatchDefinition(definition) ? definition.patch : definition
+                podSpecPatch: renderPodSpecPatchOverlay(patch)
             }
         });
     }
@@ -852,3 +894,21 @@ export class ContainerBuilder<
         return this.withUpdates({ sync: synchronizationBuilderFn({ inputs: this.inputs }) });
     }
 }
+
+/**
+ * Compile-time projection of every field that contributes to Argo's main
+ * container, whether rendered directly or supplied through podSpecPatch.
+ */
+export type EffectiveContainerOutput<Builder> =
+    Builder extends ContainerBuilder<
+        any,
+        any,
+        infer ContainerScope,
+        any,
+        any,
+        any,
+        infer PodConfigState,
+        any
+    >
+        ? ContainerScope & MainContainerFromPodConfigState<PodConfigState>
+        : never;

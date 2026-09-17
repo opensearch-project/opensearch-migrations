@@ -12,7 +12,7 @@ import { z } from "zod";
 describe("GCS repo routing", () => {
     const transformer = new MigrationConfigTransformer();
 
-    const baseGcsConfig: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+    const baseGcsConfig = {
         sourceClusters: {
             gcssource: {
                 endpoint: "https://gcs-source.example.com",
@@ -50,7 +50,7 @@ describe("GCS repo routing", () => {
                 metadataMigrationConfig: { skipEvaluateApproval: true, skipMigrateApproval: true, },
             },
         ],
-    };
+    } satisfies z.input<typeof OVERALL_MIGRATION_CONFIG>;
 
     it("emits GCS createSnapshot configs into the unified snapshots array", async () => {
         const result = await transformer.processFromObject(baseGcsConfig);
@@ -77,7 +77,7 @@ describe("GCS repo routing", () => {
     });
 
     it("mixes S3 and GCS repos in the same output arrays", async () => {
-        const mixed: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const mixed = {
             sourceClusters: {
                 s3source: {
                     endpoint: "https://s3-source.example.com",
@@ -107,7 +107,7 @@ describe("GCS repo routing", () => {
                 },
                 baseGcsConfig.snapshotMigrationConfigs[0],
             ],
-        };
+        } satisfies z.input<typeof OVERALL_MIGRATION_CONFIG>;
 
         const result = await transformer.processFromObject(mixed);
         expect(result.snapshots?.length).toBe(2);

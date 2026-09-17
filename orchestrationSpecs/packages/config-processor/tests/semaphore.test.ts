@@ -7,7 +7,7 @@ describe("semaphore configuration", () => {
     const transformer = new MigrationConfigTransformer();
 
     it("generates shared semaphore key for legacy versions (multiple snapshots)", async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 legacysource: {
                     endpoint: "https://legacy.example.com",
@@ -85,7 +85,7 @@ describe("semaphore configuration", () => {
     });
 
     it("generates unique semaphore keys for modern versions (multiple snapshots)", async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 modernsource: {
                     endpoint: "https://modern.example.com",
@@ -163,7 +163,7 @@ describe("semaphore configuration", () => {
     });
 
     it("generates correct ConfigMap YAML with semaphore keys", async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 legacysource: {
                     endpoint: "https://legacy.example.com",
@@ -278,7 +278,7 @@ describe("semaphore configuration", () => {
     });
 
     it("honors serializeSnapshotCreation=false override on a legacy source (parallel semaphores)", async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 legacysource: {
                     endpoint: "https://legacy.example.com",
@@ -358,7 +358,7 @@ describe("semaphore configuration", () => {
     });
 
     it("honors serializeSnapshotCreation=true override on a modern source (shared semaphore)", async () => {
-        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+        const config: z.input<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 modernsource: {
                     endpoint: "https://modern.example.com",
