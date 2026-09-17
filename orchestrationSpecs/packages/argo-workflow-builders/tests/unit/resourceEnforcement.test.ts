@@ -24,7 +24,7 @@ function exampleResourcesExpression() {
     });
 }
 
-describe('Resource Rendering', () => {
+describe('Resource Enforcement', () => {
     it('should allow container with resources and verify resources block', () => {
         const wf = WorkflowBuilder.create({
             k8sResourceName: 'test-workflow',
@@ -61,24 +61,20 @@ describe('Resource Rendering', () => {
         expect(testTemplate.container.resources).toStrictEqual(EXAMPLE_RESOURCES);
     });
 
-    it('should allow Kubernetes-optional resources to be omitted', () => {
-        const wf = WorkflowBuilder.create({
+    it('should reject a container when no source provides resources', () => {
+        WorkflowBuilder.create({
             k8sResourceName: 'test-workflow',
             serviceAccountName: 'default'
         })
         .addTemplate('test', t => t
+            // @ts-expect-error - neither the container nor a podSpecPatch supplies resources
             .addContainer(c => c
-                    .addImageInfo('nginx:latest', 'IfNotPresent')
-                    .addCommand(['echo', 'hello'])
-                    .addArgs(['world'])
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo', 'hello'])
+                .addArgs(['world'])
             )
-        )
-        .getFullScope();
-
-        const rendered = renderWorkflowTemplate(wf);
-        const testTemplate = rendered.spec.templates.find((t: any) => t.name === 'test');
-
-        expect(testTemplate.container.resources).toBeUndefined();
+        );
+        expect(true).toBe(true);
     });
 
     it.skip('should merge multiple resource specifications and verify merged result', () => {

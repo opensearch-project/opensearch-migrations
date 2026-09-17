@@ -204,7 +204,7 @@ type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
 
 function makeMetadataPodSpecPatch(
     inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>
-): PodSpecPatchOverlay {
+) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
     return {
         volumes: expr.concatArrays(
@@ -218,7 +218,7 @@ function makeMetadataPodSpecPatch(
             ),
             resources: expr.get(metadataConfig, "resources"),
         },
-    };
+    } satisfies PodSpecPatchOverlay;
 }
 
 function buildMetadataContainer<

@@ -693,6 +693,22 @@ describe('Pod Config - PodSpecPatch', () => {
         expect(template.podSpecPatch).toContain('"volumeMounts"');
     });
 
+    it('should not treat an opaque podSpecPatch as proof that resources are present', () => {
+        WorkflowBuilder.create({
+            k8sResourceName: 'test-opaque-patch-resources',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            // @ts-expect-error - opaque patches cannot prove that the main container has resources
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addPodSpecPatch(() => '{"containers":[{"name":"main","resources":{}}]}')
+            )
+        );
+        expect(true).toBe(true);
+    });
+
     it('should keep pod fields, container fields, and the Argo merge key separate', () => {
         const invalidPodOverlay: PodSpecPatchOverlay = {
             // @ts-expect-error - resources belong to the main container

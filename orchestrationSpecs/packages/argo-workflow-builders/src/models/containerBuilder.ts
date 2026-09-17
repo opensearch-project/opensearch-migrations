@@ -163,6 +163,18 @@ export type PodSpecPatchOverlay = {
     };
 };
 
+type MainContainerFromPodSpecPatch<Patch> =
+    Patch extends { mainContainer: infer MainContainer } ? MainContainer : {};
+
+type PodSpecPatchOutput<Patch> = {
+    readonly __podSpecPatchMainContainer: MainContainerFromPodSpecPatch<Patch>;
+};
+
+type MainContainerFromPodConfigState<State> =
+    State extends { readonly __podSpecPatchMainContainer: infer MainContainer }
+        ? MainContainer
+        : {};
+
 function podSpecPatchValueExpression<T>(value: PodSpecPatchValue<T>): BaseExpression<any, any> {
     return isExpression(value) ? value : expr.templateValue(value);
 }
@@ -826,13 +838,29 @@ export class ContainerBuilder<
         return this.withUpdates({ podConfig: { ...this.podConfig, hostAliases: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
     }
 
-    addPodSpecPatch(
+    addPodSpecPatch<
+        Patch extends AllowLiteralOrExpression<string> | PodSpecPatchOverlay
+    >(
         this: PodConfigBrands extends HasPodSpecPatch ? never : this,
         builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) =>
-            AllowLiteralOrExpression<string> | PodSpecPatchOverlay
-    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasPodSpecPatch> {
+            Patch
+    ): ContainerBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ContainerScope,
+        VolumeScope,
+        EnvScope,
+        OutputParamsScope,
+        PodConfigBrands & HasPodSpecPatch & PodSpecPatchOutput<Patch>
+    > {
         const patch = builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs });
-        return this.withUpdates({
+        return this.withUpdates<
+            ContainerScope,
+            VolumeScope,
+            EnvScope,
+            OutputParamsScope,
+            PodConfigBrands & HasPodSpecPatch & PodSpecPatchOutput<Patch>
+        >({
             podConfig: {
                 ...this.podConfig,
                 podSpecPatch: isPodSpecPatchOverlay(patch) ? renderPodSpecPatchOverlay(patch) : patch
@@ -854,3 +882,21 @@ export class ContainerBuilder<
         return this.withUpdates({ sync: synchronizationBuilderFn({ inputs: this.inputs }) });
     }
 }
+
+/**
+ * Compile-time projection of every field that contributes to Argo's main
+ * container, whether rendered directly or supplied through podSpecPatch.
+ */
+export type EffectiveContainerOutput<Builder> =
+    Builder extends ContainerBuilder<
+        any,
+        any,
+        infer ContainerScope,
+        any,
+        any,
+        any,
+        infer PodConfigState,
+        any
+    >
+        ? ContainerScope & MainContainerFromPodConfigState<PodConfigState>
+        : never;
