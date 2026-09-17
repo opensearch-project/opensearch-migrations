@@ -600,8 +600,12 @@ if [[ "$create_vpc_endpoints" == "all" ]]; then
 fi
 
 # --- resolve version once ---
+# Grant-only mode never touches release artifacts, so avoid an unnecessary GitHub lookup.
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  RELEASE_VERSION="grant-access-only"
+  echo "Grant-only mode: skipping release version resolution."
 # Skip version resolution when building everything from source (--build)
-if [[ "$build" == "true" ]]; then
+elif [[ "$build" == "true" ]]; then
   RELEASE_VERSION="local-build"
   echo "Building all artifacts from source (no release version needed)"
 elif [[ -z "$version" || "$version" == "latest" ]]; then
@@ -766,17 +770,20 @@ check_existing_ma_release() {
   fi
 }
 
-# Check required tools
+# Check required tools. Grant-only mode only talks to AWS; it never downloads artifacts, installs
+# Helm, or touches kubectl.
 missing=0
-for cmd in jq kubectl; do
-  if ! command -v $cmd &>/dev/null; then
-    echo "Missing required tool: $cmd"
-    missing=1
-  fi
-done
+if [[ "$grant_eks_access_only" != "true" ]]; then
+  for cmd in jq kubectl; do
+    if ! command -v $cmd &>/dev/null; then
+      echo "Missing required tool: $cmd"
+      missing=1
+    fi
+  done
+fi
 
 # Install helm if missing
-if ! command -v helm &>/dev/null; then
+if [[ "$grant_eks_access_only" != "true" ]] && ! command -v helm &>/dev/null; then
   echo "Helm is not installed. Installing it now..."
   install_helm
 fi
@@ -960,7 +967,9 @@ fi
 # Show resolved configuration and sources
 echo ""
 echo "Resolved configuration:"
-if [[ "$RELEASE_VERSION" == "local-build" ]]; then
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  echo "  Mode                   = Grant EKS access only (--grant-eks-access-only)"
+elif [[ "$RELEASE_VERSION" == "local-build" ]]; then
   echo "  Mode                   = Build from source (--build)"
   if [[ "$with_load_test_images" == "true" ]]; then
     echo "  Load-test images       = Included (--with-load-test-images)"
@@ -988,6 +997,41 @@ else
 fi
 echo ""
 
+# --- EKS access entry (optional) ---
+grant_eks_cluster_admin() {
+  local principal_arn="$1"
+  echo "Configuring EKS access for principal: $principal_arn"
+  if aws eks describe-access-entry --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+       --principal-arn "$principal_arn" ${region:+--region "$region"} >/dev/null 2>&1; then
+    echo "Access entry already exists, skipping create."
+  else
+    aws eks create-access-entry \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --principal-arn "$principal_arn" \
+      --type STANDARD \
+      ${region:+--region "$region"}
+  fi
+  aws eks associate-access-policy \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --principal-arn "$principal_arn" \
+    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --access-scope type=cluster \
+    ${region:+--region "$region"}
+  echo "EKS access configured for $principal_arn"
+}
+
+if [[ -n "$eks_access_principal_arn" ]]; then
+  grant_eks_cluster_admin "$eks_access_principal_arn"
+fi
+
+# In grant-only mode, adding the access entry above is the whole job. Exit before image mirroring and
+# the Helm install so an admin can be added long after the initial bootstrap. It also doesn't need a
+# kubeconfig entry because it never uses kubectl.
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  echo "Done -- EKS access entry applied. Skipped image mirroring and Helm install (--grant-eks-access-only)."
+  exit 0
+fi
+
 KUBE_CONTEXT="${kubectl_context:-${MIGRATIONS_EKS_CLUSTER_NAME}}"
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${KUBE_CONTEXT}"
 export KUBE_CONTEXT
@@ -997,35 +1041,6 @@ if [[ "$skip_setting_k8s_context" == "true" ]]; then
   echo "Use --context=${KUBE_CONTEXT} with kubectl or --kube-context=${KUBE_CONTEXT} with helm."
 else
   kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
-fi
-
-# --- EKS access entry (optional) ---
-if [[ -n "$eks_access_principal_arn" ]]; then
-  echo "Configuring EKS access for principal: $eks_access_principal_arn"
-  if aws eks describe-access-entry --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-       --principal-arn "$eks_access_principal_arn" ${region:+--region "$region"} >/dev/null 2>&1; then
-    echo "Access entry already exists, skipping create."
-  else
-    aws eks create-access-entry \
-      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-      --principal-arn "$eks_access_principal_arn" \
-      --type STANDARD \
-      ${region:+--region "$region"}
-  fi
-  aws eks associate-access-policy \
-    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-    --principal-arn "$eks_access_principal_arn" \
-    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
-    --access-scope type=cluster \
-    ${region:+--region "$region"}
-  echo "EKS access configured for $eks_access_principal_arn"
-fi
-
-# In grant-only mode, adding the access entry above is the whole job. Exit before image mirroring and
-# the Helm install so an admin can be added long after the initial bootstrap.
-if [[ "$grant_eks_access_only" == "true" ]]; then
-  echo "Done -- EKS access entry applied. Skipped image mirroring and Helm install (--grant-eks-access-only)."
-  exit 0
 fi
 
 # =============================================================================
