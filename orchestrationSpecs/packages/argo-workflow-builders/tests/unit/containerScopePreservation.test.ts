@@ -1,15 +1,35 @@
 import {expectTypeOf} from "expect-type";
 import {
     ContainerBuilder,
+    ExpressionOrConfigMapValue,
     OutputArtifactDef,
     renderWorkflowTemplate,
     WorkflowBuilder
 } from "../../src";
 
-type ArtifactScopeOf<Builder> =
-    Builder extends ContainerBuilder<any, any, any, any, any, any, any, infer ArtifactScope>
-        ? ArtifactScope
+type ScopesOf<Builder> =
+    Builder extends ContainerBuilder<
+        any,
+        any,
+        infer ContainerScope,
+        infer VolumeScope,
+        infer EnvScope,
+        infer OutputParamsScope,
+        infer PodConfigBrands,
+        infer ArtifactScope
+    >
+        ? {
+            container: ContainerScope;
+            volumes: VolumeScope;
+            env: EnvScope;
+            outputs: OutputParamsScope;
+            podConfig: PodConfigBrands;
+            artifacts: ArtifactScope;
+        }
         : never;
+
+type ArtifactScopeOf<Builder> =
+    ScopesOf<Builder>["artifacts"];
 
 const EXAMPLE_RESOURCES = {
     requests: {cpu: "100m", memory: "128Mi"},
@@ -23,6 +43,46 @@ const SCRATCH_VOLUME = {
 };
 
 describe("ContainerBuilder scope preservation", () => {
+    it("preserves every non-environment generic scope and replaces only EnvScope", () => {
+        WorkflowBuilder.create({k8sResourceName: "generic-scope-preservation"})
+            .addTemplate("main", t => t
+                .addContainer(c => {
+                    const beforeEnv = c
+                        .addImageInfo("alpine", "IfNotPresent")
+                        .addCommand(["sh", "-c"])
+                        .addResources(EXAMPLE_RESOURCES)
+                        .addVolumesFromRecord({scratch: SCRATCH_VOLUME})
+                        .addArtifactOutput("result", "/tmp/result.txt")
+                        .addPodMetadata(() => ({labels: {first: "value"}}));
+
+                    const withEnv = beforeEnv.addEnvVars(emptyEnv => {
+                        expectTypeOf<keyof ScopesOf<typeof emptyEnv>["env"]>()
+                            .toEqualTypeOf<never>();
+
+                        return emptyEnv
+                            .addEnvVar("FIRST", "one")
+                            .addEnvVar("SECOND", "two");
+                    });
+
+                    type Before = ScopesOf<typeof beforeEnv>;
+                    type After = ScopesOf<typeof withEnv>;
+
+                    expectTypeOf<After["container"]>().toEqualTypeOf<Before["container"]>();
+                    expectTypeOf<After["volumes"]>().toEqualTypeOf<Before["volumes"]>();
+                    expectTypeOf<After["outputs"]>().toEqualTypeOf<Before["outputs"]>();
+                    expectTypeOf<After["podConfig"]>().toEqualTypeOf<Before["podConfig"]>();
+                    expectTypeOf<After["artifacts"]>().toEqualTypeOf<Before["artifacts"]>();
+                    expectTypeOf<keyof After["env"]>().toEqualTypeOf<"FIRST" | "SECOND">();
+                    expectTypeOf<After["env"]["FIRST"]>()
+                        .toEqualTypeOf<ExpressionOrConfigMapValue<string>>();
+                    expectTypeOf<After["env"]["SECOND"]>()
+                        .toEqualTypeOf<ExpressionOrConfigMapValue<string>>();
+
+                    return withEnv;
+                })
+            );
+    });
+
     it("preserves volumes and artifact outputs while building environment variables", () => {
         const workflow = WorkflowBuilder.create({k8sResourceName: "scope-preservation"})
             .addTemplate("main", t => t
