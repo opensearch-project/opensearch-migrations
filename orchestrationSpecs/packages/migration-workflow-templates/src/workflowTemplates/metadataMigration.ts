@@ -227,7 +227,10 @@ function buildMetadataContainer<
     const {inputs} = builder;
     return builder
         .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
-        .addPodSpecPatchWithResources(({inputs}) => makeMetadataPodSpecPatch(inputs))
+        .addPodSpecPatch(
+            ({inputs}) => makeMetadataPodSpecPatch(inputs),
+            {satisfies: ["resources"]}
+        )
         .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
             expr.ternary(
                 expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),

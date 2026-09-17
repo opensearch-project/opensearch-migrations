@@ -32,7 +32,7 @@ import {
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
 import {StepsBuilder} from "./stepsBuilder";
-import {ContainerBuilder} from "./containerBuilder";
+import {ContainerBuilder, HasResources} from "./containerBuilder";
 import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
@@ -44,8 +44,7 @@ import {
 import {AllowLiteralOrExpression, expr, isExpression, LiteralExpression, NonRecordLiteral} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
-import { Container } from "@opensearch-migrations/k8s-types";
-import { SetRequired } from "../utils";
+import {Container} from "@opensearch-migrations/k8s-types";
 
 /**
  * Maintains a scope of all previous public parameters (workflow and previous templates' inputs/outputs)
@@ -264,12 +263,18 @@ export class TemplateBuilder<
 
     addContainer<
         FirstBuilder extends ContainerBuilder<ParentWorkflowScope, InputParamsScope, any, any, any, any>,
-        FinalBuilder extends ContainerBuilder<ParentWorkflowScope, InputParamsScope,
-
-         GenericScope &
-         // Excluding name from container as it is realized during containerBuilder::getBody()
-         SetRequired<Omit<Container, "name">, "resources">,
-          any, any, any>,
+        FinalBuilder extends ContainerBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            GenericScope &
+            // The main container name is supplied by Argo and resources may be
+            // supplied either directly or through podSpecPatch.
+            Omit<Container, "name" | "resources">,
+            any,
+            any,
+            any,
+            HasResources
+        >,
     >(
         builderFn: ScopeIsEmptyConstraint<BodyScope,
             (b: ContainerBuilder<ParentWorkflowScope, InputParamsScope, {}, {}, {}, OutputParamsScope>) => FinalBuilder>,

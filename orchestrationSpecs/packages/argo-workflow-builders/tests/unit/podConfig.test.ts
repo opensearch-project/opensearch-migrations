@@ -666,8 +666,9 @@ describe('Pod Config - PodSpecPatch', () => {
             .addContainer(c => c
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
-                .addPodSpecPatchWithResources(() =>
-                    '{"containers":[{"name":"main","resources":{"requests":{"cpu":"100m"}}}]}'
+                .addPodSpecPatch(
+                    () => '{"containers":[{"name":"main","resources":{"requests":{"cpu":"100m"}}}]}',
+                    { satisfies: ['resources'] }
                 )
             )
         )
@@ -678,6 +679,22 @@ describe('Pod Config - PodSpecPatch', () => {
 
         expect(template.container.resources).toBeUndefined();
         expect(template.podSpecPatch).toContain('"resources"');
+    });
+
+    it('should not treat an ordinary podSpecPatch as satisfying resource requirements', () => {
+        WorkflowBuilder.create({
+            k8sResourceName: 'test-patch-without-resources',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            // @ts-expect-error - podSpecPatch does not declare that it supplies resources
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addPodSpecPatch(() => '{"terminationGracePeriodSeconds": 30}')
+            )
+        );
+        expect(true).toBe(true);
     });
 
     it('should reject duplicate addPodSpecPatch calls at compile time', () => {
