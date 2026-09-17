@@ -142,6 +142,12 @@ type HasPodSpecPatch = { __hasPodSpecPatch: true };
 type HasRetryStrategy = { __hasRetryStrategy: true };
 type HasSynchronization = { __hasSynchronization: true };
 type HasAllowDisruption = { __hasAllowDisruption: true };
+export type HasResources = { __hasResources: true };
+
+export type ContainerRequirement = "resources";
+
+type BrandsForRequirements<Requirements extends ContainerRequirement> =
+    "resources" extends Requirements ? HasResources : {};
 
 // Runtime storage for pod config (not tracked in type system individually)
 type PodConfigData = {
@@ -179,6 +185,8 @@ export class ContainerBuilder<
     ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands, any>,
     GenericScope
 > {
+    declare readonly __podConfigBrands: PodConfigBrands;
+
     constructor(
         parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
@@ -550,7 +558,16 @@ export class ContainerBuilder<
     ): ScopeIsEmptyConstraint<EnvScope,
         ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, {}, NewEnvScope, OutputParamsScope, PodConfigBrands>
     > {
-        const emptyEnvBuilder = new ContainerBuilder(
+        const emptyEnvBuilder = new ContainerBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            ContainerScope,
+            VolumeScope,
+            {},
+            OutputParamsScope,
+            PodConfigBrands,
+            ArtifactScope
+        >(
             this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
@@ -654,10 +671,19 @@ export class ContainerBuilder<
         VolumeScope,
         EnvScope,
         OutputParamsScope,
-        PodConfigBrands
+        PodConfigBrands & HasResources
     > {
         const mergedResources = resources;
-        return new ContainerBuilder(
+        return new ContainerBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+            VolumeScope,
+            EnvScope,
+            OutputParamsScope,
+            PodConfigBrands & HasResources,
+            ArtifactScope
+        >(
             {...this.parentWorkflowScope},
             this.inputsScope,
             {...this.bodyScope, resources: mergedResources} as ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
@@ -763,45 +789,31 @@ export class ContainerBuilder<
         return this.withUpdates({ podConfig: { ...this.podConfig, hostAliases: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
     }
 
-    addPodSpecPatch(
+    addPodSpecPatch<ProvidedRequirements extends ContainerRequirement = never>(
         this: PodConfigBrands extends HasPodSpecPatch ? never : this,
-        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
-    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasPodSpecPatch> {
-        return this.withUpdates({ podConfig: { ...this.podConfig, podSpecPatch: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
-    }
-
-    /**
-     * Add a podSpecPatch that supplies the main container's resource requirements.
-     *
-     * This satisfies the builder's resource invariant without emitting a duplicate
-     * container.resources block in the generated template.
-     */
-    addPodSpecPatchWithResources(
-        this: PodConfigBrands extends HasPodSpecPatch ? never : this,
-        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>,
+        _options?: { satisfies: readonly ProvidedRequirements[] }
     ): ContainerBuilder<
         ParentWorkflowScope,
         InputParamsScope,
-        ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+        ContainerScope,
         VolumeScope,
         EnvScope,
         OutputParamsScope,
-        PodConfigBrands & HasPodSpecPatch
+        PodConfigBrands & HasPodSpecPatch & BrandsForRequirements<ProvidedRequirements>
     > {
-        return this.withUpdates({
+        return this.withUpdates<
+            ContainerScope,
+            VolumeScope,
+            EnvScope,
+            OutputParamsScope,
+            PodConfigBrands & HasPodSpecPatch & BrandsForRequirements<ProvidedRequirements>
+        >({
             podConfig: {
                 ...this.podConfig,
                 podSpecPatch: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs })
             }
-        }) as ContainerBuilder<
-            ParentWorkflowScope,
-            InputParamsScope,
-            ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
-            VolumeScope,
-            EnvScope,
-            OutputParamsScope,
-            PodConfigBrands & HasPodSpecPatch
-        >;
+        });
     }
 
     override addRetryParameters(
