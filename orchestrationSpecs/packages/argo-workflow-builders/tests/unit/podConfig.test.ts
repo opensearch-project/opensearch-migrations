@@ -1,4 +1,4 @@
-import { WorkflowBuilder, renderWorkflowTemplate, typeToken, defineParam } from '../../src';
+import { WorkflowBuilder, renderWorkflowTemplate, typeToken, defineParam, definePodSpecPatch } from '../../src';
 
 const EXAMPLE_RESOURCES = {
     requests: { cpu: "100m", memory: "128Mi" },
@@ -666,10 +666,10 @@ describe('Pod Config - PodSpecPatch', () => {
             .addContainer(c => c
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
-                .addPodSpecPatch(
-                    () => '{"containers":[{"name":"main","resources":{"requests":{"cpu":"100m"}}}]}',
+                .addPodSpecPatch(() => definePodSpecPatch(
+                    '{"containers":[{"name":"main","resources":{"requests":{"cpu":"100m"}}}]}',
                     { satisfies: ['resources'] }
-                )
+                ))
             )
         )
         .getFullScope();

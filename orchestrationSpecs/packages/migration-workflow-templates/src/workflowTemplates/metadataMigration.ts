@@ -10,6 +10,7 @@ import {
     BaseExpression,
     ContainerBuilder,
     defineParam,
+    definePodSpecPatch,
     defineRequiredParam,
     expr,
     InputParameterSource,
@@ -203,20 +204,23 @@ type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
 
 function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>) {
     const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
-    return expr.asString(expr.serialize(expr.makeDict({
-        volumes: expr.concatArrays(
-            expr.templateValue(METADATA_STATIC_VOLUMES),
-            expr.dig(metadataConfig, ["fileSourceVolumes"], [])
-        ),
-        containers: expr.toArray(expr.makeDict({
-            name: "main",
-            volumeMounts: expr.concatArrays(
-                expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
-                expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
+    return definePodSpecPatch(
+        expr.asString(expr.serialize(expr.makeDict({
+            volumes: expr.concatArrays(
+                expr.templateValue(METADATA_STATIC_VOLUMES),
+                expr.dig(metadataConfig, ["fileSourceVolumes"], [])
             ),
-            resources: expr.get(metadataConfig, "resources"),
-        }))
-    })));
+            containers: expr.toArray(expr.makeDict({
+                name: "main",
+                volumeMounts: expr.concatArrays(
+                    expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
+                    expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
+                ),
+                resources: expr.get(metadataConfig, "resources"),
+            }))
+        }))),
+        {satisfies: ["resources"]}
+    );
 }
 
 function buildMetadataContainer<
@@ -227,10 +231,7 @@ function buildMetadataContainer<
     const {inputs} = builder;
     return builder
         .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
-        .addPodSpecPatch(
-            ({inputs}) => makeMetadataPodSpecPatch(inputs),
-            {satisfies: ["resources"]}
-        )
+        .addPodSpecPatch(({inputs}) => makeMetadataPodSpecPatch(inputs))
         .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
             expr.ternary(
                 expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
