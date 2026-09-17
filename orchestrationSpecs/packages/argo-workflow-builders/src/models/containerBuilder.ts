@@ -770,6 +770,40 @@ export class ContainerBuilder<
         return this.withUpdates({ podConfig: { ...this.podConfig, podSpecPatch: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
     }
 
+    /**
+     * Add a podSpecPatch that supplies the main container's resource requirements.
+     *
+     * This satisfies the builder's resource invariant without emitting a duplicate
+     * container.resources block in the generated template.
+     */
+    addPodSpecPatchWithResources(
+        this: PodConfigBrands extends HasPodSpecPatch ? never : this,
+        builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => AllowLiteralOrExpression<string>
+    ): ContainerBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+        VolumeScope,
+        EnvScope,
+        OutputParamsScope,
+        PodConfigBrands & HasPodSpecPatch
+    > {
+        return this.withUpdates({
+            podConfig: {
+                ...this.podConfig,
+                podSpecPatch: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs })
+            }
+        }) as ContainerBuilder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            ExtendScope<ContainerScope, { resources: AllowLiteralOrExpression<Record<string, any>> }>,
+            VolumeScope,
+            EnvScope,
+            OutputParamsScope,
+            PodConfigBrands & HasPodSpecPatch
+        >;
+    }
+
     override addRetryParameters(
         this: PodConfigBrands extends HasRetryStrategy ? never : this,
         retryParameters: GenericScope
