@@ -12,6 +12,7 @@ import {
   type BrowserConfigDraft,
 } from "./browserDraft";
 import {
+  ConnectivityCheckDetails,
   ConnectivityDialog,
   navigationConnectivityTargets,
   useConnectivityChecks,
@@ -55,11 +56,17 @@ function Harness({
       <span data-testid="inventory-loading">
         {String(connectivity.inventoryLoading)}
       </span>
+      <span data-testid="inventory-problem">
+        {connectivity.inventoryProblem}
+      </span>
       {connectivity.states.map((state) => (
         <span data-testid={`status-${state.target.id}`} key={state.target.id}>
           {state.status}
         </span>
       ))}
+      {connectivity.selectedState ? (
+        <ConnectivityCheckDetails state={connectivity.selectedState} />
+      ) : null}
       <button
         onClick={() => {
           const id = connectivity.selectedState?.target.id;
@@ -192,6 +199,85 @@ describe("configuration connectivity checks", () => {
     }));
     await waitFor(() => expect(screen.getByTestId("inventory-loading"))
       .toHaveTextContent("false"));
+  });
+
+  it("waits for required draft fields without calling the server", async () => {
+    const initial = createBrowserConfigDraft(document);
+    const draft = applyBrowserEditOperation(initial, {
+      op: "set",
+      path: ["sourceClusters", "source", "version"],
+      value: "",
+    });
+    const target: ConnectivityTarget = {
+      id: "source:source",
+      kind: "source",
+      refName: "source",
+      label: "Source source",
+      editPath: ["sourceClusters", "source"],
+    };
+    let inventories = 0;
+    let starts = 0;
+    server.use(
+      http.post(
+        "*/api/v1/config/connectivity/inventory",
+        () => {
+          inventories += 1;
+          return HttpResponse.json({}, { status: 500 });
+        },
+      ),
+      http.post("*/api/v1/config/connectivity/checks", () => {
+        starts += 1;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+
+    renderHarness(draft, [target]);
+
+    await waitFor(() => expect(screen.getByTestId("status"))
+      .toHaveTextContent("awaiting_configuration"));
+    expect(screen.getByTestId("inventory-problem")).toBeEmptyDOMElement();
+    expect(screen.getByText(
+      "Complete the required configuration before this check can run.",
+    )).toBeInTheDocument();
+    expect(screen.getByText("Version")).toBeInTheDocument();
+    expect(screen.getByText(/Use '<ENGINE> <VERSION>'/)).toBeInTheDocument();
+    expect(screen.queryByText(/config processor failed/i)).toBeNull();
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 20));
+    expect(inventories).toBe(0);
+    expect(starts).toBe(0);
+  });
+
+  it("treats stricter backend validation as awaiting configuration", async () => {
+    const draft = createBrowserConfigDraft(document);
+    const target: ConnectivityTarget = {
+      id: "source:source",
+      kind: "source",
+      refName: "source",
+      label: "Source source",
+      editPath: ["sourceClusters", "source"],
+    };
+    server.use(
+      http.post(
+        "*/api/v1/config/connectivity/inventory",
+        () => HttpResponse.json({
+          detail: {
+            code: "connectivity_config_invalid",
+            message: [
+              "Connectivity checks require a valid configuration.",
+              "config processor failed with exit code 2:",
+              "InputValidationError at sourceClusters.source.version",
+            ].join(" "),
+          },
+        }, { status: 422 }),
+      ),
+    );
+
+    renderHarness(draft, [target]);
+
+    await waitFor(() => expect(screen.getByTestId("status"))
+      .toHaveTextContent("awaiting_configuration"));
+    expect(screen.getByTestId("inventory-problem")).toBeEmptyDOMElement();
+    expect(screen.queryByText(/config processor failed/i)).toBeNull();
   });
 
   it("shows Valid only when every applicable target is current and passing", () => {

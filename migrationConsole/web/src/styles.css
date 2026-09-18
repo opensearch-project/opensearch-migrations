@@ -1706,6 +1706,11 @@ button.secondary-button:hover:not(:disabled) {
   background: #edf7fb;
 }
 
+.tree-connectivity-indicator.connectivity-awaiting_configuration {
+  color: #77838a;
+  background: #f0f2f3;
+}
+
 .tree-row-tools {
   position: relative;
   display: inline-flex;
@@ -4543,6 +4548,17 @@ button.validity-tab[aria-selected="true"] {
   background: #f1f8fb;
 }
 
+.validity-tab.status-awaiting_configuration {
+  border-color: #c4cbcf;
+  color: #69767d;
+  background: #f5f6f7;
+}
+
+.validity-tab.status-awaiting_configuration > svg {
+  color: #77838a;
+  background: #e9edef;
+}
+
 .validity-tab-panel {
   min-height: 96px;
   padding: 9px 14px 11px;
@@ -4663,6 +4679,12 @@ button.validity-tab[aria-selected="true"] {
   border-color: #79a6b9;
   color: #315f73;
   background: #f1f8fb;
+}
+
+.validity-indicator.status-awaiting_configuration {
+  border-color: #c4cbcf;
+  color: #69767d;
+  background: #f4f6f7;
 }
 
 .config-property-validity-detail > td {
@@ -4789,6 +4811,38 @@ button.validity-tab[aria-selected="true"] {
   height: 13px;
 }
 
+.connectivity-requirements {
+  display: grid;
+  gap: 7px;
+}
+
+.connectivity-requirements > p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.connectivity-requirements ul {
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.connectivity-requirements li {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) minmax(0, 1fr);
+  gap: 9px;
+  padding: 6px 8px;
+  border-left: 3px solid #aab4b9;
+  color: #5d696f;
+  background: #f4f6f7;
+}
+
+.connectivity-requirements li span {
+  overflow-wrap: anywhere;
+}
+
 .validity-dashboard-problem {
   padding: 0 14px 8px;
   margin: 0;
@@ -4878,6 +4932,12 @@ button.validity-tab[aria-selected="true"] {
   border-bottom-color: #d9a09b;
   color: #772f29;
   background: #fff0ef;
+}
+
+.connectivity-panel.status-awaiting_configuration {
+  border-bottom-color: #c4cbcf;
+  color: #69767d;
+  background: #f4f6f7;
 }
 
 .connectivity-stage-list {
@@ -5024,6 +5084,12 @@ button.validity-tab[aria-selected="true"] {
   background: #fff0ef;
 }
 
+.connectivity-overall.status-awaiting_configuration {
+  border-color: #c4cbcf;
+  color: #69767d;
+  background: #f4f6f7;
+}
+
 .connectivity-list-item {
   padding: 10px;
   border: 1px solid var(--border);
@@ -5039,6 +5105,12 @@ button.validity-tab[aria-selected="true"] {
 .connectivity-list-item.status-partially_verified {
   border-color: #c8d29b;
   background: #f8faef;
+}
+
+.connectivity-list-item.status-awaiting_configuration {
+  border-color: #c4cbcf;
+  color: #69767d;
+  background: #f5f6f7;
 }
 
 .connectivity-empty {

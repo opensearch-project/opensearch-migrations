@@ -550,7 +550,7 @@ test("opens the focused configuration deletion review from a runtime resource", 
 
   expect(await screen.findByText("Editing configuration"))
     .toBeInTheDocument();
-  expect(screen.getByRole("heading", {
+  expect(await screen.findByRole("heading", {
     name: "Remove legacy from configuration?",
   }))
     .toBeInTheDocument();

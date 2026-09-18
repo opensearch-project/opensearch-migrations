@@ -225,7 +225,11 @@ export function ValidityDetails({
           <span>{validityStatusLabel(item.status)}</span>
         </div>
         <button
-          disabled={item.status === "checking" || item.status === "pending"}
+          disabled={
+            item.status === "checking"
+            || item.status === "pending"
+            || item.status === "awaiting_configuration"
+          }
           onClick={() => onCheckConnectivity([item.connectivity!.target.id])}
           type="button"
         >

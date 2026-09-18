@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import {
+  ConfigApiError,
   getConnectivityInventory,
   getOperations,
   startConnectivityChecks,
@@ -27,6 +28,7 @@ import {
 } from "../../api/client";
 import { ModalDialog } from "../../components/ModalDialog";
 import type { BrowserConfigDraft } from "./browserDraft";
+import { humanizeFieldLabel } from "./fieldLabels";
 
 
 export type ConnectivityStatus =
@@ -35,6 +37,7 @@ export type ConnectivityStatus =
   | "failed"
   | "checking"
   | "pending"
+  | "awaiting_configuration"
   | "stale"
   | "not_checked"
   | "not_applicable";
@@ -74,6 +77,14 @@ export interface ConnectivityTargetState {
   target: ConnectivityTarget;
   status: ConnectivityStatus;
   check?: ConnectivityCheck;
+  requirements?: ConnectivityRequirement[];
+}
+
+
+export interface ConnectivityRequirement {
+  path: string[];
+  label: string;
+  message: string;
 }
 
 
@@ -113,6 +124,7 @@ export function connectivityStatusLabel(status: ConnectivityStatus): string {
     case "failed": return "Failed";
     case "checking": return "Checking";
     case "pending": return "Pending";
+    case "awaiting_configuration": return "Awaiting configuration";
     case "stale": return "Recheck needed";
     case "not_applicable": return "Not applicable";
     default: return "Not checked";
@@ -128,6 +140,7 @@ export function connectivityOverallStatus(
   if (statuses.has("failed")) return "failed";
   if (statuses.has("checking")) return "checking";
   if (statuses.has("pending")) return "pending";
+  if (statuses.has("awaiting_configuration")) return "awaiting_configuration";
   if (statuses.has("stale")) return "stale";
   if (statuses.has("not_checked")) return "not_checked";
   if (statuses.has("partially_verified")) return "partially_verified";
@@ -151,6 +164,8 @@ function overallSummary(status: ConnectivityStatus): string {
       return "One or more connectivity checks are still running.";
     case "pending":
       return "One or more connectivity checks are waiting to start.";
+    case "awaiting_configuration":
+      return "Complete the required configuration before connectivity can be checked.";
     case "stale":
       return "Configured values changed after at least one check completed.";
     case "not_applicable":
@@ -266,6 +281,89 @@ function targetForPath(
 }
 
 
+function pathsOverlap(left: string[], right: string[]): boolean {
+  return left.every((part, index) => right[index] === part)
+    || right.every((part, index) => left[index] === part);
+}
+
+
+function draftNodeForPath(
+  draft: BrowserConfigDraft,
+  path: string[],
+) {
+  const stack = [...draft.editState.nodes];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    if (
+      node.path.length === path.length
+      && node.path.every((part, index) => path[index] === part)
+    ) {
+      return node;
+    }
+    stack.push(...(node.children ?? []));
+  }
+  return null;
+}
+
+
+function requirementLabel(path: string[], target: ConnectivityTarget): string {
+  const relativePath = path.slice(target.editPath.length);
+  const field = relativePath.at(-1) ?? path.at(-1);
+  return field ? humanizeFieldLabel(field) : "Configuration";
+}
+
+
+function connectivityRequirements(
+  draft: BrowserConfigDraft | undefined,
+  target: ConnectivityTarget,
+): ConnectivityRequirement[] {
+  if (!draft) return [];
+  const diagnostics = (draft.editState.validation.diagnostics ?? []).filter(
+    ({ severity }) => severity === "error" || severity === "required",
+  );
+  const scoped = diagnostics.filter(({ path }) => (
+    path && pathsOverlap(path, target.editPath)
+  ));
+  const relevant = scoped.length > 0 ? scoped : diagnostics;
+  const seen = new Set<string>();
+  return relevant.flatMap((diagnostic) => {
+    const path = diagnostic.path ?? [];
+    const node = draftNodeForPath(draft, path);
+    const message = node?.validation?.message
+      ?? node?.diagnostics?.find(({ severity }) => (
+        severity === "error" || severity === "required"
+      ))?.message
+      ?? diagnostic.message;
+    const key = `${path.join(".")}:${message}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      path,
+      label: requirementLabel(path, target),
+      message,
+    }];
+  });
+}
+
+
+function connectivityConfigInvalid(error: unknown): boolean {
+  return error instanceof ConfigApiError
+    && error.code === "connectivity_config_invalid";
+}
+
+
+function draftBlocksConnectivity(draft: BrowserConfigDraft | undefined): boolean {
+  return (draft?.editState.validation.diagnostics ?? []).some(
+    ({ severity }) => (
+      severity === "error"
+      || severity === "required"
+      || severity === "blocked"
+    ),
+  );
+}
+
+
 // The hook and its compact renderers intentionally share the result contract.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useConnectivityChecks(
@@ -284,6 +382,9 @@ export function useConnectivityChecks(
   } | null>(null);
   const [inventory, setInventory] = useState<ConnectivityInventory | null>(null);
   const [inventoryProblem, setInventoryProblem] = useState("");
+  const [awaitingConfigurationNonce, setAwaitingConfigurationNonce] = useState<
+    string | null
+  >(null);
   const [operationProblem, setOperationProblem] = useState("");
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [started, setStarted] = useState<Array<{
@@ -295,10 +396,22 @@ export function useConnectivityChecks(
 
   useEffect(() => {
     if (!enabled) return;
-    if (!nonce || !rawYaml || draft?.rawYaml !== undefined) {
+    if (!nonce || !rawYaml) {
       setRequest(null);
       setInventory(null);
       setInventoryProblem("");
+      setAwaitingConfigurationNonce(null);
+      setInventoryLoading(false);
+      return;
+    }
+    if (
+      draft?.rawYaml !== undefined
+      || draftBlocksConnectivity(draft)
+    ) {
+      setRequest(null);
+      setInventory(null);
+      setInventoryProblem("");
+      setAwaitingConfigurationNonce(nonce);
       setInventoryLoading(false);
       return;
     }
@@ -307,13 +420,21 @@ export function useConnectivityChecks(
       setRequest({ nonce, rawYaml });
     }, debounceMs);
     return () => globalThis.clearTimeout(timer);
-  }, [debounceMs, draft?.rawYaml, enabled, nonce, rawYaml]);
+  }, [
+    debounceMs,
+    draft,
+    draft?.rawYaml,
+    enabled,
+    nonce,
+    rawYaml,
+  ]);
 
   useEffect(() => {
     if (!enabled || !request) return;
     const controller = new AbortController();
     setInventoryLoading(true);
     setInventoryProblem("");
+    setAwaitingConfigurationNonce(null);
     void getConnectivityInventory(
       request.rawYaml,
       request.nonce,
@@ -323,6 +444,11 @@ export function useConnectivityChecks(
       setInventory(result);
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
+      if (connectivityConfigInvalid(error)) {
+        setInventory(null);
+        setAwaitingConfigurationNonce(request.nonce);
+        return;
+      }
       setInventoryProblem(error instanceof Error ? error.message : String(error));
     }).finally(() => {
       if (!controller.signal.aborted) setInventoryLoading(false);
@@ -392,11 +518,27 @@ export function useConnectivityChecks(
       }
       const current = currentById.get(target.id);
       if (current) return { target, status: current.status, check: current };
+      if (awaitingConfigurationNonce === nonce) {
+        return {
+          target,
+          status: "awaiting_configuration",
+          requirements: connectivityRequirements(draft, target),
+        };
+      }
       const prior = priorById.get(target.id);
       if (prior) return { target, status: "stale", check: prior };
       return { target, status: enabled ? "pending" : "not_checked" };
     });
-  }, [activeTargetIds, currentById, enabled, priorById, targets]);
+  }, [
+    activeTargetIds,
+    awaitingConfigurationNonce,
+    currentById,
+    draft,
+    enabled,
+    nonce,
+    priorById,
+    targets,
+  ]);
   const navigationStates = useMemo(
     () => Object.fromEntries(
       states.map(({ target, status }) => [editTargetId(target.editPath), status]),
@@ -415,7 +557,13 @@ export function useConnectivityChecks(
     : null;
 
   const start = useCallback(async (targetIds: string[] = []) => {
-    if (!nonce || !rawYaml) return false;
+    if (
+      !nonce
+      || !rawYaml
+      || awaitingConfigurationNonce === nonce
+    ) {
+      return false;
+    }
     const requestedTargetIds = targetIds.length > 0
       ? targetIds
       : targets.map(({ id }) => id);
@@ -443,6 +591,11 @@ export function useConnectivityChecks(
       await queryClient.invalidateQueries({ queryKey: ["operations"] });
       return true;
     } catch (error) {
+      if (connectivityConfigInvalid(error)) {
+        setAwaitingConfigurationNonce(nonce);
+        setOperationProblem("");
+        return false;
+      }
       setOperationProblem(error instanceof Error ? error.message : String(error));
       return false;
     } finally {
@@ -450,7 +603,13 @@ export function useConnectivityChecks(
         (targetId) => !requestedTargetIds.includes(targetId),
       ));
     }
-  }, [nonce, queryClient, rawYaml, targets]);
+  }, [
+    awaitingConfigurationNonce,
+    nonce,
+    queryClient,
+    rawYaml,
+    targets,
+  ]);
   const autoTargetKey = useMemo(
     () => states
       .filter(({ status }) => (
@@ -524,6 +683,30 @@ export function ConnectivityCheckDetails({
 }: Readonly<{ state: ConnectivityTargetState }>) {
   const check = state.check;
   if (!check) {
+    if (state.status === "awaiting_configuration") {
+      return (
+        <div className="connectivity-requirements">
+          <p>
+            Complete the required configuration before this check can run.
+          </p>
+          {state.requirements && state.requirements.length > 0 ? (
+            <ul>
+              {state.requirements.map((requirement) => (
+                <li key={`${requirement.path.join(".")}:${requirement.message}`}>
+                  <strong>{requirement.label}</strong>
+                  <span>{requirement.message}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>
+              Resolve the validation errors in the configuration editor, then
+              this check will start automatically.
+            </p>
+          )}
+        </div>
+      );
+    }
     return (
       <p>
         {state.status === "checking"
@@ -610,7 +793,11 @@ export function ConnectivityPanel({
           <span>{connectivityStatusLabel(state.status)}</span>
         </div>
         <button
-          disabled={state.status === "checking" || state.status === "pending"}
+          disabled={
+            state.status === "checking"
+            || state.status === "pending"
+            || state.status === "awaiting_configuration"
+          }
           onClick={onCheck}
           type="button"
         >
@@ -640,6 +827,9 @@ export function ConnectivityDialog({
   const checking = states.some((state) => (
     state.status === "checking" || state.status === "pending"
   ));
+  const awaitingConfiguration = states.some(
+    ({ status }) => status === "awaiting_configuration",
+  );
   const aggregateStatus = connectivityOverallStatus(states);
   return (
     <ModalDialog
@@ -655,7 +845,12 @@ export function ConnectivityDialog({
           <button onClick={onClose} type="button">Close</button>
           <button
             className="primary-button"
-            disabled={loading || checking || states.length === 0}
+            disabled={
+              loading
+              || checking
+              || awaitingConfiguration
+              || states.length === 0
+            }
             onClick={() => onCheck()}
             type="button"
           >
@@ -707,7 +902,9 @@ export function ConnectivityDialog({
                 </div>
                 <button
                   disabled={
-                    state.status === "checking" || state.status === "pending"
+                    state.status === "checking"
+                    || state.status === "pending"
+                    || state.status === "awaiting_configuration"
                   }
                   onClick={() => onCheck([state.target.id])}
                   type="button"
@@ -717,7 +914,8 @@ export function ConnectivityDialog({
                 </button>
               </header>
               {state.status === "failed"
-                || state.status === "partially_verified" ? (
+                || state.status === "partially_verified"
+                || state.status === "awaiting_configuration" ? (
                 <ConnectivityCheckDetails state={state} />
               ) : null}
             </article>

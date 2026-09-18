@@ -104,6 +104,34 @@ describe("validity dashboard", () => {
     expect(screen.queryByText(/configured reference is available/)).toBeNull();
   });
 
+  it("renders incomplete connectivity as a muted actionable state", async () => {
+    const awaitingSource: ConnectivityTargetState = {
+      ...sourceState,
+      status: "awaiting_configuration",
+      requirements: [{
+        path: ["sourceClusters", "source", "version"],
+        label: "Version",
+        message: "Choose the source engine and version.",
+      }],
+    };
+    render(
+      <ValidityDashboard
+        connectivityLoading={false}
+        connectivityProblem=""
+        connectivityStates={[awaitingSource]}
+        environmentGroups={[]}
+        onCheckConnectivity={vi.fn()}
+      />,
+    );
+
+    const tab = screen.getByRole("tab", { name: /Awaiting configuration/i });
+    expect(tab).toHaveClass("status-awaiting_configuration");
+    await userEvent.click(tab);
+    expect(screen.getByText("Choose the source engine and version."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check" })).toBeDisabled();
+  });
+
   it("fits expanded details once and lets the user resize the pinned panel", async () => {
     const scrollHeight = vi.spyOn(
       HTMLElement.prototype,
