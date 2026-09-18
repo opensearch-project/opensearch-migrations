@@ -2,6 +2,9 @@
 aws-crt = "0.48.4"
 aws-msk-iam-auth = "2.3.9"
 aws-sdk = "2.55.6"
+azure-core-http-jdk-httpclient = "1.1.7"
+azure-identity = "1.18.6"
+azure-storage-blob = "12.35.1"
 bouncycastle = "1.86"
 commons-collections = "4.6.0"
 commons-compress = "1.26.2"
@@ -79,6 +82,12 @@ groovy = { module = "org.codehaus.groovy:groovy-all", version.ref = "groovy" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 
 gcp-storage = { module = "com.google.cloud:google-cloud-storage", version.ref = "gcp-storage" }
+
+azure-storage-blob = { module = "com.azure:azure-storage-blob", version.ref = "azure-storage-blob" }
+
+azure-identity = { module = "com.azure:azure-identity", version.ref = "azure-identity" }
+
+azure-core-http-jdk-httpclient = { module = "com.azure:azure-core-http-jdk-httpclient", version.ref = "azure-core-http-jdk-httpclient" }
 
 hamcrest = { module = "org.hamcrest:hamcrest", version.ref = "hamcrest" }
 
@@ -172,6 +181,7 @@ semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 
 testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
+testcontainers-azure = {module = "org.testcontainers:testcontainers-azure", version.ref = "testcontainers" }
 testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers-modules" }
 testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers-modules" }
 testcontainers-localstack = {module = "org.testcontainers:localstack", version.ref = "testcontainers-modules" }

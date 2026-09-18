@@ -10,6 +10,7 @@ dependencies {
     implementation project(":RFS")
     implementation project(":SnapshotReader")
     implementation project(":SnapshotReaderGcs")
+    implementation project(":SnapshotReaderAzure")
     implementation project(":RfsPipeline")
     implementation project(":SolrReader")
     implementation project(":transformation")
