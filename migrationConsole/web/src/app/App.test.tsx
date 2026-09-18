@@ -313,6 +313,40 @@ function addLegacySourceNavigation(draft: ConfigDraft): ConfigDraft {
 }
 
 
+function runtimeSourceSnapshot(): ManageSnapshot {
+  const snapshot = structuredClone(manageSnapshot);
+  const source = structuredClone(
+    snapshot.nodes["resource:captureproxies:capture"],
+  );
+  Object.assign(source, {
+    id: "resource:sourceconfigs:legacy",
+    revision: "legacy-source-1",
+    parentId: "group:Sources:Sources",
+    childIds: [],
+    label: "legacy",
+    description: "sourceconfigs/legacy",
+    status: "ok",
+    phase: "Ready",
+    valueSummary: null,
+    diagnostics: [],
+    capabilities: [{
+      kind: "edit",
+      editTargetId: "edit:sourceClusters.legacy",
+      label: "Edit legacy",
+    }],
+    details: [],
+    relationships: [],
+    comparisons: [],
+    resourcePlural: "sourceconfigs",
+    resourceName: "legacy",
+    resourceType: "Source cluster",
+  });
+  snapshot.nodes[source.id] = source;
+  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  return snapshot;
+}
+
+
 function addSourceDefinitionCollection(
   draft: ConfigDraft,
   {
@@ -498,35 +532,7 @@ test("renders real manage state with exact-node details and capabilities", async
 
 
 test("opens the focused configuration deletion review from a runtime resource", async () => {
-  const snapshot = structuredClone(manageSnapshot);
-  const source = structuredClone(
-    snapshot.nodes["resource:captureproxies:capture"],
-  );
-  Object.assign(source, {
-    id: "resource:sourceconfigs:legacy",
-    revision: "legacy-source-1",
-    parentId: "group:Sources:Sources",
-    childIds: [],
-    label: "legacy",
-    description: "sourceconfigs/legacy",
-    status: "ok",
-    phase: "Ready",
-    valueSummary: null,
-    diagnostics: [],
-    capabilities: [{
-      kind: "edit",
-      editTargetId: "edit:sourceClusters.legacy",
-      label: "Edit legacy",
-    }],
-    details: [],
-    relationships: [],
-    comparisons: [],
-    resourcePlural: "sourceconfigs",
-    resourceName: "legacy",
-    resourceType: "Source cluster",
-  });
-  snapshot.nodes[source.id] = source;
-  snapshot.nodes["group:Sources:Sources"].childIds = [source.id];
+  const snapshot = runtimeSourceSnapshot();
   server.use(
     http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
   );
@@ -566,6 +572,49 @@ test("opens the focused configuration deletion review from a runtime resource", 
     name: "Remove legacy from configuration?",
   })).toBeNull();
   expect(screen.getByText("Edit legacy")).toBeInTheDocument();
+});
+
+
+test("shows runtime connectivity while its initial check is pending", async () => {
+  const snapshot = runtimeSourceSnapshot();
+  let resolveInventory: ((response: Response) => void) | undefined;
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+    http.post(
+      "*/api/v1/config/connectivity/inventory",
+      () => new Promise<Response>((resolve) => {
+        resolveInventory = resolve;
+      }),
+    ),
+  );
+
+  renderApp();
+  const tree = await screen.findByRole("tree", {
+    name: "Workflow resources",
+  });
+  const source = within(tree).getByRole("treeitem", {
+    name: /^legacy, Ready$/,
+  });
+  expect(within(source).getByLabelText("Connectivity pending"))
+    .toBeInTheDocument();
+  await userEvent.click(source);
+
+  expect(await screen.findByRole("heading", { name: "Connectivity" }))
+    .toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Pending" }))
+    .toBeInTheDocument();
+
+  await waitFor(() => expect(resolveInventory).toBeDefined());
+  resolveInventory?.(HttpResponse.json({
+    configNonce: configDraft.draftRevision,
+    targets: [{
+      id: "source:legacy",
+      kind: "source",
+      refName: "legacy",
+      label: "Source legacy",
+      editPath: ["sourceClusters", "legacy"],
+    }],
+  }));
 });
 
 

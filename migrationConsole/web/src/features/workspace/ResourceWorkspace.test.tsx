@@ -9,6 +9,34 @@ import { ResourceWorkspace } from "./ResourceWorkspace";
 
 
 describe("resource workspace connectivity", () => {
+  it("keeps a pending connectivity section visible before checks start", () => {
+    const connectivityState: ConnectivityTargetState = {
+      target: {
+        id: "source:source",
+        kind: "source",
+        refName: "source",
+        label: "Source source",
+        editPath: ["sourceClusters", "source"],
+      },
+      status: "pending",
+    };
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResourceWorkspace
+          connectivityState={connectivityState}
+          node={manageSnapshot.nodes["resource:captureproxies:capture"]}
+          onCheckConnectivity={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Connectivity" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pending" }))
+      .toBeInTheDocument();
+  });
+
   it("shows the current resource check and allows it to be rerun", async () => {
     const onCheckConnectivity = vi.fn();
     const connectivityState: ConnectivityTargetState = {

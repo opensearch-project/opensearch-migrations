@@ -609,7 +609,7 @@ const TreeRow = memo(function TreeRow({
             ) : null}
           </span>
           <span className="tree-row-tools">
-        {configurationOnly && connectivityStatus ? (
+        {connectivityStatus ? (
           <span
             aria-label={`Connectivity ${connectivityStatus.replaceAll("_", " ")}`}
             className={[

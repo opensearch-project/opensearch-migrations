@@ -57,7 +57,7 @@ export function validityStatusClass(status: ValidityStatus): string {
 export function ValidityStatusIcon({
   status,
 }: Readonly<{ status: ValidityStatus }>) {
-  if (status === "checking" || status === "stale") {
+  if (status === "checking" || status === "pending" || status === "stale") {
     return <LoaderCircle className="spin" aria-hidden="true" />;
   }
   if (
@@ -154,7 +154,7 @@ export function ValidityDetails({
           <span>{validityStatusLabel(item.status)}</span>
         </div>
         <button
-          disabled={item.status === "checking"}
+          disabled={item.status === "checking" || item.status === "pending"}
           onClick={() => onCheckConnectivity([item.connectivity!.target.id])}
           type="button"
         >

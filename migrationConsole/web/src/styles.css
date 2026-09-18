@@ -1701,6 +1701,11 @@ button.secondary-button:hover:not(:disabled) {
   color: var(--accent);
 }
 
+.tree-connectivity-indicator.connectivity-pending {
+  color: #3f7188;
+  background: #edf7fb;
+}
+
 .tree-row-tools {
   position: relative;
   display: inline-flex;
@@ -4528,6 +4533,16 @@ button.validity-tab[aria-selected="true"] {
   background: #dcecf3;
 }
 
+.validity-tab.status-pending > svg {
+  color: #366e87;
+  background: #e3f0f5;
+}
+
+.validity-tab.status-pending {
+  border-color: #79a6b9;
+  background: #f1f8fb;
+}
+
 .validity-tab-panel {
   height: 148px;
   padding: 9px 14px 11px;
@@ -4595,6 +4610,12 @@ button.validity-tab[aria-selected="true"] {
   border-color: #5f9db8;
   color: #205e78;
   background: #edf7fb;
+}
+
+.validity-indicator.status-pending {
+  border-color: #79a6b9;
+  color: #315f73;
+  background: #f1f8fb;
 }
 
 .config-property-validity-detail > td {

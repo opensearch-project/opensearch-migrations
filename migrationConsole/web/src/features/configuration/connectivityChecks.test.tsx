@@ -4,6 +4,8 @@ import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 
 import { server } from "../../test/server";
+import { manageSnapshot } from "../../test/fixtures";
+import type { ConnectivityTarget } from "../../api/client";
 import {
   applyBrowserEditOperation,
   createBrowserConfigDraft,
@@ -11,6 +13,7 @@ import {
 } from "./browserDraft";
 import {
   ConnectivityDialog,
+  runtimeConnectivityTargets,
   useConnectivityChecks,
   type ConnectivityTargetState,
 } from "./connectivityChecks";
@@ -30,11 +33,19 @@ snapshotMigrationConfigs: []
 };
 
 
-function Harness({ draft }: Readonly<{ draft: BrowserConfigDraft }>) {
+function Harness({
+  draft,
+  provisionalTargets = [],
+}: Readonly<{
+  draft: BrowserConfigDraft;
+  provisionalTargets?: ConnectivityTarget[];
+}>) {
   const connectivity = useConnectivityChecks(
     draft,
     ["sourceClusters", "source"],
     0,
+    true,
+    provisionalTargets,
   );
   return (
     <>
@@ -63,7 +74,10 @@ function Harness({ draft }: Readonly<{ draft: BrowserConfigDraft }>) {
 }
 
 
-function renderHarness(draft: BrowserConfigDraft) {
+function renderHarness(
+  draft: BrowserConfigDraft,
+  provisionalTargets: ConnectivityTarget[] = [],
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -71,13 +85,90 @@ function renderHarness(draft: BrowserConfigDraft) {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <Harness draft={draft} />
+      <Harness draft={draft} provisionalTargets={provisionalTargets} />
     </QueryClientProvider>,
   );
 }
 
 
 describe("configuration connectivity checks", () => {
+  it("derives stable runtime targets from resource edit capabilities", () => {
+    const source = structuredClone(
+      manageSnapshot.nodes["resource:captureproxies:capture"],
+    );
+    source.label = "legacy";
+    source.resourceType = "Source cluster";
+    source.capabilities = [{
+      kind: "edit",
+      editTargetId: "edit:sourceClusters.legacy",
+      label: "Edit legacy",
+    }];
+    const repository = structuredClone(source);
+    repository.label = "archive";
+    repository.resourceType = "Snapshot repository";
+    repository.capabilities = [{
+      kind: "edit",
+      editTargetId: (
+        "edit:sourceClusters.legacy.snapshotInfo.repos.archive"
+      ),
+      label: "Edit archive",
+    }];
+
+    expect(runtimeConnectivityTargets([source, repository])).toEqual([
+      {
+        editPath: [
+          "sourceClusters",
+          "legacy",
+          "snapshotInfo",
+          "repos",
+          "archive",
+        ],
+        id: "repository:legacy:archive",
+        kind: "repository",
+        label: "Repository archive",
+        refName: "archive",
+      },
+      {
+        editPath: ["sourceClusters", "legacy"],
+        id: "source:legacy",
+        kind: "source",
+        label: "Source legacy",
+        refName: "legacy",
+      },
+    ]);
+  });
+
+  it("shows runtime targets as pending while inventory is loading", async () => {
+    let resolveInventory: ((value: Response) => void) | undefined;
+    const draft = createBrowserConfigDraft(document);
+    const target: ConnectivityTarget = {
+      id: "source:source",
+      kind: "source",
+      refName: "source",
+      label: "Source source",
+      editPath: ["sourceClusters", "source"],
+    };
+    server.use(
+      http.post(
+        "*/api/v1/config/connectivity/inventory",
+        () => new Promise<Response>((resolve) => {
+          resolveInventory = resolve;
+        }),
+      ),
+    );
+
+    renderHarness(draft, [target]);
+
+    expect(screen.getByTestId("status")).toHaveTextContent("pending");
+    expect(screen.getByTestId("status-source:source"))
+      .toHaveTextContent("pending");
+    await waitFor(() => expect(resolveInventory).toBeDefined());
+    resolveInventory?.(HttpResponse.json({
+      configNonce: draft.draftRevision,
+      targets: [target],
+    }));
+  });
+
   it("reports loading while the initial inventory is being resolved", async () => {
     let resolveInventory: ((value: Response) => void) | undefined;
     const draft = createBrowserConfigDraft(document);
@@ -263,7 +354,7 @@ describe("configuration connectivity checks", () => {
     const view = renderHarness(initial);
 
     await waitFor(() => expect(screen.getByTestId("status"))
-      .toHaveTextContent("not_checked"));
+      .toHaveTextContent("pending"));
     fireEvent.click(screen.getByRole("button", { name: "Check" }));
     await waitFor(() => expect(screen.getByTestId("status"))
       .toHaveTextContent("valid"));

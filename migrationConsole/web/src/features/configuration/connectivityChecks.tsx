@@ -22,6 +22,7 @@ import {
   startConnectivityChecks,
   type ConnectivityInventory,
   type ConnectivityTarget,
+  type ManageNode,
   type Operation,
 } from "../../api/client";
 import { ModalDialog } from "../../components/ModalDialog";
@@ -33,6 +34,7 @@ export type ConnectivityStatus =
   | "partially_verified"
   | "failed"
   | "checking"
+  | "pending"
   | "stale"
   | "not_checked"
   | "not_applicable";
@@ -87,6 +89,7 @@ interface ConnectivityOperationResult {
 
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "waiting"]);
+const EMPTY_CONNECTIVITY_TARGETS: ConnectivityTarget[] = [];
 
 
 function resultFrom(operation: Operation): ConnectivityOperationResult | null {
@@ -109,6 +112,7 @@ export function connectivityStatusLabel(status: ConnectivityStatus): string {
     case "partially_verified": return "Partially verified";
     case "failed": return "Failed";
     case "checking": return "Checking";
+    case "pending": return "Pending";
     case "stale": return "Recheck needed";
     case "not_applicable": return "Not applicable";
     default: return "Not checked";
@@ -123,6 +127,7 @@ export function connectivityOverallStatus(
   const statuses = new Set(states.map((state) => state.status));
   if (statuses.has("failed")) return "failed";
   if (statuses.has("checking")) return "checking";
+  if (statuses.has("pending")) return "pending";
   if (statuses.has("stale")) return "stale";
   if (statuses.has("not_checked")) return "not_checked";
   if (statuses.has("partially_verified")) return "partially_verified";
@@ -144,6 +149,8 @@ function overallSummary(status: ConnectivityStatus): string {
       return "At least one configured connection failed its check.";
     case "checking":
       return "One or more connectivity checks are still running.";
+    case "pending":
+      return "One or more connectivity checks are waiting to start.";
     case "stale":
       return "Configured values changed after at least one check completed.";
     case "not_applicable":
@@ -173,6 +180,77 @@ function editTargetId(path: string[]): string {
 }
 
 
+function runtimeConnectivityTarget(node: ManageNode): ConnectivityTarget | null {
+  const editCapability = node.capabilities.find(
+    (capability) => capability.kind === "edit",
+  );
+  if (editCapability?.kind !== "edit") return null;
+  const type = node.resourceType?.toLocaleLowerCase();
+  const refName = node.label;
+  if (type === "source cluster") {
+    return {
+      id: `source:${refName}`,
+      kind: "source",
+      refName,
+      label: `Source ${refName}`,
+      editPath: ["sourceClusters", refName],
+    };
+  }
+  if (type === "target cluster") {
+    return {
+      id: `target:${refName}`,
+      kind: "target",
+      refName,
+      label: `Target ${refName}`,
+      editPath: ["targetClusters", refName],
+    };
+  }
+  if (type !== "snapshot repository") return null;
+  const editTarget = editCapability.editTargetId;
+  const prefix = "edit:sourceClusters.";
+  const suffix = `.snapshotInfo.repos.${refName}`;
+  if (!editTarget.startsWith(prefix) || !editTarget.endsWith(suffix)) {
+    return null;
+  }
+  const sourceName = editTarget.slice(
+    prefix.length,
+    editTarget.length - suffix.length,
+  );
+  if (!sourceName) return null;
+  return {
+    id: `repository:${sourceName}:${refName}`,
+    kind: "repository",
+    refName,
+    label: `Repository ${refName}`,
+    editPath: [
+      "sourceClusters",
+      sourceName,
+      "snapshotInfo",
+      "repos",
+      refName,
+    ],
+  };
+}
+
+
+// Runtime navigation arrives independently from connectivity inventory. Seed
+// concrete targets from its edit capabilities so the status UI has a stable
+// place on first paint instead of appearing after the first check finishes.
+// eslint-disable-next-line react-refresh/only-export-components
+export function runtimeConnectivityTargets(
+  nodes: Iterable<ManageNode>,
+): ConnectivityTarget[] {
+  const targets = new Map<string, ConnectivityTarget>();
+  for (const node of nodes) {
+    const target = runtimeConnectivityTarget(node);
+    if (target) targets.set(target.id, target);
+  }
+  return [...targets.values()].sort((left, right) => (
+    left.id.localeCompare(right.id)
+  ));
+}
+
+
 function targetForPath(
   targets: ConnectivityTarget[],
   path: string[] | null,
@@ -195,6 +273,7 @@ export function useConnectivityChecks(
   scopePath: string[] | null,
   debounceMs = 350,
   enabled = true,
+  provisionalTargets: ConnectivityTarget[] = EMPTY_CONNECTIVITY_TARGETS,
 ) {
   const queryClient = useQueryClient();
   const nonce = draft?.draftRevision ?? null;
@@ -303,8 +382,8 @@ export function useConnectivityChecks(
     );
   }, [nonce, operations.data, started, startingTargetIds]);
   const targets = useMemo(
-    () => inventory?.targets ?? [],
-    [inventory?.targets],
+    () => inventory?.targets ?? provisionalTargets,
+    [inventory?.targets, provisionalTargets],
   );
   const states = useMemo(() => {
     return targets.map((target): ConnectivityTargetState => {
@@ -315,9 +394,9 @@ export function useConnectivityChecks(
       if (current) return { target, status: current.status, check: current };
       const prior = priorById.get(target.id);
       if (prior) return { target, status: "stale", check: prior };
-      return { target, status: "not_checked" };
+      return { target, status: enabled ? "pending" : "not_checked" };
     });
-  }, [activeTargetIds, currentById, priorById, targets]);
+  }, [activeTargetIds, currentById, enabled, priorById, targets]);
   const navigationStates = useMemo(
     () => Object.fromEntries(
       states.map(({ target, status }) => [editTargetId(target.editPath), status]),
@@ -374,7 +453,11 @@ export function useConnectivityChecks(
   }, [nonce, queryClient, rawYaml, targets]);
   const autoTargetKey = useMemo(
     () => states
-      .filter(({ status }) => status === "not_checked" || status === "stale")
+      .filter(({ status }) => (
+        status === "pending"
+        || status === "not_checked"
+        || status === "stale"
+      ))
       .map(({ target }) => target.id)
       .sort()
       .join(","),
@@ -445,6 +528,8 @@ export function ConnectivityCheckDetails({
       <p>
         {state.status === "checking"
           ? "The check is running in the configured execution context."
+          : state.status === "pending"
+            ? "The check will start automatically."
           : "Run this check to verify the current saved or unsaved values."}
       </p>
     );
@@ -525,7 +610,7 @@ export function ConnectivityPanel({
           <span>{connectivityStatusLabel(state.status)}</span>
         </div>
         <button
-          disabled={state.status === "checking"}
+          disabled={state.status === "checking" || state.status === "pending"}
           onClick={onCheck}
           type="button"
         >
@@ -552,7 +637,9 @@ export function ConnectivityDialog({
   problem: string;
   states: ConnectivityTargetState[];
 }>) {
-  const checking = states.some((state) => state.status === "checking");
+  const checking = states.some((state) => (
+    state.status === "checking" || state.status === "pending"
+  ));
   const aggregateStatus = connectivityOverallStatus(states);
   return (
     <ModalDialog
@@ -619,7 +706,9 @@ export function ConnectivityDialog({
                   <span>{connectivityStatusLabel(state.status)}</span>
                 </div>
                 <button
-                  disabled={state.status === "checking"}
+                  disabled={
+                    state.status === "checking" || state.status === "pending"
+                  }
                   onClick={() => onCheck([state.target.id])}
                   type="button"
                 >
