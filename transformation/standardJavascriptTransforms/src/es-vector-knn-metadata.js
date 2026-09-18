@@ -13,24 +13,23 @@ function main(context) {
         let changed = false;
 
         const buildKnn = (def) => {
-            const { dims, similarity, index_options: opts = {} } = def;
-            const { m, ef_construction: efConstr } = opts;
-            return {
-                type: 'knn_vector',
-                dimension: dims,
-                method: {
-                    name:       'hnsw',
-                    engine:     'lucene',
-                    space_type: mapSimilarity(similarity),
-                    parameters: {
-                        encoder: {
-                            name: "sq"
-                        },
-                        m: m,
-                        ef_construction: efConstr
-                    }
-                }
+            const { dims, similarity, index_options: opts } = def;
+            const method = {
+                name:       'hnsw',
+                engine:     'lucene',
+                space_type: mapSimilarity(similarity),
             };
+            // Only include explicit HNSW parameters when the source field had index_options.
+            // Omitting parameters lets OpenSearch use its own defaults, which avoids
+            // NPE in OS 3.0+ when m/ef_construction would otherwise be null.
+            if (opts) {
+                const { m, ef_construction: efConstr } = opts;
+                const params = { encoder: { name: 'sq' } };
+                if (m != null) params.m = m;
+                if (efConstr != null) params.ef_construction = efConstr;
+                method.parameters = params;
+            }
+            return { type: 'knn_vector', dimension: dims, method };
         };
 
         const recurse = (node) => {
@@ -78,6 +77,10 @@ function main(context) {
     };
 
     return applyTransformation;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = main;
 }
 
 (() => main)();

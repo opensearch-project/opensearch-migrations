@@ -105,7 +105,7 @@ final class OpenSearchIndexCreator {
      * Exact internal settings to strip (after optional "index." prefix).
      */
     private static final Set<String> INTERNAL_SETTINGS_EXACT = Set.of(
-        "creation_date", "provided_name", "uuid", "version", "mapping", "mapper",
+        "creation_date", "provided_name", "uuid", "version", "mapper",
         "history.uuid", "verified_before_close"
     );
 
