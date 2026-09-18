@@ -31,6 +31,8 @@ import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -88,9 +90,9 @@ class NettyScanningHttpProxyTest {
     @Test
     public void testRoundTrip() throws IOException, InterruptedException,
         PortFinder.ExceededMaxPortAssigmentAttemptException {
-        final int NUM_EXPECTED_TRAFFIC_STREAMS = 1;
+        final int NUM_EXPECTED_TRAFFIC_RECORDS = 1;
         final int NUM_INTERACTIONS = 3;
-        CountDownLatch interactionsCapturedCountdown = new CountDownLatch(NUM_EXPECTED_TRAFFIC_STREAMS);
+        CountDownLatch interactionsCapturedCountdown = new CountDownLatch(NUM_EXPECTED_TRAFFIC_RECORDS);
         var captureFactory = new InMemoryConnectionCaptureFactory(
             TEST_NODE_ID_STRING,
             1024 * 1024,
@@ -113,8 +115,8 @@ class NettyScanningHttpProxyTest {
             var recordedStreams = captureFactory.getRecordedStreams();
             Assertions.assertEquals(1, recordedStreams.size());
             var recordedTrafficStreams = captureFactory.getRecordedTrafficStreamsStream().toArray(TrafficStream[]::new);
-            Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_STREAMS, recordedTrafficStreams.length);
-            log.info("Recorded traffic stream:\n" + recordedTrafficStreams[0]);
+            Assertions.assertEquals(NUM_EXPECTED_TRAFFIC_RECORDS, recordedTrafficStreams.length);
+            log.info("Recorded traffic record:\n" + recordedTrafficStreams[0]);
             var coalescedTrafficList = coalesceObservations(recordedTrafficStreams[0]);
             Assertions.assertEquals(NUM_INTERACTIONS * 2, coalescedTrafficList.size());
             int counter = 0;
@@ -145,8 +147,13 @@ class NettyScanningHttpProxyTest {
     }
 
     @Test
-    public void testTlsHandshakeFailureIsLoggedAndProxyStaysAlive() throws Exception {
-        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+    public void testTlsHandshakeFailureIsLoggedTerminallyCapturedAndProxyStaysAlive() throws Exception {
+        var tlsFailureCaptured = new CountDownLatch(1);
+        var captureFactory = new InMemoryConnectionCaptureFactory(
+            TEST_NODE_ID_STRING,
+            1024 * 1024,
+            tlsFailureCaptured::countDown
+        );
         var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
         var rootCtx = new RootWireLoggingContext(
             inMemoryInstrumentationBundle.openTelemetrySdk,
@@ -160,6 +167,17 @@ class NettyScanningHttpProxyTest {
             sendPlaintextToTlsEndpoint(servers.proxy.getProxyPort());
 
             assertEventuallyLogged(closeableLogSetup, ProxyChannelInitializer.TLS_HANDSHAKE_FAILURE_LOG_MESSAGE);
+            Assertions.assertTrue(tlsFailureCaptured.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            var failedTlsConnection = captureFactory.getRecordedTrafficStreamsStream()
+                .findFirst()
+                .orElseThrow();
+            Assertions.assertEquals(
+                1,
+                failedTlsConnection.getSubStreamList()
+                    .stream()
+                    .filter(observation -> observation.hasClose())
+                    .count()
+            );
 
             var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
             Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
@@ -193,6 +211,42 @@ class NettyScanningHttpProxyTest {
             var responseBody = makeTestRequestViaHttpsClient(servers.proxyEndpoint(), sslContext);
             Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
         }
+    }
+
+    @Test
+    public void unexpectedEventLoopTerminationReportsAnUnstableProcess() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var unstableFailure = new AtomicReference<Throwable>();
+
+        try (var servers = startServers(rootCtx, captureFactory, null, unstableFailure::set)) {
+            servers.proxy.workerGroup.next().shutdownGracefully().sync();
+
+            assertEventually(() -> unstableFailure.get() != null);
+            Assertions.assertTrue(
+                unstableFailure.get().getMessage().contains("worker-0 event loop terminated unexpectedly")
+            );
+        }
+    }
+
+    @Test
+    public void plannedProxyStopDoesNotReportEventLoopFailure() throws Exception {
+        var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024 * 1024, () -> {});
+        var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
+        var rootCtx = new RootWireLoggingContext(
+            inMemoryInstrumentationBundle.openTelemetrySdk,
+            IContextTracker.DO_NOTHING_TRACKER
+        );
+        var unstableFailure = new AtomicReference<Throwable>();
+        var servers = startServers(rootCtx, captureFactory, null, unstableFailure::set);
+
+        servers.close();
+
+        Assertions.assertEquals(null, unstableFailure.get());
     }
 
     private static String normalizeMessage(String s) {
@@ -256,6 +310,20 @@ class NettyScanningHttpProxyTest {
         IConnectionCaptureFactory connectionCaptureFactory,
         java.util.function.Supplier<SSLEngine> sslEngineSupplier
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return startServers(
+            rootCtx,
+            connectionCaptureFactory,
+            sslEngineSupplier,
+            failure -> log.error("Unexpected event-loop termination in proxy test", failure)
+        );
+    }
+
+    private static RunningProxyServers startServers(
+        RootWireLoggingContext rootCtx,
+        IConnectionCaptureFactory connectionCaptureFactory,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier,
+        java.util.function.Consumer<Throwable> unstableProcessFailureHandler
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var nshp = new AtomicReference<NettyScanningHttpProxy>();
         var upstreamTestServer = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -275,13 +343,14 @@ class NettyScanningHttpProxyTest {
         }
 
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
-            nshp.set(new NettyScanningHttpProxy(port));
+            nshp.set(new NettyScanningHttpProxy(port, unstableProcessFailureHandler));
             try {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null, 10, Duration.ofSeconds(10));
 
                 nshp.get()
                     .start(new ProxyChannelInitializer(rootCtx, connectionPool, sslEngineSupplier,
-                        connectionCaptureFactory, new RequestCapturePredicate()), 1);
+                        connectionCaptureFactory, new RequestCapturePredicate(),
+                        new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)), 1);
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -331,6 +400,18 @@ class NettyScanningHttpProxyTest {
         }
         Assertions.fail("Expected log message containing: " + expectedMessage
             + ". Actual log messages: " + logSetup.getLogEvents());
+    }
+
+    private static void assertEventually(java.util.function.BooleanSupplier condition)
+        throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(25);
+        }
+        Assertions.fail("Expected condition to become true");
     }
 
     private static long countLogEventsContaining(CloseableLogSetup logSetup, String expectedMessage) {

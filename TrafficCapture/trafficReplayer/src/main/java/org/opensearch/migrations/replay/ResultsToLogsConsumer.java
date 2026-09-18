@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -70,19 +69,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
     }
 
     private Map<String, Object> toJSONObject(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsed) {
-        var tupleMap = new LinkedHashMap<String, Object>();
-
-        parsed.sourceRequestOp.ifPresent(r -> tupleMap.put("sourceRequest", r));
-        parsed.sourceResponseOp.ifPresent(r -> tupleMap.put("sourceResponse", r));
-        parsed.targetRequestOp.ifPresent(r -> tupleMap.put("targetRequest", r));
-        tupleMap.put("targetResponses", parsed.targetResponseList);
-
-        tupleMap.put("connectionId", formatUniqueRequestKey(tuple.getRequestKey()));
-        Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> tupleMap.put("error", e.toString()));
-        tupleMap.put("numRequests",  tuple.responseList.size());
-        tupleMap.put("numErrors",  tuple.responseList.stream().filter(r->r.errorCause!=null).count());
-
-        return tupleMap;
+        return parsed.toTupleMap(tuple);
     }
 
     /**

@@ -8,7 +8,6 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +39,7 @@ public class MetricsDoubleCountingWithRetriesTest {
                 URI.create("http://localhost:9200"),
                 null,
                 () -> mock(IJsonTransformer.class),
-                mock(TrafficStreamLimiter.class),
+                1,
                 mock(TrafficReplayerCore.IWorkTracker.class),
                 mock(IRetryVisitorFactory.class)
             );

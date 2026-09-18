@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -32,26 +33,38 @@ public class RequestTransformerAndSender<T> {
                          Consumer<AggregatedRawResponse> resultsConsumer) {
         var perRequestStatefulVisitor =
             retryVisitorFactory.getRetryCheckVisitor(transformedResult, finishedAccumulatingResponseFuture);
-        return (requestBytes, aggResponse, t) -> {
-            resultsConsumer.accept(aggResponse);
-            if (!shouldRetry()) {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.DONE,
-                        null),
-                    () -> "Returning a future to NOT retry because the class is currently prohibiting retries" +
-                        "");
-            }
-            if (t != null) {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.RETRY,
-                        null),
-                    () -> "Returning a future to retry due to a connection exception");
-            } else {
+        return new RequestSenderOrchestrator.RetryVisitor<>() {
+            @Override
+            public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<T>> visit(
+                io.netty.buffer.ByteBuf requestBytes,
+                AggregatedRawResponse aggResponse,
+                Throwable t
+            ) {
+                resultsConsumer.accept(aggResponse);
+                if (!shouldRetry()) {
+                    return TextTrackedFuture.completedFuture(
+                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                            RequestSenderOrchestrator.RetryDirective.DONE,
+                            null),
+                        () -> "Returning a future to NOT retry because the class is currently prohibiting retries"
+                    );
+                }
+                if (t != null) {
+                    return TextTrackedFuture.completedFuture(
+                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                            RequestSenderOrchestrator.RetryDirective.RETRY,
+                            null),
+                        () -> "Returning a future to retry due to a connection exception"
+                    );
+                }
                 assert (aggResponse != null);
+                return perRequestStatefulVisitor.visit(requestBytes, aggResponse, null);
             }
-            return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
+
+            @Override
+            public void close() {
+                perRequestStatefulVisitor.close();
+            }
         };
     }
 
@@ -96,61 +109,36 @@ public class RequestTransformerAndSender<T> {
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         @NonNull Instant start,
         @NonNull Instant end,
-        Supplier<Stream<byte[]>> packetsSupplier) {
-        return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
-            finishedAccumulatingResponseFuture, ctx, start, end, packetsSupplier, null);
-    }
-
-    public TrackedFuture<String, T> transformAndSendRequest(
-        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-        ReplayEngine replayEngine,
-        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx,
-        @NonNull Instant start,
-        @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier,
-        Duration quiescentDurationForRequest) {
+        Duration quiescentDurationForRequest,
+        @NonNull AsyncPermitPool permitPool
+    ) {
         try {
-            var requestReadyFuture = replayEngine.scheduleTransformationWork(
+            return replayEngine.scheduleRequestLifecycle(
                 ctx,
                 start,
-                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
-            );
-            log.atDebug().setMessage("request transform future for {} = {}")
-                .addArgument(ctx)
-                .addArgument(requestReadyFuture)
-                .log();
-            final Duration effectiveQuiescentDuration = quiescentDurationForRequest;
-            // It might be safer to chain this work directly inside the scheduleWork call above so that the
-            // read buffer horizons aren't set after the transformation work finishes, but after the packets
-            // are fully handled
-            return requestReadyFuture.thenCompose(
-                transformedRequest -> {
-                    if (transformedRequest.transformedOutput == null) {
-                        @SuppressWarnings("unchecked")
-                        var filtered = (TrackedFuture<String, T>) TextTrackedFuture.completedFuture(
-                            (T) new TransformedTargetRequestAndResponseList(
-                                null, transformedRequest.transformationStatus),
-                            () -> "request filtered - skipping target send"
-                        );
-                        return filtered;
-                    }
-                    return replayEngine.scheduleRequest(
-                        ctx,
-                        start,
-                        end,
-                        transformedRequest.transformedOutput.numByteBufs(),
-                        transformedRequest.transformedOutput,
-                        getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                            arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                        effectiveQuiescentDuration
-                    );
+                end,
+                permitPool,
+                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier),
+                transformedRequest -> getRetryCheckVisitor(
+                    transformedRequest,
+                    finishedAccumulatingResponseFuture,
+                    response -> perResponseConsumer(
+                        response,
+                        transformedRequest.transformationStatus,
+                        ctx
+                    )
+                ),
+                transformationStatus -> {
+                    @SuppressWarnings("unchecked")
+                    var filtered = (T) new TransformedTargetRequestAndResponseList(null, transformationStatus);
+                    return filtered;
                 },
-                () -> "transitioning transformed packets onto the wire"
+                quiescentDurationForRequest
             );
         } catch (Exception e) {
-            log.debug("Caught exception in transformAndSendRequest, so failing future");
-            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.writeToSocketAndClose");
+            log.debug("Caught exception while admitting the request lifecycle", e);
+            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.requestLifecycle");
         }
     }
 

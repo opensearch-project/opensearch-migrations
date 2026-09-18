@@ -7,9 +7,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiFunction;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.datahandlers.http.helpers.WriteMeteringH
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.netty.BacksideHttpWatcherHandler;
 import org.opensearch.migrations.replay.netty.BacksideSnifferHandler;
+import org.opensearch.migrations.replay.netty.InterimHttpResponseHandler;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
@@ -35,18 +36,22 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.EventLoop;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpResponseDecoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.util.concurrent.ScheduledFuture;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
+
+    private static final byte[] HEAD_METHOD_BYTES = "HEAD".getBytes(StandardCharsets.US_ASCII);
 
     /**
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
@@ -74,6 +79,60 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
     Duration readTimeoutDuration;
+    private final CompletableFuture<AggregatedRawResponse> responseFuture = new CompletableFuture<>();
+    private final OutboundRequestMethod outboundRequestMethod = new OutboundRequestMethod();
+    private CancellationException cancellationCause;
+    private boolean spansClosed;
+
+    private static final class OutboundRequestMethod {
+        private int bytesRead;
+        private boolean couldBeHead = true;
+        private boolean complete;
+
+        private void accept(ByteBuf packetData) {
+            if (complete) {
+                return;
+            }
+            var bytes = packetData.duplicate();
+            while (bytes.isReadable()) {
+                var next = bytes.readUnsignedByte();
+                if (bytesRead == 0 && (next == '\r' || next == '\n')) {
+                    continue;
+                }
+                if (next == ' ' || next == '\t') {
+                    complete = true;
+                    return;
+                }
+                if (next == '\r' || next == '\n') {
+                    couldBeHead = false;
+                    complete = true;
+                    return;
+                }
+                if (bytesRead >= HEAD_METHOD_BYTES.length || next != HEAD_METHOD_BYTES[bytesRead]) {
+                    couldBeHead = false;
+                }
+                bytesRead++;
+            }
+        }
+
+        private boolean isHead() {
+            return complete && couldBeHead && bytesRead == HEAD_METHOD_BYTES.length;
+        }
+    }
+
+    private static final class RequestMethodAwareHttpResponseDecoder extends HttpResponseDecoder {
+        private final OutboundRequestMethod requestMethod;
+
+        private RequestMethodAwareHttpResponseDecoder(OutboundRequestMethod requestMethod) {
+            this.requestMethod = requestMethod;
+        }
+
+        @Override
+        protected boolean isContentAlwaysEmpty(HttpMessage message) {
+            return requestMethod.isHead() || super.isContentAlwaysEmpty(message);
+        }
+    }
+
 
     private static class ConnectionClosedListenerHandler extends ChannelInboundHandlerAdapter {
         private final IReplayContexts.ISocketContext socketContext;
@@ -115,6 +174,12 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private TrackedFuture<String, Void> activateLiveChannel() {
+        if (cancellationCause != null) {
+            return TextTrackedFuture.failedFuture(
+                cancellationCause,
+                () -> "target request was cancelled before channel activation"
+            );
+        }
         final var channelCtx = replaySession.getChannelKeyContext();
         return replaySession.getChannelFutureInActiveState(getParentContext())
             .thenCompose(
@@ -131,6 +196,13 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     }
 
                     final var c = channelFuture.channel();
+                    if (cancellationCause != null) {
+                        c.close();
+                        return TextTrackedFuture.failedFuture(
+                            cancellationCause,
+                            () -> "target request was cancelled while activating its channel"
+                        );
+                    }
                     if (c.isActive()) {
                         this.channel = c;
                         initializeRequestHandlers();
@@ -164,9 +236,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
 
-    public static BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String,ChannelFuture>>
+    public static ConnectionReplaySession.ChannelFutureFactory
     createClientConnectionFactory(SslContext sslContext, URI uri) {
-        return (eventLoop, ctx) -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, uri, ctx);
+        return (eventLoop, ctx, cancellationSignal) ->
+            NettyPacketToHttpConsumer.createClientConnection(
+                eventLoop,
+                sslContext,
+                uri,
+                ctx,
+                Duration.ofMillis(1),
+                cancellationSignal
+            );
     }
 
     public static class ChannelNotActiveException extends IOException { }
@@ -177,91 +257,322 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         URI serverUri,
         IReplayContexts.ITargetRequestContext replayedRequestCtx
     ) {
-        return createClientConnection(eventLoop, sslContext, serverUri, replayedRequestCtx, Duration.ofMillis(1));
+        return createClientConnection(
+            eventLoop,
+            sslContext,
+            serverUri,
+            replayedRequestCtx,
+            Duration.ofMillis(1),
+            new ConnectionReplaySession.CancellationSignal()
+        );
     }
 
     public static TrackedFuture<String, ChannelFuture> createClientConnection(
+        EventLoop eventLoop,
+        SslContext sslContext,
+        URI serverUri,
+        IReplayContexts.ITargetRequestContext requestCtx,
+        Duration nextRetryDuration
+    ) {
+        return createClientConnection(
+            eventLoop,
+            sslContext,
+            serverUri,
+            requestCtx,
+            nextRetryDuration,
+            new ConnectionReplaySession.CancellationSignal()
+        );
+    }
+
+    private static TrackedFuture<String, ChannelFuture> createClientConnection(
+        EventLoop eventLoop,
+        SslContext sslContext,
+        URI serverUri,
+        IReplayContexts.ITargetRequestContext requestCtx,
+        Duration nextRetryDuration,
+        ConnectionReplaySession.CancellationSignal cancellationSignal
+    ) {
+        var completion = new CompletableFuture<ChannelFuture>();
+        var attempt = new ClientConnectionAttempt(
+            eventLoop,
+            sslContext,
+            serverUri,
+            requestCtx,
+            cancellationSignal,
+            completion
+        );
+        attempt.start(nextRetryDuration);
+        return new TextTrackedFuture<>(completion, "creating a cancellable target connection");
+    }
+
+    private static final class ClientConnectionAttempt {
+        private final EventLoop eventLoop;
+        private final SslContext sslContext;
+        private final URI serverUri;
+        private final IReplayContexts.ITargetRequestContext requestContext;
+        private final ConnectionReplaySession.CancellationSignal cancellationSignal;
+        private final CompletableFuture<ChannelFuture> completion;
+        private ChannelFuture activeChannelFuture;
+        private ScheduledFuture<?> retryFuture;
+
+        private ClientConnectionAttempt(
             EventLoop eventLoop,
             SslContext sslContext,
             URI serverUri,
-            IReplayContexts.ITargetRequestContext requestCtx,
-            Duration nextRetryDuration
-    ) {
-        var connectingCtx = requestCtx.createHttpConnectingContext();
-        if (eventLoop.isShuttingDown()) {
-            return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
-                () -> "createClientConnection is failing due to the pending shutdown of the EventLoop");
+            IReplayContexts.ITargetRequestContext requestContext,
+            ConnectionReplaySession.CancellationSignal cancellationSignal,
+            CompletableFuture<ChannelFuture> completion
+        ) {
+            this.eventLoop = eventLoop;
+            this.sslContext = sslContext;
+            this.serverUri = serverUri;
+            this.requestContext = requestContext;
+            this.cancellationSignal = cancellationSignal;
+            this.completion = completion;
         }
-        String host = serverUri.getHost();
-        int port = serverUri.getPort();
-        log.atTrace().setMessage("Active - setting up backend connection to {}:{}")
-            .addArgument(host)
-            .addArgument(port)
-            .log();
 
-        Bootstrap b = new Bootstrap();
-        var channelKeyCtx = requestCtx.getLogicalEnclosingScope().getChannelKeyContext();
-        b.group(eventLoop).handler(new ChannelInitializer<>() {
-            @Override
-            protected void initChannel(@NonNull Channel ch) throws Exception {
-                ch.pipeline()
-                    .addFirst(CONNECTION_CLOSE_HANDLER_NAME, new ConnectionClosedListenerHandler(channelKeyCtx));
+        private void start(Duration nextRetryDuration) {
+            var cancellationRegistration = cancellationSignal.register(this::cancel);
+            completion.whenComplete((ignored, failure) -> cancellationRegistration.close());
+            runOnEventLoop(() -> connect(nextRetryDuration));
+        }
+
+        private void connect(Duration nextRetryDuration) {
+            if (completion.isDone()) {
+                return;
             }
-        }).channel(NioSocketChannel.class).option(ChannelOption.AUTO_READ, false);
+            if (cancellationSignal.cause() != null) {
+                cancelOnEventLoop();
+                return;
+            }
+            if (eventLoop.isShuttingDown()) {
+                fail(new IllegalStateException("EventLoop is shutting down"));
+                return;
+            }
 
-        var outboundChannelFuture = b.connect(host, port);
+            var connectingCtx = requestContext.createHttpConnectingContext();
+            String host = serverUri.getHost();
+            int port = serverUri.getPort();
+            log.atTrace().setMessage("Active - setting up backend connection to {}:{}")
+                .addArgument(host)
+                .addArgument(port)
+                .log();
 
-        return NettyFutureBinders.bindNettyFutureToTrackableFuture(outboundChannelFuture, "")
-            .getDeferredFutureThroughHandle((voidVal, tWrapped) -> {
-                try {
-                    var t = TrackedFuture.unwindPossibleCompletionException(tWrapped);
-                    if (t != null) {
-                        log.atWarn().setCause(t)
-                            .setMessage("{} Caught exception while trying to get an active channel")
-                            .addArgument(channelKeyCtx).log();
-                    } else if (!outboundChannelFuture.channel().isActive()) {
-                        t = new ChannelNotActiveException();
+            try {
+                Bootstrap bootstrap = new Bootstrap();
+                var channelKeyCtx = requestContext.getLogicalEnclosingScope().getChannelKeyContext();
+                bootstrap.group(eventLoop).handler(new ChannelInitializer<>() {
+                    @Override
+                    protected void initChannel(@NonNull Channel ch) throws Exception {
+                        ch.pipeline()
+                            .addFirst(
+                                CONNECTION_CLOSE_HANDLER_NAME,
+                                new ConnectionClosedListenerHandler(channelKeyCtx)
+                            );
                     }
-                    if (t == null) {
-                        return initializeConnectionHandlers(sslContext, channelKeyCtx, outboundChannelFuture);
+                }).channel(NioSocketChannel.class).option(ChannelOption.AUTO_READ, false);
+
+                var outboundChannelFuture = bootstrap.connect(host, port);
+                activeChannelFuture = outboundChannelFuture;
+                outboundChannelFuture.addListener(ignored -> {
+                    try {
+                        onConnectSettled(
+                            outboundChannelFuture,
+                            nextRetryDuration,
+                            connectingCtx
+                        );
+                    } finally {
+                        connectingCtx.close();
                     }
-                    connectingCtx.addTraceException(t, true);
-                    if (t instanceof Exception) { // let Throwables propagate
-                        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, nextRetryDuration)
-                            .thenCompose(x -> createClientConnection(eventLoop, sslContext, serverUri, requestCtx,
-                                    Duration.ofMillis(Math.min(MAX_WAIT_BETWEEN_CREATE_RETRIES.toMillis(),
-                                        nextRetryDuration.multipliedBy(2).toMillis()))),
-                                () -> "");
-                    } else { // give up
-                        return TextTrackedFuture.failedFuture(t, () -> "failed to connect");
-                    }
-                } finally {
-                    connectingCtx.close();
+                });
+            } catch (Throwable t) {
+                connectingCtx.close();
+                fail(t);
+            }
+        }
+
+        private void onConnectSettled(
+            ChannelFuture outboundChannelFuture,
+            Duration nextRetryDuration,
+            IReplayContexts.IRequestConnectingContext connectingContext
+        ) {
+            if (completion.isDone()) {
+                activeChannelFuture = null;
+                closeChannel(outboundChannelFuture);
+                return;
+            }
+            if (cancellationSignal.cause() != null) {
+                activeChannelFuture = null;
+                closeChannel(outboundChannelFuture);
+                cancelOnEventLoop();
+                return;
+            }
+
+            Throwable failure = outboundChannelFuture.isSuccess() ? null : outboundChannelFuture.cause();
+            if (failure == null && !outboundChannelFuture.channel().isActive()) {
+                failure = new ChannelNotActiveException();
+            }
+            if (failure != null) {
+                activeChannelFuture = null;
+                closeChannel(outboundChannelFuture);
+                log.atWarn().setCause(failure)
+                    .setMessage("{} Caught exception while trying to get an active channel")
+                    .addArgument(requestContext.getLogicalEnclosingScope().getChannelKeyContext())
+                    .log();
+                connectingContext.addTraceException(failure, true);
+                if (failure instanceof Exception) {
+                    scheduleRetry(nextRetryDuration);
+                } else {
+                    fail(failure);
                 }
-            }, () -> "");
-    }
+                return;
+            }
 
-    private static TrackedFuture<String, ChannelFuture>
-    initializeConnectionHandlers(SslContext sslContext,
-                                 IReplayContexts.IChannelKeyContext channelKeyContext,
-                                 ChannelFuture outboundChannelFuture)
-    {
-        final var channel = outboundChannelFuture.channel();
-        log.atTrace().setMessage("{} successfully done setting up client channel for {}")
-            .addArgument(channelKeyContext::getChannelKey)
-            .addArgument(channel)
-            .log();
-        var pipeline = channel.pipeline();
-        if (sslContext != null) {
+            try {
+                var initialization = initializeConnectionHandlers(outboundChannelFuture);
+                initialization.future.whenComplete((channelFuture, initializationFailure) ->
+                    runOnEventLoop(() ->
+                        onInitializationSettled(
+                            outboundChannelFuture,
+                            channelFuture,
+                            initializationFailure
+                        )
+                    )
+                );
+            } catch (Throwable t) {
+                closeChannel(outboundChannelFuture);
+                fail(t);
+            }
+        }
+
+        private void onInitializationSettled(
+            ChannelFuture outboundChannelFuture,
+            ChannelFuture initializedChannelFuture,
+            Throwable failure
+        ) {
+            if (activeChannelFuture == outboundChannelFuture) {
+                activeChannelFuture = null;
+            }
+            if (cancellationSignal.cause() != null) {
+                closeChannel(outboundChannelFuture);
+                cancelOnEventLoop();
+                return;
+            }
+            if (failure != null) {
+                closeChannel(outboundChannelFuture);
+                fail(TrackedFuture.unwindPossibleCompletionException(failure));
+                return;
+            }
+            if (initializedChannelFuture == null) {
+                closeChannel(outboundChannelFuture);
+                fail(new NullPointerException("channel initialization completed without a ChannelFuture"));
+                return;
+            }
+            completion.complete(initializedChannelFuture);
+        }
+
+        /*
+         * TLS handshake failures remain terminal for this attempt rather than entering the
+         * connection-acquisition retry loop.
+         */
+        private TrackedFuture<String, ChannelFuture> initializeConnectionHandlers(
+            ChannelFuture outboundChannelFuture
+        ) {
+            final var channel = outboundChannelFuture.channel();
+            var channelKeyContext = requestContext.getLogicalEnclosingScope().getChannelKeyContext();
+            log.atTrace().setMessage("{} successfully done setting up client channel for {}")
+                .addArgument(channelKeyContext::getChannelKey)
+                .addArgument(channel)
+                .log();
+            var pipeline = channel.pipeline();
+            if (sslContext == null) {
+                return TextTrackedFuture.completedFuture(outboundChannelFuture, () -> "");
+            }
             var sslEngine = sslContext.newEngine(channel.alloc());
             sslEngine.setUseClientMode(true);
             var sslHandler = new SslHandler(sslEngine);
             addLoggingHandlerLast(pipeline, "A");
             pipeline.addLast(SSL_HANDLER_NAME, sslHandler);
             return NettyFutureBinders.bindNettyFutureToTrackableFuture(sslHandler.handshakeFuture(), () -> "")
-                .thenApply(voidVal2 -> outboundChannelFuture, () -> "");
-        } else {
-            return TextTrackedFuture.completedFuture(outboundChannelFuture, () -> "");
+                .thenApply(ignored -> outboundChannelFuture, () -> "");
+        }
+
+        private void scheduleRetry(Duration retryDelay) {
+            if (cancellationSignal.cause() != null) {
+                cancelOnEventLoop();
+                return;
+            }
+            if (eventLoop.isShuttingDown()) {
+                fail(new IllegalStateException("EventLoop is shutting down"));
+                return;
+            }
+            var delayMillis = Math.max(0, retryDelay.toMillis());
+            var nextRetryDelay = Duration.ofMillis(
+                Math.min(
+                    MAX_WAIT_BETWEEN_CREATE_RETRIES.toMillis(),
+                    retryDelay.multipliedBy(2).toMillis()
+                )
+            );
+            activeChannelFuture = null;
+            try {
+                retryFuture = eventLoop.schedule(() -> {
+                    retryFuture = null;
+                    connect(nextRetryDelay);
+                }, delayMillis, TimeUnit.MILLISECONDS);
+            } catch (Throwable t) {
+                fail(t);
+            }
+        }
+
+        private void cancel() {
+            runOnEventLoop(this::cancelOnEventLoop);
+        }
+
+        private void cancelOnEventLoop() {
+            var cause = cancellationSignal.cause();
+            if (cause == null || completion.isDone()) {
+                return;
+            }
+            if (retryFuture != null) {
+                var retry = retryFuture;
+                retryFuture = null;
+                retry.cancel(false);
+            }
+            if (activeChannelFuture != null) {
+                var channelFuture = activeChannelFuture;
+                activeChannelFuture = null;
+                channelFuture.cancel(false);
+                closeChannel(channelFuture);
+            }
+            completion.completeExceptionally(cause);
+        }
+
+        private void fail(Throwable failure) {
+            if (activeChannelFuture != null) {
+                var channelFuture = activeChannelFuture;
+                activeChannelFuture = null;
+                closeChannel(channelFuture);
+            }
+            completion.completeExceptionally(failure);
+        }
+
+        private void closeChannel(ChannelFuture channelFuture) {
+            try {
+                channelFuture.channel().close();
+            } catch (Throwable closeFailure) {
+                log.atWarn()
+                    .setCause(closeFailure)
+                    .setMessage("Failed to close an incomplete target connection")
+                    .log();
+            }
+        }
+
+        private void runOnEventLoop(Runnable command) {
+            if (eventLoop.inEventLoop()) {
+                command.run();
+            } else {
+                eventLoop.execute(command);
+            }
         }
     }
 
@@ -292,7 +603,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 if (size == 0) {
                     return;
                 }
-                if (!(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
+                if (!spansClosed
+                    && !(this.currentRequestContextUnion instanceof IReplayContexts.IRequestSendingContext)) {
                     this.getCurrentRequestSpan().close();
                     this.setCurrentMessageContext(getParentContext().createHttpSendingContext());
                 }
@@ -307,22 +619,20 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 if (size == 0) {
                     return;
                 }
-                if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
+                if (!spansClosed
+                    && !(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
                     this.getCurrentRequestSpan().close();
                     this.setCurrentMessageContext(getParentContext().createHttpReceivingContext());
                 }
                 getParentContext().onBytesReceived(size);
             })
         );
-        pipeline.addLast(
-            READ_TIMEOUT_HANDLER_NAME,
-            new ReadTimeoutHandler(this.readTimeoutDuration.toMillis(), TimeUnit.MILLISECONDS)
-        );
         addLoggingHandlerLast(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "C");
-        pipeline.addLast(new HttpResponseDecoder());
+        pipeline.addLast(new RequestMethodAwareHttpResponseDecoder(outboundRequestMethod));
         addLoggingHandlerLast(pipeline, "D");
+        pipeline.addLast(new InterimHttpResponseHandler());
         pipeline.addLast(BACKSIDE_HTTP_WATCHER_HANDLER_NAME, new BacksideHttpWatcherHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "E");
         log.atTrace().setMessage("Added handlers to the pipeline: {}").addArgument(pipeline).log();
@@ -364,15 +674,16 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 .addArgument(pipeline)
                 .log();
         } finally {
-            getCurrentRequestSpan().close();
-            getParentContext().close();
+            closeSpans();
         }
     }
 
     @Override
     public TrackedFuture<String, Void> consumeBytes(ByteBuf packetData) {
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
-            if (channelException == null) {
+            var failure = cancellationCause == null ? channelException : cancellationCause;
+            if (failure == null) {
+                outboundRequestMethod.accept(packetData);
                 log.atTrace().setMessage("[{}] outboundChannelFuture is ready. Writing packets (hash={}): {}: {}")
                     .addArgument(this::connId)
                     .addArgument(() -> System.identityHashCode(packetData))
@@ -395,7 +706,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 if (channel != null) {
                     channel.close();
                 }
-                return TrackedFuture.Factory.failedFuture(channelException, () -> "exception");
+                packetData.release();
+                return TrackedFuture.Factory.failedFuture(failure, () -> "exception");
             }
         }, () -> "consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");
         log.atTrace()
@@ -431,19 +743,31 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v, t) -> {
             log.atDebug().setMessage("[{}] finalization running since all prior work has completed for {}")
                 .addArgument(this::connId).addArgument(() -> httpContext()).log();
-            if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
+            if (!spansClosed
+                && !(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
                 this.getCurrentRequestSpan().close();
                 this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
             }
 
-            var future = new CompletableFuture<AggregatedRawResponse>();
-            var rval = new TrackedFuture<>(future, () -> "NettyPacketToHttpConsumer.finalizeRequest()");
+            var rval = new TrackedFuture<>(
+                responseFuture,
+                () -> "NettyPacketToHttpConsumer.finalizeRequest()"
+            );
             if (t == null) {
-                var responseWatchHandler = (BacksideHttpWatcherHandler) channel.pipeline()
+                var pipeline = channel.pipeline();
+                var timeoutPredecessor = pipeline.get(SSL_HANDLER_NAME) == null
+                    ? WRITE_COUNT_WATCHER_HANDLER_NAME
+                    : SSL_HANDLER_NAME;
+                pipeline.addAfter(
+                    timeoutPredecessor,
+                    READ_TIMEOUT_HANDLER_NAME,
+                    new ReadTimeoutHandler(this.readTimeoutDuration.toMillis(), TimeUnit.MILLISECONDS)
+                );
+                var responseWatchHandler = (BacksideHttpWatcherHandler) pipeline
                     .get(BACKSIDE_HTTP_WATCHER_HANDLER_NAME);
-                responseWatchHandler.addCallback(future::complete);
+                responseWatchHandler.addCallback(responseFuture::complete);
             } else {
-                future.complete(responseBuilder.addErrorCause(t).build());
+                responseFuture.complete(responseBuilder.addErrorCause(t).build());
             }
             return rval;
         }, () -> "Waiting for previous consumes to set the future")
@@ -451,8 +775,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             if (channel == null) {
                 log.atTrace().setMessage(
                     "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
-                getCurrentRequestSpan().close();
-                getParentContext().close();
+                closeSpans();
             } else {
                 deactivateChannel();
             }
@@ -464,5 +787,31 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             .addArgument(ff)
             .log();
         return ff;
+    }
+
+    @Override
+    public void abort(CancellationException cause) {
+        if (cancellationCause == null) {
+            cancellationCause = cause;
+        }
+        responseFuture.completeExceptionally(cause);
+        // Channel activation retries connections until something stops it, so an abort can arrive while the
+        // activation future is still outstanding, which means finalizeRequest may never run and the spans
+        // opened in the constructor would never be closed.  Close them here; the parent http transaction
+        // span will close as soon as its caller is settled, and it must not outlive this one.
+        closeSpans();
+    }
+
+    /**
+     * Closes the target request span and whichever phase span is current.  Every path that finishes a target
+     * request funnels through here so that an abort racing an orderly finalization closes each span once.
+     */
+    private void closeSpans() {
+        if (spansClosed) {
+            return;
+        }
+        spansClosed = true;
+        getCurrentRequestSpan().close();
+        getParentContext().close();
     }
 }

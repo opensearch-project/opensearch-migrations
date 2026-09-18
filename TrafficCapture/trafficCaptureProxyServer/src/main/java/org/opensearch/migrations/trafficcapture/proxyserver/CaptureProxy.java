@@ -15,10 +15,13 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
@@ -29,14 +32,18 @@ import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
-import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IOrderlyRetirableCaptureFactory;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.CaptureMembershipAssignmentTracker;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderAdderHandler;
@@ -46,6 +53,7 @@ import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelIn
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.URIHelper;
 
+import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
@@ -59,17 +67,30 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.logging.log4j.LogManager;
 
 @Slf4j
 public class CaptureProxy {
+    static final int CAPTURE_FAILURE_EXIT_CODE = 78;
+    static final Duration CAPTURE_FAILURE_LOG_FLUSH_TIMEOUT = Duration.ofSeconds(5);
+    static final Duration ORDERLY_SHUTDOWN_WARNING_TARGET = Duration.ofMinutes(5);
+
+    public static class CaptureFailurePolicyConverter implements IStringConverter<CaptureFailurePolicy> {
+        @Override
+        public CaptureFailurePolicy convert(String value) {
+            return switch (value.toLowerCase(java.util.Locale.ROOT)) {
+                case "fail-open" -> CaptureFailurePolicy.FAIL_OPEN;
+                case "fail-closed" -> CaptureFailurePolicy.FAIL_CLOSED;
+                default -> throw new ParameterException(
+                    "--capture-failure-policy must be fail-open or fail-closed"
+                );
+            };
+        }
+    }
 
     public static class Parameters {
-        @Parameter(required = false,
-            names = { "--traceDirectory" },
-            arity = 1,
-            description = "Directory to store trace files in.")
-        public String traceDirectory;
         @Parameter(required = false,
             names = { "--noCapture" },
             arity = 0,
@@ -104,7 +125,7 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--maxTrafficBufferSize" },
             arity = 1,
-            description = "The maximum number of bytes that will be written to a single TrafficStream object.")
+            description = "The maximum number of bytes that will be written to a single TrafficStream.")
         public int maximumTrafficStreamSize = 1024 * 1024;
         @Parameter(required = false,
             names = { "--insecureDestination" },
@@ -199,6 +220,55 @@ public class CaptureProxy {
             arity = 1,
             description = "Name of the topic to write captured traffic to.")
         public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
+        @Parameter(required = false,
+            names = { "--liveness-snapshot-interval-seconds" },
+            arity = 1,
+            description = "Interval between complete connection manifests.")
+        public int livenessSnapshotIntervalSeconds =
+            Math.toIntExact(KafkaCaptureFactory.DEFAULT_LIVENESS_SNAPSHOT_INTERVAL.toSeconds());
+        @Parameter(required = false,
+            names = { "--manifest-expiration-interval-seconds" },
+            arity = 1,
+            description = "Maximum accepted broker-time interval between complete proxy manifests.")
+        public int manifestExpirationIntervalSeconds =
+            Math.toIntExact(KafkaCaptureFactory.DEFAULT_MANIFEST_EXPIRATION_INTERVAL.toSeconds());
+        @Parameter(required = false,
+            names = { "--minimum-active-proxy-count" },
+            arity = 1,
+            description = "Minimum Kafka group member count required before accepting new captured connections.")
+        public int minimumActiveProxyCount = 1;
+        @Parameter(required = false,
+            names = { "--max-request-assembly-duration-seconds" },
+            arity = 1,
+            description = "Maximum duration for assembling one incomplete request.")
+        public long maximumRequestAssemblyDurationSeconds =
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_ASSEMBLY_DURATION.toSeconds();
+        @Parameter(required = false,
+            names = { "--max-connection-duration-seconds" },
+            arity = 1,
+            description = "Maximum lifetime of one source TCP connection.")
+        public long maximumConnectionDurationSeconds =
+            org.opensearch.migrations.trafficcapture.netty.LoggingHttpHandler
+                .DEFAULT_MAXIMUM_CONNECTION_DURATION
+                .toSeconds();
+        @Parameter(required = false,
+            names = { "--max-incomplete-request-header-bytes" },
+            arity = 1,
+            description = "Maximum aggregate header bytes for one incomplete request.")
+        public long maximumIncompleteRequestHeaderBytes =
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES;
+        @Parameter(required = false,
+            names = { "--max-incomplete-request-total-bytes" },
+            arity = 1,
+            description = "Maximum aggregate wire bytes for one incomplete request.")
+        public long maximumIncompleteRequestTotalBytes =
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES;
+        @Parameter(required = false,
+            names = { "--capture-failure-policy" },
+            arity = 1,
+            converter = CaptureFailurePolicyConverter.class,
+            description = "Behavior when required request capture fails: fail-closed or fail-open.")
+        public CaptureFailurePolicy captureFailurePolicy = CaptureFailurePolicy.FAIL_CLOSED;
         @ParametersDelegate
         public KafkaParameters kafkaParameters = new KafkaParameters();
     }
@@ -208,14 +278,40 @@ public class CaptureProxy {
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
             parser.parse(args);
-            // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
             p.kafkaParameters.validateKafkaAuthFlags();
-            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaBrokers, (p.noCapture ? "" : null))
-                .mapToInt(s -> s != null ? 1 : 0)
-                .sum() != 1) {
+            if (p.livenessSnapshotIntervalSeconds <= 0) {
+                throw new ParameterException("--liveness-snapshot-interval-seconds must be positive");
+            }
+            if (p.manifestExpirationIntervalSeconds <= p.livenessSnapshotIntervalSeconds) {
                 throw new ParameterException(
-                    "Expected exactly one of '--traceDirectory', '--kafkaBrokers'/'--kafkaConnection', or "
-                        + "'--noCapture' to be set"
+                    "--manifest-expiration-interval-seconds must be greater than "
+                        + "--liveness-snapshot-interval-seconds"
+                );
+            }
+            if (p.minimumActiveProxyCount <= 0) {
+                throw new ParameterException("--minimum-active-proxy-count must be positive");
+            }
+            if (p.maximumRequestAssemblyDurationSeconds <= 0) {
+                throw new ParameterException("--max-request-assembly-duration-seconds must be positive");
+            }
+            if (p.maximumConnectionDurationSeconds <= 0) {
+                throw new ParameterException("--max-connection-duration-seconds must be positive");
+            }
+            if (p.maximumIncompleteRequestHeaderBytes <= 0
+                || p.maximumIncompleteRequestHeaderBytes > Integer.MAX_VALUE) {
+                throw new ParameterException(
+                    "--max-incomplete-request-header-bytes must be positive and no greater than Integer.MAX_VALUE"
+                );
+            }
+            if (p.maximumIncompleteRequestTotalBytes < p.maximumIncompleteRequestHeaderBytes) {
+                throw new ParameterException(
+                    "--max-incomplete-request-total-bytes must be at least "
+                        + "--max-incomplete-request-header-bytes"
+                );
+            }
+            if ((p.kafkaParameters.kafkaBrokers != null) == p.noCapture) {
+                throw new ParameterException(
+                    "Expected exactly one of '--kafkaBrokers'/'--kafkaConnection' or '--noCapture' to be set"
                 );
             }
             return p;
@@ -228,12 +324,11 @@ public class CaptureProxy {
         }
     }
 
-    protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
-        System.err.println("No trace log directory specified.  Logging to /dev/null");
+    protected static <T> IConnectionCaptureFactory<T> getNullConnectionCaptureFactory() {
         return ctx -> new StreamChannelConnectionCaptureSerializer<>(
             null,
             ctx.getConnectionId(),
-            new StreamLifecycleManager<>() {
+            new StreamLifecycleManager<T>() {
                 @Override
                 public CodedOutputStreamHolder createStream() {
                     return new CodedOutputStreamHolder() {
@@ -254,35 +349,66 @@ public class CaptureProxy {
                 }
 
                 @Override
-                public CompletableFuture<Object> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+                public CompletableFuture<T> closeStream(CodedOutputStreamHolder outputStreamHolder, int index) {
                     return CompletableFuture.completedFuture(null);
                 }
             }
         );
     }
 
-    protected static String getNodeId() {
+    protected static String newCaptureActivationId() {
         return UUID.randomUUID().toString();
     }
 
 
     protected static IConnectionCaptureFactory<?> getConnectionCaptureFactory(
         Parameters params,
-        RootCaptureContext rootContext
+        RootCaptureContext rootContext,
+        CaptureProcessState captureProcessState,
+        String captureActivationId
     ) throws IOException {
-        var nodeId = getNodeId();
-        // Resist the urge for now though until it comes in as a request/need.
-        if (params.traceDirectory != null) {
-            return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
-        } else if (params.kafkaParameters.kafkaBrokers != null) {
-            return new KafkaCaptureFactory(
-                rootContext,
-                nodeId,
-                new KafkaProducer<>(KafkaConfig.buildKafkaProperties(params.kafkaParameters)),
-                params.kafakTopicName,
-                params.maximumTrafficStreamSize
-            );
+        Objects.requireNonNull(captureActivationId);
+        if (params.kafkaParameters.kafkaBrokers != null) {
+            KafkaProducer<String, byte[]> producer = null;
+            try {
+                producer = new KafkaProducer<>(
+                    KafkaConfig.buildKafkaProperties(params.kafkaParameters)
+                );
+                var assignmentTracker = new CaptureMembershipAssignmentTracker();
+                var membershipConsumer = new KafkaConsumer<String, byte[]>(
+                    KafkaConfig.buildMembershipConsumerProperties(
+                        params.kafkaParameters,
+                        captureActivationId,
+                        params.kafakTopicName,
+                        assignmentTracker
+                    )
+                );
+                return new KafkaCaptureFactory(
+                    rootContext,
+                    captureActivationId,
+                    producer,
+                    membershipConsumer,
+                    assignmentTracker,
+                    params.minimumActiveProxyCount,
+                    params.kafakTopicName,
+                    params.maximumTrafficStreamSize,
+                    Duration.ofSeconds(params.livenessSnapshotIntervalSeconds),
+                    Duration.ofSeconds(params.manifestExpirationIntervalSeconds),
+                    captureProcessState::requiredCaptureFailed,
+                    captureProcessState::unstableProcessFailed
+                );
+            } catch (RuntimeException | IOException e) {
+                if (producer != null) {
+                    producer.close(Duration.ZERO);
+                }
+                captureProcessState.requiredCaptureFailed(e);
+                if (captureProcessState.isPassThrough()) {
+                    return getNullConnectionCaptureFactory();
+                }
+                throw e;
+            }
         } else if (params.noCapture) {
+            System.err.println("Capture is disabled.  Forwarding without a capture sink.");
             return getNullConnectionCaptureFactory();
         } else {
             throw new IllegalStateException("Must specify some connection capture factory options");
@@ -399,7 +525,9 @@ public class CaptureProxy {
 
     public static void main(String[] args) throws InterruptedException, IOException {
         System.err.println("Got args: " + String.join("; ", args));
-        log.info("Starting Capture Proxy on " + ProcessHelpers.getNodeInstanceName());
+        var processId = ProcessHelpers.getNodeInstanceName();
+        var captureActivationId = newCaptureActivationId();
+        log.info("Starting Capture Proxy on " + processId);
 
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
@@ -408,12 +536,36 @@ public class CaptureProxy {
             RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
                 new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
                 "capture",
-                ProcessHelpers.getNodeInstanceName()),
-            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+                processId),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()),
+            RootCaptureContext.SCOPE_NAME,
+            processId,
+            captureActivationId
         );
 
         var sslEngineSupplier = buildSslEngineSupplier(params);
-        var proxy = new NettyScanningHttpProxy(params.frontsidePort);
+        var captureProcessState = new CaptureProcessState(
+            params.captureFailurePolicy,
+            ctx.captureProcessMetrics::recordTransition
+        );
+        captureProcessState.addTerminationListener(
+            new CaptureFailureTerminator(
+                CAPTURE_FAILURE_EXIT_CODE,
+                CAPTURE_FAILURE_LOG_FLUSH_TIMEOUT,
+                LogManager::shutdown,
+                code -> Runtime.getRuntime().halt(code)
+            )
+        );
+        var proxy = new NettyScanningHttpProxy(
+            params.frontsidePort,
+            captureProcessState::unstableProcessFailed
+        );
+        var connectionCaptureFactory = getConnectionCaptureFactory(
+            params,
+            ctx,
+            captureProcessState,
+            captureActivationId
+        );
         try {
             var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0
                 ? Duration.ZERO
@@ -433,25 +585,96 @@ public class CaptureProxy {
                 .build();
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
-                    params.headerOverrides, getConnectionCaptureFactory(params, ctx));
+                    params.headerOverrides, connectionCaptureFactory,
+                    new IncompleteRequestLimits(
+                        Duration.ofSeconds(params.maximumRequestAssemblyDurationSeconds),
+                        params.maximumIncompleteRequestHeaderBytes,
+                        params.maximumIncompleteRequestTotalBytes
+                    ),
+                    Duration.ofSeconds(params.maximumConnectionDurationSeconds),
+                    captureProcessState);
             proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
+            closeCaptureFactory(connectionCaptureFactory);
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 System.err.println("Received shutdown signal.  Trying to shutdown cleanly");
-                proxy.stop();
+                performOrderlyShutdown(
+                    proxy,
+                    connectionCaptureFactory,
+                    ORDERLY_SHUTDOWN_WARNING_TARGET,
+                    () -> log.atError()
+                        .setMessage(
+                            "Orderly proxy shutdown has exceeded its five-minute target; "
+                                + "continuing connection and writer retirement"
+                        )
+                        .log()
+                );
                 System.err.println("Done stopping the proxy.");
             } catch (InterruptedException e) {
                 System.err.println("Caught InterruptedException while shutting down, resetting interrupt status: " + e);
                 Thread.currentThread().interrupt();
+            } catch (RuntimeException e) {
+                log.atError().setCause(e).setMessage("Orderly proxy shutdown failed").log();
             }
         }));
         // This loop just gives the main() function something to do while the netty event loops
         // work in the background.
         proxy.waitForClose();
+    }
+
+    static void performOrderlyShutdown(
+        NettyScanningHttpProxy proxy,
+        IConnectionCaptureFactory<?> connectionCaptureFactory,
+        Duration warningTarget,
+        Runnable warningAction
+    ) throws InterruptedException {
+        if (warningTarget.isZero() || warningTarget.isNegative()) {
+            throw new IllegalArgumentException("warningTarget must be positive");
+        }
+        var shutdownFinished = new AtomicBoolean();
+        var warningExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            var thread = new Thread(runnable, "proxy-orderly-shutdown-warning");
+            thread.setDaemon(true);
+            return thread;
+        });
+        var warningFuture = warningExecutor.schedule(
+            () -> {
+                if (!shutdownFinished.get()) {
+                    warningAction.run();
+                }
+            },
+            warningTarget.toNanos(),
+            TimeUnit.NANOSECONDS
+        );
+        try {
+            var retirement = connectionCaptureFactory instanceof IOrderlyRetirableCaptureFactory retirable
+                ? retirable.retireForOrderlyShutdown()
+                : CompletableFuture.<Void>completedFuture(null);
+            proxy.stop();
+            retirement.join();
+        } finally {
+            try {
+                closeCaptureFactory(connectionCaptureFactory);
+            } finally {
+                shutdownFinished.set(true);
+                warningFuture.cancel(false);
+                warningExecutor.shutdownNow();
+            }
+        }
+    }
+
+    private static void closeCaptureFactory(IConnectionCaptureFactory<?> connectionCaptureFactory) {
+        if (connectionCaptureFactory instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception e) {
+                log.atWarn().setCause(e).setMessage("Unable to close the capture factory cleanly").log();
+            }
+        }
     }
 
     @SuppressWarnings("java:S4030") // Collections removeStrings and addBufs are incorrectly reported as being unused
@@ -460,11 +683,13 @@ public class CaptureProxy {
                                                                 Supplier<SSLEngine> sslEngineSupplier,
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
                                                                 List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory<T> connectionFactory)
+                                                                IConnectionCaptureFactory<T> connectionFactory,
+                                                                IncompleteRequestLimits incompleteRequestLimits,
+                                                                Duration maximumConnectionDuration,
+                                                                CaptureProcessState captureProcessState)
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
-        final var removeStrings = new ArrayList<String>(headers.size());
         final var addBufs = new ArrayList<ByteBuf>(headers.size());
 
         for (var kvp : headers) {
@@ -472,7 +697,6 @@ public class CaptureProxy {
                 Unpooled.unreleasableBuffer(
                     Unpooled.wrappedBuffer(
                         (kvp.getKey() + ": " + kvp.getValue()).getBytes(StandardCharsets.UTF_8))));
-            removeStrings.add(kvp.getKey() + ":");
         }
 
         return new ProxyChannelInitializer<>(
@@ -480,7 +704,11 @@ public class CaptureProxy {
             backsideConnectionPool,
             sslEngineSupplier,
             connectionFactory,
-            headerCapturePredicate
+            getNullConnectionCaptureFactory(),
+            headerCapturePredicate,
+            incompleteRequestLimits,
+            maximumConnectionDuration,
+            captureProcessState
         ) {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {
@@ -492,10 +720,9 @@ public class CaptureProxy {
                         new HeaderAdderHandler(addBufs.get(i++)));
                 }
 
-                i = 0;
                 for (var kvp : headers) {
                     pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
-                        new HeaderRemoverHandler(removeStrings.get(i++)));
+                        new HeaderRemoverHandler(kvp.getKey() + ":"));
                 }
             }
         };

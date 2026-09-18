@@ -46,9 +46,12 @@ public class ParsedHttpMessagesAsDicts {
     public static final String METHOD_KEY = "Method";
     public static final String HTTP_VERSION_KEY = "HTTP-Version";
     public static final String PAYLOAD_KEY = "payload";
+    public static final String SOURCE_RESPONSE_STATUS_KEY = "sourceResponseStatus";
+    public static final String SOURCE_RESPONSE_STATUS_EXPIRED = "expired";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
+    public final Optional<String> sourceResponseStatusOp;
     public final Optional<Map<String, Object>> targetRequestOp;
     public final List<Map<String, Object>> targetResponseList;
     public final IReplayContexts.ITupleHandlingContext context;
@@ -65,6 +68,7 @@ public class ParsedHttpMessagesAsDicts {
             tuple.context,
             getSourceRequestOp(tuple.context, sourcePairOp),
             getSourceResponseOp(tuple, sourcePairOp),
+            getSourceResponseStatusOp(sourcePairOp),
             getTargetRequestOp(tuple),
             getTargetResponseOp(tuple)
         );
@@ -86,7 +90,9 @@ public class ParsedHttpMessagesAsDicts {
         SourceTargetCaptureTuple tuple,
         Optional<RequestResponsePacketPair> sourcePairOp
     ) {
-        return sourcePairOp.flatMap(
+        return sourcePairOp
+            .filter(p -> p.completionStatus != RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY)
+            .flatMap(
             p -> Optional.ofNullable(p.responseData)
                 .flatMap(d -> Optional.ofNullable(d.packetBytes))
                 .map(
@@ -101,6 +107,14 @@ public class ParsedHttpMessagesAsDicts {
                     )
                 )
         );
+    }
+
+    private static Optional<String> getSourceResponseStatusOp(
+        Optional<RequestResponsePacketPair> sourcePairOp
+    ) {
+        return sourcePairOp
+            .filter(p -> p.completionStatus == RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY)
+            .map(p -> SOURCE_RESPONSE_STATUS_EXPIRED);
     }
 
     private static Optional<Map<String, Object>> getSourceRequestOp(
@@ -121,12 +135,31 @@ public class ParsedHttpMessagesAsDicts {
         Optional<Map<String, Object>> targetRequestOp3,
         List<Map<String, Object>> targetResponseOps4
     ) {
+        this(
+            context,
+            sourceRequestOp1,
+            sourceResponseOp2,
+            Optional.empty(),
+            targetRequestOp3,
+            targetResponseOps4
+        );
+    }
+
+    private ParsedHttpMessagesAsDicts(
+        IReplayContexts.ITupleHandlingContext context,
+        Optional<Map<String, Object>> sourceRequestOp1,
+        Optional<Map<String, Object>> sourceResponseOp2,
+        Optional<String> sourceResponseStatusOp3,
+        Optional<Map<String, Object>> targetRequestOp4,
+        List<Map<String, Object>> targetResponseOps5
+    ) {
         this.context = context;
         this.sourceRequestOp = sourceRequestOp1;
         this.sourceResponseOp = sourceResponseOp2;
-        this.targetRequestOp = targetRequestOp3;
-        this.targetResponseList = targetResponseOps4;
-        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps4);
+        this.sourceResponseStatusOp = sourceResponseStatusOp3;
+        this.targetRequestOp = targetRequestOp4;
+        this.targetResponseList = targetResponseOps5;
+        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps5);
     }
 
     /**
@@ -136,6 +169,7 @@ public class ParsedHttpMessagesAsDicts {
         var map = new LinkedHashMap<String, Object>();
         sourceRequestOp.ifPresent(r -> map.put("sourceRequest", r));
         sourceResponseOp.ifPresent(r -> map.put("sourceResponse", r));
+        sourceResponseStatusOp.ifPresent(status -> map.put(SOURCE_RESPONSE_STATUS_KEY, status));
         targetRequestOp.ifPresent(r -> map.put("targetRequest", r));
         map.put("targetResponses", targetResponseList);
         var key = tuple.getRequestKey();

@@ -165,6 +165,10 @@ public class ExpiringTrafficStreamMap {
         return connectionAccumulationMap.get(makeKey(trafficStreamKey));
     }
 
+    public Accumulation getIfPresent(String nodeId, String connectionId) {
+        return connectionAccumulationMap.get(new ScopedConnectionIdKey(nodeId, connectionId));
+    }
+
     public Accumulation getOrCreateWithoutExpiration(
         ITrafficStreamKey trafficStreamKey,
         Function<ITrafficStreamKey, Accumulation> accumulationGenerator
@@ -183,6 +187,11 @@ public class ExpiringTrafficStreamMap {
         if (!updateExpirationTrackers(trafficStreamKey, new EpochMillis(timestamp), accumulation, 0)) {
             connectionAccumulationMap.remove(makeKey(trafficStreamKey));
         }
+    }
+
+    public void observeWithoutExpiration(Accumulation accumulation, Instant timestamp) {
+        accumulation.getNewestPacketTimestampInMillisReference()
+            .accumulateAndGet(timestamp.toEpochMilli(), Math::max);
     }
 
     public Accumulation remove(String partitionId, String id) {

@@ -9,7 +9,7 @@ abstract class TestContainerTestBase<T extends GenericContainer<?>> {
     }
 
     public void stop() {
-        getContainer().start();
+        getContainer().stop();
     }
 
     abstract T getContainer();

@@ -2,8 +2,13 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Properties;
 
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
+
+import com.beust.jcommander.ParameterException;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
@@ -16,6 +21,106 @@ import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfi
 public class CaptureProxySetupTest {
 
     public static final String kafkaBrokerString = "invalid:9092";
+
+    @Test
+    void captureFailuresDefaultToFailClosedAndCanBeConfiguredFailOpen() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var failOpen = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--capture-failure-policy", "fail-open"
+        });
+
+        Assertions.assertEquals(CaptureFailurePolicy.FAIL_CLOSED, defaults.captureFailurePolicy);
+        Assertions.assertEquals(CaptureFailurePolicy.FAIL_OPEN, failOpen.captureFailurePolicy);
+        Assertions.assertThrows(
+            ParameterException.class,
+            () -> new CaptureProxy.CaptureFailurePolicyConverter().convert("sometimes")
+        );
+    }
+
+    @Test
+    void incompleteRequestLimitsHaveSafeDefaultsAndAreConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--max-request-assembly-duration-seconds", "17",
+            "--max-connection-duration-seconds", "19",
+            "--max-incomplete-request-header-bytes", "4096",
+            "--max-incomplete-request-total-bytes", "8192"
+        });
+
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_ASSEMBLY_DURATION,
+            Duration.ofSeconds(defaults.maximumRequestAssemblyDurationSeconds)
+        );
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+            defaults.maximumIncompleteRequestHeaderBytes
+        );
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES,
+            defaults.maximumIncompleteRequestTotalBytes
+        );
+        Assertions.assertEquals(
+            Duration.ofMinutes(60),
+            Duration.ofSeconds(defaults.maximumConnectionDurationSeconds)
+        );
+        Assertions.assertEquals(17, configured.maximumRequestAssemblyDurationSeconds);
+        Assertions.assertEquals(19, configured.maximumConnectionDurationSeconds);
+        Assertions.assertEquals(4096, configured.maximumIncompleteRequestHeaderBytes);
+        Assertions.assertEquals(8192, configured.maximumIncompleteRequestTotalBytes);
+    }
+
+    @Test
+    void minimumActiveProxyCountDefaultsToOneAndIsConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--minimum-active-proxy-count", "3"
+        });
+
+        Assertions.assertEquals(1, defaults.minimumActiveProxyCount);
+        Assertions.assertEquals(3, configured.minimumActiveProxyCount);
+    }
+
+    @Test
+    void manifestTimingDefaultsToThirtyAndSixtySecondsAndIsConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--liveness-snapshot-interval-seconds", "15",
+            "--manifest-expiration-interval-seconds", "45"
+        });
+
+        Assertions.assertEquals(30, defaults.livenessSnapshotIntervalSeconds);
+        Assertions.assertEquals(60, defaults.manifestExpirationIntervalSeconds);
+        Assertions.assertEquals(15, configured.livenessSnapshotIntervalSeconds);
+        Assertions.assertEquals(45, configured.manifestExpirationIntervalSeconds);
+    }
 
     @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {

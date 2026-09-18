@@ -19,7 +19,9 @@ public class ReplayEngineFactory implements Function<ClientConnectionPool, Repla
             new RequestSenderOrchestrator(
                 clientConnectionPool,
                 (replaySession, ctx) ->
-                    new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
+                    new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
+                RequestSenderOrchestrator.noSourceTerminationObligations(),
+                ignored -> {}
             ),
             flowController, timeShifter);
     }

@@ -10,7 +10,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
@@ -180,12 +183,20 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         Assertions.assertEquals(from, keysReceived.size());
         for (int i = 0; i < count;) {
             var trafficStreams = trafficSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : trafficStreams) {
+            for (var sourceInput : trafficStreams) {
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 if (ts instanceof TrafficSourceReaderInterruptedClose) {
-                    // Drain synthetic closes and decrement the counter so real records can resume
                     var key = ts.getKey();
                     log.atInfo().setMessage("Draining synthetic close for {}").addArgument(key).log();
-                    kafkaSource.onNetworkConnectionClosed(key.getConnectionId(), 0, key.getSourceGeneration());
+                    kafkaSource.acknowledgeSessionTermination(
+                        new ConnectionSessionKey(
+                            new SourceConnectionKey(key.getNodeId(), key.getConnectionId()),
+                            0,
+                            key.getSourceGeneration()
+                        )
+                    ).toCompletableFuture().get();
                     continue;
                 }
                 var tsk = ts.getKey();

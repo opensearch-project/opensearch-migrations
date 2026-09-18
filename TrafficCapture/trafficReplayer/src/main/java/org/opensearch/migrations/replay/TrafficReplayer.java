@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -23,7 +24,6 @@ import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -68,6 +68,10 @@ public class TrafficReplayer {
     public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
+    static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
+    static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
+    static final int DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS = 100_000;
+    static final long DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES = 1024L * 1024 * 1024;
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
@@ -242,14 +246,33 @@ public class TrafficReplayer {
             required = false,
             names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow", "--lookaheadTimeSeconds" },
             arity = 1,
-            description = "Number of seconds of data that will be buffered.")
-        int lookaheadTimeSeconds = 400;
+            description = "Number of seconds of data that will be buffered. Defaults to 30 for Kafka "
+                + "structural expiration and 400 for legacy stream input.")
+        Integer lookaheadTimeSeconds;
         @Parameter(
             required = false,
             names = { "--max-concurrent-requests", "--maxConcurrentRequests" },
             arity = 1,
             description = "Maximum number of requests at a time that can be outstanding")
         int maxConcurrentRequests = 10000;
+        @Parameter(
+            required = false,
+            names = { "--max-owned-kafka-records", "--maxOwnedKafkaRecords" },
+            arity = 1,
+            description = "Hard maximum number of Kafka records owned locally before replay intake pauses.")
+        int maximumOwnedKafkaRecords = DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS;
+        @Parameter(
+            required = false,
+            names = { "--max-owned-kafka-bytes", "--maxOwnedKafkaBytes" },
+            arity = 1,
+            description = "Hard maximum serialized bytes of Kafka records owned locally before replay intake pauses.")
+        long maximumOwnedKafkaBytes = DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES;
+        @Parameter(
+            required = false,
+            names = { "--disable-liveness-scanner", "--disableLivenessScanner" },
+            arity = 0,
+            description = "Disable Kafka metadata lookahead. Structural proof is then discovered by normal replay.")
+        boolean disableLivenessScanner;
         @Parameter(
             required = false,
             names = { "--num-client-threads", "--numClientThreads" },
@@ -415,6 +438,13 @@ public class TrafficReplayer {
                 + "Example: --non-retryable-doc-exception-types version_conflict_engine_exception")
         List<String> nonRetryableDocExceptionTypes;
 
+        @Parameter(
+            required = false,
+            names = { "--poison-doc-exception-types", "--poisonDocExceptionTypes" },
+            description = "Optional, default empty. Comma-separated bulk item exception types that may be "
+                + "committed as deliberate skips after retries stop and tuple evidence is durable.")
+        List<String> poisonDocExceptionTypes;
+
         void validateKafkaAuthFlags() {
             if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
                 if (Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth)
@@ -431,8 +461,30 @@ public class TrafficReplayer {
             }
         }
 
+        void validateOwnershipLimits() {
+            if (maximumOwnedKafkaRecords <= 0) {
+                throw new ParameterException("--max-owned-kafka-records must be positive");
+            }
+            if (maximumOwnedKafkaBytes <= 0) {
+                throw new ParameterException("--max-owned-kafka-bytes must be positive");
+            }
+        }
+
         boolean isKafkaTrafficEnableMSKAuth() {
             return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
+        }
+
+        int getEffectiveLookaheadTimeSeconds() {
+            if (lookaheadTimeSeconds != null) {
+                return lookaheadTimeSeconds;
+            }
+            return kafkaTrafficBrokers != null
+                ? DEFAULT_KAFKA_LOOKAHEAD_SECONDS
+                : DEFAULT_LEGACY_LOOKAHEAD_SECONDS;
+        }
+
+        boolean usesKafkaTrafficSource() {
+            return kafkaTrafficBrokers != null;
         }
 
         String getEffectiveKafkaAuthType() {
@@ -527,6 +579,7 @@ public class TrafficReplayer {
         try {
             parser.parse(args);
             p.validateKafkaAuthFlags();
+            p.validateOwnershipLimits();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -623,10 +676,19 @@ public class TrafficReplayer {
             System.exit(3);
             return null;
         }
-        if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
+        int lookaheadTimeSeconds = params.getEffectiveLookaheadTimeSeconds();
+        if (lookaheadTimeSeconds <= 0) {
+            String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME + " must be positive";
+            System.err.println(msg);
+            log.error(msg);
+            System.exit(4);
+            return null;
+        }
+        if (!params.usesKafkaTrafficSource()
+            && lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
             String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
                 + "("
-                + params.lookaheadTimeSeconds
+                + lookaheadTimeSeconds
                 + ") must be > "
                 + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME
                 + "("
@@ -667,10 +729,9 @@ public class TrafficReplayer {
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
                 params,
-                Duration.ofSeconds(params.lookaheadTimeSeconds)
+                Duration.ofSeconds(params.getEffectiveLookaheadTimeSeconds())
             );
-            var authTransformer = buildAuthTransformerFactory(params);
-            var trafficStreamLimiter = new TrafficStreamLimiter(params.maxConcurrentRequests)
+            var authTransformer = buildAuthTransformerFactory(params)
         ) {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
@@ -693,6 +754,9 @@ public class TrafficReplayer {
             var errorClassifier = params.nonRetryableDocExceptionTypes != null
                 ? new BulkItemErrorClassifier(new java.util.HashSet<>(params.nonRetryableDocExceptionTypes))
                 : new BulkItemErrorClassifier();
+            var poisonAllowlist = params.poisonDocExceptionTypes == null
+                ? ExceptionTypeAllowlist.empty()
+                : new ExceptionTypeAllowlist(params.poisonDocExceptionTypes);
 
             var transformationLoader = new TransformationLoader();
             var effectiveTransformerSupplier = buildTransformerSupplier(
@@ -705,19 +769,28 @@ public class TrafficReplayer {
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
-                    params.numClientThreads
+                    params.numClientThreads,
+                    null,
+                    topContext.getTargetExchangeStateMetrics()
                 ),
-                trafficStreamLimiter,
+                params.maxConcurrentRequests,
                 orderedRequestTracker,
-                errorClassifier
+                errorClassifier,
+                poisonAllowlist,
+                Runtime.getRuntime()::halt
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
+                    " maxOwnedKafkaRecords={} maxOwnedKafkaBytes={}" +
+                    " livenessScannerEnabled={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
-                .addArgument(params.lookaheadTimeSeconds)
+                .addArgument(params.getEffectiveLookaheadTimeSeconds())
                 .addArgument(params.speedupFactor)
                 .addArgument(params.maxConcurrentRequests)
+                .addArgument(params.maximumOwnedKafkaRecords)
+                .addArgument(params.maximumOwnedKafkaBytes)
+                .addArgument(!params.disableLivenessScanner)
                 .addArgument(params.targetServerResponseTimeoutSeconds)
                 .addArgument(params.observedPacketConnectionTimeout)
                 .addArgument(uri)
@@ -869,7 +942,7 @@ public class TrafficReplayer {
                     log.atWarn().setMessage(beforeMsg).log();
                     System.err.println(beforeMsg);
                 });
-            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(o -> o.shutdown(null));
+            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(TrafficReplayer::awaitReplayerShutdown);
             Optional.of("Done shutting down TrafficReplayer (due to Runtime shutdown).  "
                     + "Logs may be missing for events that have happened after the Shutdown event was received.")
                 .ifPresent(afterMsg -> {
@@ -877,6 +950,10 @@ public class TrafficReplayer {
                     System.err.println(afterMsg);
                 });
         }));
+    }
+
+    static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
+        trafficReplayer.shutdown(null).join();
     }
 
     /**

@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.SneakyThrows;
@@ -77,6 +78,9 @@ public class KafkaRecordsReadyToCommitTest extends InstrumentationTest {
 
         var consumer = new TrackingKafkaConsumer(
             rootContext, mockConsumer, TOPIC, Duration.ofSeconds(30), Clock.systemUTC(), tsk -> {}
+        );
+        consumer.setSourcePartitionLifecycleListener(
+            new IgnoringSourcePartitionLifecycleListener()
         );
 
         // Assign partition 0

@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay.kafka;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -19,8 +17,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Test #7: Verify the onClose callback fires even when no TCP connection was ever opened
- * (null channel path in closeClientConnectionChannel).
+ * Verifies that the channel-close stage itself represents the null-channel cleanup path.
  */
 class SessionCloseCallbackTest extends InstrumentationTest {
 
@@ -37,19 +34,16 @@ class SessionCloseCallbackTest extends InstrumentationTest {
     }
 
     @Test
-    void globalOnSessionClose_firesForNullChannelSession() throws Exception {
-        var onCloseFired = new AtomicBoolean(false);
+    void nullChannelCloseCompletesItsLifecycleStage() throws Exception {
         var channelKeyCtx = mock(IReplayContexts.IChannelKeyContext.class);
         when(channelKeyCtx.getConnectionId()).thenReturn("test-conn");
 
-        // Create a session with no channel ever opened (cachedChannel stays null)
-        // and an onClose callback that sets our flag
+        // Create a session with no channel ever opened (cachedChannel stays null).
         var session = new ConnectionReplaySession(
             eventLoopGroup.next(),
             channelKeyCtx,
             (el, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no-op channel factory"),
-            0,
-            ignored -> onCloseFired.set(true)
+            0
         );
 
         // Use ClientConnectionPool.closeChannelForSession to trigger the close path
@@ -59,11 +53,12 @@ class SessionCloseCallbackTest extends InstrumentationTest {
             1
         );
 
-        // closeChannelForSession calls closeClientConnectionChannel which handles null channel
-        var closeFuture = pool.closeChannelForSession(session);
-        closeFuture.get(); // wait for completion
-
-        Assertions.assertTrue(onCloseFired.get(),
-            "onClose callback must fire even when no TCP connection was ever opened (null channel)");
+        try {
+            var closeFuture = pool.closeChannelForSession(session);
+            Assertions.assertNull(closeFuture.get());
+            Assertions.assertTrue(closeFuture.future.isDone());
+        } finally {
+            pool.shutdownNow().get();
+        }
     }
 }

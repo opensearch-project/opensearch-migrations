@@ -389,6 +389,11 @@ describe('MigrationConfigTransformer validation', () => {
             label: "default",
             kafkaTopic: "loaded-dump",
             managedByWorkflow: true,
+            topicSpecOverrides: expect.objectContaining({
+                config: expect.not.objectContaining({
+                    "message.timestamp.type": expect.anything(),
+                }),
+            }),
             configChecksum: expect.stringMatching(/^[a-f0-9]{16}$/)
         }));
 
@@ -1023,6 +1028,35 @@ describe('MigrationConfigTransformer validation', () => {
                     }
                 }
             }
+        });
+    });
+
+    it('should require LogAppendTime for workflow-managed live proxy topics', async () => {
+        const config = cloneBaseConfig();
+        config.kafkaClusterConfiguration = {
+            default: {
+                autoCreate: {
+                    topicSpecOverrides: {
+                        partitions: 2,
+                        replicas: 3,
+                        config: {
+                            "retention.ms": 12345,
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies[0].kafkaConfig.topicSpecOverrides).toEqual({
+            partitions: 2,
+            replicas: 3,
+            config: {
+                "retention.ms": 12345,
+                "segment.bytes": 1073741824,
+                "message.timestamp.type": "LogAppendTime",
+            },
         });
     });
 

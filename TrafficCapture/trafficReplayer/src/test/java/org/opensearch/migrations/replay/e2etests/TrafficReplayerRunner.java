@@ -142,7 +142,8 @@ public class TrafficReplayerRunner {
                 // if this finished running without an exception, we need to stop the loop
                 break;
             } catch (TrafficReplayer.TerminationException e) {
-                log.atLevel(e.originalCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
+                var killSignalError = findKillSignal(e.originalCause, e.immediateCause);
+                log.atLevel(killSignalError != null ? Level.INFO : Level.ERROR)
                     .setCause(e.originalCause)
                     .setMessage("broke out of the replayer, with this shutdown reason")
                     .log();
@@ -151,12 +152,6 @@ public class TrafficReplayerRunner {
                     .setMessage("broke out of the replayer, with the shutdown cause={} and this immediate reason")
                     .addArgument(e.originalCause)
                     .log();
-                FabricatedErrorToKillTheReplayer killSignalError =
-                    e.originalCause instanceof FabricatedErrorToKillTheReplayer
-                        ? (FabricatedErrorToKillTheReplayer) e.originalCause
-                        : (e.immediateCause instanceof FabricatedErrorToKillTheReplayer
-                            ? (FabricatedErrorToKillTheReplayer) e.immediateCause
-                            : null);
                 if (killSignalError == null) {
                     skipFinally = true;
                     throw e.immediateCause;
@@ -234,6 +229,20 @@ public class TrafficReplayerRunner {
                 Duration.ofSeconds(5)
             );
         }
+    }
+
+    private static FabricatedErrorToKillTheReplayer findKillSignal(Throwable... causes) {
+        for (var cause : causes) {
+            for (var current = cause; current != null; current = current.getCause()) {
+                if (current instanceof FabricatedErrorToKillTheReplayer) {
+                    return (FabricatedErrorToKillTheReplayer) current;
+                }
+                if (current == current.getCause()) {
+                    break;
+                }
+            }
+        }
+        return null;
     }
 
     private static void waitForWorkerThreadsToStop(String targetConnectionPoolName) throws InterruptedException {

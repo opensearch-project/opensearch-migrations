@@ -26,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static org.opensearch.migrations.replay.ActorRequestTestUtils.schedulePreparedRequest;
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
@@ -87,7 +88,9 @@ public class OpenSearchDefaultRetryE2ETest {
             "targetConnectionPool for OpenSearchDefaultRetryE2ETest");
         var retryFactory = new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry());
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT));
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT),
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rootContext.getReplayProcessFatalMetrics());
         var requestContext = rootContext.getTestConnectionRequestContext(0);
         var sourceRequestPackets = new ByteBufList(
             Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)));
@@ -97,14 +100,28 @@ public class OpenSearchDefaultRetryE2ETest {
             new TransformedOutputAndResult<>(packetProducer, HttpRequestTransformationStatus.skipped()),
             TextTrackedFuture.completedFuture(
                 new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes), () -> "static rrp"));
-        return senderOrchestrator.scheduleRequest(
-            requestContext.getReplayerRequestKey(), requestContext,
+        return schedulePreparedRequest(
+            senderOrchestrator,
+            requestContext,
             Instant.now().plus(Duration.ofMillis(10)), Duration.ofMillis(1),
-            packetProducer, retryVisitor)
-            .whenComplete((v, t) -> {
-                requestContext.close();
-                clientConnectionPool.shutdownNow();
-            }, () -> "cleanup");
+            packetProducer, retryVisitor
+        ).thenCompose(
+            result -> senderOrchestrator.scheduleActorClose(
+                requestContext.getChannelKeyContext(),
+                0,
+                Instant.now()
+            ).thenApply(ignored -> result, () -> "preserve the retry result after closing its connection actor"),
+            () -> "close the connection actor after retry processing finishes"
+        ).thenCompose(
+            result -> new TextTrackedFuture<>(
+                clientConnectionPool.shutdownNow(),
+                () -> "wait for the retry test connection pool to stop"
+            ).thenApply(ignored -> result, () -> "preserve the retry result after stopping Netty"),
+            () -> "stop Netty only after the connection actor reaches its final state"
+        ).whenComplete(
+            (ignored, failure) -> requestContext.close(),
+            () -> "close the retry test request context"
+        );
     }
 
     /**

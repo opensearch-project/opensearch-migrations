@@ -1,9 +1,13 @@
 package org.opensearch.migrations.utils;
 
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 @Slf4j
@@ -40,5 +44,35 @@ class TrackedFutureTest {
             log.atInfo().setMessage("top tf after {} releases={}").addArgument(finalI).addArgument(finalTf).log();
         }
         log.atInfo().setMessage("final tf after any ancestor culls={}").addArgument(finalTf).log();
+    }
+
+    @Test
+    void whenSettledReportsCancellationWithoutChangingFutureSemantics() {
+        var source = new TextTrackedFuture<String>("source");
+        var observedOutcome = new AtomicReference<WorkOutcome<String>>();
+        var observedFuture = source.whenSettled(observedOutcome::set, () -> "observing settlement");
+        var cancellation = new CancellationException("cancelled");
+
+        source.future.completeExceptionally(cancellation);
+
+        var thrown = Assertions.assertThrows(ExecutionException.class, observedFuture::get);
+        Assertions.assertSame(cancellation, thrown.getCause());
+        var outcome = Assertions.assertInstanceOf(WorkOutcome.Cancelled.class, observedOutcome.get());
+        Assertions.assertSame(cancellation, outcome.cause());
+    }
+
+    @Test
+    void whenSettledReportsFailureWithoutChangingFutureSemantics() {
+        var source = new TextTrackedFuture<String>("source");
+        var observedOutcome = new AtomicReference<WorkOutcome<String>>();
+        var observedFuture = source.whenSettled(observedOutcome::set, () -> "observing settlement");
+        var failure = new IllegalStateException("failed");
+
+        source.future.completeExceptionally(failure);
+
+        var thrown = Assertions.assertThrows(ExecutionException.class, observedFuture::get);
+        Assertions.assertSame(failure, thrown.getCause());
+        var outcome = Assertions.assertInstanceOf(WorkOutcome.Failed.class, observedOutcome.get());
+        Assertions.assertSame(failure, outcome.cause());
     }
 }

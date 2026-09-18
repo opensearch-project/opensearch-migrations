@@ -259,4 +259,14 @@ class FilteringTransformerWrapperTest extends InstrumentationTest {
         Assertions.assertNotNull(supplier);
         Assertions.assertInstanceOf(FilteringTransformerWrapper.class, supplier.get());
     }
+
+    @Test
+    void sourceClusterScrollContinuationsCanBeExplicitlyFiltered() {
+        var filter = new org.opensearch.migrations.transform.PredicateLoader().getPredicateFactoryLoader(
+            "{\"JsonJMESPathPredicateProvider\":{\"script\":\"URI != '/_search/scroll'\"}}"
+        );
+
+        Assertions.assertTrue(filter.test(Map.of("URI", "/geonames/_search?scroll=10s")));
+        Assertions.assertFalse(filter.test(Map.of("URI", "/_search/scroll")));
+    }
 }

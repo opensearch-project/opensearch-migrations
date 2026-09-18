@@ -102,6 +102,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "sourceKind": "proxy",
       "sourceLabel": "source",
       "topicConfig": {
+        "message.timestamp.type": "LogAppendTime",
         "retention.ms": 604800000,
         "segment.bytes": 1073741824,
       },

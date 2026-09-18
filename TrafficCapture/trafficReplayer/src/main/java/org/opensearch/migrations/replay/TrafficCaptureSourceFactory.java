@@ -24,7 +24,10 @@ public class TrafficCaptureSourceFactory {
         TrafficReplayer.Parameters appParams,
         Duration bufferTimeWindow
     ) throws IOException {
-        return new BlockingTrafficSource(createUnbufferedTrafficCaptureSource(ctx, appParams), bufferTimeWindow);
+        return new BlockingTrafficSource(
+            createUnbufferedTrafficCaptureSource(ctx, appParams),
+            bufferTimeWindow
+        );
     }
 
     public static ISimpleTrafficCaptureSource createUnbufferedTrafficCaptureSource(
@@ -55,7 +58,10 @@ public class TrafficCaptureSourceFactory {
                 appParams.kafkaTrafficPassword,
                 appParams.kafkaTrafficPropertyFile,
                 Clock.systemUTC(),
-                new KafkaBehavioralPolicy()
+                new KafkaBehavioralPolicy(),
+                appParams.maximumOwnedKafkaRecords,
+                appParams.maximumOwnedKafkaBytes,
+                !appParams.disableLivenessScanner
             );
         } else {
             return new InputStreamOfTraffic(

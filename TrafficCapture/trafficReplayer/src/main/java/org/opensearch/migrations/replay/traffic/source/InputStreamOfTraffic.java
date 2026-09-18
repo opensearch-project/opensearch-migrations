@@ -8,12 +8,14 @@ import java.io.InputStreamReader;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -62,7 +64,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
      * EOFException if the input has been exhausted.
      */
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         return CompletableFuture.supplyAsync(() -> {
@@ -79,7 +81,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
             }
             trafficStreamsRead.incrementAndGet();
             log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.get(), ts);
-            return List.<ITrafficStreamWithKey>of(
+            return List.<SourceInput>of(
                 new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts, tsk -> {
                     var channelCtx = channelContextManager.retainOrCreateContext(tsk);
                     return channelContextManager.getGlobalContext()
@@ -87,7 +89,7 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
                 }))
             );
         }).exceptionally(e -> {
-            var ecf = new CompletableFuture<List<ITrafficStreamWithKey>>();
+            var ecf = new CompletableFuture<List<SourceInput>>();
             ecf.completeExceptionally(e.getCause());
             return ecf.join();
         });
@@ -98,6 +100,21 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
         // do nothing - this datasource isn't transactional
         channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
         return CommitResult.IMMEDIATE;
+    }
+
+    @Override
+    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
+        channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
+    }
+
+    @Override
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        // Stream-backed input has no per-connection source registry.
     }
 
     @Override

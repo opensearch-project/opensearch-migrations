@@ -91,15 +91,11 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
     }
 
     static class FailingTupleSink implements TupleSink {
-        final CountDownLatch allAccepted;
-
-        FailingTupleSink(int expectedCount) {
-            this.allAccepted = new CountDownLatch(expectedCount);
-        }
+        final CountDownLatch failureInjected = new CountDownLatch(1);
 
         @Override
         public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
-            allAccepted.countDown();
+            failureInjected.countDown();
             future.completeExceptionally(new RuntimeException("tuple write failed"));
         }
 
@@ -214,6 +210,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 // Wait for the replay loop to exit cleanly. Surface any exception
                 // that occurred inside the thread.
                 replayDone.get(1, TimeUnit.MINUTES);
+                replayThread.join(TimeUnit.SECONDS.toMillis(5));
                 Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
 
                 tr.shutdown(null).get();
@@ -307,7 +304,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
     @Test
     public void tupleWriteFailureStopsReplayWithoutCommittingOffset() throws Throwable {
         var random = new Random(1);
-        var failingSink = new FailingTupleSink(NUM_REQUESTS);
+        var failingSink = new FailingTupleSink();
 
         try (var httpServer = SimpleNettyHttpServer.makeServer(
                 false, Duration.ofMinutes(10),
@@ -342,8 +339,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 replayThread.start();
 
                 Assertions.assertTrue(
-                    failingSink.allAccepted.await(30, TimeUnit.SECONDS),
-                    "Timed out waiting for failing sink to accept all tuples"
+                    failingSink.failureInjected.await(30, TimeUnit.SECONDS),
+                    "Timed out waiting for the sink to inject its tuple write failure"
                 );
 
                 replayThread.join(30_000);

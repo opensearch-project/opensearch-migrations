@@ -7,10 +7,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -18,10 +20,12 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.lifecycle.UnconfiguredSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
@@ -38,6 +42,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.slf4j.event.Level;
 
 /**
@@ -48,6 +53,68 @@ import org.slf4j.event.Level;
  */
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
+    public interface Metrics {
+        Metrics NO_OP = new Metrics() {};
+
+        default void unresolvedObligationsChanged(int delta) {}
+
+        default void stagedCommitPartitionsChanged(int delta) {}
+
+        default void pendingAcknowledgementsChanged(int generation, int delta) {}
+
+        default void commitAcknowledged(int generation, Duration latency) {}
+
+        default void commitHeadObserved(int partition, int generation, Duration age) {}
+
+        default void ownedRecordCapacityChanged(int recordDelta, long byteDelta) {}
+
+        default void ownedRecordBudgetSaturated() {}
+    }
+
+    static final class ScanCycle {
+        private final List<ConsumerRecord<String, byte[]>> records;
+        private final boolean stableGeneration;
+        private final boolean exhaustedBudget;
+
+        ScanCycle(
+            List<ConsumerRecord<String, byte[]>> records,
+            boolean stableGeneration,
+            boolean exhaustedBudget
+        ) {
+            this.records = records;
+            this.stableGeneration = stableGeneration;
+            this.exhaustedBudget = exhaustedBudget;
+        }
+
+        List<ConsumerRecord<String, byte[]>> records() {
+            return records;
+        }
+
+        boolean stableGeneration() {
+            return stableGeneration;
+        }
+
+        boolean exhaustedBudget() {
+            return exhaustedBudget;
+        }
+    }
+
+    private static final class ScanBaseline {
+        private final Set<TopicPartition> assignment;
+        private final Map<TopicPartition, Long> replayPositions;
+        private final Map<Integer, Integer> generations;
+
+        private ScanBaseline(
+            Set<TopicPartition> assignment,
+            Map<TopicPartition, Long> replayPositions,
+            Map<Integer, Integer> generations
+        ) {
+            this.assignment = assignment;
+            this.replayPositions = replayPositions;
+            this.generations = generations;
+        }
+    }
+
     @AllArgsConstructor
     private static class OrderedKeyHolder implements Comparable<OrderedKeyHolder> {
         @Getter
@@ -55,6 +122,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         @Getter
         @NonNull
         final ITrafficStreamKey tsk;
+        final int generation;
+        @NonNull
+        final Instant acceptedAt;
 
         @Override
         public int compareTo(OrderedKeyHolder o) {
@@ -88,6 +158,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      * which happens after we poll() (on the same thread, as per Consumer requirements).
      */
     public static final int POLL_TIMEOUT_KEEP_ALIVE_DIVISOR = 4;
+    static final int UNBOUNDED_OWNED_RECORDS = Integer.MAX_VALUE;
+    static final long UNBOUNDED_OWNED_BYTES = Long.MAX_VALUE;
 
     @NonNull
     private final RootReplayerContext globalContext;
@@ -108,6 +180,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     final Map<TopicPartition, PriorityQueue<OrderedKeyHolder>> nextSetOfKeysContextsBeingCommitted;
     final java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback;
     private final Duration keepAliveInterval;
+    private final Metrics metrics;
+    private final KafkaRecordOwnershipBudget ownershipBudget;
     private final AtomicReference<Instant> lastTouchTimeRef;
     private final AtomicInteger consumerConnectionGeneration;
     private final AtomicInteger kafkaRecordsLeftToCommitEventually;
@@ -120,10 +194,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         org.slf4j.LoggerFactory.getLogger("KafkaHeartbeat");
     /** Called with revoked partition numbers so the source layer can synthesize interrupted-close
      *  events for any active connections on them. Always invoked at the OLD generation (before
-     *  any subsequent onPartitionsAssigned bumps it), which matches the session.generation that
-     *  was stamped on those channels — required for onNetworkConnectionClosed to find and clear
-     *  the pendingTrafficSourceReaderInterruptedCloses entries. */
-    private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
+     *  any subsequent onPartitionsAssigned bumps it), matching the generation stamped on the
+     *  source termination obligations. */
+    private java.util.function.Consumer<Collection<SourcePartitionKey>> onPartitionsTrulyLostCallback =
+        ignored -> {};
+    private SourcePartitionLifecycleListener sourcePartitionLifecycleListener =
+        new UnconfiguredSourcePartitionLifecycleListener();
     /** Set true by {@link #cleanupRevokedPartitions} when a rebalance callback fires inline
      *  during {@code kafkaConsumer.poll()}; cleared at the top of each poll. The post-poll
      *  recovery in {@link #safePollWithSwallowedRuntimeExceptions} reads this to decide
@@ -138,6 +214,52 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         Clock c,
         java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback
     ) {
+        this(
+            globalContext,
+            kafkaConsumer,
+            topic,
+            keepAliveInterval,
+            c,
+            onCommitKeyCallback,
+            globalContext.getKafkaCommitStateMetrics(),
+            UNBOUNDED_OWNED_RECORDS,
+            UNBOUNDED_OWNED_BYTES
+        );
+    }
+
+    TrackingKafkaConsumer(
+        @NonNull RootReplayerContext globalContext,
+        Consumer<String, byte[]> kafkaConsumer,
+        String topic,
+        Duration keepAliveInterval,
+        Clock c,
+        java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback,
+        @NonNull Metrics metrics
+    ) {
+        this(
+            globalContext,
+            kafkaConsumer,
+            topic,
+            keepAliveInterval,
+            c,
+            onCommitKeyCallback,
+            metrics,
+            UNBOUNDED_OWNED_RECORDS,
+            UNBOUNDED_OWNED_BYTES
+        );
+    }
+
+    TrackingKafkaConsumer(
+        @NonNull RootReplayerContext globalContext,
+        Consumer<String, byte[]> kafkaConsumer,
+        String topic,
+        Duration keepAliveInterval,
+        Clock c,
+        java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback,
+        @NonNull Metrics metrics,
+        int maximumOwnedRecords,
+        long maximumOwnedBytes
+    ) {
         this.globalContext = globalContext;
         this.kafkaConsumer = kafkaConsumer;
         this.topic = topic;
@@ -151,14 +273,26 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         kafkaRecordsReadyToCommit = new AtomicBoolean();
         this.keepAliveInterval = keepAliveInterval;
         this.onCommitKeyCallback = onCommitKeyCallback;
+        this.metrics = metrics;
+        ownershipBudget = new KafkaRecordOwnershipBudget(
+            maximumOwnedRecords,
+            maximumOwnedBytes,
+            metrics
+        );
     }
 
     public int getConsumerConnectionGeneration() {
         return consumerConnectionGeneration.get();
     }
 
-    public void setOnPartitionsTrulyLostCallback(java.util.function.Consumer<Collection<Integer>> callback) {
+    public void setOnPartitionsTrulyLostCallback(
+        java.util.function.Consumer<Collection<SourcePartitionKey>> callback
+    ) {
         this.onPartitionsTrulyLostCallback = callback;
+    }
+
+    public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
+        this.sourcePartitionLifecycleListener = listener;
     }
 
     @Override
@@ -187,17 +321,29 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         // If we're inside poll(), flag the post-poll recovery so it can drop records and rewind.
         rebalanceDuringPoll.set(true);
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
-        var partitionNums = new ArrayList<Integer>(partitions.size());
+        var revokedPartitions = new ArrayList<SourcePartitionKey>(partitions.size());
         synchronized (commitDataLock) {
             if (attemptCommit) {
                 safeCommit(globalContext::createCommitContext);
             }
             partitions.forEach(p -> {
                 var tp = new TopicPartition(topic, p.partition());
-                nextSetOfCommitsMap.remove(tp);
-                nextSetOfKeysContextsBeingCommitted.remove(tp);
+                var tracker = partitionToOffsetLifecycleTrackerMap.get(p.partition());
+                if (tracker != null) {
+                    metrics.unresolvedObligationsChanged(-tracker.size());
+                    ownershipBudget.releasePartition(
+                        p.partition(),
+                        tracker.consumerConnectionGeneration
+                    );
+                    revokedPartitions.add(
+                        new SourcePartitionKey(topic, p.partition(), tracker.consumerConnectionGeneration)
+                    );
+                }
+                if (nextSetOfCommitsMap.remove(tp) != null) {
+                    metrics.stagedCommitPartitionsChanged(-1);
+                }
+                removePendingAcknowledgements(nextSetOfKeysContextsBeingCommitted.remove(tp));
                 partitionToOffsetLifecycleTrackerMap.remove(p.partition());
-                partitionNums.add(p.partition());
             });
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
@@ -209,7 +355,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
-        onPartitionsTrulyLostCallback.accept(partitionNums);
+        var immutableRevokedPartitions = List.copyOf(revokedPartitions);
+        sourcePartitionLifecycleListener.onRevoked(immutableRevokedPartitions);
+        onPartitionsTrulyLostCallback.accept(immutableRevokedPartitions);
     }
 
     @Override
@@ -222,20 +370,28 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         // doesn't invalidate any pre-rebalance buffer; a round-trip is already tagged on the
         // revoke side.
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsAssigned(newPartitions);
+        List<SourcePartitionKey> assignedPartitions;
         synchronized (commitDataLock) {
             consumerConnectionGeneration.incrementAndGet();
             newPartitions.forEach(
                 p -> partitionToOffsetLifecycleTrackerMap.computeIfAbsent(
                     p.partition(),
-                    x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get())
+                    x -> new OffsetLifecycleTracker(consumerConnectionGeneration.get(), clock)
                 )
             );
+            assignedPartitions = newPartitions.stream()
+                .map(p -> {
+                    var tracker = partitionToOffsetLifecycleTrackerMap.get(p.partition());
+                    return new SourcePartitionKey(topic, p.partition(), tracker.consumerConnectionGeneration);
+                })
+                .toList();
             log.atInfo()
                 .setMessage("{} partitions added for {}")
                 .addArgument(this)
                 .addArgument(() -> newPartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
+        sourcePartitionLifecycleListener.onAssigned(assignedPartitions);
     }
 
     public void close() {
@@ -243,7 +399,34 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             .setMessage("Kafka consumer closing.  Committing (implicitly by Kafka's consumer): {}")
             .addArgument(this::nextCommitsToString)
             .log();
-        kafkaConsumer.close();
+        try {
+            kafkaConsumer.close();
+        } finally {
+            clearCommitTrackingState();
+        }
+    }
+
+    private void clearCommitTrackingState() {
+        synchronized (commitDataLock) {
+            var unresolvedObligations = partitionToOffsetLifecycleTrackerMap.values()
+                .stream()
+                .mapToInt(OffsetLifecycleTracker::size)
+                .sum();
+            if (unresolvedObligations != 0) {
+                metrics.unresolvedObligationsChanged(-unresolvedObligations);
+            }
+            if (!nextSetOfCommitsMap.isEmpty()) {
+                metrics.stagedCommitPartitionsChanged(-nextSetOfCommitsMap.size());
+            }
+            nextSetOfKeysContextsBeingCommitted.values().forEach(this::removePendingAcknowledgements);
+
+            partitionToOffsetLifecycleTrackerMap.clear();
+            nextSetOfCommitsMap.clear();
+            nextSetOfKeysContextsBeingCommitted.clear();
+            ownershipBudget.clear();
+            kafkaRecordsLeftToCommitEventually.set(0);
+            kafkaRecordsReadyToCommit.set(false);
+        }
     }
 
     public Optional<Instant> getNextRequiredTouch() {
@@ -253,13 +436,23 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             r = Optional.empty();
         }
         else {
-            r = Optional.of(kafkaRecordsReadyToCommit.get() ? Instant.now() : lastTouchTime.plus(keepAliveInterval));
+            r = Optional.of(kafkaRecordsReadyToCommit.get() ? clock.instant() : lastTouchTime.plus(keepAliveInterval));
         }
         log.atTrace().setMessage("returning next required touch at {} from a lastTouchTime of {}")
             .addArgument(() -> r.map(Instant::toString).orElse("N/A"))
             .addArgument(lastTouchTime)
             .log();
         return r;
+    }
+
+    /**
+     * Flushes staged offset commits without a driving read or back-pressure block. Once intake
+     * stops (end of stream or shutdown), no poll cycle ever runs again, so commits staged by late
+     * dispositions would otherwise sit unflushed and their acknowledgements would never complete.
+     * Must run on the same executor that owns every other consumer interaction.
+     */
+    public void commitStagedOffsets() {
+        safeCommit(globalContext::createCommitContext);
     }
 
     public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
@@ -350,22 +543,225 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return applyBuilder(builder, records);
     }
 
+    ScanCycle scanAhead(int maximumRecords, Duration maximumDuration) {
+        validateScanBudget(maximumRecords, maximumDuration);
+        long deadline = System.nanoTime() + maximumDuration.toNanos();
+        var assignment = Set.copyOf(kafkaConsumer.assignment());
+        if (assignment.isEmpty()) {
+            return new ScanCycle(List.of(), true, false);
+        }
+        var baseline = captureScanBaseline(assignment, deadline);
+        if (baseline == null) {
+            return new ScanCycle(List.of(), false, false);
+        }
+        var endOffsets = kafkaConsumer.endOffsets(assignment, remainingScanDuration(deadline));
+        rebalanceDuringPoll.set(false);
+        try {
+            var scanned = collectScanRecords(baseline.assignment, endOffsets, maximumRecords, deadline);
+            var stableGeneration = scanGenerationIsStable(baseline.assignment, baseline.generations);
+            var exhaustedBudget = stableGeneration
+                && (scanned.size() >= maximumRecords || System.nanoTime() >= deadline);
+            return stableGeneration
+                ? new ScanCycle(List.copyOf(scanned), true, exhaustedBudget)
+                : new ScanCycle(List.of(), false, exhaustedBudget);
+        } finally {
+            restoreReplayPositions(baseline);
+            rebalanceDuringPoll.set(false);
+            lastTouchTimeRef.set(clock.instant());
+        }
+    }
+
+    private void validateScanBudget(int maximumRecords, Duration maximumDuration) {
+        if (maximumRecords <= 0) {
+            throw new IllegalArgumentException("maximumRecords must be positive");
+        }
+        if (maximumDuration.isZero() || maximumDuration.isNegative()) {
+            throw new IllegalArgumentException("maximumDuration must be positive");
+        }
+    }
+
+    private ScanBaseline captureScanBaseline(Set<TopicPartition> assignment, long deadline) {
+        var replayPositions = new HashMap<TopicPartition, Long>();
+        var generations = new HashMap<Integer, Integer>();
+        synchronized (commitDataLock) {
+            for (var topicPartition : assignment) {
+                replayPositions.put(
+                    topicPartition,
+                    kafkaConsumer.position(topicPartition, remainingScanDuration(deadline))
+                );
+                var tracker = partitionToOffsetLifecycleTrackerMap.get(topicPartition.partition());
+                if (tracker == null) {
+                    return null;
+                }
+                generations.put(topicPartition.partition(), tracker.consumerConnectionGeneration);
+            }
+        }
+        return new ScanBaseline(assignment, replayPositions, generations);
+    }
+
+    private List<ConsumerRecord<String, byte[]>> collectScanRecords(
+        Set<TopicPartition> assignment,
+        Map<TopicPartition, Long> endOffsets,
+        int maximumRecords,
+        long deadline
+    ) {
+        var scanned = new ArrayList<ConsumerRecord<String, byte[]>>();
+        while (shouldContinueScan(assignment, endOffsets, scanned.size(), maximumRecords, deadline)) {
+            var records = pollForScan(assignment, deadline);
+            if (records == null) {
+                return scanned;
+            }
+            for (var kafkaRecord : records) {
+                var topicPartition = new TopicPartition(kafkaRecord.topic(), kafkaRecord.partition());
+                if (scanned.size() < maximumRecords && assignment.contains(topicPartition)) {
+                    scanned.add(kafkaRecord);
+                }
+            }
+        }
+        return scanned;
+    }
+
+    private boolean shouldContinueScan(
+        Set<TopicPartition> assignment,
+        Map<TopicPartition, Long> endOffsets,
+        int scannedRecords,
+        int maximumRecords,
+        long deadline
+    ) {
+        return scannedRecords < maximumRecords
+            && System.nanoTime() < deadline
+            && !rebalanceDuringPoll.get()
+            && !atScanEnd(assignment, endOffsets, deadline);
+    }
+
+    private ConsumerRecords<String, byte[]> pollForScan(
+        Set<TopicPartition> assignment,
+        long deadline
+    ) {
+        var remaining = Duration.ofNanos(Math.max(1, deadline - System.nanoTime()));
+        try {
+            return kafkaConsumer.poll(
+                remaining.compareTo(Duration.ofMillis(10)) > 0 ? Duration.ofMillis(10) : remaining
+            );
+        } catch (RuntimeException e) {
+            if (rebalanceDuringPoll.get() || !kafkaConsumer.assignment().equals(assignment)) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    private void restoreReplayPositions(ScanBaseline baseline) {
+        for (var entry : baseline.replayPositions.entrySet()) {
+            var topicPartition = entry.getKey();
+            if (kafkaConsumer.assignment().contains(topicPartition)
+                && generationMatches(topicPartition, baseline.generations.get(topicPartition.partition()))) {
+                kafkaConsumer.seek(topicPartition, entry.getValue());
+            }
+        }
+    }
+
+    private boolean atScanEnd(
+        Set<TopicPartition> assignment,
+        Map<TopicPartition, Long> endOffsets,
+        long deadline
+    ) {
+        return assignment.stream().allMatch(topicPartition ->
+            kafkaConsumer.position(topicPartition, remainingScanDuration(deadline))
+                >= endOffsets.getOrDefault(topicPartition, Long.MAX_VALUE)
+        );
+    }
+
+    private Duration remainingScanDuration(long deadline) {
+        long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) {
+            throw new TimeoutException("Kafka liveness scan exceeded its time budget");
+        }
+        return Duration.ofNanos(remainingNanos);
+    }
+
+    private boolean scanGenerationIsStable(
+        Set<TopicPartition> assignment,
+        Map<Integer, Integer> generations
+    ) {
+        return !rebalanceDuringPoll.get()
+            && kafkaConsumer.assignment().equals(assignment)
+            && assignment.stream().allMatch(topicPartition ->
+                generationMatches(topicPartition, generations.get(topicPartition.partition()))
+            );
+    }
+
+    private boolean generationMatches(TopicPartition topicPartition, Integer expectedGeneration) {
+        synchronized (commitDataLock) {
+            var tracker = partitionToOffsetLifecycleTrackerMap.get(topicPartition.partition());
+            return tracker != null
+                && expectedGeneration != null
+                && tracker.consumerConnectionGeneration == expectedGeneration;
+        }
+    }
+
     private <T> Stream<T> applyBuilder(
         BiFunction<KafkaCommitOffsetData, ConsumerRecord<String, byte[]>, T> builder,
         ConsumerRecords<String, byte[]> records
     ) {
-        return StreamSupport.stream(records.spliterator(), false).map(kafkaRecord -> {
-            var offsetTracker = partitionToOffsetLifecycleTrackerMap.get(kafkaRecord.partition());
-            var offsetDetails = new PojoKafkaCommitOffsetData(
-                offsetTracker.consumerConnectionGeneration,
-                kafkaRecord.partition(),
-                kafkaRecord.offset()
-            );
-            offsetTracker.add(offsetDetails.getOffset(), kafkaRecord.key());
-            kafkaRecordsLeftToCommitEventually.incrementAndGet();
-            log.atTrace().setMessage("records in flight={}").addArgument(kafkaRecordsLeftToCommitEventually::get).log();
-            return builder.apply(offsetDetails, kafkaRecord);
+        var accepted = new ArrayList<T>();
+        var rewindOffsets = new HashMap<TopicPartition, Long>();
+        boolean capacityReached = false;
+        for (var kafkaRecord : records) {
+            var topicPartition = new TopicPartition(kafkaRecord.topic(), kafkaRecord.partition());
+            if (capacityReached) {
+                rewindOffsets.merge(topicPartition, kafkaRecord.offset(), Math::min);
+            } else {
+                var offsetTracker = partitionToOffsetLifecycleTrackerMap.get(kafkaRecord.partition());
+                var offsetDetails = new PojoKafkaCommitOffsetData(
+                    offsetTracker.consumerConnectionGeneration,
+                    kafkaRecord.partition(),
+                    kafkaRecord.offset()
+                );
+                var reservationKey = reservationKey(offsetDetails);
+                if (!ownershipBudget.tryReserve(reservationKey, serializedRecordSize(kafkaRecord))) {
+                    capacityReached = true;
+                    rewindOffsets.merge(topicPartition, kafkaRecord.offset(), Math::min);
+                } else {
+                    final T builtRecord;
+                    try {
+                        builtRecord = builder.apply(offsetDetails, kafkaRecord);
+                    } catch (RuntimeException | Error e) {
+                        ownershipBudget.release(reservationKey);
+                        throw e;
+                    }
+                    offsetTracker.add(offsetDetails.getOffset(), kafkaRecord.key());
+                    kafkaRecordsLeftToCommitEventually.incrementAndGet();
+                    metrics.unresolvedObligationsChanged(1);
+                    log.atTrace().setMessage("records in flight={}")
+                        .addArgument(kafkaRecordsLeftToCommitEventually::get)
+                        .log();
+                    accepted.add(builtRecord);
+                }
+            }
+        }
+        rewindRejectedRecords(rewindOffsets);
+        return accepted.stream();
+    }
+
+    private void rewindRejectedRecords(Map<TopicPartition, Long> rewindOffsets) {
+        rewindOffsets.forEach((partition, offset) -> {
+            if (kafkaConsumer.assignment().contains(partition)) {
+                kafkaConsumer.seek(partition, offset);
+            }
         });
+    }
+
+    private static long serializedRecordSize(ConsumerRecord<String, byte[]> kafkaRecord) {
+        int keySize = kafkaRecord.serializedKeySize();
+        if (keySize < 0 && kafkaRecord.key() != null) {
+            keySize = kafkaRecord.key().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        }
+        int valueSize = kafkaRecord.serializedValueSize();
+        if (valueSize < 0 && kafkaRecord.value() != null) {
+            valueSize = kafkaRecord.value().length;
+        }
+        return (long) Math.max(0, keySize) + Math.max(0, valueSize);
     }
 
     private ConsumerRecords<String, byte[]> safePollWithSwallowedRuntimeExceptions(
@@ -388,6 +784,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             if (rebalanceDuringPoll.getAndSet(false)) {
                 records = recoverFromInlineRebalance(records, prePollPositions);
             }
+            failOnUnexpectedOffsetRewind(records);
             pollsSinceLastHeartbeat.incrementAndGet();
             if (records.isEmpty()) {
                 emptyPollsSinceLastHeartbeat.incrementAndGet();
@@ -409,6 +806,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .log();
             return records;
         } catch (RuntimeException e) {
+            if (e instanceof UnexpectedOffsetRewindException) {
+                throw e;
+            }
             log.atWarn().setCause(e)
                 .setMessage("Unable to poll the topic: {} with our Kafka consumer ({}). "
                         + "Swallowing and awaiting next metadata refresh to try again.")
@@ -474,47 +874,84 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
     }
 
-    ITrafficCaptureSource.CommitResult commitKafkaKey(ITrafficStreamKey streamKey, KafkaCommitOffsetData kafkaTsk) {
-        OffsetLifecycleTracker tracker;
+    private void failOnUnexpectedOffsetRewind(
+        ConsumerRecords<String, byte[]> polled
+    ) {
+        var minimumReturned = new HashMap<TopicPartition, Long>();
+        for (var consumerRecord : polled) {
+            var partition = new TopicPartition(consumerRecord.topic(), consumerRecord.partition());
+            minimumReturned.merge(partition, consumerRecord.offset(), Math::min);
+        }
+        var resetPartitions = minimumReturned.entrySet()
+            .stream()
+            .filter(entry -> hasAlreadyObserved(entry.getKey(), entry.getValue()))
+            .map(Map.Entry::getKey)
+            .toList();
+        if (resetPartitions.isEmpty()) {
+            return;
+        }
+
+        throw new UnexpectedOffsetRewindException(
+            "Kafka offsets moved backward for "
+                + resetPartitions.stream()
+                    .map(partition -> partition + "->" + minimumReturned.get(partition))
+                    .collect(Collectors.joining(","))
+                + ". Live traffic-topic replacement is unsupported; restart the replay with a fresh source."
+        );
+    }
+
+    static final class UnexpectedOffsetRewindException extends IllegalStateException {
+        private UnexpectedOffsetRewindException(String message) {
+            super(message);
+        }
+    }
+
+    private boolean hasAlreadyObserved(TopicPartition partition, long offset) {
         synchronized (commitDataLock) {
-            tracker = partitionToOffsetLifecycleTrackerMap.get(kafkaTsk.getPartition());
+            var tracker = partitionToOffsetLifecycleTrackerMap.get(partition.partition());
+            return tracker != null && tracker.hasAlreadyObserved(offset);
         }
-        if (tracker == null || tracker.consumerConnectionGeneration != kafkaTsk.getGeneration()) {
-            log.atWarn()
-                .setMessage(
-                    () -> "trafficKey's generation ({}) is not current ({})." +
-                        "  Dropping this commit request since the record would "
-                        + "have been handled again by a current consumer within this process or another. Full key={}")
-                .addArgument(kafkaTsk::getGeneration)
-                .addArgument((Optional.ofNullable(tracker)
-                    .map(t -> "new generation=" + t.consumerConnectionGeneration)
-                    .orElse("Partition unassigned")))
-                .addArgument(kafkaTsk)
-                .log();
-            return ITrafficCaptureSource.CommitResult.IGNORED;
-        }
+    }
 
-        var p = kafkaTsk.getPartition();
-        Optional<Long> newHeadValue;
-
-        var k = new TopicPartition(topic, p);
-
-        newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk.getOffset());
-        return newHeadValue.map(o -> {
-            var v = new OffsetAndMetadata(o);
-            log.atDebug().setMessage("Adding new commit {}->{} to map").addArgument(k).addArgument(v).log();
-            synchronized (commitDataLock) {
-                addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
-                nextSetOfCommitsMap.put(k, v);
+    ITrafficCaptureSource.CommitResult commitKafkaKey(ITrafficStreamKey streamKey, KafkaCommitOffsetData kafkaTsk) {
+        synchronized (commitDataLock) {
+            var tracker = partitionToOffsetLifecycleTrackerMap.get(kafkaTsk.getPartition());
+            if (tracker == null || tracker.consumerConnectionGeneration != kafkaTsk.getGeneration()) {
+                log.atWarn()
+                    .setMessage(
+                        () -> "trafficKey's generation ({}) is not current ({})." +
+                            "  Dropping this commit request since the record would "
+                            + "have been handled again by a current consumer within this process or another. Full key={}")
+                    .addArgument(kafkaTsk::getGeneration)
+                    .addArgument((Optional.ofNullable(tracker)
+                        .map(t -> "new generation=" + t.consumerConnectionGeneration)
+                        .orElse("Partition unassigned")))
+                    .addArgument(kafkaTsk)
+                    .log();
+                return ITrafficCaptureSource.CommitResult.IGNORED;
             }
-            kafkaRecordsReadyToCommit.set(true);
-            return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
-        }).orElseGet(() -> {
-            synchronized (commitDataLock) {
-                addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
+
+            var partition = new TopicPartition(topic, kafkaTsk.getPartition());
+            var newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk.getOffset());
+            metrics.unresolvedObligationsChanged(-1);
+            if (newHeadValue.isPresent()) {
+                var nextOffset = new OffsetAndMetadata(newHeadValue.get());
+                log.atDebug()
+                    .setMessage("Adding new commit {}->{} to map")
+                    .addArgument(partition)
+                    .addArgument(nextOffset)
+                    .log();
+                addKeyContextForEventualCommit(streamKey, kafkaTsk, partition);
+                if (nextSetOfCommitsMap.put(partition, nextOffset) == null) {
+                    metrics.stagedCommitPartitionsChanged(1);
+                }
+                kafkaRecordsReadyToCommit.set(true);
+                return ITrafficCaptureSource.CommitResult.AFTER_NEXT_READ;
             }
+
+            addKeyContextForEventualCommit(streamKey, kafkaTsk, partition);
             return ITrafficCaptureSource.CommitResult.BLOCKED_BY_OTHER_COMMITS;
-        });
+        }
     }
 
     private void addKeyContextForEventualCommit(
@@ -523,7 +960,13 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         TopicPartition k
     ) {
         nextSetOfKeysContextsBeingCommitted.computeIfAbsent(k, k2 -> new PriorityQueue<>())
-            .add(new OrderedKeyHolder(kafkaTsk.getOffset(), streamKey));
+            .add(new OrderedKeyHolder(
+                kafkaTsk.getOffset(),
+                streamKey,
+                kafkaTsk.getGeneration(),
+                clock.instant()
+            ));
+        metrics.pendingAcknowledgementsChanged(kafkaTsk.getGeneration(), 1);
     }
 
     private void safeCommit(Supplier<IKafkaConsumerContexts.ICommitScopeContext> commitContextSupplier) {
@@ -540,16 +983,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             safeCommitStatic(context, kafkaConsumer, nextCommitsMapCopy);
             commitsSinceLastHeartbeat.incrementAndGet();
             synchronized (commitDataLock) {
-                nextCommitsMapCopy.entrySet()
-                    .stream()
-                    .forEach(
-                        kvp -> callbackUpTo(
-                            onCommitKeyCallback,
-                            nextSetOfKeysContextsBeingCommitted.get(kvp.getKey()),
-                            kvp.getValue().offset()
-                        )
-                    );
-                nextCommitsMapCopy.forEach((k, v) -> nextSetOfCommitsMap.remove(k));
+                nextCommitsMapCopy.forEach((partition, offset) -> {
+                    var pendingAcknowledgements = nextSetOfKeysContextsBeingCommitted.get(partition);
+                    callbackUpTo(partition, pendingAcknowledgements, offset.offset());
+                    if (pendingAcknowledgements != null && pendingAcknowledgements.isEmpty()) {
+                        nextSetOfKeysContextsBeingCommitted.remove(partition, pendingAcknowledgements);
+                    }
+                    if (nextSetOfCommitsMap.remove(partition, offset)) {
+                        metrics.stagedCommitPartitionsChanged(-1);
+                    }
+                });
             }
             // This function will only ever be called in a threadsafe way, mutually exclusive from any
             // other call other than commitKafkaKey(). Since commitKafkaKey() doesn't alter
@@ -594,16 +1037,43 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    private static void callbackUpTo(
-        java.util.function.Consumer<ITrafficStreamKey> onCommitKeyCallback,
+    private void callbackUpTo(
+        TopicPartition partition,
         PriorityQueue<OrderedKeyHolder> orderedKeyHolders,
         long upToOffset
     ) {
+        if (orderedKeyHolders == null) {
+            return;
+        }
         for (var nextKeyHolder = orderedKeyHolders.peek(); nextKeyHolder != null
             && nextKeyHolder.offset <= upToOffset; nextKeyHolder = orderedKeyHolders.peek()) {
-            onCommitKeyCallback.accept(nextKeyHolder.tsk);
+            try {
+                onCommitKeyCallback.accept(nextKeyHolder.tsk);
+            } finally {
+                ownershipBudget.release(
+                    new KafkaRecordOwnershipBudget.ReservationKey(
+                        partition.partition(),
+                        nextKeyHolder.generation,
+                        nextKeyHolder.offset
+                    )
+                );
+            }
             orderedKeyHolders.poll();
+            metrics.pendingAcknowledgementsChanged(nextKeyHolder.generation, -1);
+            metrics.commitAcknowledged(
+                nextKeyHolder.generation,
+                Duration.between(nextKeyHolder.acceptedAt, clock.instant())
+            );
         }
+    }
+
+    private void removePendingAcknowledgements(PriorityQueue<OrderedKeyHolder> pendingAcknowledgements) {
+        if (pendingAcknowledgements == null) {
+            return;
+        }
+        pendingAcknowledgements.forEach(holder ->
+            metrics.pendingAcknowledgementsChanged(holder.generation, -1)
+        );
     }
 
     /** Emit a periodic heartbeat log summarizing the Kafka consumer state. */
@@ -614,6 +1084,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         int inflight = kafkaRecordsLeftToCommitEventually.get();
         boolean readyToCommit = kafkaRecordsReadyToCommit.get();
         int generation = consumerConnectionGeneration.get();
+        var budget = ownershipBudget.snapshot();
 
         synchronized (commitDataLock) {
             var sb = new StringBuilder();
@@ -621,29 +1092,70 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             sb.append(" partitions=").append(partitionToOffsetLifecycleTrackerMap.keySet());
             sb.append(" inflight=").append(inflight);
 
-            // Report commit head details from the first partition's tracker
-            partitionToOffsetLifecycleTrackerMap.values().stream().findFirst().ifPresent(tracker -> {
-                tracker.peekHeadOffset().ifPresent(headOffset -> {
-                    sb.append(" commitHead={offset=").append(headOffset);
-                    tracker.peekHeadMetadata().ifPresent(meta -> {
-                        sb.append(", conn=").append(meta.connectionId);
-                        var age = Duration.between(meta.addedAt, clock.instant());
-                        sb.append(", age=").append(Utils.formatDurationInSeconds(age));
-                    });
-                    sb.append("}");
-                });
-                sb.append(" commitTail=").append(tracker.getHighWatermark());
-                sb.append(" queueSize=").append(tracker.size());
-            });
+            appendCommitHeadDiagnostics(sb);
 
             sb.append(" polls=").append(polls);
             sb.append(" emptyPolls=").append(emptyPolls);
             sb.append(" commits=").append(commits);
             sb.append(" readyToCommit=").append(readyToCommit);
             sb.append(" pendingCommitPartitions=").append(nextSetOfCommitsMap.size());
+            sb.append(" ownedRecords=").append(budget.records())
+                .append("/").append(budget.maximumRecords());
+            sb.append(" ownedBytes=").append(budget.bytes())
+                .append("/").append(budget.maximumBytes());
+            sb.append(" ownershipBudgetSaturated=").append(budget.saturated());
 
             heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
         }
+    }
+
+    boolean isReadCapacityAvailable() {
+        return ownershipBudget.isCapacityAvailable();
+    }
+
+    void setReadCapacityAvailableListener(Runnable listener) {
+        ownershipBudget.setCapacityAvailableListener(listener);
+    }
+
+    KafkaRecordOwnershipBudget.OwnershipSnapshot ownershipBudgetSnapshot() {
+        return ownershipBudget.snapshot();
+    }
+
+    private static KafkaRecordOwnershipBudget.ReservationKey reservationKey(
+        KafkaCommitOffsetData offset
+    ) {
+        return new KafkaRecordOwnershipBudget.ReservationKey(
+            offset.getPartition(),
+            offset.getGeneration(),
+            offset.getOffset()
+        );
+    }
+
+    private void appendCommitHeadDiagnostics(StringBuilder sb) {
+        var commitHeads = new StringJoiner(", ", "[", "]");
+        partitionToOffsetLifecycleTrackerMap.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> {
+                var partition = entry.getKey();
+                var tracker = entry.getValue();
+                tracker.peekHeadOffset().ifPresent(headOffset -> {
+                    var details = new StringBuilder()
+                        .append("{partition=").append(partition)
+                        .append(", generation=").append(tracker.consumerConnectionGeneration)
+                        .append(", offset=").append(headOffset);
+                    tracker.peekHeadMetadata().ifPresent(metadata -> {
+                        var age = Duration.between(metadata.addedAt, clock.instant());
+                        metrics.commitHeadObserved(partition, tracker.consumerConnectionGeneration, age);
+                        details.append(", conn=").append(metadata.connectionId)
+                            .append(", age=").append(Utils.formatDurationInSeconds(age));
+                    });
+                    details.append(", tail=").append(tracker.getHighWatermark())
+                        .append(", queueSize=").append(tracker.size())
+                        .append("}");
+                    commitHeads.add(details);
+                });
+            });
+        sb.append(" commitHeads=").append(commitHeads);
     }
 
 
