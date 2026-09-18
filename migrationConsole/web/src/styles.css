@@ -4411,7 +4411,7 @@ button.secondary-button:hover:not(:disabled) {
 .validity-dashboard {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
-  background: #f6f8fa;
+  background: var(--surface);
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -4434,7 +4434,7 @@ button.secondary-button:hover:not(:disabled) {
   align-items: center;
   gap: 8px;
   padding: 5px 9px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid #aab8bf;
   border-radius: 5px;
   color: var(--text);
   background: var(--surface);
@@ -4494,15 +4494,33 @@ button.validity-tab[aria-selected="true"] {
   background: #dcefe2;
 }
 
+.validity-tab.status-valid,
+.validity-tab.status-not_applicable {
+  border-color: #83b997;
+  background: #f2faf4;
+}
+
 .validity-tab.status-partially_verified > svg,
 .validity-tab.status-stale > svg {
   color: #725b14;
   background: #f6ebc8;
 }
 
+.validity-tab.status-partially_verified,
+.validity-tab.status-stale {
+  border-color: #d0ae50;
+  background: #fff9e8;
+}
+
 .validity-tab.status-failed > svg {
   color: #8d342d;
   background: #f5deda;
+}
+
+.validity-tab.status-failed {
+  border-color: #c85b52;
+  background: #fff0ef;
+  box-shadow: inset 0 0 0 1px #e4aaa5;
 }
 
 .validity-tab.status-checking > svg {
@@ -4511,15 +4529,137 @@ button.validity-tab[aria-selected="true"] {
 }
 
 .validity-tab-panel {
+  height: 148px;
   padding: 9px 14px 11px;
   border-top: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
+  overflow: auto;
 }
 
 .validity-detail-content {
   display: grid;
   gap: 7px;
+}
+
+.validity-detail-content > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.validity-detail-content > header span {
+  color: var(--text-muted);
+}
+
+.validity-indicator {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid #9ba9b0;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.validity-indicator > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.validity-indicator.status-valid {
+  border-color: #74ad89;
+  color: #1f6838;
+  background: #eef8f1;
+}
+
+.validity-indicator.status-partially_verified,
+.validity-indicator.status-stale {
+  border-color: #c8a33e;
+  color: #6c5311;
+  background: #fff8df;
+}
+
+.validity-indicator.status-failed {
+  border-color: #c34e45;
+  color: #872d27;
+  background: #ffebe9;
+  box-shadow: inset 0 0 0 1px #e5a39e;
+}
+
+.validity-indicator.status-checking {
+  border-color: #5f9db8;
+  color: #205e78;
+  background: #edf7fb;
+}
+
+.config-property-validity-detail > td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.property-validity-content {
+  height: 148px;
+  padding: 10px 14px 10px calc(14px + var(--config-depth) * 18px);
+  background: #fbfcfd;
+  overflow: auto;
+}
+
+.config-scope-validity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.config-scope-validity-detail {
+  width: 100%;
+  height: 148px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  background: #fbfcfd;
+  overflow: auto;
+}
+
+.runtime-validity {
+  display: grid;
+  gap: 8px;
+}
+
+.runtime-validity > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-validity > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.runtime-validity > header h3 {
+  margin: 0;
+}
+
+.runtime-validity > header span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.runtime-validity-detail {
+  height: 148px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  background: #fbfcfd;
+  overflow: auto;
 }
 
 .validity-detail-content > p {

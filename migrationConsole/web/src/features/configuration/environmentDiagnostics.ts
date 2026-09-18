@@ -50,6 +50,7 @@ export interface EnvironmentReference {
 export interface EnvironmentReferenceGroup {
   id: string;
   label: string;
+  typeLabel: string;
   references: EnvironmentReference[];
   diagnostics: ConfigEnvironmentDiagnostics["diagnostics"];
   status: EnvironmentDiagnosticLifecycle;
@@ -162,7 +163,7 @@ export function environmentReferenceGroups(
   diagnostics: ConfigEnvironmentDiagnostics["diagnostics"],
   lifecycle: EnvironmentDiagnosticLifecycle,
 ): EnvironmentReferenceGroup[] {
-  const references = new Map<string, EnvironmentReference>();
+  const references = new Map<string, EnvironmentReference[]>();
   const visit = (node: EditNode) => {
     const name = referenceName(node);
     if (
@@ -172,49 +173,39 @@ export function environmentReferenceGroups(
     ) {
       const category = referenceCategory(node);
       const id = `${category}:${name}`;
-      if (!references.has(id)) {
-        references.set(id, {
-          id,
+      const reference = {
+          id: `${id}:${node.path.join(".")}`,
           category,
           displayName: node.externalRef.displayName || node.label,
           name,
           path: node.path,
-        });
-      }
+        };
+      references.set(id, [...(references.get(id) ?? []), reference]);
     }
     node.children?.forEach(visit);
   };
   nodes.forEach(visit);
 
-  const byCategory = new Map<
-    EnvironmentReferenceCategory,
-    EnvironmentReference[]
-  >();
-  references.forEach((reference) => {
-    byCategory.set(reference.category, [
-      ...(byCategory.get(reference.category) ?? []),
-      reference,
-    ]);
-  });
-  return [...byCategory.entries()]
-    .map(([category, categoryReferences]) => {
-      const categoryDiagnostics = diagnostics.filter((diagnostic) => (
+  return [...references.entries()]
+    .map(([id, resourceReferences]) => {
+      const referenceDiagnostics = diagnostics.filter((diagnostic) => (
         diagnostic.path.length === 0
-        || categoryReferences.some((reference) => (
+        || resourceReferences.some((reference) => (
           pathsOverlap(reference.path, diagnostic.path)
         ))
       ));
       return {
-        id: `environment:${category}`,
-        label: categoryLabel(category),
-        references: categoryReferences.sort(
-          (left, right) => left.name.localeCompare(right.name),
-        ),
-        diagnostics: categoryDiagnostics,
-        status: groupStatus(lifecycle, categoryDiagnostics),
+        id: `environment:${id}`,
+        label: resourceReferences[0].name,
+        typeLabel: categoryLabel(resourceReferences[0].category),
+        references: resourceReferences,
+        diagnostics: referenceDiagnostics,
+        status: groupStatus(lifecycle, referenceDiagnostics),
       };
     })
-    .sort((left, right) => left.label.localeCompare(right.label));
+    .sort((left, right) => left.references[0].path.join(".").localeCompare(
+      right.references[0].path.join("."),
+    ));
 }
 
 
@@ -275,7 +266,8 @@ export function useEnvironmentDiagnostics(
 
   useEffect(() => {
     setRequest((current) => {
-      if (!rawDocument || !nonce) return null;
+      if (!nonce) return null;
+      if (!rawDocument) return current;
       if (current?.nonce === nonce) return current;
       return {
         nonce,

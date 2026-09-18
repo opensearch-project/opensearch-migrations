@@ -66,6 +66,7 @@ import {
 import {
   StandaloneConnectivityLogs,
   type ConnectivityNavigationStates,
+  useConnectivityChecks,
 } from "../features/configuration/connectivityChecks";
 import type {
   PendingResourceAddition,
@@ -362,6 +363,12 @@ function ManageApp() {
     enabled: true,
     staleTime: Infinity,
   });
+  const runtimeConnectivity = useConnectivityChecks(
+    browserConfigDraft.data,
+    null,
+    500,
+    !editContext,
+  );
   const resetTargetIds = useMemo(
     () => activeResetTargetIds(operations.data),
     [operations.data],
@@ -1582,7 +1589,11 @@ function ManageApp() {
                 </header>
                 <ResourceTree
                   changeStates={resourceDraftChanges}
-                  connectivityStates={connectivityStates}
+                  connectivityStates={
+                    editContext
+                      ? connectivityStates
+                      : runtimeConnectivity.navigationStates
+                  }
                   onSelect={selectNode}
                   presentation={editContext ? "configuration" : "runtime"}
                   resourceAdds={editContext ? resourceAdds : null}
@@ -1698,6 +1709,14 @@ function ManageApp() {
                   key={selectedNode.id}
                   navigationBackLabel={linkedBackLabel}
                   node={selectedNode}
+                  connectivityState={
+                    runtimeConnectivity.navigationTargets[
+                      editTarget(selectedNode) ?? ""
+                    ]
+                  }
+                  onCheckConnectivity={(targetIds) => {
+                    void runtimeConnectivity.start(targetIds);
+                  }}
                   onDelete={
                     selectedRemovalTargetId ? startDeleting : undefined
                   }

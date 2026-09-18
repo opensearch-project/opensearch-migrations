@@ -7,8 +7,9 @@ import { ValidityDashboard } from "./ValidityDashboard";
 
 
 const secretGroup: EnvironmentReferenceGroup = {
-  id: "environment:secret",
-  label: "Kubernetes Secrets",
+  id: "environment:secret:source-creds",
+  label: "source-creds",
+  typeLabel: "Kubernetes Secrets",
   status: "valid",
   diagnostics: [],
   references: [
@@ -18,27 +19,6 @@ const secretGroup: EnvironmentReferenceGroup = {
       displayName: "Source credentials",
       name: "source-creds",
       path: ["sourceClusters", "source", "authConfig", "basic", "secretName"],
-    },
-    {
-      id: "secret:target-creds",
-      category: "secret",
-      displayName: "Target credentials",
-      name: "target-creds",
-      path: ["targetClusters", "target", "authConfig", "basic", "secretName"],
-    },
-    {
-      id: "secret:proxy-tls",
-      category: "secret",
-      displayName: "Proxy TLS",
-      name: "proxy-tls",
-      path: ["traffic", "proxies", "capture", "tls", "secretName"],
-    },
-    {
-      id: "secret:kafka-creds",
-      category: "secret",
-      displayName: "Kafka credentials",
-      name: "kafka-creds",
-      path: ["traffic", "kafkaClusters", "main", "secretName"],
     },
   ],
 };
@@ -57,17 +37,16 @@ describe("validity dashboard", () => {
     );
 
     const tab = screen.getByRole("tab", { name: /Kubernetes Secrets/i });
-    expect(tab).toHaveTextContent("Valid · 4");
-    expect(screen.queryByText(/Checked source-creds/)).toBeNull();
+    expect(tab).toHaveTextContent("Kubernetes Secrets · Valid");
+    expect(screen.queryByText(/configured reference is available/)).toBeNull();
 
     await userEvent.click(tab);
 
     expect(screen.getByText(
-      "Checked source-creds, target-creds, proxy-tls, ... (4 checked).",
+      "Valid: the configured reference is available.",
     )).toBeInTheDocument();
-    expect(screen.getByText("kafka-creds")).toBeInTheDocument();
 
     await userEvent.click(tab);
-    expect(screen.queryByText(/Checked source-creds/)).toBeNull();
+    expect(screen.queryByText(/configured reference is available/)).toBeNull();
   });
 });

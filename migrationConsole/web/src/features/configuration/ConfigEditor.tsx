@@ -79,7 +79,13 @@ import {
   type ResourceAddOption,
   type ResourceRenameOption,
 } from "./resourceAdds";
-import { ValidityDashboard } from "./ValidityDashboard";
+import {
+  buildValidityItems,
+  ValidityDashboard,
+  ValidityDetails,
+  ValidityIndicator,
+  type ValidityItem,
+} from "./ValidityDashboard";
 
 
 interface ConfigEditorProps {
@@ -599,6 +605,7 @@ function visibleNode(
   node: EditNode,
   showOptional: boolean,
   showExpert: boolean,
+  retainedOptionalIds: ReadonlySet<string> = new Set(),
 ): boolean {
   if (
     node.expert
@@ -613,10 +620,12 @@ function visibleNode(
     && !showOptional
     && !node.essential
     && !node.valueAuthored
+    && !node.draftChange
+    && !retainedOptionalIds.has(node.id)
     && !nodeHasIssue(node)
   ) {
     return propertyChildren(node).some((child) =>
-      visibleNode(child, showOptional, showExpert));
+      visibleNode(child, showOptional, showExpert, retainedOptionalIds));
   }
   return true;
 }
@@ -627,11 +636,17 @@ function treeRows(
   expanded: ReadonlySet<string>,
   showOptional: boolean,
   showExpert: boolean,
+  retainedOptionalIds: ReadonlySet<string> = new Set(),
 ): EditRow[] {
   const rows: EditRow[] = [];
   const visit = (node: EditNode, depth: number) => {
     if (node.valueKind === "command") return;
-    if (!visibleNode(node, showOptional, showExpert)) return;
+    if (!visibleNode(
+      node,
+      showOptional,
+      showExpert,
+      retainedOptionalIds,
+    )) return;
     rows.push({ node, depth });
     if (expanded.has(node.id)) {
       nodeChildren(node).forEach((child) => visit(child, depth + 1));
@@ -1469,6 +1484,11 @@ function ConfigPropertyRow({
   onToggle,
   rowRef,
   contextProgress,
+  validityItems,
+  expandedValidityIds,
+  onToggleValidity,
+  onCheckConnectivity,
+  retainedOptional,
 }: Readonly<{
   draft: BrowserConfigDraft;
   node: EditNode;
@@ -1497,6 +1517,11 @@ function ConfigPropertyRow({
   onToggle: () => void;
   rowRef: (element: HTMLTableRowElement | null) => void;
   contextProgress: number;
+  validityItems: ValidityItem[];
+  expandedValidityIds: ReadonlySet<string>;
+  onToggleValidity: (id: string) => void;
+  onCheckConnectivity: (targetIds: string[]) => void;
+  retainedOptional: boolean;
 }>) {
   const [renaming, setRenaming] = useState(false);
   const [addingCommandId, setAddingCommandId] = useState<string | null>(null);
@@ -1809,6 +1834,11 @@ function ConfigPropertyRow({
                     ? <span>{node.presence}</span>
                     : null}
                   {node.expert ? <span>Expert</span> : null}
+                  {retainedOptional && !node.valueAuthored ? (
+                    <span title="This explicit value was removed and the default will be used.">
+                      Uses default
+                    </span>
+                  ) : null}
                 </span>
               </span>
               {showDocumentation && node.description
@@ -1942,6 +1972,14 @@ function ConfigPropertyRow({
                       {node.status}
                     </span>
             ) : null}
+            {validityItems.map((item) => (
+              <ValidityIndicator
+                expanded={expandedValidityIds.has(item.id)}
+                item={item}
+                key={item.id}
+                onToggle={() => onToggleValidity(item.id)}
+              />
+            ))}
             <div className="property-actions">
             {topLevelResourceCommand ? (
               <button
@@ -2014,6 +2052,23 @@ function ConfigPropertyRow({
           </div>
         </td>
       </tr>
+      {validityItems
+        .filter(({ id }) => expandedValidityIds.has(id))
+        .map((item) => (
+          <tr className="config-property-validity-detail" key={`${item.id}:detail`}>
+            <td colSpan={3}>
+              <div
+                className="property-validity-content"
+                style={{ "--config-depth": depth } as React.CSSProperties}
+              >
+                <ValidityDetails
+                  item={item}
+                  onCheckConnectivity={onCheckConnectivity}
+                />
+              </div>
+            </td>
+          </tr>
+        ))}
       {renaming || showDetails ? (
         <tr className={[
           "config-property-detail",
@@ -2175,6 +2230,9 @@ export function ConfigEditor({
     initialDisplayPreferences.showExpert,
   );
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [expandedValidityIds, setExpandedValidityIds] =
+    useState<Set<string>>(() => new Set());
+  const retainedOptionalIds = useRef(new Set<string>());
   const [insertedIds, setInsertedIds] = useState<Set<string>>(() => new Set());
   const [removingIds, setRemovingIds] = useState<Set<string>>(
     () => new Set(),
@@ -2279,6 +2337,15 @@ export function ConfigEditor({
     () => draft?.editState.nodes ?? [],
     [draft?.editState.nodes],
   );
+  useEffect(() => {
+    const visit = (node: EditNode) => {
+      if (node.presence === "optional" && node.valueAuthored) {
+        retainedOptionalIds.current.add(node.id);
+      }
+      nodeChildren(node).forEach(visit);
+    };
+    nodes.forEach(visit);
+  }, [nodes]);
   const globalTarget = activeTargetId === "edit:workflowConfiguration";
   const target = useMemo(
     () => globalTarget ? null : findNode(nodes, activeTargetId),
@@ -2294,7 +2361,6 @@ export function ConfigEditor({
   );
   useEffect(() => {
     onConnectivityStatesChange?.(connectivity.navigationStates);
-    return () => onConnectivityStatesChange?.({});
   }, [connectivity.navigationStates, onConnectivityStatesChange]);
   const environmentGroups = useMemo(
     () => environmentReferenceGroups(
@@ -2318,6 +2384,20 @@ export function ConfigEditor({
       ));
     },
     [connectivity.states, scope?.path],
+  );
+  const validityItems = useMemo(
+    () => buildValidityItems(environmentGroups, scopedConnectivityStates),
+    [environmentGroups, scopedConnectivityStates],
+  );
+  const scopeValidityItems = useMemo(
+    () => validityItems.filter((item) => (
+      Boolean(scope?.path)
+      && item.paths.some((path) => (
+        path.length === scope?.path.length
+        && path.every((part, index) => scope?.path[index] === part)
+      ))
+    )),
+    [scope?.path, validityItems],
   );
   const renderedScope = useMemo(
     () => contentScope(scope),
@@ -2633,7 +2713,13 @@ export function ConfigEditor({
   }, [draft?.dirty, hasLocalEdits]);
 
   const rows = useMemo(
-    () => treeRows(scopedNodes, expanded, renderOptional, renderExpert),
+    () => treeRows(
+      scopedNodes,
+      expanded,
+      renderOptional,
+      renderExpert,
+      retainedOptionalIds.current,
+    ),
     [expanded, renderExpert, renderOptional, scopedNodes],
   );
   useLayoutEffect(() => {
@@ -2840,7 +2926,13 @@ export function ConfigEditor({
       return;
     }
     const nextIds = new Set(
-      treeRows(scopedNodes, expanded, false, hideExpert ? false : renderExpert)
+      treeRows(
+        scopedNodes,
+        expanded,
+        false,
+        hideExpert ? false : renderExpert,
+        retainedOptionalIds.current,
+      )
         .map(({ node }) => node.id),
     );
     const exiting = new Set(
@@ -2870,7 +2962,13 @@ export function ConfigEditor({
       return;
     }
     const nextIds = new Set(
-      treeRows(scopedNodes, expanded, renderOptional, false)
+      treeRows(
+        scopedNodes,
+        expanded,
+        renderOptional,
+        false,
+        retainedOptionalIds.current,
+      )
         .map(({ node }) => node.id),
     );
     const exiting = new Set(
@@ -3973,6 +4071,37 @@ export function ConfigEditor({
               ) : null}
             </div>
           </header>
+          {scopeValidityItems.length > 0 ? (
+            <div className="config-scope-validity">
+              {scopeValidityItems.map((item) => (
+                <ValidityIndicator
+                  expanded={expandedValidityIds.has(item.id)}
+                  item={item}
+                  key={item.id}
+                  onToggle={() => {
+                    setExpandedValidityIds((current) => {
+                      const next = new Set(current);
+                      if (next.has(item.id)) next.delete(item.id);
+                      else next.add(item.id);
+                      return next;
+                    });
+                  }}
+                />
+              ))}
+              {scopeValidityItems
+                .filter(({ id }) => expandedValidityIds.has(id))
+                .map((item) => (
+                  <div className="config-scope-validity-detail" key={item.id}>
+                    <ValidityDetails
+                      item={item}
+                      onCheckConnectivity={(targetIds) => {
+                        void connectivity.start(targetIds);
+                      }}
+                    />
+                  </div>
+                ))}
+            </div>
+          ) : null}
           {pinnedRows.length > 0 ? (
             <nav
               aria-label="Current configuration path"
@@ -4059,6 +4188,27 @@ export function ConfigEditor({
                     inserted={insertedIds.has(node.id)}
                     key={node.id}
                     node={node}
+                    validityItems={validityItems.filter((item) => (
+                      item.paths.some((path) => (
+                        path.length === node.path.length
+                        && path.every(
+                          (part, index) => node.path[index] === part,
+                        )
+                      ))
+                    ))}
+                    expandedValidityIds={expandedValidityIds}
+                    onToggleValidity={(id) => {
+                      setExpandedValidityIds((current) => {
+                        const next = new Set(current);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        return next;
+                      });
+                    }}
+                    onCheckConnectivity={(targetIds) => {
+                      void connectivity.start(targetIds);
+                    }}
+                    retainedOptional={retainedOptionalIds.current.has(node.id)}
                     removing={removingIds.has(node.id)}
                     showDocumentation={showDocumentation}
                     onLocalDirtyChange={markLocalEdit}

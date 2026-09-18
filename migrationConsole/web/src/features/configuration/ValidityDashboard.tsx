@@ -1,19 +1,15 @@
 import {
   AlertTriangle,
   Check,
+  ChevronUp,
   CircleDashed,
   LoaderCircle,
   RefreshCw,
 } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   ConnectivityCheckDetails,
-  connectivityOverallStatus,
   connectivityStatusLabel,
   type ConnectivityStatus,
   type ConnectivityTargetState,
@@ -24,18 +20,24 @@ import {
 } from "./environmentDiagnostics";
 
 
-type ValidityStatus = ConnectivityStatus | EnvironmentDiagnosticLifecycle;
+export type ValidityStatus =
+  | ConnectivityStatus
+  | EnvironmentDiagnosticLifecycle;
 
 
-interface ConnectivityGroup {
+export interface ValidityItem {
   id: string;
   label: string;
-  states: ConnectivityTargetState[];
-  status: ConnectivityStatus;
+  typeLabel: string;
+  paths: string[][];
+  status: ValidityStatus;
+  environment?: EnvironmentReferenceGroup;
+  connectivity?: ConnectivityTargetState;
 }
 
 
-function statusLabel(status: ValidityStatus): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function validityStatusLabel(status: ValidityStatus): string {
   if (status === "not-checked") return "Not checked";
   if (status === "warning") return "Warning";
   if (status === "error") return "Error";
@@ -43,7 +45,8 @@ function statusLabel(status: ValidityStatus): string {
 }
 
 
-function statusClass(status: ValidityStatus): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function validityStatusClass(status: ValidityStatus): string {
   if (status === "error") return "failed";
   if (status === "warning") return "partially_verified";
   if (status === "not-checked") return "not_checked";
@@ -51,7 +54,9 @@ function statusClass(status: ValidityStatus): string {
 }
 
 
-function statusIcon(status: ValidityStatus) {
+export function ValidityStatusIcon({
+  status,
+}: Readonly<{ status: ValidityStatus }>) {
   if (status === "checking" || status === "stale") {
     return <LoaderCircle className="spin" aria-hidden="true" />;
   }
@@ -69,88 +74,121 @@ function statusIcon(status: ValidityStatus) {
 }
 
 
-function checkedSummary(names: string[]): string {
-  const shown = names.slice(0, 3).join(", ");
-  const omitted = names.length > 3 ? ", ..." : "";
-  return `Checked ${shown}${omitted} (${names.length} checked).`;
-}
-
-
-function connectivityGroupLabel(
+function connectivityTypeLabel(
   kind: ConnectivityTargetState["target"]["kind"],
 ): string {
   switch (kind) {
-    case "source": return "Source Clusters";
-    case "target": return "Target Clusters";
-    case "repository": return "Snapshot Repositories";
+    case "source": return "Source Cluster";
+    case "target": return "Target Cluster";
+    case "repository": return "Snapshot Repository";
   }
 }
 
 
-function EnvironmentDetails({
-  group,
-}: Readonly<{ group: EnvironmentReferenceGroup }>) {
-  const names = group.references.map(({ name }) => name);
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildValidityItems(
+  environmentGroups: EnvironmentReferenceGroup[],
+  connectivityStates: ConnectivityTargetState[],
+): ValidityItem[] {
+  return [
+    ...environmentGroups.map((group): ValidityItem => ({
+      id: group.id,
+      label: group.label,
+      typeLabel: group.typeLabel,
+      paths: group.references.map(({ path }) => path),
+      status: group.status,
+      environment: group,
+    })),
+    ...connectivityStates.map((state): ValidityItem => ({
+      id: `connectivity:${state.target.id}`,
+      label: state.target.refName,
+      typeLabel: connectivityTypeLabel(state.target.kind),
+      paths: [state.target.editPath],
+      status: state.status,
+      connectivity: state,
+    })),
+  ];
+}
+
+
+export function ValidityDetails({
+  item,
+  onCheckConnectivity,
+}: Readonly<{
+  item: ValidityItem;
+  onCheckConnectivity: (targetIds: string[]) => void;
+}>) {
+  if (item.environment) {
+    return (
+      <div className="validity-detail-content">
+        <header>
+          <strong>{item.label}</strong>
+          <span>{item.typeLabel}</span>
+        </header>
+        {item.environment.diagnostics.length > 0 ? (
+          <ul className="validity-diagnostic-list">
+            {item.environment.diagnostics.map((diagnostic, index) => (
+              <li
+                className={`status-${diagnostic.severity}`}
+                key={`${diagnostic.path.join(".")}:${diagnostic.message}:${index}`}
+              >
+                {diagnostic.message}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>
+            {validityStatusLabel(item.status)}: the configured reference is
+            available.
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (!item.connectivity) return null;
   return (
-    <div className="validity-detail-content">
-      <p>{checkedSummary(names)}</p>
-      <ul className="validity-reference-list">
-        {group.references.map((reference) => (
-          <li key={reference.id}>
-            <code>{reference.name}</code>
-            <span>{reference.displayName}</span>
-          </li>
-        ))}
-      </ul>
-      {group.diagnostics.length > 0 ? (
-        <ul className="validity-diagnostic-list">
-          {group.diagnostics.map((diagnostic, index) => (
-            <li
-              className={`status-${diagnostic.severity}`}
-              key={`${diagnostic.path.join(".")}:${diagnostic.message}:${index}`}
-            >
-              {diagnostic.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+    <div className="validity-connectivity-target">
+      <header>
+        <div>
+          <strong>{item.connectivity.target.label}</strong>
+          <span>{validityStatusLabel(item.status)}</span>
+        </div>
+        <button
+          disabled={item.status === "checking"}
+          onClick={() => onCheckConnectivity([item.connectivity!.target.id])}
+          type="button"
+        >
+          <RefreshCw aria-hidden="true" />
+          {item.connectivity.check ? "Recheck" : "Check"}
+        </button>
+      </header>
+      <ConnectivityCheckDetails state={item.connectivity} />
     </div>
   );
 }
 
 
-function ConnectivityDetails({
-  group,
-  onCheck,
+export function ValidityIndicator({
+  expanded,
+  item,
+  onToggle,
 }: Readonly<{
-  group: ConnectivityGroup;
-  onCheck: (targetIds: string[]) => void;
+  expanded: boolean;
+  item: ValidityItem;
+  onToggle: () => void;
 }>) {
   return (
-    <div className="validity-connectivity-list">
-      {group.states.map((state) => (
-        <article
-          className={`validity-connectivity-target status-${state.status}`}
-          key={state.target.id}
-        >
-          <header>
-            <div>
-              <strong>{state.target.label}</strong>
-              <span>{connectivityStatusLabel(state.status)}</span>
-            </div>
-            <button
-              disabled={state.status === "checking"}
-              onClick={() => onCheck([state.target.id])}
-              type="button"
-            >
-              <RefreshCw aria-hidden="true" />
-              {state.check ? "Recheck" : "Check"}
-            </button>
-          </header>
-          <ConnectivityCheckDetails state={state} />
-        </article>
-      ))}
-    </div>
+    <button
+      aria-expanded={expanded}
+      className={`validity-indicator status-${validityStatusClass(item.status)}`}
+      onClick={onToggle}
+      title={`${item.typeLabel}: ${validityStatusLabel(item.status)}`}
+      type="button"
+    >
+      <ValidityStatusIcon status={item.status} />
+      <span>{validityStatusLabel(item.status)}</span>
+      {expanded ? <ChevronUp aria-hidden="true" /> : null}
+    </button>
   );
 }
 
@@ -168,146 +206,67 @@ export function ValidityDashboard({
   environmentGroups: EnvironmentReferenceGroup[];
   onCheckConnectivity: (targetIds: string[]) => void;
 }>) {
-  const connectivityGroups = useMemo(() => {
-    const byKind = new Map<
-      ConnectivityTargetState["target"]["kind"],
-      ConnectivityTargetState[]
-    >();
-    connectivityStates.forEach((state) => {
-      byKind.set(state.target.kind, [
-        ...(byKind.get(state.target.kind) ?? []),
-        state,
-      ]);
-    });
-    return [...byKind.entries()].map(([kind, states]): ConnectivityGroup => ({
-      id: `connectivity:${kind}`,
-      label: connectivityGroupLabel(kind),
-      states,
-      status: connectivityOverallStatus(states),
-    }));
-  }, [connectivityStates]);
-  const itemIds = useMemo(
-    () => [
-      ...environmentGroups.map(({ id }) => id),
-      ...connectivityGroups.map(({ id }) => id),
-    ],
-    [connectivityGroups, environmentGroups],
+  const items = useMemo(
+    () => buildValidityItems(environmentGroups, connectivityStates),
+    [connectivityStates, environmentGroups],
   );
   const [expandedId, setExpandedId] = useState<string | null>(null);
   useEffect(() => {
-    if (expandedId && !itemIds.includes(expandedId)) setExpandedId(null);
-  }, [expandedId, itemIds]);
-
-  if (
-    environmentGroups.length === 0
-    && connectivityGroups.length === 0
-    && !connectivityLoading
-    && !connectivityProblem
-  ) {
+    if (expandedId && !items.some(({ id }) => id === expandedId)) {
+      setExpandedId(null);
+    }
+  }, [expandedId, items]);
+  if (items.length === 0 && !connectivityLoading && !connectivityProblem) {
     return null;
   }
-  const expandedEnvironment = environmentGroups.find(
-    ({ id }) => id === expandedId,
-  );
-  const expandedConnectivity = connectivityGroups.find(
-    ({ id }) => id === expandedId,
-  );
+  const expandedItem = items.find(({ id }) => id === expandedId);
   return (
     <section className="validity-dashboard" aria-label="Configuration checks">
       <div className="validity-tabs" role="tablist">
-        {environmentGroups.map((group) => (
+        {items.map((item) => (
           <button
-            aria-controls={`${group.id}:panel`}
-            aria-expanded={expandedId === group.id}
-            aria-selected={expandedId === group.id}
-            className={`validity-tab status-${statusClass(group.status)}`}
-            id={`${group.id}:tab`}
-            key={group.id}
+            aria-controls={`${item.id}:panel`}
+            aria-expanded={expandedId === item.id}
+            aria-selected={expandedId === item.id}
+            className={`validity-tab status-${validityStatusClass(item.status)}`}
+            id={`${item.id}:tab`}
+            key={item.id}
             onClick={() => setExpandedId(
-              (current) => current === group.id ? null : group.id,
+              (current) => current === item.id ? null : item.id,
             )}
             role="tab"
             type="button"
           >
-            {statusIcon(group.status)}
+            <ValidityStatusIcon status={item.status} />
             <span>
-              <strong>{group.label}</strong>
-              <small>
-                {statusLabel(group.status)} · {group.references.length}
-              </small>
+              <strong>{item.label}</strong>
+              <small>{item.typeLabel} · {validityStatusLabel(item.status)}</small>
             </span>
           </button>
         ))}
-        {connectivityGroups.map((group) => (
-          <button
-            aria-controls={`${group.id}:panel`}
-            aria-expanded={expandedId === group.id}
-            aria-selected={expandedId === group.id}
-            className={`validity-tab status-${statusClass(group.status)}`}
-            id={`${group.id}:tab`}
-            key={group.id}
-            onClick={() => setExpandedId(
-              (current) => current === group.id ? null : group.id,
-            )}
-            role="tab"
-            type="button"
-          >
-            {statusIcon(group.status)}
-            <span>
-              <strong>{group.label}</strong>
-              <small>
-                {statusLabel(group.status)} · {group.states.length}
-              </small>
-            </span>
-          </button>
-        ))}
-        {connectivityLoading && connectivityGroups.length === 0 ? (
+        {connectivityLoading && items.length === 0 ? (
           <div className="validity-tab status-checking" role="status">
             <LoaderCircle className="spin" aria-hidden="true" />
-            <span>
-              <strong>Connectivity</strong>
-              <small>Loading checks</small>
-            </span>
-          </div>
-        ) : null}
-        {connectivityProblem && connectivityGroups.length === 0 ? (
-          <div className="validity-tab status-failed" role="alert">
-            <AlertTriangle aria-hidden="true" />
-            <span>
-              <strong>Connectivity</strong>
-              <small>Unavailable</small>
-            </span>
+            <span><strong>Connectivity</strong><small>Loading checks</small></span>
           </div>
         ) : null}
       </div>
-      {expandedEnvironment ? (
+      {expandedItem ? (
         <div
-          aria-labelledby={`${expandedEnvironment.id}:tab`}
-          className={`validity-tab-panel status-${statusClass(
-            expandedEnvironment.status,
+          aria-labelledby={`${expandedItem.id}:tab`}
+          className={`validity-tab-panel status-${validityStatusClass(
+            expandedItem.status,
           )}`}
-          id={`${expandedEnvironment.id}:panel`}
+          id={`${expandedItem.id}:panel`}
           role="tabpanel"
         >
-          <EnvironmentDetails group={expandedEnvironment} />
-        </div>
-      ) : null}
-      {expandedConnectivity ? (
-        <div
-          aria-labelledby={`${expandedConnectivity.id}:tab`}
-          className={`validity-tab-panel status-${statusClass(
-            expandedConnectivity.status,
-          )}`}
-          id={`${expandedConnectivity.id}:panel`}
-          role="tabpanel"
-        >
-          <ConnectivityDetails
-            group={expandedConnectivity}
-            onCheck={onCheckConnectivity}
+          <ValidityDetails
+            item={expandedItem}
+            onCheckConnectivity={onCheckConnectivity}
           />
         </div>
       ) : null}
-      {connectivityProblem && connectivityGroups.length > 0 ? (
+      {connectivityProblem ? (
         <p className="validity-dashboard-problem" role="alert">
           {connectivityProblem}
         </p>

@@ -2498,6 +2498,14 @@ test("opens a generic configuration editor and explains generated values", async
   await waitFor(() => expect(
     within(configTree).queryByRole("row", { name: /Timeout/ }),
   ).toBeNull());
+  await userEvent.click(
+    await screen.findByRole("button", {
+      name: /Clear Allow insecure and use the default/i,
+    }),
+  );
+  await waitFor(() => expect(
+    within(configTree).getByRole("row", { name: /Allow insecure/i }),
+  ).toHaveTextContent("Uses default"));
 
   const optionalFields = screen.getByRole("checkbox", {
     name: "Show optional fields",
@@ -4713,10 +4721,17 @@ snapshotMigrationConfigs: []
   const secretsCheck = await screen.findByRole("tab", {
     name: /Kubernetes Secrets/i,
   });
-  await waitFor(() => expect(secretsCheck).toHaveTextContent("Valid · 1"));
+  await waitFor(() => expect(secretsCheck).toHaveTextContent(
+    "Kubernetes Secrets · Valid",
+  ));
+  const secretRow = screen.getByRole("row", {
+    name: /Secret Name.*Valid/i,
+  });
+  expect(within(secretRow).getByRole("button", { name: "Valid" }))
+    .toBeInTheDocument();
   await userEvent.click(secretsCheck);
   expect(await screen.findByText(
-    "Checked source-creds (1 checked).",
+    "Valid: the configured reference is available.",
   )).toBeInTheDocument();
   expect(diagnosticRequests).toBe(1);
   const [allowInsecure] = await screen.findAllByRole("checkbox", {

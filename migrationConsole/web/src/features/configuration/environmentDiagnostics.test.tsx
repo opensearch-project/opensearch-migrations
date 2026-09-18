@@ -83,8 +83,9 @@ describe("configuration environment diagnostics", () => {
 
     expect(groups).toEqual([
       expect.objectContaining({
-        id: "environment:secret",
-        label: "Kubernetes Secrets",
+        id: "environment:secret:source-creds",
+        label: "source-creds",
+        typeLabel: "Kubernetes Secrets",
         status: "valid",
         references: [
           expect.objectContaining({
@@ -99,6 +100,46 @@ describe("configuration environment diagnostics", () => {
           }),
         ],
       }),
+    ]);
+  });
+
+  it("keeps one resource check attached to every field that references it", () => {
+    const draft = createBrowserConfigDraft({
+      ...document,
+      rawYaml: document.rawYaml.replace(
+        "targetClusters: {}",
+        `targetClusters:
+  target:
+    endpoint: https://target.example.com:9200
+    allowInsecure: false
+    authConfig:
+      basic:
+        secretName: source-creds`,
+      ),
+    });
+    const groups = environmentReferenceGroups(
+      draft.editState.nodes,
+      null,
+      [],
+      "valid",
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].references.map(({ path }) => path)).toEqual([
+      [
+        "sourceClusters",
+        "source",
+        "authConfig",
+        "basic",
+        "secretName",
+      ],
+      [
+        "targetClusters",
+        "target",
+        "authConfig",
+        "basic",
+        "secretName",
+      ],
     ]);
   });
 

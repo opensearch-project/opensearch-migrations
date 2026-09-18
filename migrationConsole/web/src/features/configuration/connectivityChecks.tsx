@@ -194,6 +194,7 @@ export function useConnectivityChecks(
   draft: BrowserConfigDraft | undefined,
   scopePath: string[] | null,
   debounceMs = 350,
+  enabled = true,
 ) {
   const queryClient = useQueryClient();
   const nonce = draft?.draftRevision ?? null;
@@ -214,6 +215,7 @@ export function useConnectivityChecks(
   const autoStartedSignature = useRef("");
 
   useEffect(() => {
+    if (!enabled) return;
     if (!nonce || !rawYaml || draft?.rawYaml !== undefined) {
       setRequest(null);
       setInventory(null);
@@ -226,10 +228,10 @@ export function useConnectivityChecks(
       setRequest({ nonce, rawYaml });
     }, debounceMs);
     return () => globalThis.clearTimeout(timer);
-  }, [debounceMs, draft?.rawYaml, nonce, rawYaml]);
+  }, [debounceMs, draft?.rawYaml, enabled, nonce, rawYaml]);
 
   useEffect(() => {
-    if (!request) return;
+    if (!enabled || !request) return;
     const controller = new AbortController();
     setInventoryLoading(true);
     setInventoryProblem("");
@@ -242,13 +244,12 @@ export function useConnectivityChecks(
       setInventory(result);
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
-      setInventory(null);
       setInventoryProblem(error instanceof Error ? error.message : String(error));
     }).finally(() => {
       if (!controller.signal.aborted) setInventoryLoading(false);
     });
     return () => controller.abort();
-  }, [request]);
+  }, [enabled, request]);
 
   const operations = useQuery({
     queryKey: ["operations"],
@@ -323,13 +324,19 @@ export function useConnectivityChecks(
     ),
     [states],
   );
+  const navigationTargets = useMemo(
+    () => Object.fromEntries(
+      states.map((state) => [editTargetId(state.target.editPath), state]),
+    ),
+    [states],
+  );
   const selectedTarget = targetForPath(targets, scopePath);
   const selectedState = selectedTarget
     ? states.find(({ target }) => target.id === selectedTarget.id) ?? null
     : null;
 
   const start = useCallback(async (targetIds: string[] = []) => {
-    if (!nonce || !rawYaml) return;
+    if (!nonce || !rawYaml) return false;
     const requestedTargetIds = targetIds.length > 0
       ? targetIds
       : targets.map(({ id }) => id);
@@ -355,8 +362,10 @@ export function useConnectivityChecks(
         ],
       );
       await queryClient.invalidateQueries({ queryKey: ["operations"] });
+      return true;
     } catch (error) {
       setOperationProblem(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setStartingTargetIds((current) => current.filter(
         (targetId) => !requestedTargetIds.includes(targetId),
@@ -375,8 +384,9 @@ export function useConnectivityChecks(
   useEffect(() => {
     if (
       !nonce
+      || !enabled
       || inventoryLoading
-      || inventoryProblem
+      || (inventoryProblem && !inventory)
       || operations.isLoading
       || !autoTargetKey
     ) {
@@ -386,12 +396,16 @@ export function useConnectivityChecks(
     if (autoStartedSignature.current === signature) return;
     const timer = globalThis.setTimeout(() => {
       autoStartedSignature.current = signature;
-      void start(autoTargetKey.split(","));
+      void start(autoTargetKey.split(",")).then((started) => {
+        if (!started) autoStartedSignature.current = "";
+      });
     }, debounceMs);
     return () => globalThis.clearTimeout(timer);
   }, [
     autoTargetKey,
     debounceMs,
+    enabled,
+    inventory,
     inventoryLoading,
     inventoryProblem,
     nonce,
@@ -403,6 +417,7 @@ export function useConnectivityChecks(
     inventoryLoading,
     inventoryProblem: operationProblem || inventoryProblem,
     navigationStates,
+    navigationTargets,
     selectedState,
     start,
     states,
