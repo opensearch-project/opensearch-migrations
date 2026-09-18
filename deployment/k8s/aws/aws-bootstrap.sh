@@ -29,7 +29,7 @@
 #
 # ARCHITECTURE NOTES FOR FUTURE CHANGES:
 #   - Version is resolved ONCE at startup and threaded through all downloads.
-#     To add a new downloaded artifact, use $RELEASE_VERSION for its URL.
+#     To add a new downloaded artifact, use $BOOTSTRAP_ARTIFACT_VERSION for its URL.
 #   - The $build flag gates all build-from-source sections. To add a new
 #     buildable component, add a conditional block that switches between
 #     download and local build based on $build.
@@ -59,6 +59,7 @@ cfn_stack_name=""
 vpc_id=""
 subnet_ids=""
 eks_access_principal_arn=""
+grant_eks_access_only=false
 skip_cfn_deploy=false
 tls_mode="none"
 pca_arn=""
@@ -95,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --vpc-id) vpc_id="$2"; shift 2 ;;
     --subnet-ids) subnet_ids="$2"; shift 2 ;;
     --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
+    --grant-eks-access-only) grant_eks_access_only=true; shift 1 ;;
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
     --version) version="$2"; shift 2 ;;
     --create-vpc-endpoints)
@@ -170,6 +172,12 @@ while [[ $# -gt 0 ]]; do
       echo "                                            to the EKS cluster. Useful after a fresh CFN deploy when"
       echo "                                            the deploying principal needs kubectl access, or to grant"
       echo "                                            access to a CI role or teammate."
+      echo "  --grant-eks-access-only                   Add the --eks-access-principal-arn access entry to an"
+      echo "                                            ALREADY-bootstrapped cluster and exit -- no image mirroring,"
+      echo "                                            no Helm install. Use this to add an admin later WITHOUT"
+      echo "                                            re-running the whole bootstrap. Requires"
+      echo "                                            --eks-access-principal-arn. The cluster must already exist;"
+      echo "                                            it is resolved from CloudFormation exports (respects --stage)."
       echo ""
       echo "Deployment options:"
       echo "  --namespace <val>                         K8s namespace (default: $namespace)"
@@ -249,6 +257,10 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "  # Bootstrap only (CloudFormation stack already deployed):"
       echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
+      echo ""
+      echo "  # Add an admin to an existing cluster WITHOUT re-running the whole bootstrap:"
+      echo "  $0 --grant-eks-access-only --stage dev --region us-east-1 \\"
+      echo "     --eks-access-principal-arn arn:aws:iam::123456789012:role/AnotherAdmin"
       echo ""
       echo "  # Tag every created resource, including the nodes and volumes EKS creates later:"
       echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1 \\"
@@ -385,11 +397,25 @@ validate_args() {
     echo "Error: --deploy-create-vpc-cfn and --deploy-import-vpc-cfn are mutually exclusive." >&2
     exit 1
   fi
-  if [[ "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" ]]; then
-    echo "Error: One of --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, or --skip-cfn-deploy is required." >&2
+  # --grant-eks-access-only only adds an EKS access entry to an existing cluster, so it must not be
+  # combined with a deploy/skip-deploy/build, and it needs a principal to grant.
+  if [[ "$grant_eks_access_only" == "true" ]]; then
+    if [[ "$deploy_cfn" == "true" || "$skip_cfn_deploy" == "true" || "$build" == "true" ]]; then
+      echo "Error: --grant-eks-access-only cannot be combined with --deploy-*-cfn, --skip-cfn-deploy, or --build." >&2
+      echo "  It only adds an EKS access entry to an already-bootstrapped cluster, then exits." >&2
+      exit 1
+    fi
+    if [[ -z "$eks_access_principal_arn" ]]; then
+      echo "Error: --grant-eks-access-only requires --eks-access-principal-arn <arn>." >&2
+      exit 1
+    fi
+  fi
+  if [[ "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" && "$grant_eks_access_only" == "false" ]]; then
+    echo "Error: One of --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, --skip-cfn-deploy, or --grant-eks-access-only is required." >&2
     echo "  Use --deploy-create-vpc-cfn to create a new VPC and EKS cluster." >&2
     echo "  Use --deploy-import-vpc-cfn to deploy into an existing VPC." >&2
     echo "  Use --skip-cfn-deploy if the stack is already deployed." >&2
+    echo "  Use --grant-eks-access-only to add EKS access to an existing cluster without re-bootstrapping." >&2
     exit 1
   fi
   if [[ "$deploy_cfn" == "true" && "$skip_cfn_deploy" == "true" ]]; then
@@ -574,18 +600,22 @@ if [[ "$create_vpc_endpoints" == "all" ]]; then
 fi
 
 # --- resolve version once ---
+# Grant-only mode never touches release artifacts, so avoid an unnecessary GitHub lookup.
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  BOOTSTRAP_ARTIFACT_VERSION="grant-access-only"
+  echo "Grant-only mode: skipping release version resolution."
 # Skip version resolution when building everything from source (--build)
-if [[ "$build" == "true" ]]; then
-  RELEASE_VERSION="local-build"
+elif [[ "$build" == "true" ]]; then
+  BOOTSTRAP_ARTIFACT_VERSION="local-build"
   echo "Building all artifacts from source (no release version needed)"
 elif [[ -z "$version" || "$version" == "latest" ]]; then
-  RELEASE_VERSION=$(curl -sf https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
-  RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
-  [[ -n "$RELEASE_VERSION" ]] || { echo "Error: Could not determine latest release version from GitHub."; exit 1; }
-  echo "Resolved latest release version: $RELEASE_VERSION"
+  BOOTSTRAP_ARTIFACT_VERSION=$(curl -sf https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+  BOOTSTRAP_ARTIFACT_VERSION=$(echo "$BOOTSTRAP_ARTIFACT_VERSION" | tr -d '[:space:]')
+  [[ -n "$BOOTSTRAP_ARTIFACT_VERSION" ]] || { echo "Error: Could not determine latest release version from GitHub."; exit 1; }
+  echo "Resolved latest release version: $BOOTSTRAP_ARTIFACT_VERSION"
 else
-  RELEASE_VERSION="$version"
-  echo "Using specified version: $RELEASE_VERSION"
+  BOOTSTRAP_ARTIFACT_VERSION="$version"
+  echo "Using specified version: $BOOTSTRAP_ARTIFACT_VERSION"
 fi
 
 TOOLS_ARCH=$(uname -m)
@@ -618,11 +648,11 @@ resolve_chart_source() {
   fi
 
   local release_base_url
-  release_base_url="https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}"
-  echo "Downloading release Helm chart (${RELEASE_VERSION}) from GitHub..." >&2
-  curl -fLO "${release_base_url}/migration-assistant-${RELEASE_VERSION}.tgz" \
-    || { echo "Failed to download Helm chart for version ${RELEASE_VERSION}"; exit 1; }
-  ma_chart_dir="./migration-assistant-${RELEASE_VERSION}.tgz"
+  release_base_url="https://github.com/opensearch-project/opensearch-migrations/releases/download/${BOOTSTRAP_ARTIFACT_VERSION}"
+  echo "Downloading release Helm chart (${BOOTSTRAP_ARTIFACT_VERSION}) from GitHub..." >&2
+  curl -fLO "${release_base_url}/migration-assistant-${BOOTSTRAP_ARTIFACT_VERSION}.tgz" \
+    || { echo "Failed to download Helm chart for version ${BOOTSTRAP_ARTIFACT_VERSION}"; exit 1; }
+  ma_chart_dir="./migration-assistant-${BOOTSTRAP_ARTIFACT_VERSION}.tgz"
 }
 
 resolve_mirror_manifest_file() {
@@ -740,17 +770,20 @@ check_existing_ma_release() {
   fi
 }
 
-# Check required tools
+# Check required tools. Grant-only mode only talks to AWS; it never downloads artifacts, installs
+# Helm, or touches kubectl.
 missing=0
-for cmd in jq kubectl; do
-  if ! command -v $cmd &>/dev/null; then
-    echo "Missing required tool: $cmd"
-    missing=1
-  fi
-done
+if [[ "$grant_eks_access_only" != "true" ]]; then
+  for cmd in jq kubectl; do
+    if ! command -v $cmd &>/dev/null; then
+      echo "Missing required tool: $cmd"
+      missing=1
+    fi
+  done
+fi
 
 # Install helm if missing
-if ! command -v helm &>/dev/null; then
+if [[ "$grant_eks_access_only" != "true" ]] && ! command -v helm &>/dev/null; then
   echo "Helm is not installed. Installing it now..."
   install_helm
 fi
@@ -784,8 +817,8 @@ if [[ "$deploy_cfn" == "true" ]]; then
     cfn_template_file=$(mktemp)
     echo "Downloading CFN template from GitHub release: ${cfn_template_name}"
     curl -fL -o "$cfn_template_file" \
-      "https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}/${cfn_template_name}" \
-      || { echo "Failed to download CFN template for version ${RELEASE_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
+      "https://github.com/opensearch-project/opensearch-migrations/releases/download/${BOOTSTRAP_ARTIFACT_VERSION}/${cfn_template_name}" \
+      || { echo "Failed to download CFN template for version ${BOOTSTRAP_ARTIFACT_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
   fi
 
   # Build parameter overrides for `aws cloudformation deploy`
@@ -934,14 +967,16 @@ fi
 # Show resolved configuration and sources
 echo ""
 echo "Resolved configuration:"
-if [[ "$RELEASE_VERSION" == "local-build" ]]; then
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  echo "  Mode                   = Grant EKS access only (--grant-eks-access-only)"
+elif [[ "$BOOTSTRAP_ARTIFACT_VERSION" == "local-build" ]]; then
   echo "  Mode                   = Build from source (--build)"
   if [[ "$with_load_test_images" == "true" ]]; then
     echo "  Load-test images       = Included (--with-load-test-images)"
   fi
 else
   echo "  Mode                   = Published artifacts"
-  echo "  Version                = ${RELEASE_VERSION}"
+  echo "  Version                = ${BOOTSTRAP_ARTIFACT_VERSION}"
 fi
 echo "  AWS_ACCOUNT              = ${AWS_ACCOUNT}"
 echo "  AWS_CFN_REGION           = ${AWS_CFN_REGION}"
@@ -962,6 +997,41 @@ else
 fi
 echo ""
 
+# --- EKS access entry (optional) ---
+grant_eks_cluster_admin() {
+  local principal_arn="$1"
+  echo "Configuring EKS access for principal: $principal_arn"
+  if aws eks describe-access-entry --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+       --principal-arn "$principal_arn" ${region:+--region "$region"} >/dev/null 2>&1; then
+    echo "Access entry already exists, skipping create."
+  else
+    aws eks create-access-entry \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --principal-arn "$principal_arn" \
+      --type STANDARD \
+      ${region:+--region "$region"}
+  fi
+  aws eks associate-access-policy \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --principal-arn "$principal_arn" \
+    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+    --access-scope type=cluster \
+    ${region:+--region "$region"}
+  echo "EKS access configured for $principal_arn"
+}
+
+if [[ -n "$eks_access_principal_arn" ]]; then
+  grant_eks_cluster_admin "$eks_access_principal_arn"
+fi
+
+# In grant-only mode, adding the access entry above is the whole job. Exit before image mirroring and
+# the Helm install so an admin can be added long after the initial bootstrap. It also doesn't need a
+# kubeconfig entry because it never uses kubectl.
+if [[ "$grant_eks_access_only" == "true" ]]; then
+  echo "Done -- EKS access entry applied. Skipped image mirroring and Helm install (--grant-eks-access-only)."
+  exit 0
+fi
+
 KUBE_CONTEXT="${kubectl_context:-${MIGRATIONS_EKS_CLUSTER_NAME}}"
 aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${KUBE_CONTEXT}"
 export KUBE_CONTEXT
@@ -971,28 +1041,6 @@ if [[ "$skip_setting_k8s_context" == "true" ]]; then
   echo "Use --context=${KUBE_CONTEXT} with kubectl or --kube-context=${KUBE_CONTEXT} with helm."
 else
   kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
-fi
-
-# --- EKS access entry (optional) ---
-if [[ -n "$eks_access_principal_arn" ]]; then
-  echo "Configuring EKS access for principal: $eks_access_principal_arn"
-  if aws eks describe-access-entry --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-       --principal-arn "$eks_access_principal_arn" ${region:+--region "$region"} >/dev/null 2>&1; then
-    echo "Access entry already exists, skipping create."
-  else
-    aws eks create-access-entry \
-      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-      --principal-arn "$eks_access_principal_arn" \
-      --type STANDARD \
-      ${region:+--region "$region"}
-  fi
-  aws eks associate-access-policy \
-    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-    --principal-arn "$eks_access_principal_arn" \
-    --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
-    --access-scope type=cluster \
-    ${region:+--region "$region"}
-  echo "EKS access configured for $eks_access_principal_arn"
 fi
 
 # =============================================================================
@@ -1730,7 +1778,7 @@ migration_console|console"
         dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
         echo "  $public_suffix → $dst"
         if [[ -n "${ECR_PULL_THROUGH_ENDPOINT:-}" ]] && \
-           crane_copy_retry "${ECR_PULL_THROUGH_ENDPOINT}/ecr-public/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}" "$dst" 2>/dev/null; then
+           crane_copy_retry "${ECR_PULL_THROUGH_ENDPOINT}/ecr-public/opensearchproject/opensearch-migrations-${public_suffix}:${BOOTSTRAP_ARTIFACT_VERSION}" "$dst" 2>/dev/null; then
           continue
         fi
         if [[ "$_ecr_public_authed" != "true" ]]; then
@@ -1738,7 +1786,7 @@ migration_console|console"
             crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
           _ecr_public_authed=true
         fi
-        crane_copy_retry "public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}" "$dst"
+        crane_copy_retry "public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${BOOTSTRAP_ARTIFACT_VERSION}" "$dst"
       done
     fi
     # Tag mirrored images with the immutable IMAGE_TAG
@@ -1821,7 +1869,7 @@ fi
 # --- image source selection ---
 # When --build is set (without --ma-images-source), images are built from source
 # and pushed to the private ECR registry. Otherwise, public images are pulled from
-# public.ecr.aws/opensearchproject, tagged with $RELEASE_VERSION.
+# public.ecr.aws/opensearchproject, tagged with $BOOTSTRAP_ARTIFACT_VERSION.
 # To add a new image, add entries to both branches below.
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
@@ -1837,23 +1885,23 @@ if [[ "$use_public_images" == "false" ]]; then
     --set images.installer.tag=migrations_migration_console_${IMAGE_TAG}"
 # Use latest public images
 else
-  echo "Using public images tagged '$RELEASE_VERSION'"
+  echo "Using public images tagged '$BOOTSTRAP_ARTIFACT_VERSION'"
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy \
-    --set images.captureProxy.tag=$RELEASE_VERSION \
+    --set images.captureProxy.tag=$BOOTSTRAP_ARTIFACT_VERSION \
     --set images.trafficReplayer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-replayer \
-    --set images.trafficReplayer.tag=$RELEASE_VERSION \
+    --set images.trafficReplayer.tag=$BOOTSTRAP_ARTIFACT_VERSION \
     --set images.reindexFromSnapshot.repository=public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot \
-    --set images.reindexFromSnapshot.tag=$RELEASE_VERSION \
+    --set images.reindexFromSnapshot.tag=$BOOTSTRAP_ARTIFACT_VERSION \
     --set images.migrationConsole.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
-    --set images.migrationConsole.tag=$RELEASE_VERSION \
+    --set images.migrationConsole.tag=$BOOTSTRAP_ARTIFACT_VERSION \
     --set images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console \
-    --set images.installer.tag=$RELEASE_VERSION"
+    --set images.installer.tag=$BOOTSTRAP_ARTIFACT_VERSION"
 fi
 
 # --- chart source selection ---
 # By default, the Helm chart is downloaded from the GitHub release matching
-# $RELEASE_VERSION. With --build, it comes from the local repo checkout instead.
+# $BOOTSTRAP_ARTIFACT_VERSION. With --build, it comes from the local repo checkout instead.
 # Dashboard JSONs are bundled inside the chart.
 resolve_chart_source
 
