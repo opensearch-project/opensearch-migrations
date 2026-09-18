@@ -59,6 +59,7 @@ import {
 } from "./editorPreferences";
 import {
   ConnectivityDialog,
+  navigationConnectivityTargets,
   useConnectivityChecks,
   type ConnectivityNavigationStates,
 } from "./connectivityChecks";
@@ -2355,9 +2356,18 @@ export function ConfigEditor({
     () => target ? editScope(nodes, target.id) : null,
     [nodes, target],
   );
+  const provisionalConnectivityTargets = useMemo(
+    () => navigationConnectivityTargets(Object.values(
+      navigationSnapshot?.nodes ?? draft?.navigation?.nodes ?? {},
+    )),
+    [draft?.navigation?.nodes, navigationSnapshot?.nodes],
+  );
   const connectivity = useConnectivityChecks(
     draft,
     scope?.path ?? null,
+    350,
+    true,
+    provisionalConnectivityTargets,
   );
   useEffect(() => {
     onConnectivityStatesChange?.(connectivity.navigationStates);

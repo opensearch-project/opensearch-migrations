@@ -28,11 +28,7 @@ import type { ApprovalCandidate } from "../actions/approvals";
 import { StatusIndicator } from "../status/StatusIndicator";
 import { presentResourceActionText } from "../status/operationPresentation";
 import type { ConnectivityTargetState } from "../configuration/connectivityChecks";
-import {
-  buildValidityItems,
-  ValidityDetails,
-  ValidityIndicator,
-} from "../configuration/ValidityDashboard";
+import { ValidityDashboard } from "../configuration/ValidityDashboard";
 
 
 interface PendingAction {
@@ -893,10 +889,6 @@ export function ResourceWorkspace({
   // reset by remount instead of a one-frame-late effect.
   const [pendingAction, setPendingAction] =
     useState<PendingAction | null>(null);
-  const [connectivityExpanded, setConnectivityExpanded] = useState(false);
-  const connectivityItem = connectivityState
-    ? buildValidityItems([], [connectivityState])[0]
-    : null;
   // Mirrors the server's orphan derivation from configPresence rather
   // than matching the "Orphaned; cleanup required" presentation string.
   const presence = node.configPresence ?? {};
@@ -964,28 +956,15 @@ export function ResourceWorkspace({
         })}
         resetInProgress={resetInProgress}
       />
-      {connectivityItem && onCheckConnectivity ? (
-        <section className="workspace-section runtime-validity">
-          <header>
-            <div>
-              <h3>Connectivity</h3>
-              <span>{connectivityItem.typeLabel}</span>
-            </div>
-            <ValidityIndicator
-              expanded={connectivityExpanded}
-              item={connectivityItem}
-              onToggle={() => setConnectivityExpanded((current) => !current)}
-            />
-          </header>
-          {connectivityExpanded ? (
-            <div className="runtime-validity-detail">
-              <ValidityDetails
-                item={connectivityItem}
-                onCheckConnectivity={onCheckConnectivity}
-              />
-            </div>
-          ) : null}
-        </section>
+      {connectivityState && onCheckConnectivity ? (
+        <ValidityDashboard
+          ariaLabel="Resource checks"
+          connectivityLoading={false}
+          connectivityProblem=""
+          connectivityStates={[connectivityState]}
+          environmentGroups={[]}
+          onCheckConnectivity={onCheckConnectivity}
+        />
       ) : null}
       {onTogglePreapprovals ? (
         <ResourcePreapproval

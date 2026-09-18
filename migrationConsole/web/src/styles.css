@@ -4544,12 +4544,59 @@ button.validity-tab[aria-selected="true"] {
 }
 
 .validity-tab-panel {
-  height: 148px;
+  min-height: 96px;
   padding: 9px 14px 11px;
   border-top: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
   overflow: auto;
+}
+
+.validity-expanded-panel {
+  display: grid;
+}
+
+.validity-resize-handle {
+  position: relative;
+  display: grid;
+  height: 12px;
+  place-items: center;
+  border-top: 1px solid var(--border);
+  color: #637781;
+  background: #f4f7f8;
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.validity-resize-handle::before {
+  position: absolute;
+  top: 5px;
+  right: 14px;
+  left: 14px;
+  height: 1px;
+  background: #b8c5ca;
+  content: "";
+}
+
+.validity-resize-handle > svg {
+  z-index: 1;
+  width: 20px;
+  height: 12px;
+  padding: 0 3px;
+  background: #f4f7f8;
+}
+
+.validity-resize-handle:hover,
+.validity-resize-handle:focus-visible {
+  color: var(--accent);
+  background: #eaf3f6;
+  outline: 0;
+}
+
+.validity-resize-handle:hover > svg,
+.validity-resize-handle:focus-visible > svg {
+  background: #eaf3f6;
 }
 
 .validity-detail-content {
@@ -4642,40 +4689,6 @@ button.validity-tab[aria-selected="true"] {
 
 .config-scope-validity-detail {
   width: 100%;
-  height: 148px;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  background: #fbfcfd;
-  overflow: auto;
-}
-
-.runtime-validity {
-  display: grid;
-  gap: 8px;
-}
-
-.runtime-validity > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.runtime-validity > header > div {
-  display: grid;
-  gap: 2px;
-}
-
-.runtime-validity > header h3 {
-  margin: 0;
-}
-
-.runtime-validity > header span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.runtime-validity-detail {
   height: 148px;
   padding: 9px 10px;
   border: 1px solid var(--border);

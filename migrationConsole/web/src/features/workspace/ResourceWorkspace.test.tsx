@@ -31,9 +31,11 @@ describe("resource workspace connectivity", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "Connectivity" }))
+    expect(screen.getByRole("region", { name: "Resource checks" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pending" }))
+    expect(screen.getByRole("tab", {
+      name: /source.*Source Cluster · Pending/i,
+    }))
       .toBeInTheDocument();
   });
 
@@ -71,7 +73,9 @@ describe("resource workspace connectivity", () => {
       </QueryClientProvider>,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Valid" }));
+    await userEvent.click(screen.getByRole("tab", {
+      name: /source.*Source Cluster · Valid/i,
+    }));
     expect(screen.getByText("Connected.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Recheck" }));
     expect(onCheckConnectivity).toHaveBeenCalledWith(["source:source"]);

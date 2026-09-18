@@ -13,7 +13,7 @@ import {
 } from "./browserDraft";
 import {
   ConnectivityDialog,
-  runtimeConnectivityTargets,
+  navigationConnectivityTargets,
   useConnectivityChecks,
   type ConnectivityTargetState,
 } from "./connectivityChecks";
@@ -114,7 +114,7 @@ describe("configuration connectivity checks", () => {
       label: "Edit archive",
     }];
 
-    expect(runtimeConnectivityTargets([source, repository])).toEqual([
+    expect(navigationConnectivityTargets([source, repository])).toEqual([
       {
         editPath: [
           "sourceClusters",

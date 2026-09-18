@@ -64,7 +64,7 @@ import {
   type BrowserConfigDraft,
 } from "../features/configuration/browserDraft";
 import {
-  runtimeConnectivityTargets,
+  navigationConnectivityTargets,
   StandaloneConnectivityLogs,
   type ConnectivityNavigationStates,
   useConnectivityChecks,
@@ -365,7 +365,7 @@ function ManageApp() {
     staleTime: Infinity,
   });
   const provisionalRuntimeConnectivityTargets = useMemo(
-    () => runtimeConnectivityTargets(
+    () => navigationConnectivityTargets(
       Object.values(state.data?.nodes ?? {}),
     ),
     [state.data?.nodes],

@@ -233,11 +233,11 @@ function runtimeConnectivityTarget(node: ManageNode): ConnectivityTarget | null 
 }
 
 
-// Runtime navigation arrives independently from connectivity inventory. Seed
-// concrete targets from its edit capabilities so the status UI has a stable
-// place on first paint instead of appearing after the first check finishes.
+// Configuration navigation arrives independently from connectivity inventory.
+// Seed concrete targets from its edit capabilities so runtime and edit status
+// bars have stable slots instead of adding them after checks have started.
 // eslint-disable-next-line react-refresh/only-export-components
-export function runtimeConnectivityTargets(
+export function navigationConnectivityTargets(
   nodes: Iterable<ManageNode>,
 ): ConnectivityTarget[] {
   const targets = new Map<string, ConnectivityTarget>();

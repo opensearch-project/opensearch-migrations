@@ -599,10 +599,24 @@ test("shows runtime connectivity while its initial check is pending", async () =
     .toBeInTheDocument();
   await userEvent.click(source);
 
-  expect(await screen.findByRole("heading", { name: "Connectivity" }))
+  expect(await screen.findByRole("region", { name: "Resource checks" }))
     .toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Pending" }))
+  expect(screen.getByRole("tab", {
+    name: /legacy.*Source Cluster · Pending/i,
+  }))
     .toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", {
+    name: "Edit configuration",
+  }));
+  expect(await screen.findByText("Editing configuration"))
+    .toBeInTheDocument();
+  const configurationChecks = screen.getByRole("region", {
+    name: "Configuration checks",
+  });
+  expect(within(configurationChecks).getByRole("tab", {
+    name: /legacy.*Source Cluster · Pending/i,
+  })).toBeInTheDocument();
 
   await waitFor(() => expect(resolveInventory).toBeDefined());
   resolveInventory?.(HttpResponse.json({
