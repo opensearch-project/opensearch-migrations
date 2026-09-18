@@ -4710,8 +4710,13 @@ snapshotMigrationConfigs: []
   renderApp(null);
   await enterEditMode();
 
+  const secretsCheck = await screen.findByRole("tab", {
+    name: /Kubernetes Secrets/i,
+  });
+  await waitFor(() => expect(secretsCheck).toHaveTextContent("Valid · 1"));
+  await userEvent.click(secretsCheck);
   expect(await screen.findByText(
-    "Configured Kubernetes references are available for this resource.",
+    "Checked source-creds (1 checked).",
   )).toBeInTheDocument();
   expect(diagnosticRequests).toBe(1);
   const [allowInsecure] = await screen.findAllByRole("checkbox", {

@@ -59,14 +59,12 @@ import {
 } from "./editorPreferences";
 import {
   ConnectivityDialog,
-  ConnectivityPanel,
   useConnectivityChecks,
   type ConnectivityNavigationStates,
 } from "./connectivityChecks";
 import {
-  diagnosticsForScope,
+  environmentReferenceGroups,
   useEnvironmentDiagnostics,
-  type EnvironmentDiagnosticLifecycle,
 } from "./environmentDiagnostics";
 import { humanizeFieldLabel } from "./fieldLabels";
 import { fieldValidationProblem } from "./fieldValidation";
@@ -81,6 +79,7 @@ import {
   type ResourceAddOption,
   type ResourceRenameOption,
 } from "./resourceAdds";
+import { ValidityDashboard } from "./ValidityDashboard";
 
 
 interface ConfigEditorProps {
@@ -155,86 +154,6 @@ interface PinnedContext {
 }
 
 
-function environmentLifecycleLabel(
-  lifecycle: EnvironmentDiagnosticLifecycle,
-): string {
-  switch (lifecycle) {
-    case "not-checked":
-      return "Not checked";
-    case "checking":
-      return "Checking";
-    case "valid":
-      return "Valid";
-    case "warning":
-      return "Warning";
-    case "error":
-      return "Error";
-    case "stale":
-      return "Refreshing";
-  }
-}
-
-
-function EnvironmentDiagnostics({
-  diagnostics,
-  lifecycle,
-}: Readonly<{
-  diagnostics: BrowserConfigDraft["editState"]["validation"]["diagnostics"];
-  lifecycle: EnvironmentDiagnosticLifecycle;
-}>) {
-  const blocking = diagnostics.filter(
-    (diagnostic) => diagnostic.severity === "error",
-  );
-  const warnings = diagnostics.filter(
-    (diagnostic) => diagnostic.severity === "warning",
-  );
-  const scopedLifecycle = (
-    lifecycle === "not-checked"
-    || lifecycle === "checking"
-    || lifecycle === "stale"
-  )
-    ? lifecycle
-    : blocking.length > 0
-      ? "error"
-      : warnings.length > 0
-        ? "warning"
-        : "valid";
-  return (
-    <section
-      aria-live="polite"
-      className={`environment-diagnostics status-${scopedLifecycle}`}
-    >
-      <header>
-        {scopedLifecycle === "checking" || scopedLifecycle === "stale"
-          ? <LoaderCircle className="spin" aria-hidden="true" />
-          : scopedLifecycle === "valid"
-            ? <Check aria-hidden="true" />
-            : <AlertTriangle aria-hidden="true" />}
-        <strong>Environment checks</strong>
-        <span>{environmentLifecycleLabel(scopedLifecycle)}</span>
-      </header>
-      {diagnostics.length > 0 ? (
-        <ul>
-          {diagnostics.map((diagnostic, index) => (
-            <li key={`${diagnostic.path.join(".")}:${diagnostic.message}:${index}`}>
-              {diagnostic.message}
-            </li>
-          ))}
-        </ul>
-      ) : scopedLifecycle === "not-checked" ? (
-        <p>Configured Kubernetes references have not been checked yet.</p>
-      ) : scopedLifecycle === "checking" ? (
-        <p>Checking configured Kubernetes references.</p>
-      ) : scopedLifecycle === "stale" ? (
-        <p>Configured references changed; refreshing their checks.</p>
-      ) : (
-        <p>Configured Kubernetes references are available for this resource.</p>
-      )}
-    </section>
-  );
-}
-
-
 type ValidationErrorEmphasis = "item" | "ancestor" | null;
 
 
@@ -281,6 +200,12 @@ function addCommands(node: EditNode): EditNode[] {
 
 function addCommand(node: EditNode): EditNode | null {
   return addCommands(node)[0] ?? null;
+}
+
+
+function editPathsOverlap(left: string[], right: string[]): boolean {
+  return left.every((part, index) => right[index] === part)
+    || right.every((part, index) => left[index] === part);
 }
 
 
@@ -2371,12 +2296,28 @@ export function ConfigEditor({
     onConnectivityStatesChange?.(connectivity.navigationStates);
     return () => onConnectivityStatesChange?.({});
   }, [connectivity.navigationStates, onConnectivityStatesChange]);
-  const scopedEnvironmentDiagnostics = useMemo(
-    () => diagnosticsForScope(
-      environmentDiagnostics.diagnostics,
+  const environmentGroups = useMemo(
+    () => environmentReferenceGroups(
+      nodes,
       scope?.path ?? null,
+      environmentDiagnostics.diagnostics,
+      environmentDiagnostics.lifecycle,
     ),
-    [environmentDiagnostics.diagnostics, scope?.path],
+    [
+      environmentDiagnostics.diagnostics,
+      environmentDiagnostics.lifecycle,
+      nodes,
+      scope?.path,
+    ],
+  );
+  const scopedConnectivityStates = useMemo(
+    () => {
+      if (!scope?.path) return connectivity.states;
+      return connectivity.states.filter(({ target: connectivityTarget }) => (
+        editPathsOverlap(scope.path, connectivityTarget.editPath)
+      ));
+    },
+    [connectivity.states, scope?.path],
   );
   const renderedScope = useMemo(
     () => contentScope(scope),
@@ -3866,22 +3807,13 @@ export function ConfigEditor({
           <button onClick={() => setNotice("")} type="button">Dismiss</button>
         </div>
       ) : null}
-      {environmentDiagnostics.nonce ? (
-        <EnvironmentDiagnostics
-          diagnostics={scopedEnvironmentDiagnostics}
-          lifecycle={environmentDiagnostics.lifecycle}
-        />
-      ) : null}
-      {connectivity.selectedState ? (
-        <ConnectivityPanel
-          onCheck={() => {
-            void connectivity.start([
-              connectivity.selectedState?.target.id ?? "",
-            ]);
-          }}
-          state={connectivity.selectedState}
-        />
-      ) : null}
+      <ValidityDashboard
+        connectivityLoading={connectivity.inventoryLoading}
+        connectivityProblem={connectivity.inventoryProblem}
+        connectivityStates={scopedConnectivityStates}
+        environmentGroups={environmentGroups}
+        onCheckConnectivity={(targetIds) => void connectivity.start(targetIds)}
+      />
       {connectivityDialogOpen ? (
         <ConnectivityDialog
           loading={connectivity.inventoryLoading}

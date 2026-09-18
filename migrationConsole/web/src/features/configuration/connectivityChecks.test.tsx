@@ -143,6 +143,63 @@ describe("configuration connectivity checks", () => {
       .toHaveTextContent("All applicable configured connections passed");
   });
 
+  it("automatically starts checks for the current unverified targets", async () => {
+    const draft = createBrowserConfigDraft(document);
+    let starts = 0;
+    let queuedOperation: Record<string, unknown> | null = null;
+    let resolveStart: ((response: Response) => void) | undefined;
+    server.use(
+      http.post(
+        "*/api/v1/config/connectivity/inventory",
+        () => HttpResponse.json({
+          configNonce: draft.draftRevision,
+          targets: [{
+            id: "source:source",
+            kind: "source",
+            refName: "source",
+            label: "Source source",
+            editPath: ["sourceClusters", "source"],
+          }],
+        }),
+      ),
+      http.post(
+        "*/api/v1/config/connectivity/checks",
+        async ({ request }) => {
+          starts += 1;
+          const body = await request.json() as {
+            configNonce: string;
+            targetIds: string[];
+          };
+          queuedOperation = {
+            id: "operation-connectivity-source",
+            kind: "connectivity-check",
+            label: "Check source",
+            status: "queued",
+            targetIds: body.targetIds,
+            createdAt: "2026-09-18T00:00:00Z",
+            updatedAt: "2026-09-18T00:00:00Z",
+            message: "Queued",
+            result: {},
+          };
+          return new Promise<Response>((resolve) => {
+            resolveStart = resolve;
+          });
+        },
+      ),
+      http.get("*/api/v1/operations", () => HttpResponse.json({
+        operations: queuedOperation ? [queuedOperation] : [],
+      })),
+    );
+
+    renderHarness(draft);
+
+    await waitFor(() => expect(screen.getByTestId("status"))
+      .toHaveTextContent("checking"));
+    await waitFor(() => expect(starts).toBe(1));
+    expect(resolveStart).toBeDefined();
+    resolveStart?.(HttpResponse.json(queuedOperation, { status: 202 }));
+  });
+
   it("marks a completed result stale when the draft nonce changes", async () => {
     let completedOperation: Record<string, unknown> | null = null;
     server.use(

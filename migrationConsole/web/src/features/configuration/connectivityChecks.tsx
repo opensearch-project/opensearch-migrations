@@ -1,6 +1,8 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -100,7 +102,8 @@ function resultFrom(operation: Operation): ConnectivityOperationResult | null {
 }
 
 
-function statusLabel(status: ConnectivityStatus): string {
+// eslint-disable-next-line react-refresh/only-export-components
+export function connectivityStatusLabel(status: ConnectivityStatus): string {
   switch (status) {
     case "valid": return "Valid";
     case "partially_verified": return "Partially verified";
@@ -113,7 +116,8 @@ function statusLabel(status: ConnectivityStatus): string {
 }
 
 
-function overallStatus(
+// eslint-disable-next-line react-refresh/only-export-components
+export function connectivityOverallStatus(
   states: ConnectivityTargetState[],
 ): ConnectivityStatus {
   const statuses = new Set(states.map((state) => state.status));
@@ -206,6 +210,8 @@ export function useConnectivityChecks(
     operationId: string;
     nonce: string;
   }>>([]);
+  const [startingTargetIds, setStartingTargetIds] = useState<string[]>([]);
+  const autoStartedSignature = useRef("");
 
   useEffect(() => {
     if (!nonce || !rawYaml || draft?.rawYaml !== undefined) {
@@ -283,15 +289,18 @@ export function useConnectivityChecks(
       (operations.data ?? []).map((operation) => [operation.id, operation]),
     );
     return new Set(
-      started
-        .filter((record) => record.nonce === nonce)
-        .map((record) => operationsById.get(record.operationId))
-        .filter((operation): operation is Operation => (
-          operation !== undefined && ACTIVE_STATUSES.has(operation.status)
-        ))
-        .flatMap((operation) => operation.targetIds),
+      [
+        ...startingTargetIds,
+        ...started
+          .filter((record) => record.nonce === nonce)
+          .map((record) => operationsById.get(record.operationId))
+          .filter((operation): operation is Operation => (
+            operation !== undefined && ACTIVE_STATUSES.has(operation.status)
+          ))
+          .flatMap((operation) => operation.targetIds),
+      ],
     );
-  }, [nonce, operations.data, started]);
+  }, [nonce, operations.data, started, startingTargetIds]);
   const targets = useMemo(
     () => inventory?.targets ?? [],
     [inventory?.targets],
@@ -319,8 +328,14 @@ export function useConnectivityChecks(
     ? states.find(({ target }) => target.id === selectedTarget.id) ?? null
     : null;
 
-  const start = async (targetIds: string[] = []) => {
+  const start = useCallback(async (targetIds: string[] = []) => {
     if (!nonce || !rawYaml) return;
+    const requestedTargetIds = targetIds.length > 0
+      ? targetIds
+      : targets.map(({ id }) => id);
+    setStartingTargetIds((current) => [
+      ...new Set([...current, ...requestedTargetIds]),
+    ]);
     setOperationProblem("");
     try {
       const operation = await startConnectivityChecks(
@@ -329,13 +344,7 @@ export function useConnectivityChecks(
         targetIds,
       );
       setStarted((current) => [
-        ...current.filter((record) => {
-          if (record.nonce !== nonce) return false;
-          const prior = (operations.data ?? []).find(
-            (candidate) => candidate.id === record.operationId,
-          );
-          return prior !== undefined && ACTIVE_STATUSES.has(prior.status);
-        }),
+        ...current.filter((record) => record.nonce === nonce),
         { operationId: operation.id, nonce },
       ]);
       queryClient.setQueryData<Operation[]>(
@@ -348,8 +357,47 @@ export function useConnectivityChecks(
       await queryClient.invalidateQueries({ queryKey: ["operations"] });
     } catch (error) {
       setOperationProblem(error instanceof Error ? error.message : String(error));
+    } finally {
+      setStartingTargetIds((current) => current.filter(
+        (targetId) => !requestedTargetIds.includes(targetId),
+      ));
     }
-  };
+  }, [nonce, queryClient, rawYaml, targets]);
+  const autoTargetKey = useMemo(
+    () => states
+      .filter(({ status }) => status === "not_checked" || status === "stale")
+      .map(({ target }) => target.id)
+      .sort()
+      .join(","),
+    [states],
+  );
+
+  useEffect(() => {
+    if (
+      !nonce
+      || inventoryLoading
+      || inventoryProblem
+      || operations.isLoading
+      || !autoTargetKey
+    ) {
+      return;
+    }
+    const signature = `${nonce}:${autoTargetKey}`;
+    if (autoStartedSignature.current === signature) return;
+    const timer = globalThis.setTimeout(() => {
+      autoStartedSignature.current = signature;
+      void start(autoTargetKey.split(","));
+    }, debounceMs);
+    return () => globalThis.clearTimeout(timer);
+  }, [
+    autoTargetKey,
+    debounceMs,
+    inventoryLoading,
+    inventoryProblem,
+    nonce,
+    operations.isLoading,
+    start,
+  ]);
 
   return {
     inventoryLoading,
@@ -373,7 +421,9 @@ function openLogs(check: ConnectivityCheck) {
 }
 
 
-function CheckDetails({ state }: Readonly<{ state: ConnectivityTargetState }>) {
+export function ConnectivityCheckDetails({
+  state,
+}: Readonly<{ state: ConnectivityTargetState }>) {
   const check = state.check;
   if (!check) {
     return (
@@ -457,7 +507,7 @@ export function ConnectivityPanel({
         {statusIcon(state.status)}
         <div>
           <strong>Connectivity</strong>
-          <span>{statusLabel(state.status)}</span>
+          <span>{connectivityStatusLabel(state.status)}</span>
         </div>
         <button
           disabled={state.status === "checking"}
@@ -468,7 +518,7 @@ export function ConnectivityPanel({
           {state.check ? "Recheck" : "Check"}
         </button>
       </header>
-      <CheckDetails state={state} />
+      <ConnectivityCheckDetails state={state} />
     </section>
   );
 }
@@ -488,7 +538,7 @@ export function ConnectivityDialog({
   states: ConnectivityTargetState[];
 }>) {
   const checking = states.some((state) => state.status === "checking");
-  const aggregateStatus = overallStatus(states);
+  const aggregateStatus = connectivityOverallStatus(states);
   return (
     <ModalDialog
       className="connectivity-dialog"
@@ -537,7 +587,7 @@ export function ConnectivityDialog({
               {statusIcon(aggregateStatus)}
               <div>
                 <strong>Configuration connectivity</strong>
-                <span>{statusLabel(aggregateStatus)}</span>
+                <span>{connectivityStatusLabel(aggregateStatus)}</span>
                 <p>{overallSummary(aggregateStatus)}</p>
               </div>
             </section>
@@ -551,7 +601,7 @@ export function ConnectivityDialog({
                 {statusIcon(state.status)}
                 <div>
                   <strong>{state.target.label}</strong>
-                  <span>{statusLabel(state.status)}</span>
+                  <span>{connectivityStatusLabel(state.status)}</span>
                 </div>
                 <button
                   disabled={state.status === "checking"}
@@ -564,7 +614,7 @@ export function ConnectivityDialog({
               </header>
               {state.status === "failed"
                 || state.status === "partially_verified" ? (
-                <CheckDetails state={state} />
+                <ConnectivityCheckDetails state={state} />
               ) : null}
             </article>
           ))}

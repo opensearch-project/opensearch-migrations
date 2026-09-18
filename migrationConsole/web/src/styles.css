@@ -4408,74 +4408,216 @@ button.secondary-button:hover:not(:disabled) {
   text-decoration: underline;
 }
 
-.environment-diagnostics {
-  display: grid;
+.validity-dashboard {
   flex: 0 0 auto;
-  gap: 5px;
-  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   background: #f6f8fa;
   color: var(--text-muted);
   font-size: 12px;
 }
 
-.environment-diagnostics > header {
+.validity-tabs {
   display: flex;
+  min-height: 54px;
   align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  overflow-x: auto;
+}
+
+.validity-tab {
+  display: flex;
+  min-width: 164px;
+  max-width: 230px;
+  height: 42px;
+  flex: 0 1 210px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--surface);
+  text-align: left;
+}
+
+button.validity-tab {
+  cursor: pointer;
+}
+
+button.validity-tab:hover {
+  border-color: #8aa0ab;
+  background: #f9fbfc;
+}
+
+button.validity-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.validity-tab > svg {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border-radius: 50%;
+  color: #66757d;
+  background: #e8edef;
+}
+
+.validity-tab > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.validity-tab strong,
+.validity-tab small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.validity-tab strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.validity-tab small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.validity-tab.status-valid > svg,
+.validity-tab.status-not_applicable > svg {
+  color: #23683a;
+  background: #dcefe2;
+}
+
+.validity-tab.status-partially_verified > svg,
+.validity-tab.status-stale > svg {
+  color: #725b14;
+  background: #f6ebc8;
+}
+
+.validity-tab.status-failed > svg {
+  color: #8d342d;
+  background: #f5deda;
+}
+
+.validity-tab.status-checking > svg {
+  color: #235f7a;
+  background: #dcecf3;
+}
+
+.validity-tab-panel {
+  padding: 9px 14px 11px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.validity-detail-content {
+  display: grid;
   gap: 7px;
 }
 
-.environment-diagnostics > header svg {
-  width: 15px;
-  height: 15px;
-  color: var(--accent);
+.validity-detail-content > p {
+  margin: 0;
+  font-weight: 600;
 }
 
-.environment-diagnostics > header span {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.environment-diagnostics p,
-.environment-diagnostics ul {
-  margin: 0 0 0 22px;
-}
-
-.environment-diagnostics ul {
+.validity-reference-list,
+.validity-diagnostic-list {
   display: grid;
-  gap: 3px;
-  padding-left: 16px;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
-.environment-diagnostics.status-valid {
-  border-bottom-color: #9fc7ab;
-  background: #edf8f0;
-  color: #215c35;
+.validity-reference-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
-.environment-diagnostics.status-valid > header svg {
-  color: #277741;
+.validity-reference-list code {
+  color: var(--text);
+  font-weight: 650;
 }
 
-.environment-diagnostics.status-warning {
-  border-bottom-color: #d5b55f;
+.validity-reference-list span {
+  color: var(--text-muted);
+}
+
+.validity-diagnostic-list li {
+  padding: 5px 8px;
+  border-left: 3px solid #d5b55f;
   background: #fff9e8;
-  color: #67531d;
 }
 
-.environment-diagnostics.status-warning > header svg {
-  color: #8b6b13;
-}
-
-.environment-diagnostics.status-error {
-  border-bottom-color: #d9a09b;
+.validity-diagnostic-list li.status-error {
+  border-left-color: var(--danger);
   background: #fff0ef;
-  color: #772f29;
 }
 
-.environment-diagnostics.status-error > header svg {
+.validity-connectivity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.validity-connectivity-target {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.validity-connectivity-target:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.validity-connectivity-target > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.validity-connectivity-target > header > div {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.validity-connectivity-target > header span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.validity-connectivity-target button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 650;
+}
+
+.validity-connectivity-target button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.validity-dashboard-problem {
+  padding: 0 14px 8px;
+  margin: 0;
   color: var(--danger);
 }
 

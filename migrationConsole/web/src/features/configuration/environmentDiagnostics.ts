@@ -30,6 +30,32 @@ export interface EnvironmentDiagnosticState {
 }
 
 
+export type EnvironmentReferenceCategory =
+  | "secret"
+  | "config-map"
+  | "image"
+  | "issuer"
+  | "kubernetes-resource";
+
+
+export interface EnvironmentReference {
+  id: string;
+  category: EnvironmentReferenceCategory;
+  displayName: string;
+  name: string;
+  path: string[];
+}
+
+
+export interface EnvironmentReferenceGroup {
+  id: string;
+  label: string;
+  references: EnvironmentReference[];
+  diagnostics: ConfigEnvironmentDiagnostics["diagnostics"];
+  status: EnvironmentDiagnosticLifecycle;
+}
+
+
 const NOT_CHECKED: EnvironmentDiagnosticState = {
   diagnostics: [],
   nonce: null,
@@ -65,6 +91,133 @@ function externalReferenceSignature(nodes: EditNode[]): string {
 }
 
 
+function pathsOverlap(left: string[], right: string[]): boolean {
+  return left.every((part, index) => right[index] === part)
+    || right.every((part, index) => left[index] === part);
+}
+
+
+function referenceCategory(node: EditNode): EnvironmentReferenceCategory {
+  const externalRef = node.externalRef;
+  if (externalRef?.kind === "image") return "image";
+  if (externalRef?.kind === "secret") return "secret";
+  if (externalRef?.kind === "configMap") return "config-map";
+  if (externalRef?.kind === "certManagerIssuer") return "issuer";
+  const kinds = externalRef?.k8s?.resourceTypes?.map(({ kind }) => kind) ?? [];
+  if (kinds.includes("Secret")) return "secret";
+  if (kinds.includes("ConfigMap")) return "config-map";
+  if (kinds.some((kind) => kind === "Issuer" || kind === "ClusterIssuer")) {
+    return "issuer";
+  }
+  return "kubernetes-resource";
+}
+
+
+function referenceName(node: EditNode): string {
+  if (typeof node.value === "string") return node.value.trim();
+  if (!node.value || typeof node.value !== "object") return "";
+  const value = node.value as Record<string, unknown>;
+  const selection = node.externalRef?.selection;
+  const nameField = selection && "nameField" in selection
+    ? selection.nameField ?? "name"
+    : "name";
+  const name = value[nameField];
+  return typeof name === "string" ? name.trim() : "";
+}
+
+
+function categoryLabel(category: EnvironmentReferenceCategory): string {
+  switch (category) {
+    case "secret": return "Kubernetes Secrets";
+    case "config-map": return "Kubernetes ConfigMaps";
+    case "image": return "Transform Images";
+    case "issuer": return "Certificate Issuers";
+    case "kubernetes-resource": return "Kubernetes Resources";
+  }
+}
+
+
+function groupStatus(
+  lifecycle: EnvironmentDiagnosticLifecycle,
+  diagnostics: ConfigEnvironmentDiagnostics["diagnostics"],
+): EnvironmentDiagnosticLifecycle {
+  if (
+    lifecycle === "not-checked"
+    || lifecycle === "checking"
+    || lifecycle === "stale"
+  ) {
+    return lifecycle;
+  }
+  if (diagnostics.some(({ severity }) => severity === "error")) return "error";
+  if (diagnostics.some(({ severity }) => severity === "warning")) {
+    return "warning";
+  }
+  return "valid";
+}
+
+
+export function environmentReferenceGroups(
+  nodes: EditNode[],
+  scopePath: string[] | null,
+  diagnostics: ConfigEnvironmentDiagnostics["diagnostics"],
+  lifecycle: EnvironmentDiagnosticLifecycle,
+): EnvironmentReferenceGroup[] {
+  const references = new Map<string, EnvironmentReference>();
+  const visit = (node: EditNode) => {
+    const name = referenceName(node);
+    if (
+      node.externalRef
+      && name
+      && (!scopePath || pathsOverlap(scopePath, node.path))
+    ) {
+      const category = referenceCategory(node);
+      const id = `${category}:${name}`;
+      if (!references.has(id)) {
+        references.set(id, {
+          id,
+          category,
+          displayName: node.externalRef.displayName || node.label,
+          name,
+          path: node.path,
+        });
+      }
+    }
+    node.children?.forEach(visit);
+  };
+  nodes.forEach(visit);
+
+  const byCategory = new Map<
+    EnvironmentReferenceCategory,
+    EnvironmentReference[]
+  >();
+  references.forEach((reference) => {
+    byCategory.set(reference.category, [
+      ...(byCategory.get(reference.category) ?? []),
+      reference,
+    ]);
+  });
+  return [...byCategory.entries()]
+    .map(([category, categoryReferences]) => {
+      const categoryDiagnostics = diagnostics.filter((diagnostic) => (
+        diagnostic.path.length === 0
+        || categoryReferences.some((reference) => (
+          pathsOverlap(reference.path, diagnostic.path)
+        ))
+      ));
+      return {
+        id: `environment:${category}`,
+        label: categoryLabel(category),
+        references: categoryReferences.sort(
+          (left, right) => left.name.localeCompare(right.name),
+        ),
+        diagnostics: categoryDiagnostics,
+        status: groupStatus(lifecycle, categoryDiagnostics),
+      };
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+
 function hashSignature(signature: string): string {
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
@@ -95,13 +248,9 @@ export function diagnosticsForScope(
   scopePath: string[] | null,
 ): ConfigEnvironmentDiagnostics["diagnostics"] {
   if (!scopePath || scopePath.length === 0) return diagnostics;
-  const sharesScope = (path: string[]) => (
-    scopePath.every((part, index) => path[index] === part)
-    || path.every((part, index) => scopePath[index] === part)
-  );
   return diagnostics.filter(
     (diagnostic) => diagnostic.path.length === 0
-      || sharesScope(diagnostic.path),
+      || pathsOverlap(scopePath, diagnostic.path),
   );
 }
 

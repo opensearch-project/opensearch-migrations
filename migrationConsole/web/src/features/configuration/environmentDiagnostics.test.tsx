@@ -9,6 +9,7 @@ import {
   type BrowserConfigDraft,
 } from "./browserDraft";
 import {
+  environmentReferenceGroups,
   environmentDiagnosticNonce,
   useEnvironmentDiagnostics,
 } from "./environmentDiagnostics";
@@ -69,6 +70,36 @@ describe("configuration environment diagnostics", () => {
       .toBe(environmentDiagnosticNonce(initial.editState.nodes));
     expect(environmentDiagnosticNonce(changedReference.editState.nodes))
       .not.toBe(environmentDiagnosticNonce(initial.editState.nodes));
+  });
+
+  it("groups configured references by concrete Kubernetes resource type", () => {
+    const draft = createBrowserConfigDraft(document);
+    const groups = environmentReferenceGroups(
+      draft.editState.nodes,
+      ["sourceClusters", "source"],
+      [],
+      "valid",
+    );
+
+    expect(groups).toEqual([
+      expect.objectContaining({
+        id: "environment:secret",
+        label: "Kubernetes Secrets",
+        status: "valid",
+        references: [
+          expect.objectContaining({
+            name: "source-creds",
+            path: [
+              "sourceClusters",
+              "source",
+              "authConfig",
+              "basic",
+              "secretName",
+            ],
+          }),
+        ],
+      }),
+    ]);
   });
 
   it("keeps a superseded response from replacing newer diagnostics", async () => {
