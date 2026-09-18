@@ -1,4 +1,10 @@
-import { WorkflowBuilder, renderWorkflowTemplate, typeToken, defineParam } from '../../src';
+import {
+    WorkflowBuilder,
+    renderWorkflowTemplate,
+    typeToken,
+    defineParam,
+    PodSpecPatchOverlay
+} from '../../src';
 
 const EXAMPLE_RESOURCES = {
     requests: { cpu: "100m", memory: "128Mi" },
@@ -636,7 +642,7 @@ describe('Pod Config - HostAliases', () => {
 });
 
 describe('Pod Config - PodSpecPatch', () => {
-    it('should render podSpecPatch', () => {
+    it('should render a typed pod-level podSpecPatch overlay', () => {
         const wf = WorkflowBuilder.create({
             k8sResourceName: 'test-patch',
             serviceAccountName: 'default'
@@ -646,7 +652,7 @@ describe('Pod Config - PodSpecPatch', () => {
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
                 .addResources(EXAMPLE_RESOURCES)
-                .addPodSpecPatch(() => '{"terminationGracePeriodSeconds": 30}')
+                .addPodSpecPatch(() => ({terminationGracePeriodSeconds: 30}))
             )
         )
         .getFullScope();
@@ -654,7 +660,78 @@ describe('Pod Config - PodSpecPatch', () => {
         const rendered = renderWorkflowTemplate(wf);
         const template = rendered.spec.templates.find((t: any) => t.name === 'test');
 
-        expect(template.podSpecPatch).toBe('{"terminationGracePeriodSeconds": 30}');
+        expect(template.podSpecPatch).toContain('"terminationGracePeriodSeconds"');
+        expect(template.podSpecPatch).toContain('30');
+    });
+
+    it('should render a typed podSpecPatch overlay with the Argo main-container merge key', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-patch-resources',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addPodSpecPatch(() => ({
+                    volumes: [{name: 'scratch', emptyDir: {}}],
+                    mainContainer: {
+                        resources: {requests: {cpu: '100m'}},
+                        volumeMounts: [{name: 'scratch', mountPath: '/scratch'}],
+                    },
+                }))
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.container.resources).toBeUndefined();
+        expect(template.podSpecPatch).toContain('"volumes"');
+        expect(template.podSpecPatch).toContain('"name", \'main\'');
+        expect(template.podSpecPatch).toContain('"resources"');
+        expect(template.podSpecPatch).toContain('"volumeMounts"');
+    });
+
+    it('should reject opaque podSpecPatch strings even when direct resources are present', () => {
+        WorkflowBuilder.create({
+            k8sResourceName: 'test-opaque-patch-resources',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                // @ts-expect-error - opaque patches can overwrite resource guarantees
+                .addPodSpecPatch(() => '{"containers":[{"name":"main","resources":{}}]}')
+            )
+        );
+        expect(true).toBe(true);
+    });
+
+    it('should keep pod fields, container fields, and the Argo merge key separate', () => {
+        const invalidPodOverlay: PodSpecPatchOverlay = {
+            // @ts-expect-error - resources belong to the main container
+            resources: EXAMPLE_RESOURCES,
+        };
+        const invalidContainerOverlay: PodSpecPatchOverlay = {
+            mainContainer: {
+                // @ts-expect-error - the renderer owns the main container name
+                name: 'alternate',
+            },
+        };
+        const invalidValueOverlay: PodSpecPatchOverlay = {
+            mainContainer: {
+                // @ts-expect-error - resources retain their Kubernetes value shape
+                resources: '100m',
+            },
+        };
+
+        expect(invalidPodOverlay).toBeDefined();
+        expect(invalidContainerOverlay).toBeDefined();
+        expect(invalidValueOverlay).toBeDefined();
     });
 
     it('should reject duplicate addPodSpecPatch calls at compile time', () => {
@@ -668,8 +745,8 @@ describe('Pod Config - PodSpecPatch', () => {
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
                 .addResources(EXAMPLE_RESOURCES)
-                .addPodSpecPatch(() => '{}')
-                .addPodSpecPatch(() => '{}')
+                .addPodSpecPatch(() => ({}))
+                .addPodSpecPatch(() => ({}))
             )
         );
         expect(true).toBe(true);
@@ -698,7 +775,7 @@ describe('Pod Config - All Features Combined', () => {
                 .addAutomountServiceAccountToken(() => false)
                 .addSecurityContext(() => ({ runAsNonRoot: true }))
                 .addHostAliases(() => [{ ip: '10.0.0.1', hostnames: ['db'] }])
-                .addPodSpecPatch(() => '{}')
+                .addPodSpecPatch(() => ({terminationGracePeriodSeconds: 30}))
             )
         )
         .getFullScope();
@@ -717,7 +794,7 @@ describe('Pod Config - All Features Combined', () => {
         expect(template.automountServiceAccountToken).toBe(false);
         expect(template.securityContext).toEqual({ runAsNonRoot: true });
         expect(template.hostAliases).toHaveLength(1);
-        expect(template.podSpecPatch).toBe('{}');
+        expect(template.podSpecPatch).toContain('"terminationGracePeriodSeconds"');
     });
 });
 
