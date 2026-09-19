@@ -1381,6 +1381,80 @@ describe("editConfig state", () => {
         expect(findNode(result.editState.nodes, "edit:traffic.replayers.replay-cap")).toBeUndefined();
     });
 
+    it("preserves same-named snapshots owned by a different source", () => {
+        const result = applyEditOperationToObject({
+            sourceClusters: {
+                retired: {
+                    endpoint: "https://retired.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        snapshots: {
+                            shared: {
+                                repoName: "",
+                                config: {
+                                    externallyManagedSnapshotName: "retired-snapshot",
+                                },
+                            },
+                        },
+                    },
+                },
+                retained: {
+                    endpoint: "https://retained.example.com:9200",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        snapshots: {
+                            shared: {
+                                repoName: "",
+                                config: {
+                                    externallyManagedSnapshotName: "retained-snapshot",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target: {endpoint: "https://target.example.com:9200"},
+            },
+            snapshotMigrationConfigs: [
+                {
+                    fromSource: "retired",
+                    toTarget: "target",
+                    fromSnapshot: "shared",
+                    slice: "retired",
+                    metadataMigrationConfig: {},
+                },
+                {
+                    fromSource: "retained",
+                    toTarget: "target",
+                    fromSnapshot: "shared",
+                    slice: "retained",
+                    metadataMigrationConfig: {},
+                },
+            ],
+        }, {
+            op: "removeConfig",
+            path: ["sourceClusters", "retired"],
+        });
+
+        const config = parse(result.yaml);
+        expect(config.sourceClusters.retired).toBeUndefined();
+        expect(config.sourceClusters.retained.snapshotInfo.snapshots.shared)
+            .toEqual({
+                repoName: "",
+                config: {
+                    externallyManagedSnapshotName: "retained-snapshot",
+                },
+            });
+        expect(config.snapshotMigrationConfigs).toEqual([{
+            fromSource: "retained",
+            toTarget: "target",
+            fromSnapshot: "shared",
+            slice: "retained",
+            metadataMigrationConfig: {},
+        }]);
+    });
+
     it("deletes replayers downstream of a removed capture proxy", () => {
         const result = applyEditOperationToObject({
             sourceClusters: {

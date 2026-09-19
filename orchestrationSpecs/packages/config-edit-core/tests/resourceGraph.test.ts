@@ -165,6 +165,165 @@ describe("configuration resource graph projection", () => {
         });
     });
 
+    it("does not mark another source's snapshot removed when a source is deleted", () => {
+        const snapshot = runtimeSource("retired");
+        const group = snapshot.nodes["group:Sources:Sources"];
+        const sourceId = "resource:sourceconfigs:source";
+        const snapshotId = "resource:datasnapshots:source-snap";
+        group.childIds = [...(group.childIds ?? []), sourceId];
+        snapshot.nodes[sourceId] = node(sourceId, "resource", "source", {
+            parentId: group.id,
+            childIds: [snapshotId],
+            capabilities: [{
+                kind: "edit",
+                editTargetId: "edit:sourceClusters.source",
+                label: "Edit source",
+            }],
+            resourcePlural: "sourceconfigs",
+            resourceName: "source",
+            resourceType: "Source cluster",
+            configPresence: {deployed: true, pending: true},
+        });
+        snapshot.nodes[snapshotId] = node(
+            snapshotId,
+            "resource",
+            "source-snap",
+            {
+                parentId: sourceId,
+                capabilities: [{
+                    kind: "edit",
+                    editTargetId: (
+                        "edit:sourceClusters.source.snapshotInfo.snapshots."
+                        + "snap.config.createSnapshotConfig"
+                    ),
+                    label: "Edit source-snap",
+                }],
+                resourcePlural: "datasnapshots",
+                resourceName: "source-snap",
+                resourceType: "Data snapshot",
+                configPresence: {deployed: true, pending: true},
+            },
+        );
+        const retainedSource = {
+            endpoint: "https://source.example.com:9200",
+            version: "ES 7.10",
+            snapshotInfo: {
+                snapshots: {
+                    snap: {
+                        repoName: "",
+                        config: {createSnapshotConfig: {}},
+                    },
+                },
+            },
+        };
+        const base = {
+            sourceClusters: {
+                retired: {
+                    endpoint: "https://retired.example.com:9200",
+                    version: "ES 7.10",
+                },
+                source: retainedSource,
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        };
+        const configured = {
+            ...base,
+            sourceClusters: {source: retainedSource},
+        };
+
+        const projected = projectConfigResourceGraph(
+            snapshot,
+            draft(base, configured),
+        );
+
+        expect(projected.nodes["resource:sourceconfigs:retired"]).toMatchObject({
+            status: "removed",
+            valueSummary: "Marked for removal",
+        });
+        expect(projected.nodes[snapshotId]).toMatchObject({
+            status: "ok",
+            valueSummary: null,
+        });
+    });
+
+    it("marks a generated snapshot removed when its create variant is replaced", () => {
+        const snapshot = runtimeSource("source");
+        const sourceId = "resource:sourceconfigs:source";
+        const snapshotId = "resource:datasnapshots:source-snap";
+        snapshot.nodes[sourceId].childIds = [snapshotId];
+        snapshot.nodes[snapshotId] = node(
+            snapshotId,
+            "resource",
+            "source-snap",
+            {
+                parentId: sourceId,
+                capabilities: [{
+                    kind: "edit",
+                    editTargetId: (
+                        "edit:sourceClusters.source.snapshotInfo.snapshots."
+                        + "snap.config.createSnapshotConfig"
+                    ),
+                    label: "Edit source-snap",
+                }],
+                resourcePlural: "datasnapshots",
+                resourceName: "source-snap",
+                resourceType: "Data snapshot",
+                configPresence: {deployed: true, pending: true},
+            },
+        );
+        const source = {
+            endpoint: "https://source.example.com:9200",
+            version: "ES 7.10",
+        };
+        const base = {
+            sourceClusters: {
+                source: {
+                    ...source,
+                    snapshotInfo: {
+                        snapshots: {
+                            snap: {
+                                repoName: "",
+                                config: {createSnapshotConfig: {}},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        };
+        const configured = {
+            sourceClusters: {
+                source: {
+                    ...source,
+                    snapshotInfo: {
+                        snapshots: {
+                            snap: {
+                                repoName: "",
+                                config: {
+                                    externallyManagedSnapshotName: "existing",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        };
+
+        const projected = projectConfigResourceGraph(
+            snapshot,
+            draft(base, configured),
+        );
+
+        expect(projected.nodes[snapshotId]).toMatchObject({
+            status: "removed",
+            valueSummary: "Marked for removal",
+        });
+    });
+
     it("places definitions under their owning resource", () => {
         const config = {
             sourceClusters: {

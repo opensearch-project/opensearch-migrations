@@ -564,6 +564,29 @@ function resourceCollectionChanged(
 }
 
 
+function configuredTargetPresent(
+    targetId: string,
+    nodes: ReadonlyMap<string, EditNode>,
+): boolean {
+    if (nodes.has(targetId)) return true;
+    if (!targetId.startsWith(EDIT_TARGET_PREFIX)) return false;
+    const path = targetId.slice(EDIT_TARGET_PREFIX.length).split(".");
+    for (let length = path.length - 1; length > 0; length -= 1) {
+        const ancestor = nodes.get(
+            `${EDIT_TARGET_PREFIX}${path.slice(0, length).join(".")}`,
+        );
+        if (!ancestor) continue;
+        // Union variants expose their fields but not a node for the variant
+        // object itself. The selected discriminator still proves it exists.
+        return (
+            ancestor.valueKind === "union"
+            && ancestor.value === path[length]
+        );
+    }
+    return false;
+}
+
+
 function snapshotMigrationKey(node: EditNode): string[] | null {
     if (
         node.path.length !== 2
@@ -664,7 +687,7 @@ function projectExistingNode<TNode extends ResourceGraphNode>(
         draft.dirty
         && Boolean(targetId)
         && isResourceTarget(targetId ?? "", placements)
-        && !nodesByTarget.has(targetId ?? "")
+        && !configuredTargetPresent(targetId ?? "", nodesByTarget)
         && resourceCollectionChanged(targetId ?? "", nodesByTarget, placements)
     );
     if (!explicitRemoval && !removedFromDraft) {
