@@ -4699,25 +4699,6 @@ button.validity-tab[aria-selected="true"] {
   overflow: auto;
 }
 
-.config-scope-validity {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.config-scope-validity-detail {
-  width: 100%;
-  height: 148px;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  background: #fbfcfd;
-  overflow: auto;
-}
-
 .validity-detail-content > p {
   margin: 0;
   font-weight: 600;
@@ -6084,6 +6065,25 @@ button.validity-tab[aria-selected="true"] {
   gap: 6px;
 }
 
+.property-value-line {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.property-value-line > .inline-resource-button {
+  width: 100%;
+}
+
+.property-value-validity {
+  display: inline-flex;
+  min-width: max-content;
+  align-items: center;
+  gap: 4px;
+}
+
 .inline-add-actions {
   display: flex;
   min-width: 0;
@@ -6420,13 +6420,21 @@ button.validity-tab[aria-selected="true"] {
   min-height: 28px;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 6px;
 }
 
 .property-action-cell .field-status {
   display: inline-flex;
   flex: 0 0 auto;
   margin: 0;
+}
+
+.property-action-validity {
+  display: inline-flex;
+  min-width: max-content;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
 }
 
 .property-actions {

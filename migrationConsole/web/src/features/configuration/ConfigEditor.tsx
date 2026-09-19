@@ -1578,6 +1578,13 @@ function ConfigPropertyRow({
     && children.length === 0
     && !["scalar", "boolean", "union", "command"].includes(node.valueKind)
   );
+  // The dashboard immediately above the table already covers root resources.
+  const rowValidityItems = depth <= 1 ? [] : validityItems;
+  const hasRowActions = Boolean(
+    topLevelResourceCommand || canRename || canClear || node.removable,
+  );
+  const inlineValidityItems = hasRowActions ? [] : rowValidityItems;
+  const actionValidityItems = hasRowActions ? rowValidityItems : [];
   const showDetails = Boolean(addingCommand) || (selected && structured);
   const name = fieldName(node, parent);
   const errorEmphasis = validationErrorEmphasis(node);
@@ -1863,7 +1870,21 @@ function ConfigPropertyRow({
             className="property-value"
             key={`${node.id}-${draft.draftRevision}`}
           >
-            {valueEditor}
+            <div className="property-value-line">
+              {valueEditor}
+              {inlineValidityItems.length > 0 ? (
+                <div className="property-value-validity">
+                  {inlineValidityItems.map((item) => (
+                    <ValidityIndicator
+                      expanded={expandedValidityIds.has(item.id)}
+                      item={item}
+                      key={item.id}
+                      onToggle={() => onToggleValidity(item.id)}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
             {referenceTargetId
               || canCreateExplicitReference
               || visibleReferenceAdds.length > 0 ? (
@@ -1967,20 +1988,24 @@ function ConfigPropertyRow({
         </td>
         <td className="property-action-cell">
           <div className="property-action-content">
-                  {node.status
-                    && !["ok", "required"].includes(node.status) ? (
-                    <span className={`field-status status-${node.status}`}>
-                      {node.status}
-                    </span>
+            {node.status
+              && !["ok", "required"].includes(node.status) ? (
+              <span className={`field-status status-${node.status}`}>
+                {node.status}
+              </span>
             ) : null}
-            {validityItems.map((item) => (
-              <ValidityIndicator
-                expanded={expandedValidityIds.has(item.id)}
-                item={item}
-                key={item.id}
-                onToggle={() => onToggleValidity(item.id)}
-              />
-            ))}
+            {actionValidityItems.length > 0 ? (
+              <div className="property-action-validity">
+                {actionValidityItems.map((item) => (
+                  <ValidityIndicator
+                    expanded={expandedValidityIds.has(item.id)}
+                    item={item}
+                    key={item.id}
+                    onToggle={() => onToggleValidity(item.id)}
+                  />
+                ))}
+              </div>
+            ) : null}
             <div className="property-actions">
             {topLevelResourceCommand ? (
               <button
@@ -2053,7 +2078,7 @@ function ConfigPropertyRow({
           </div>
         </td>
       </tr>
-      {validityItems
+      {rowValidityItems
         .filter(({ id }) => expandedValidityIds.has(id))
         .map((item) => (
           <tr className="config-property-validity-detail" key={`${item.id}:detail`}>
@@ -2398,16 +2423,6 @@ export function ConfigEditor({
   const validityItems = useMemo(
     () => buildValidityItems(environmentGroups, scopedConnectivityStates),
     [environmentGroups, scopedConnectivityStates],
-  );
-  const scopeValidityItems = useMemo(
-    () => validityItems.filter((item) => (
-      Boolean(scope?.path)
-      && item.paths.some((path) => (
-        path.length === scope?.path.length
-        && path.every((part, index) => scope?.path[index] === part)
-      ))
-    )),
-    [scope?.path, validityItems],
   );
   const renderedScope = useMemo(
     () => contentScope(scope),
@@ -4081,37 +4096,6 @@ export function ConfigEditor({
               ) : null}
             </div>
           </header>
-          {scopeValidityItems.length > 0 ? (
-            <div className="config-scope-validity">
-              {scopeValidityItems.map((item) => (
-                <ValidityIndicator
-                  expanded={expandedValidityIds.has(item.id)}
-                  item={item}
-                  key={item.id}
-                  onToggle={() => {
-                    setExpandedValidityIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(item.id)) next.delete(item.id);
-                      else next.add(item.id);
-                      return next;
-                    });
-                  }}
-                />
-              ))}
-              {scopeValidityItems
-                .filter(({ id }) => expandedValidityIds.has(id))
-                .map((item) => (
-                  <div className="config-scope-validity-detail" key={item.id}>
-                    <ValidityDetails
-                      item={item}
-                      onCheckConnectivity={(targetIds) => {
-                        void connectivity.start(targetIds);
-                      }}
-                    />
-                  </div>
-                ))}
-            </div>
-          ) : null}
           {pinnedRows.length > 0 ? (
             <nav
               aria-label="Current configuration path"

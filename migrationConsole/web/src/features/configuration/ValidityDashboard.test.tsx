@@ -132,12 +132,16 @@ describe("validity dashboard", () => {
     expect(screen.getByRole("button", { name: "Check" })).toBeDisabled();
   });
 
-  it("fits expanded details once and lets the user resize the pinned panel", async () => {
+  it("remeasures details after a resized panel is collapsed", async () => {
     const scrollHeight = vi.spyOn(
       HTMLElement.prototype,
       "scrollHeight",
       "get",
     ).mockReturnValue(212);
+    globalThis.localStorage.setItem(
+      "workflow-manage-validity-panel-height",
+      "148",
+    );
     render(
       <ValidityDashboard
         connectivityLoading={false}
@@ -163,6 +167,22 @@ describe("validity dashboard", () => {
     fireEvent.keyDown(separator, { key: "ArrowDown" });
     expect(panel).toHaveStyle({ height: "236px" });
     expect(separator).toHaveAttribute("aria-valuenow", "236");
+
+    expect(globalThis.localStorage.getItem(
+      "workflow-manage-validity-panel-height",
+    )).toBeNull();
+    await userEvent.click(screen.getByRole("tab", {
+      name: /Kubernetes Secrets/i,
+    }));
+    scrollHeight.mockReturnValue(318);
+    await userEvent.click(screen.getByRole("tab", {
+      name: /Kubernetes Secrets/i,
+    }));
+
+    expect(screen.getByRole("tabpanel")).toHaveStyle({ height: "318px" });
+    expect(screen.getByRole("separator", {
+      name: "Resize validity details",
+    })).toHaveAttribute("aria-valuenow", "318");
     scrollHeight.mockRestore();
   });
 });

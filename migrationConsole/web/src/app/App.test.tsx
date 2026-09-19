@@ -4790,8 +4790,13 @@ snapshotMigrationConfigs: []
   const secretRow = screen.getByRole("row", {
     name: /Secret Name.*Valid/i,
   });
-  expect(within(secretRow).getByRole("button", { name: "Valid" }))
+  const inlineValidity = within(secretRow).getByRole("button", {
+    name: "Valid",
+  });
+  expect(inlineValidity.closest(".property-value-validity"))
     .toBeInTheDocument();
+  expect(inlineValidity.closest(".property-action-cell")).toBeNull();
+  expect(document.querySelector(".config-scope-validity")).toBeNull();
   await userEvent.click(secretsCheck);
   expect(await screen.findByText(
     "Valid: the configured reference is available.",

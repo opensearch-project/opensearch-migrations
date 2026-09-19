@@ -63,25 +63,9 @@ function constrainedPanelHeight(height: number): number {
 }
 
 
-function savedPanelHeight(): number | null {
+function clearSavedPanelHeight() {
   try {
-    const value = Number.parseInt(
-      globalThis.localStorage.getItem(VALIDITY_PANEL_HEIGHT_KEY) ?? "",
-      10,
-    );
-    return Number.isFinite(value) ? constrainedPanelHeight(value) : null;
-  } catch {
-    return null;
-  }
-}
-
-
-function savePanelHeight(height: number) {
-  try {
-    globalThis.localStorage.setItem(
-      VALIDITY_PANEL_HEIGHT_KEY,
-      String(constrainedPanelHeight(height)),
-    );
+    globalThis.localStorage.removeItem(VALIDITY_PANEL_HEIGHT_KEY);
   } catch {
     // Browser storage can be unavailable in locked-down browsing contexts.
   }
@@ -280,17 +264,12 @@ function ResizableValidityPanel({
     height: number;
     pointerY: number;
   } | null>(null);
-  const latestHeightRef = useRef<number | null>(null);
   const measuredItemRef = useRef<string | null>(null);
-  const initialSavedHeight = useRef(savedPanelHeight());
-  const userSizedRef = useRef(initialSavedHeight.current !== null);
-  const [height, setHeight] = useState<number | null>(
-    initialSavedHeight.current,
-  );
+  const userSizedRef = useRef(false);
+  const [height, setHeight] = useState<number | null>(null);
 
   const updateHeight = (nextHeight: number) => {
     const constrained = constrainedPanelHeight(nextHeight);
-    latestHeightRef.current = constrained;
     setHeight(constrained);
   };
 
@@ -307,7 +286,6 @@ function ResizableValidityPanel({
       panelRef.current.scrollHeight,
     );
     measuredItemRef.current = item.id;
-    latestHeightRef.current = naturalHeight;
     setHeight(naturalHeight);
   }, [item.id]);
 
@@ -317,8 +295,6 @@ function ResizableValidityPanel({
     if (!resizeStartRef.current) return;
     resizeStartRef.current = null;
     userSizedRef.current = true;
-    const chosenHeight = latestHeightRef.current ?? height;
-    if (chosenHeight !== null) savePanelHeight(chosenHeight);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -346,7 +322,6 @@ function ResizableValidityPanel({
     event.preventDefault();
     userSizedRef.current = true;
     updateHeight(nextHeight);
-    savePanelHeight(nextHeight);
   };
 
   const panelHeight = height ?? VALIDITY_PANEL_MIN_HEIGHT;
@@ -385,7 +360,6 @@ function ResizableValidityPanel({
             height: panel.getBoundingClientRect().height,
             pointerY: event.clientY,
           };
-          latestHeightRef.current = panel.getBoundingClientRect().height;
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
@@ -425,6 +399,9 @@ export function ValidityDashboard({
     [connectivityStates, environmentGroups],
   );
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  useEffect(() => {
+    clearSavedPanelHeight();
+  }, []);
   useEffect(() => {
     if (expandedId && !items.some(({ id }) => id === expandedId)) {
       setExpandedId(null);
