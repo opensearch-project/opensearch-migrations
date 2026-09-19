@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Unio
 
 from kubernetes.client.rest import ApiException
 
+from console_link.models.kafka import parse_consumer_group_describe
+
 
 CRD_GROUP = "migrations.opensearch.org"
 CRD_VERSION = "v1alpha1"
@@ -23,6 +25,21 @@ MAX_DETAIL_LINES = 60
 MAX_DETAIL_CHARACTERS = 12_000
 CAPTURED_TOPIC_RECORDS_TITLE = "Captured topic records"
 DESCRIBE_TOPIC_RECORDS_SOURCE = "console kafka describe-topic-records"
+CONSUMER_POSITIONS_TITLE = "Consumer positions"
+DESCRIBE_CONSUMER_GROUP_SOURCE = (
+    "console kafka describe-consumer-group --skip-time-lag"
+)
+CONFIGURED_CONSUMER_GROUPS_SOURCE = (
+    "console kafka list-consumer-groups --configured-only"
+)
+TERMINAL_PHASES = {"completed", "succeeded", "ready"}
+ETA_KEYS = {
+    "eta",
+    "etams",
+    "estimatedcompletion",
+    "estimatedcompletiontime",
+    "estimatedtimeremaining",
+}
 
 
 class RuntimeStatusUnavailable(RuntimeError):
@@ -67,6 +84,21 @@ class RuntimeStatusTopicPartitions:
 
 
 @dataclass(frozen=True)
+class RuntimeStatusConsumerOffset:
+    group: str
+    topic: str
+    partition: int
+    current_offset: Optional[int]
+    log_end_offset: Optional[int]
+    lag: Optional[int]
+
+
+@dataclass(frozen=True)
+class RuntimeStatusConsumerOffsets:
+    offsets: Tuple[RuntimeStatusConsumerOffset, ...]
+
+
+@dataclass(frozen=True)
 class RuntimeStatusText:
     lines: Tuple[str, ...]
 
@@ -74,6 +106,7 @@ class RuntimeStatusText:
 RuntimeStatusContent = Union[
     RuntimeStatusMetrics,
     RuntimeStatusNameList,
+    RuntimeStatusConsumerOffsets,
     RuntimeStatusTopicPartitions,
     RuntimeStatusText,
 ]
@@ -184,6 +217,7 @@ class RuntimeStatusService:
         name: str,
         *,
         force: bool = False,
+        resource_phase: Optional[str] = None,
     ) -> RuntimeStatus:
         if plural not in self.SUPPORTED_PLURALS:
             raise RuntimeStatusUnavailable(
@@ -208,7 +242,11 @@ class RuntimeStatusService:
             force = False
 
         try:
-            resource = self._resource(plural, name)
+            resource = self._resource(
+                plural,
+                name,
+                resource_phase=resource_phase,
+            )
             if plural == "datasnapshots":
                 sections = (self._snapshot_section(resource),)
             elif plural == "snapshotmigrations":
@@ -216,7 +254,7 @@ class RuntimeStatusService:
             elif plural == "kafkaclusters":
                 sections = self._kafka_cluster_sections(name)
             elif plural == "capturedtraffics":
-                sections = (self._captured_traffic_section(resource),)
+                sections = self._captured_traffic_sections(resource)
             elif plural == "captureproxies":
                 sections = (self._unsupported_section(
                     "proxy",
@@ -253,7 +291,13 @@ class RuntimeStatusService:
                 completed = self._inflight.pop(cache_key)
                 completed.set()
 
-    def _resource(self, plural: str, name: str) -> Mapping[str, Any]:
+    def _resource(
+        self,
+        plural: str,
+        name: str,
+        *,
+        resource_phase: Optional[str] = None,
+    ) -> Mapping[str, Any]:
         try:
             return self.custom_api.get_namespaced_custom_object(
                 group=CRD_GROUP,
@@ -264,8 +308,26 @@ class RuntimeStatusService:
             )
         except ApiException as error:
             if error.status == 404:
+                phase = str(resource_phase or "").lower()
+                creation_pending = any(
+                    marker in phase
+                    for marker in (
+                        "creating",
+                        "pending",
+                        "running",
+                        "submitting",
+                        "waiting",
+                    )
+                )
+                if creation_pending:
+                    raise RuntimeStatusUnavailable(
+                        f"The resource {plural}/{name} has not been created "
+                        "yet. Runtime status will appear after Kubernetes "
+                        "creates it."
+                    ) from error
                 raise RuntimeStatusUnavailable(
-                    f"The resource {plural}/{name} no longer exists."
+                    f"The resource {plural}/{name} is not currently present "
+                    "in Kubernetes."
                 ) from error
             raise
 
@@ -303,6 +365,19 @@ class RuntimeStatusService:
         status = resource.get("status") or {}
         backfill = status.get("documentBackfill") or {}
         phase = str(backfill.get("phase") or status.get("phase") or "Pending")
+        if not backfill:
+            terminal = phase.lower() in TERMINAL_PHASES
+            return RuntimeStatusSection(
+                key="backfill",
+                title="Document backfill",
+                state="unsupported" if terminal else "pending",
+                summary=(
+                    "Document backfill was not run for this migration."
+                    if terminal
+                    else "Document backfill has not reported status yet."
+                ),
+                source="console backfill status --deep-check watcher",
+            )
         summary = backfill.get("summary") or {}
         percentage = summary.get("percentageCompleted")
         shards_total = summary.get("shardsTotal")
@@ -347,9 +422,15 @@ class RuntimeStatusService:
             ),
             (
                 "consumer-groups",
-                "Kafka consumer groups",
-                ["kafka", "list-consumer-groups", "--kafka", cluster_name],
-                "console kafka list-consumer-groups",
+                "Configured consumer groups",
+                [
+                    "kafka",
+                    "list-consumer-groups",
+                    "--kafka",
+                    cluster_name,
+                    "--configured-only",
+                ],
+                CONFIGURED_CONSUMER_GROUPS_SOURCE,
                 "consumer group",
             ),
         )
@@ -367,7 +448,16 @@ class RuntimeStatusService:
             ]
             return tuple(future.result() for future in futures)
 
-    def _captured_traffic_section(
+    def _captured_traffic_sections(
+        self,
+        resource: Mapping[str, Any],
+    ) -> Tuple[RuntimeStatusSection, ...]:
+        return (
+            self._captured_traffic_records_section(resource),
+            self._captured_traffic_consumer_positions_section(resource),
+        )
+
+    def _captured_traffic_records_section(
         self,
         resource: Mapping[str, Any],
     ) -> RuntimeStatusSection:
@@ -417,6 +507,128 @@ class RuntimeStatusService:
                 if partitions
                 else _text_content(result.output)
             ),
+        )
+
+    def _captured_traffic_consumer_positions_section(
+        self,
+        resource: Mapping[str, Any],
+    ) -> RuntimeStatusSection:
+        spec = resource.get("spec") or {}
+        cluster = str(spec.get("kafkaClusterName") or "default")
+        topic = str(spec.get("topicName") or "")
+        if not topic:
+            return RuntimeStatusSection(
+                key="consumer-positions",
+                title=CONSUMER_POSITIONS_TITLE,
+                state="pending",
+                summary="The Kafka topic name is not available yet.",
+                source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+            )
+
+        groups_result = self.console_runner.run([
+            "kafka",
+            "list-consumer-groups",
+            "--kafka",
+            cluster,
+            "--configured-only",
+        ])
+        if not groups_result.success:
+            return _command_error_section(
+                "consumer-positions",
+                CONSUMER_POSITIONS_TITLE,
+                CONFIGURED_CONSUMER_GROUPS_SOURCE,
+                groups_result,
+            )
+        groups = _detail_lines(groups_result.output)
+        if not groups:
+            return RuntimeStatusSection(
+                key="consumer-positions",
+                title=CONSUMER_POSITIONS_TITLE,
+                state="ok",
+                summary=(
+                    "No replay consumer groups are configured for this "
+                    "Kafka cluster."
+                ),
+                source=CONFIGURED_CONSUMER_GROUPS_SOURCE,
+            )
+
+        commands = [
+            [
+                "kafka",
+                "describe-consumer-group",
+                "--kafka",
+                cluster,
+                "--skip-time-lag",
+                group,
+            ]
+            for group in groups
+        ]
+        with ThreadPoolExecutor(max_workers=len(commands)) as executor:
+            results = list(executor.map(self.console_runner.run, commands))
+
+        offsets = []
+        failures = []
+        for group, result in zip(groups, results):
+            if not result.success:
+                failures.append(
+                    f"{group}: "
+                    f"{result.error or result.output or 'status failed'}"
+                )
+                continue
+            offsets.extend(
+                offset
+                for offset in _consumer_offsets(result.output, group)
+                if offset.topic == topic
+            )
+
+        content = (
+            RuntimeStatusConsumerOffsets(tuple(offsets))
+            if offsets
+            else None
+        )
+        if failures:
+            summary = (
+                f"{len(failures)} of {len(groups)} consumer group checks "
+                "failed."
+            )
+            if offsets:
+                summary += (
+                    f" {len(offsets)} partition "
+                    f"position{'s' if len(offsets) != 1 else ''} available."
+                )
+            return RuntimeStatusSection(
+                key="consumer-positions",
+                title=CONSUMER_POSITIONS_TITLE,
+                state="error",
+                summary=summary,
+                source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+                content=content or RuntimeStatusText(tuple(failures)),
+            )
+        if not offsets:
+            return RuntimeStatusSection(
+                key="consumer-positions",
+                title=CONSUMER_POSITIONS_TITLE,
+                state="ok",
+                summary=(
+                    "No configured replay consumer has committed an offset "
+                    "for this topic."
+                ),
+                source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+            )
+
+        group_count = len({offset.group for offset in offsets})
+        return RuntimeStatusSection(
+            key="consumer-positions",
+            title=CONSUMER_POSITIONS_TITLE,
+            state="ok",
+            summary=(
+                f"{len(offsets)} partition "
+                f"position{'s' if len(offsets) != 1 else ''} across "
+                f"{group_count} consumer "
+                f"group{'s' if group_count != 1 else ''}."
+            ),
+            source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+            content=content,
         )
 
     def _name_list_section(
@@ -507,24 +719,53 @@ def _topic_partitions(
     return tuple(partitions)
 
 
+def _consumer_offsets(
+    value: str,
+    group: str,
+) -> Tuple[RuntimeStatusConsumerOffset, ...]:
+    return tuple(
+        RuntimeStatusConsumerOffset(
+            group=group,
+            topic=str(row["topic"]),
+            partition=int(row["partition"]),
+            current_offset=int(row["current_offset"]),
+            log_end_offset=int(row["log_end_offset"]),
+            lag=int(row["lag"]),
+        )
+        for row in parse_consumer_group_describe(value)
+    )
+
+
 def _status_metrics(
     status: Mapping[str, Any],
 ) -> Optional[RuntimeStatusMetrics]:
     metrics = []
     phase = status.get("phase")
+    terminal = str(phase or "").lower() in TERMINAL_PHASES
     if phase:
         metrics.append(RuntimeStatusMetric(
             key="phase",
             label="Phase",
             value=str(phase),
         ))
-    for key, value in (status.get("summary") or {}).items():
+    summary = status.get("summary") or {}
+    for key, value in summary.items():
+        normalized_key = key.lower()
+        if key == "dataProcessedUnit":
+            continue
+        if terminal and normalized_key in ETA_KEYS:
+            continue
         if value is not None:
+            unit = None
+            if key == "percentageCompleted":
+                unit = "percent"
+            elif key == "dataProcessed":
+                unit = str(summary.get("dataProcessedUnit") or "MiB")
             metrics.append(RuntimeStatusMetric(
                 key=key,
                 label=_humanize(key),
                 value=_metric_value(value),
-                unit="percent" if key == "percentageCompleted" else None,
+                unit=unit,
             ))
     updated_at = status.get("updatedAt")
     if updated_at:

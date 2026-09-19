@@ -48,6 +48,8 @@ from ..application.logs import (
 )
 from ..application.runtime_status import (
     RuntimeStatus,
+    RuntimeStatusConsumerOffset,
+    RuntimeStatusConsumerOffsets,
     RuntimeStatusContent,
     RuntimeStatusMetric,
     RuntimeStatusMetrics,
@@ -479,6 +481,27 @@ class RuntimeStatusTopicPartitionsV1(WebModel):
     partitions: List[RuntimeStatusTopicPartitionV1]
 
 
+class RuntimeStatusConsumerOffsetV1(WebModel):
+    group: str
+    topic: str
+    partition: int
+    current_offset: Optional[int] = None
+    log_end_offset: Optional[int] = None
+    lag: Optional[int] = None
+
+    @classmethod
+    def from_domain(
+        cls,
+        offset: RuntimeStatusConsumerOffset,
+    ) -> "RuntimeStatusConsumerOffsetV1":
+        return cls.model_validate(offset.__dict__)
+
+
+class RuntimeStatusConsumerOffsetsV1(WebModel):
+    kind: Literal["consumer-offsets"] = "consumer-offsets"
+    offsets: List[RuntimeStatusConsumerOffsetV1]
+
+
 class RuntimeStatusTextV1(WebModel):
     kind: Literal["text"] = "text"
     lines: List[str]
@@ -488,6 +511,7 @@ RuntimeStatusContentV1 = Annotated[
     Union[
         RuntimeStatusMetricsV1,
         RuntimeStatusNameListV1,
+        RuntimeStatusConsumerOffsetsV1,
         RuntimeStatusTopicPartitionsV1,
         RuntimeStatusTextV1,
     ],
@@ -507,6 +531,13 @@ def _runtime_status_content(
         )
     if isinstance(content, RuntimeStatusNameList):
         return RuntimeStatusNameListV1(items=list(content.items))
+    if isinstance(content, RuntimeStatusConsumerOffsets):
+        return RuntimeStatusConsumerOffsetsV1(
+            offsets=[
+                RuntimeStatusConsumerOffsetV1.from_domain(offset)
+                for offset in content.offsets
+            ],
+        )
     if isinstance(content, RuntimeStatusTopicPartitions):
         return RuntimeStatusTopicPartitionsV1(
             partitions=[

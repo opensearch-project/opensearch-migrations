@@ -732,9 +732,8 @@ export function WorkflowDependencyGraph({
           />
         </div>
       ))}
-      {routedPaths.length > 0 ? (
+      {routedPaths.some((route) => route.state !== "normal") ? (
         <footer aria-hidden="true" className="workflow-graph-legend">
-          <span><i className="legend-line" />requires</span>
           {routedPaths.some((route) => route.state === "blocked") ? (
             <span>
               <i className="legend-line legend-blocked" />{" "}

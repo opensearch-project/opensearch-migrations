@@ -282,6 +282,33 @@ def test_standard_kafka_describe_group(mocker):
          ])
 
 
+def test_standard_kafka_describe_group_can_skip_time_lag(mocker):
+    config = {
+        "broker_endpoints": "abc",
+        "standard": None
+    }
+    kafka = get_kafka(config)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    augmenter = mocker.patch.object(
+        kafka_module,
+        '_augment_describe_output_with_time_lag',
+    )
+
+    result = kafka.describe_consumer_group(
+        group_name='new_group',
+        include_time_lag=False,
+    )
+
+    assert result.success
+    augmenter.assert_not_called()
+    _assert_kafka_subprocess_run(
+        mock,
+        ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
+         '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
+         '--group', 'new_group',
+         ])
+
+
 def test_msk_kafka_list_groups(mocker):
     config = {
         "broker_endpoints": "abc",

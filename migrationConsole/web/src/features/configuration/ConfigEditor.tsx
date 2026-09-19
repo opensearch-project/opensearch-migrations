@@ -7,6 +7,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -90,6 +91,7 @@ import {
 
 
 interface ConfigEditorProps {
+  globalActionsTarget?: HTMLElement | null;
   initialRemovalTargetId?: string | null;
   initialTargetId?: string | null;
   navigationBackLabel?: string | null;
@@ -2190,6 +2192,7 @@ function ConfigPropertyRow({
 
 
 export function ConfigEditor({
+  globalActionsTarget,
   initialRemovalTargetId,
   initialTargetId,
   navigationBackLabel,
@@ -3696,11 +3699,63 @@ export function ConfigEditor({
   }
 
   return (
-    <section
-      aria-label={`Edit ${resourceLabel} configuration`}
-      aria-busy={busy || actionPending || resourceSyncing}
-      className="workspace config-editor"
-    >
+    <>
+      {globalActionsTarget ? createPortal(
+        <>
+          <button
+            className="edit-mode-button edit-global-action"
+            onClick={() => setConnectivityDialogOpen(true)}
+            title="Check source, target, and repository connectivity"
+            type="button"
+          >
+            <Network aria-hidden="true" />
+            <span>Connectivity</span>
+          </button>
+          <button
+            aria-label="Revert unsaved changes"
+            className="edit-mode-button edit-global-action"
+            disabled={
+              actionPending
+              || (
+                !draftBaseStale
+                && !hasLocalEdits
+                && (busy || !draft.dirty)
+              )
+            }
+            onClick={() => void revert()}
+            title="Reread the saved configuration and discard unsaved changes"
+            type="button"
+          >
+            <Undo2 aria-hidden="true" />
+            <span>Revert</span>
+          </button>
+          <button
+            aria-label="Save configuration"
+            className={[
+              "edit-mode-button",
+              "edit-global-action",
+              "edit-global-save",
+            ].join(" ")}
+            disabled={
+              actionPending
+              || draftBaseStale
+              || (!hasLocalEdits && (busy || !draft.dirty))
+            }
+            onClick={() => void save()}
+            title="Save configuration and continue editing"
+            type="button"
+          >
+            <Save aria-hidden="true" />
+            <span>Save</span>
+          </button>
+        </>,
+        globalActionsTarget,
+      ) : null}
+      <section
+        aria-label={`Edit ${resourceLabel} configuration`}
+        aria-busy={busy || actionPending || resourceSyncing}
+        className="workspace config-editor"
+      >
       <header className="config-toolbar">
         {navigationBackLabel && onNavigateBack ? (
           <button
@@ -3853,33 +3908,8 @@ export function ConfigEditor({
             <span>Show field documentation</span>
           </label>
         </div> : null}
-        <div className="config-toolbar-actions">
-          <button
-            onClick={() => setConnectivityDialogOpen(true)}
-            title="Check source, target, and repository connectivity"
-            type="button"
-          >
-            <Network aria-hidden="true" />
-            <span>Connectivity</span>
-          </button>
-          <button
-            aria-label="Revert unsaved changes"
-            disabled={
-              actionPending
-              || (
-                !draftBaseStale
-                && !hasLocalEdits
-                && (busy || !draft.dirty)
-              )
-            }
-            onClick={() => void revert()}
-            title="Reread the saved configuration and discard unsaved changes"
-            type="button"
-          >
-            <Undo2 />
-            <span>Revert</span>
-          </button>
-          {draft.rawYaml !== undefined ? (
+        {draft.rawYaml !== undefined ? (
+          <div className="config-toolbar-actions">
             <button
               disabled={actionPending || busy || !rawYamlDirty}
               onClick={() => void checkRawYaml()}
@@ -3888,23 +3918,8 @@ export function ConfigEditor({
               <ChevronRight />
               <span>Check YAML</span>
             </button>
-          ) : null}
-          <button
-            aria-label="Save configuration"
-            className="primary-button"
-            disabled={
-              actionPending
-              || draftBaseStale
-              || (!hasLocalEdits && (busy || !draft.dirty))
-            }
-            onClick={() => void save()}
-            title="Save configuration and continue editing"
-            type="button"
-          >
-            <Save />
-            <span>Save</span>
-          </button>
-        </div>
+          </div>
+        ) : null}
       </header>
       {problem ? (
         <div className="config-problem" role="alert">
@@ -4486,6 +4501,7 @@ export function ConfigEditor({
           }}
         />
       ) : null}
-    </section>
+      </section>
+    </>
   );
 }

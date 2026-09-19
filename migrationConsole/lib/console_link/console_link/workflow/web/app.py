@@ -215,6 +215,7 @@ def create_app(
                 node.resource_plural,
                 node.resource_name,
                 force=force,
+                resource_phase=node.phase,
             )
             return RuntimeStatusV1.from_domain(status)
         except RuntimeStatusUnavailable as error:

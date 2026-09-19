@@ -69,6 +69,7 @@ test("anchors dependencies to the stable resource header", () => {
     expect(node.querySelector(":scope > .workflow-graph-node-main"))
       .toHaveAttribute("data-dependency-anchor", "true");
   });
+  expect(screen.queryByText("requires")).toBeNull();
 });
 
 

@@ -324,6 +324,8 @@ function ManageApp() {
     useState<PendingResourceAddition[]>([]);
   const [pendingResourceRenames, setPendingResourceRenames] =
     useState<PendingResourceRename[]>([]);
+  const [editGlobalActionsTarget, setEditGlobalActionsTarget] =
+    useState<HTMLDivElement | null>(null);
   const editExitRef = useRef<(() => void) | null>(null);
   const editSubmitRef = useRef<(() => void) | null>(null);
   // An optimistic add moves the selection onto a resource that may never
@@ -1289,6 +1291,12 @@ function ManageApp() {
         ) : null}
         <div className="header-actions">
           {editContext ? (
+            <div
+              className="edit-global-actions"
+              ref={setEditGlobalActionsTarget}
+            />
+          ) : null}
+          {editContext ? (
             <button
               aria-label="Save and submit"
               className="edit-mode-button submit-mode-button"
@@ -1643,6 +1651,7 @@ function ManageApp() {
                   )}
                 >
                   <ConfigEditor
+                    globalActionsTarget={editGlobalActionsTarget}
                     initialTargetId={editContext.targetId}
                     initialRemovalTargetId={
                       editContext.removalTargetId ?? null
@@ -1717,6 +1726,7 @@ function ManageApp() {
                   key={selectedNode.id}
                   navigationBackLabel={linkedBackLabel}
                   node={selectedNode}
+                  nodes={displayedState.nodes}
                   connectivityState={
                     runtimeConnectivity.navigationTargets[
                       editTarget(selectedNode) ?? ""
@@ -1739,6 +1749,7 @@ function ManageApp() {
                   operations={operations.data ?? []}
                   pendingPreapprovalNames={pendingApprovalNames}
                   resetInProgress={resetTargetIds.has(selectedNode.id)}
+                  workflowPhase={state.data?.workflow?.phase}
                   workflowSteps={selectedWorkflowSteps}
                 />
               ) : (

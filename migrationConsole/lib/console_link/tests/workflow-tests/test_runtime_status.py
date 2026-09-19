@@ -2,8 +2,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import threading
 
+from kubernetes.client.exceptions import ApiException
+import pytest
+
 from console_link.workflow.application.runtime_status import (
     ConsoleCommandResult,
+    RuntimeStatusConsumerOffsets,
     RuntimeStatusMetrics,
     RuntimeStatusNameList,
     RuntimeStatusService,
@@ -19,6 +23,11 @@ class _CustomApi:
     def get_namespaced_custom_object(self, **request):
         self.calls.append(request)
         return self.resources[(request["plural"], request["name"])]
+
+
+class _MissingCustomApi:
+    def get_namespaced_custom_object(self, **request):
+        raise ApiException(status=404, reason="Not Found")
 
 
 class _Console:
@@ -108,11 +117,118 @@ def test_backfill_status_uses_deep_check_watcher_result():
     assert "backfill status --deep-check" in result.sections[0].source
 
 
+def test_completed_migration_without_backfill_status_reports_not_run():
+    service = _service({
+        ("snapshotmigrations", "migration-0"): {
+            "status": {"phase": "Completed"},
+        },
+    })
+
+    result = service.inspect(
+        "resource:snapshotmigrations:migration-0",
+        "snapshotmigrations",
+        "migration-0",
+    )
+
+    assert result.sections[0].state == "unsupported"
+    assert result.sections[0].summary == (
+        "Document backfill was not run for this migration."
+    )
+    assert result.sections[0].content is None
+
+
+def test_completed_status_omits_eta_and_preserves_data_unit():
+    service = _service({
+        ("datasnapshots", "source-snapshot"): {
+            "status": {
+                "phase": "Completed",
+                "snapshotCreation": {
+                    "phase": "Completed",
+                    "summary": {
+                        "shardsSuccessful": 8,
+                        "shardsTotal": 8,
+                        "dataProcessed": 512,
+                        "dataProcessedUnit": "MiB",
+                        "eta": "0h 0m 0s",
+                        "etaMs": 0,
+                    },
+                },
+            },
+        },
+    })
+
+    result = service.inspect(
+        "resource:datasnapshots:source-snapshot",
+        "datasnapshots",
+        "source-snapshot",
+    )
+
+    content = result.sections[0].content
+    assert isinstance(content, RuntimeStatusMetrics)
+    metrics = {metric.key: metric for metric in content.metrics}
+    assert metrics["dataProcessed"].unit == "MiB"
+    assert "dataProcessedUnit" not in metrics
+    assert "eta" not in metrics
+    assert "etaMs" not in metrics
+
+
+def test_missing_running_resource_reports_that_creation_is_pending():
+    service = RuntimeStatusService(
+        "ma",
+        _MissingCustomApi(),
+        console_runner=_Console({}),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            r"The resource trafficreplays/replay has not been created yet\. "
+            r"Runtime status will appear after Kubernetes creates it\."
+        ),
+    ):
+        service.inspect(
+            "resource:trafficreplays:replay",
+            "trafficreplays",
+            "replay",
+            resource_phase="Running",
+        )
+
+
+def test_missing_terminal_resource_uses_neutral_present_tense():
+    service = RuntimeStatusService(
+        "ma",
+        _MissingCustomApi(),
+        console_runner=_Console({}),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            r"The resource trafficreplays/replay is not currently present "
+            r"in Kubernetes\."
+        ),
+    ) as raised:
+        service.inspect(
+            "resource:trafficreplays:replay",
+            "trafficreplays",
+            "replay",
+            resource_phase="Succeeded",
+        )
+
+    assert "no longer" not in str(raised.value)
+
+
 def test_kafka_cluster_runs_bounded_inventory_commands():
     console = _Console({
         ("kafka", "list-topics", "--kafka", "default"):
             ConsoleCommandResult(True, "capture\n__consumer_offsets"),
-        ("kafka", "list-consumer-groups", "--kafka", "default"):
+        (
+            "kafka",
+            "list-consumer-groups",
+            "--kafka",
+            "default",
+            "--configured-only",
+        ):
             ConsoleCommandResult(True, "replayer-target"),
     })
     service = _service({
@@ -127,7 +243,13 @@ def test_kafka_cluster_runs_bounded_inventory_commands():
 
     assert {tuple(call) for call in console.calls} == {
         ("kafka", "list-topics", "--kafka", "default"),
-        ("kafka", "list-consumer-groups", "--kafka", "default"),
+        (
+            "kafka",
+            "list-consumer-groups",
+            "--kafka",
+            "default",
+            "--configured-only",
+        ),
     }
     assert [section.state for section in result.sections] == ["ok", "ok"]
     assert result.sections[0].summary == "2 topics."
@@ -138,18 +260,26 @@ def test_kafka_cluster_runs_bounded_inventory_commands():
 
 
 def test_captured_traffic_checks_the_exact_topic():
-    command = (
+    records_command = (
         "kafka",
         "describe-topic-records",
         "--kafka",
         "default",
         "capture",
     )
+    groups_command = (
+        "kafka",
+        "list-consumer-groups",
+        "--kafka",
+        "default",
+        "--configured-only",
+    )
     console = _Console({
-        command: ConsoleCommandResult(
+        records_command: ConsoleCommandResult(
             True,
             "TOPIC PARTITION RECORDS\ncapture 0 125",
         ),
+        groups_command: ConsoleCommandResult(True, ""),
     })
     service = _service({
         ("capturedtraffics", "capture-topic"): {
@@ -166,7 +296,7 @@ def test_captured_traffic_checks_the_exact_topic():
         "capture-topic",
     )
 
-    assert console.calls == [list(command)]
+    assert console.calls == [list(records_command), list(groups_command)]
     assert result.sections[0].summary == "125 records across 1 partition."
     content = result.sections[0].content
     assert isinstance(content, RuntimeStatusTopicPartitions)
@@ -176,6 +306,83 @@ def test_captured_traffic_checks_the_exact_topic():
         "capture",
         0,
         125,
+    )
+
+
+def test_captured_traffic_reports_consumer_cursor_for_its_topic():
+    console = _Console({
+        (
+            "kafka",
+            "describe-topic-records",
+            "--kafka",
+            "main-k",
+            "capture",
+        ): ConsoleCommandResult(
+            True,
+            "TOPIC PARTITION RECORDS\ncapture 0 57240",
+        ),
+        (
+            "kafka",
+            "list-consumer-groups",
+            "--kafka",
+            "main-k",
+            "--configured-only",
+        ): ConsoleCommandResult(True, "replayer-target\n"),
+        (
+            "kafka",
+            "describe-consumer-group",
+            "--kafka",
+            "main-k",
+            "--skip-time-lag",
+            "replayer-target",
+        ): ConsoleCommandResult(
+            True,
+            (
+                "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG "
+                "CONSUMER-ID HOST CLIENT-ID\n"
+                "replayer-target capture 0 500 57240 56740 - - -\n"
+                "replayer-target another-topic 0 10 10 0 - - -"
+            ),
+        ),
+    })
+    service = _service({
+        ("capturedtraffics", "capture-topic"): {
+            "spec": {
+                "kafkaClusterName": "main-k",
+                "topicName": "capture",
+            },
+        },
+    }, console)
+
+    result = service.inspect(
+        "resource:capturedtraffics:capture-topic",
+        "capturedtraffics",
+        "capture-topic",
+    )
+
+    positions = result.sections[1]
+    assert positions.title == "Consumer positions"
+    assert positions.state == "ok"
+    assert positions.summary == (
+        "1 partition position across 1 consumer group."
+    )
+    assert isinstance(positions.content, RuntimeStatusConsumerOffsets)
+    assert len(positions.content.offsets) == 1
+    offset = positions.content.offsets[0]
+    assert (
+        offset.group,
+        offset.topic,
+        offset.partition,
+        offset.current_offset,
+        offset.log_end_offset,
+        offset.lag,
+    ) == (
+        "replayer-target",
+        "capture",
+        0,
+        500,
+        57240,
+        56740,
     )
 
 

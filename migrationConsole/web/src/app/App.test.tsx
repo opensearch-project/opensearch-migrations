@@ -694,6 +694,24 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
                 }],
               },
             },
+            {
+              key: "consumer-positions",
+              title: "Consumer positions",
+              state: "ok",
+              summary: "1 partition position across 1 consumer group.",
+              source: "console kafka describe-consumer-group --skip-time-lag",
+              content: {
+                kind: "consumer-offsets",
+                offsets: [{
+                  group: "replayer-target",
+                  topic: "capture",
+                  partition: 0,
+                  currentOffset: 500,
+                  logEndOffset: 57240,
+                  lag: 56740,
+                }],
+              },
+            },
           ],
         });
       },
@@ -728,6 +746,16 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
   expect(within(partitions).getByRole("columnheader", { name: "Records" }))
     .toBeInTheDocument();
   expect(within(partitions).getByRole("cell", { name: "125" }))
+    .toBeInTheDocument();
+  const consumerPositions = within(runtime).getByRole("table", {
+    name: "Consumer positions",
+  });
+  expect(within(consumerPositions).getByRole("cell", {
+    name: "replayer-target",
+  })).toBeInTheDocument();
+  expect(within(consumerPositions).getByRole("cell", { name: "500" }))
+    .toBeInTheDocument();
+  expect(within(consumerPositions).getByRole("cell", { name: "56,740" }))
     .toBeInTheDocument();
   expect(forceValues).toEqual(["false"]);
 
@@ -907,7 +935,7 @@ test("keeps workflow execution steps out of configuration navigation", async () 
 });
 
 
-test("shows navigable upstream and downstream runtime dependencies", async () => {
+test("keeps runtime dependencies out of the main pane", async () => {
   renderApp();
 
   const tree = await screen.findByRole("tree", { name: "Workflow resources" });
@@ -916,34 +944,18 @@ test("shows navigable upstream and downstream runtime dependencies", async () =>
     { name: /^capture, Ready$/ },
   ));
 
-  expect(
-    screen.getByRole("heading", { name: "Required by" }),
-  ).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", {
-    name: "Open dependent replay, Running",
-  }));
+  expect(screen.queryByRole("region", {
+    name: "Runtime dependencies",
+  })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Requires" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Required by" })).toBeNull();
 
-  expect(screen.getByRole("heading", { name: "replay" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Requires" })).toBeInTheDocument();
-  expect(screen.getByRole("button", {
-    name: "Open prerequisite capture, Ready",
+  const graph = screen.getByRole("region", {
+    name: "Workflow dependency graph",
+  });
+  expect(within(graph).getByRole("button", {
+    name: "Open replay, Running",
   })).toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", {
-    name: "Open prerequisite capture, Ready",
-  }));
-  expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Back to replay" }))
-    .toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", { name: "Back to replay" }));
-  expect(screen.getByRole("heading", { name: "replay" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Back to capture" }))
-    .toBeInTheDocument();
-
-  await userEvent.click(screen.getByRole("button", { name: "Back to capture" }));
-  expect(screen.getByRole("heading", { name: "capture" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
 });
 
 
@@ -1933,11 +1945,10 @@ test("preapproves upcoming resource checkpoints and inventories all gates", asyn
   );
   renderApp();
 
-  const resourceToggle = await screen.findByRole("checkbox", {
-    name: "Preapprove upcoming checkpoints",
+  const resourcePreapproval = await screen.findByRole("button", {
+    name: "Preapprove",
   });
-  expect(resourceToggle).toHaveAttribute("aria-checked", "false");
-  await userEvent.click(resourceToggle);
+  await userEvent.click(resourcePreapproval);
   await waitFor(() => expect(preapprovalRequest).toEqual({
     expectedGateRevision: "21",
     preapproved: true,
@@ -4985,6 +4996,32 @@ snapshotMigrationConfigs: []
 });
 
 
+test("places edit-wide operations in the global application header", async () => {
+  renderApp();
+  await enterEditMode();
+  await screen.findByRole("region", {
+    name: /Edit .* configuration/,
+  });
+
+  const header = document.querySelector(".app-header");
+  const editorToolbar = document.querySelector(".config-toolbar");
+  expect(header).not.toBeNull();
+  expect(editorToolbar).not.toBeNull();
+  for (const name of [
+    "Connectivity",
+    "Revert unsaved changes",
+    "Save configuration",
+  ]) {
+    expect(within(header as HTMLElement).getByRole("button", { name }))
+      .toBeInTheDocument();
+    expect(within(editorToolbar as HTMLElement).queryByRole(
+      "button",
+      { name },
+    )).toBeNull();
+  }
+});
+
+
 test("shows ConfigMap keys and selects the map plus key together", async () => {
   let selection: unknown;
   server.use(
@@ -5394,6 +5431,106 @@ snapshotMigrationConfigs: []
     "This source is marked for removal from the configuration.",
   )).toBeInTheDocument();
   expect(screen.queryByText("Workflow configuration")).toBeNull();
+});
+
+test("does not mark another source's snapshot removed after deleting a source", async () => {
+  const snapshot = runtimeSourceSnapshot();
+  const sources = snapshot.nodes["group:Sources:Sources"];
+  const retainedSource = structuredClone(
+    snapshot.nodes["resource:sourceconfigs:legacy"],
+  );
+  Object.assign(retainedSource, {
+    id: "resource:sourceconfigs:source",
+    revision: "source-1",
+    childIds: ["resource:datasnapshots:source-snap"],
+    label: "source",
+    description: "sourceconfigs/source",
+    capabilities: [{
+      kind: "edit",
+      editTargetId: "edit:sourceClusters.source",
+      label: "Edit source",
+    }],
+    resourceName: "source",
+  });
+  const retainedSnapshot = structuredClone(
+    snapshot.nodes["resource:sourceconfigs:legacy"],
+  );
+  Object.assign(retainedSnapshot, {
+    id: "resource:datasnapshots:source-snap",
+    revision: "source-snap-1",
+    parentId: retainedSource.id,
+    childIds: [],
+    label: "source-snap",
+    description: "datasnapshots/source-snap",
+    status: "ok",
+    phase: "Completed",
+    valueSummary: "Completed",
+    capabilities: [{
+      kind: "edit",
+      editTargetId: (
+        "edit:sourceClusters.source.snapshotInfo.snapshots."
+        + "snap.config.createSnapshotConfig"
+      ),
+      label: "Edit source-snap",
+    }],
+    resourcePlural: "datasnapshots",
+    resourceName: "source-snap",
+    resourceType: "Data snapshot",
+  });
+  snapshot.nodes[retainedSource.id] = retainedSource;
+  snapshot.nodes[retainedSnapshot.id] = retainedSnapshot;
+  sources.childIds = [
+    "resource:sourceconfigs:legacy",
+    retainedSource.id,
+  ];
+
+  const draft = structuredClone(configDraft);
+  draft.rawYaml = `sourceClusters:
+  legacy:
+    endpoint: https://legacy.example.com:9200
+    version: ES 7.10
+  source:
+    endpoint: https://source.example.com:9200
+    version: ES 7.10
+    snapshotInfo:
+      snapshots:
+        snap:
+          repoName: ""
+          config:
+            createSnapshotConfig: {}
+targetClusters: {}
+snapshotMigrationConfigs: []
+`;
+  draft.editState = projectConfigYaml(draft.rawYaml).editState;
+
+  server.use(
+    http.get("*/api/v1/manage/state", () => HttpResponse.json(snapshot)),
+  );
+  renderApp(draft);
+
+  await enterEditMode();
+  const resourceTree = screen.getByRole("tree", {
+    name: "Workflow resources",
+  });
+  await userEvent.click(await within(resourceTree).findByRole("treeitem", {
+    name: /^legacy/,
+  }));
+  await userEvent.click(await screen.findByRole("button", {
+    name: "Remove legacy",
+  }));
+  await userEvent.click(within(await screen.findByRole("dialog", {
+    name: "Remove legacy from configuration?",
+  })).getByRole("button", {
+    name: "Confirm configuration removal",
+  }));
+
+  expect(await within(resourceTree).findByRole("treeitem", {
+    name: /^legacy, Marked for removal$/,
+  })).toBeInTheDocument();
+  const unaffectedSnapshot = within(resourceTree).getByRole("treeitem", {
+    name: /^source-snap/,
+  });
+  expect(unaffectedSnapshot).not.toHaveAccessibleName(/Marked for removal/);
 });
 
 

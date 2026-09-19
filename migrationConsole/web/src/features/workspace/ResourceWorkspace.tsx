@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
+  ExternalLink,
   FileOutput,
   LoaderCircle,
   Logs,
@@ -16,7 +18,6 @@ import {
 import type {
   ApprovalGateSummary,
   ManageNode,
-  ManageRelationship,
   Operation,
   RuntimeStatus,
 } from "../../api/client";
@@ -29,6 +30,7 @@ import { StatusIndicator } from "../status/StatusIndicator";
 import { presentResourceActionText } from "../status/operationPresentation";
 import type { ConnectivityTargetState } from "../configuration/connectivityChecks";
 import { ValidityDashboard } from "../configuration/ValidityDashboard";
+import { ModalDialog } from "../../components/ModalDialog";
 
 
 interface PendingAction {
@@ -44,6 +46,19 @@ const RUNTIME_STATUS_PLURALS = new Set([
   "captureproxies",
   "trafficreplays",
 ]);
+
+const CONFIG_ONLY_PLURALS = new Set(["sourceconfigs", "targetconfigs"]);
+
+const GROUP_NOUNS: Record<string, [string, string]> = {
+  Buffer: ["buffer resource", "buffer resources"],
+  Capture: ["capture", "captures"],
+  "Kafka Clusters": ["Kafka cluster", "Kafka clusters"],
+  Replay: ["replay", "replays"],
+  "Snapshot Migration": ["snapshot migration", "snapshot migrations"],
+  Sources: ["source", "sources"],
+  Targets: ["target", "targets"],
+  Topics: ["topic", "topics"],
+};
 
 
 function observedTime(value: string): string {
@@ -83,7 +98,10 @@ function metricValue(
   >["metrics"][number],
 ): string {
   const value = String(metric.value);
-  return metric.unit === "percent" ? `${value}%` : value;
+  if (!metric.unit) return value;
+  return metric.unit === "percent"
+    ? `${value}%`
+    : `${value} ${metric.unit}`;
 }
 
 
@@ -113,6 +131,47 @@ function RuntimeStatusContent({
           <li key={item}><code>{item}</code></li>
         ))}
       </ul>
+    );
+  }
+  if (content.kind === "consumer-offsets") {
+    return (
+      <table className="runtime-status-table">
+        <caption>{title}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Consumer group</th>
+            <th scope="col">Partition</th>
+            <th scope="col">Current offset</th>
+            <th scope="col">Log end</th>
+            <th scope="col">Lag</th>
+          </tr>
+        </thead>
+        <tbody>
+          {content.offsets.map((offset) => (
+            <tr key={`${offset.group}-${offset.topic}-${offset.partition}`}>
+              <td><code>{offset.group}</code></td>
+              <td>{offset.partition}</td>
+              <td>
+                {offset.currentOffset === null
+                  || offset.currentOffset === undefined
+                  ? "Not committed"
+                  : offset.currentOffset.toLocaleString()}
+              </td>
+              <td>
+                {offset.logEndOffset === null
+                  || offset.logEndOffset === undefined
+                  ? "Unknown"
+                  : offset.logEndOffset.toLocaleString()}
+              </td>
+              <td>
+                {offset.lag === null || offset.lag === undefined
+                  ? "Unknown"
+                  : offset.lag.toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     );
   }
   if (content.kind === "topic-partitions") {
@@ -239,6 +298,156 @@ function displayValue(value: { present: boolean; value?: unknown }): string {
 }
 
 
+function activePreapprovalGates(
+  gates: ApprovalGateSummary[],
+): ApprovalGateSummary[] {
+  return gates.filter((gate) => (
+    gate.category === "checkpoint"
+    && ["upcoming", "preapproved"].includes(gate.state)
+  ));
+}
+
+
+function PreapprovalActions({
+  gates,
+  loading,
+  onOpen,
+  onToggle,
+  pendingNames,
+}: Readonly<{
+  gates: ApprovalGateSummary[];
+  loading: boolean;
+  onOpen: (gates: ApprovalGateSummary[]) => void;
+  onToggle: (
+    gates: ApprovalGateSummary[],
+    preapproved: boolean,
+  ) => void;
+  pendingNames: Set<string>;
+}>) {
+  const upcoming = activePreapprovalGates(gates);
+  if (loading || upcoming.length === 0) return null;
+  const pending = upcoming.some((gate) => pendingNames.has(gate.name));
+  const approvedCount = upcoming.filter((gate) => gate.approved).length;
+  const allApproved = approvedCount === upcoming.length;
+  if (upcoming.length === 1) {
+    const gate = upcoming[0];
+    return (
+      <button
+        className={[
+          "resource-action-button",
+          "resource-action-preapproval",
+          gate.approved ? "active" : "",
+        ].filter(Boolean).join(" ")}
+        disabled={pending || !gate.toggleable}
+        onClick={() => onToggle([gate], !gate.approved)}
+        title={
+          gate.disabledReason
+          ?? (
+            gate.approved
+              ? `Require preapproval for ${gate.stage}`
+              : `Preapprove ${gate.stage}`
+          )
+        }
+        type="button"
+      >
+        {pending
+          ? <LoaderCircle aria-hidden="true" className="spin" />
+          : <ShieldCheck aria-hidden="true" />}
+        {gate.approved ? "Require preapproval" : "Preapprove"}
+      </button>
+    );
+  }
+  return (
+    <>
+      <button
+        className="resource-action-button resource-action-preapproval"
+        disabled={pending || allApproved}
+        onClick={() => onToggle(upcoming, true)}
+        title={
+          allApproved
+            ? "All upcoming checkpoints are already preapproved"
+            : "Preapprove every upcoming checkpoint for these resources"
+        }
+        type="button"
+      >
+        {pending
+          ? <LoaderCircle aria-hidden="true" className="spin" />
+          : <ShieldCheck aria-hidden="true" />}
+        Preapprove all
+      </button>
+      <button
+        className="resource-action-button resource-action-preapproval-select"
+        disabled={pending}
+        onClick={() => onOpen(upcoming)}
+        title="Choose which upcoming checkpoints require approval"
+        type="button"
+      >
+        <ShieldCheck aria-hidden="true" />
+        Select preapprovals
+      </button>
+    </>
+  );
+}
+
+
+function PreapprovalSelectionDialog({
+  gates,
+  onClose,
+  onToggle,
+  pendingNames,
+  title,
+}: Readonly<{
+  gates: ApprovalGateSummary[];
+  onClose: () => void;
+  onToggle: (
+    gates: ApprovalGateSummary[],
+    preapproved: boolean,
+  ) => void;
+  pendingNames: Set<string>;
+  title: string;
+}>) {
+  return (
+    <ModalDialog
+      className="resource-preapproval-dialog"
+      closeLabel="Close preapproval selection"
+      icon={<ShieldCheck aria-hidden="true" />}
+      onClose={onClose}
+      portal
+      subtitle={title}
+      title="Select preapprovals"
+    >
+      <div className="resource-preapproval-list">
+        {gates.map((gate) => {
+          const pending = pendingNames.has(gate.name);
+          return (
+            <label key={gate.name}>
+              <span>
+                <strong>{gate.stage}</strong>
+                <small>
+                  {gate.resourceName ?? "Workflow"}
+                  {gate.effect ? ` · ${gate.effect}` : ""}
+                </small>
+              </span>
+              <input
+                aria-label={`Preapprove ${gate.stage}`}
+                checked={gate.approved}
+                disabled={pending || !gate.toggleable}
+                onChange={(event) => onToggle(
+                  [gate],
+                  event.currentTarget.checked,
+                )}
+                title={gate.disabledReason ?? `Preapprove ${gate.stage}`}
+                type="checkbox"
+              />
+            </label>
+          );
+        })}
+      </div>
+    </ModalDialog>
+  );
+}
+
+
 function capabilityIcon(kind: string) {
   if (kind === "logs") return Logs;
   if (kind === "reset") return Trash2;
@@ -256,6 +465,11 @@ function ResourceActions({
   onReset,
   cleanupRequired,
   approvals,
+  preapprovalGates,
+  preapprovalLoading,
+  onOpenPreapprovals,
+  onTogglePreapprovals,
+  pendingPreapprovalNames,
   resetInProgress,
 }: Readonly<{
   node: ManageNode;
@@ -266,12 +480,24 @@ function ResourceActions({
   onReset: (targetId: string) => void;
   cleanupRequired: boolean;
   approvals: ApprovalCandidate[];
+  preapprovalGates: ApprovalGateSummary[];
+  preapprovalLoading: boolean;
+  onOpenPreapprovals: (gates: ApprovalGateSummary[]) => void;
+  onTogglePreapprovals?: (
+    gates: ApprovalGateSummary[],
+    preapproved: boolean,
+  ) => void;
+  pendingPreapprovalNames: Set<string>;
   resetInProgress: boolean;
 }>) {
   const capabilities = node.capabilities.filter(
     (capability) => capability.kind !== "edit",
   );
-  if (capabilities.length === 0 && !onDelete) return null;
+  const showPreapprovals = Boolean(
+    onTogglePreapprovals
+    && activePreapprovalGates(preapprovalGates).length > 0,
+  );
+  if (capabilities.length === 0 && !onDelete && !showPreapprovals) return null;
   const resetBeforeRetry = cleanupRequired || capabilities.some(
     (capability) => (
       capability.kind === "approve"
@@ -283,92 +509,111 @@ function ResourceActions({
   )));
   const orderedCapabilities = [...capabilities].sort((left, right) => {
     const rank = (capability: typeof left) => {
-      if (resetBeforeRetry && capability.kind === "reset") return 0;
-      if (capability.kind === "approve") return 1;
+      if (capability.kind === "approve") return 0;
       if (
         capability.kind === "output"
         && approvalOutputs.has(capability.outputTargetId)
       ) {
-        return 2;
+        return 1;
       }
-      if (capability.kind === "logs") return 3;
-      if (capability.kind === "output") return 4;
-      return 5;
+      if (capability.kind === "logs") return 2;
+      if (capability.kind === "output") return 3;
+      return 4;
     };
     return rank(left) - rank(right);
   });
+  const regularCapabilities = orderedCapabilities.filter(
+    (capability) => capability.kind !== "reset",
+  );
+  const resetCapabilities = orderedCapabilities.filter(
+    (capability) => capability.kind === "reset",
+  );
+  const renderCapability = (
+    capability: (typeof orderedCapabilities)[number],
+    capabilityIndex: number,
+  ) => {
+    const Icon = capabilityIcon(capability.kind);
+    const label = capability.kind === "reset"
+      ? "Delete resource"
+      : capability.label ?? capability.kind;
+    const outputTarget = (
+      capability.kind === "output"
+        ? capability.outputTargetId
+        : null
+    );
+    const logTarget = (
+      capability.kind === "logs"
+        ? capability.logTargetId
+        : null
+    );
+    const approvalTarget = (
+      capability.kind === "approve"
+        ? capability.approvalTargetId
+        : null
+    );
+    const resetTarget = (
+      capability.kind === "reset"
+        ? capability.resetTargetId
+        : null
+    );
+    const actionTarget = approvalTarget ?? resetTarget;
+    const disabledReason = capability.disabledReason
+      ? presentResourceActionText(capability.disabledReason)
+      : undefined;
+    return (
+      <button
+        aria-label={label}
+        className={[
+          "resource-action-button",
+          `resource-action-${capability.kind}`,
+          resetBeforeRetry && capability.kind === "reset"
+            ? "primary-button cleanup-action"
+            : "",
+        ].filter(Boolean).join(" ")}
+        disabled={
+          Boolean(disabledReason)
+          || (capability.kind === "reset" && resetInProgress)
+          || (!outputTarget && !logTarget && !actionTarget)
+        }
+        key={`${capability.kind}-${label}-${capabilityIndex}`}
+        onClick={() => {
+          if (outputTarget) onOutput(outputTarget);
+          else if (logTarget) onLogs(logTarget);
+          else if (approvalTarget) {
+            onApproval(approvalTarget);
+          } else if (resetTarget) {
+            onReset(resetTarget);
+          }
+        }}
+        title={(
+          capability.kind === "reset" && resetInProgress
+            ? "Resource deletion is already in progress"
+            : disabledReason
+        ) ?? (
+          outputTarget || logTarget || actionTarget
+            ? label
+            : "This action is enabled in a later phase"
+        )}
+        type="button"
+      >
+        <Icon aria-hidden="true" />
+        {label}
+      </button>
+    );
+  };
   return (
     <div className="resource-actions" aria-label="Available actions">
-      {orderedCapabilities.map((capability, capabilityIndex) => {
-        const Icon = capabilityIcon(capability.kind);
-        const label = capability.kind === "reset"
-          ? "Delete resource"
-          : capability.label ?? capability.kind;
-        const outputTarget = (
-          capability.kind === "output"
-            ? capability.outputTargetId
-            : null
-        );
-        const logTarget = (
-          capability.kind === "logs"
-            ? capability.logTargetId
-            : null
-        );
-        const approvalTarget = (
-          capability.kind === "approve"
-            ? capability.approvalTargetId
-            : null
-        );
-        const resetTarget = (
-          capability.kind === "reset"
-            ? capability.resetTargetId
-            : null
-        );
-        const actionTarget = approvalTarget ?? resetTarget;
-        const disabledReason = capability.disabledReason
-          ? presentResourceActionText(capability.disabledReason)
-          : undefined;
-        return (
-          <button
-            aria-label={label}
-            className={[
-              "resource-action-button",
-              `resource-action-${capability.kind}`,
-              resetBeforeRetry && capability.kind === "reset"
-                ? "primary-button cleanup-action"
-                : "",
-            ].filter(Boolean).join(" ")}
-            disabled={
-              Boolean(disabledReason)
-              || (capability.kind === "reset" && resetInProgress)
-              || (!outputTarget && !logTarget && !actionTarget)
-            }
-            key={`${capability.kind}-${label}-${capabilityIndex}`}
-            onClick={() => {
-              if (outputTarget) onOutput(outputTarget);
-              else if (logTarget) onLogs(logTarget);
-              else if (approvalTarget) {
-                onApproval(approvalTarget);
-              } else if (resetTarget) {
-                onReset(resetTarget);
-              }
-            }}
-            title={(
-              capability.kind === "reset" && resetInProgress
-                ? "Resource deletion is already in progress"
-                : disabledReason
-            ) ?? (
-              outputTarget || logTarget || actionTarget
-                ? label
-                : "This action is enabled in a later phase"
-            )}
-            type="button"
-          >
-            <Icon aria-hidden="true" />
-            {label}
-          </button>
-        );
-      })}
+      {regularCapabilities.map(renderCapability)}
+      {onTogglePreapprovals ? (
+        <PreapprovalActions
+          gates={preapprovalGates}
+          loading={preapprovalLoading}
+          onOpen={onOpenPreapprovals}
+          onToggle={onTogglePreapprovals}
+          pendingNames={pendingPreapprovalNames}
+        />
+      ) : null}
+      {resetCapabilities.map(renderCapability)}
       {onDelete ? (
         <button
           aria-label={`Remove ${node.label} from configuration`}
@@ -539,78 +784,260 @@ function RecentOperationFailure({
 }
 
 
-function ResourcePreapproval({
-  gates,
-  loading,
-  onToggle,
-  pendingNames,
+function resourceState(node: ManageNode): string {
+  const state = String(node.phase ?? node.status ?? "Unknown");
+  if (state === "Deployed Config") return "Configured";
+  if (state === "Pending Config") return "Pending";
+  return state;
+}
+
+
+function resourceDescendants(
+  node: ManageNode,
+  nodes: Record<string, ManageNode>,
+): ManageNode[] {
+  const resources: ManageNode[] = [];
+  const visited = new Set<string>();
+  const visit = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+    const child = nodes[nodeId];
+    if (!child || child.kind === "workflow-step") return;
+    if (child.kind === "resource") {
+      resources.push(child);
+      return;
+    }
+    child.childIds.forEach(visit);
+  };
+  node.childIds.forEach(visit);
+  return resources;
+}
+
+
+function groupCountLabel(node: ManageNode, count: number): string {
+  const nouns = GROUP_NOUNS[node.label] ?? ["resource", "resources"];
+  return `${count} ${count === 1 ? nouns[0] : nouns[1]}`;
+}
+
+
+function RuntimeSummaryCell({ node }: Readonly<{ node: ManageNode }>) {
+  const supported = Boolean(
+    node.resourcePlural
+    && RUNTIME_STATUS_PLURALS.has(node.resourcePlural),
+  );
+  const status = useQuery({
+    queryKey: ["runtime-status", node.id],
+    queryFn: () => getRuntimeStatus(node.id, false),
+    enabled: supported,
+    retry: false,
+    staleTime: 5000,
+  });
+  if (!supported) return <span className="table-empty-value">Not available</span>;
+  if (status.isPending) {
+    return <span className="table-empty-value">Reading status</span>;
+  }
+  if (status.isError || !status.data) {
+    return <span className="table-empty-value">Status unavailable</span>;
+  }
+  return (
+    <span className="resource-runtime-summary">
+      {status.data.sections.map((section) => section.summary).join(" · ")}
+    </span>
+  );
+}
+
+
+function ResourceCollectionTable({
+  approvalGates,
+  label,
+  onOpenPreapprovals,
+  onRequestApproval,
+  onReset,
+  onSelect,
+  onTogglePreapprovals,
+  pendingPreapprovalNames,
+  resources,
+  showRuntimeSummary = false,
+  workflowActive,
 }: Readonly<{
-  gates: ApprovalGateSummary[];
-  loading: boolean;
-  onToggle: (
+  approvalGates: ApprovalGateSummary[];
+  label: string;
+  onOpenPreapprovals: (
+    gates: ApprovalGateSummary[],
+    title: string,
+  ) => void;
+  onRequestApproval?: (targetId: string) => void;
+  onReset: (targetId: string) => void;
+  onSelect: (nodeId: string) => void;
+  onTogglePreapprovals?: (
     gates: ApprovalGateSummary[],
     preapproved: boolean,
   ) => void;
-  pendingNames: Set<string>;
+  pendingPreapprovalNames: Set<string>;
+  resources: ManageNode[];
+  showRuntimeSummary?: boolean;
+  workflowActive: boolean;
 }>) {
-  const upcoming = gates.filter((gate) => (
-    gate.state === "upcoming" || gate.state === "preapproved"
+  const resourceIds = new Set(resources.map((resource) => resource.id));
+  const scopedGates = workflowActive
+    ? approvalGates.filter((gate) => (
+      Boolean(gate.resourceId)
+      && resourceIds.has(gate.resourceId!)
+    ))
+    : [];
+  const ariaLabel = label.toLowerCase().endsWith("resources")
+    ? label
+    : `${label} resources`;
+  const hasActions = resources.some((resource) => (
+    resource.capabilities.some((capability) => (
+      capability.kind === "logs" || capability.kind === "reset"
+    ))
   ));
-  const approvedCount = upcoming.filter((gate) => gate.approved).length;
-  const checked = upcoming.length > 0 && approvedCount === upcoming.length;
-  const mixed = approvedCount > 0 && !checked;
-  const pending = gates.some((gate) => pendingNames.has(gate.name));
-  const disabledReason = loading
-    ? "Approval checkpoints are still loading."
-    : gates.length === 0
-      ? (
-        "The submitted configuration does not define a manual approval "
-        + "checkpoint for this resource."
-      )
-      : upcoming.length === 0
-        ? (
-          gates.find((gate) => gate.disabledReason)?.disabledReason
-          ?? "This resource has no upcoming approval checkpoints."
-        )
-        : null;
-  const disabled = Boolean(disabledReason) || pending;
   return (
     <section
-      aria-label="Resource preapproval"
-      className="resource-preapproval"
+      aria-label={ariaLabel}
+      className="workspace-section resource-collection"
     >
-      <div>
-        <ShieldCheck aria-hidden="true" />
-        <span>
-          <strong>Preapprove upcoming checkpoints</strong>
-          <small>
-            {upcoming.length > 0
-              ? `${approvedCount} of ${upcoming.length} upcoming ${
-                upcoming.length === 1 ? "checkpoint" : "checkpoints"
-              } preapproved`
-              : disabledReason}
-          </small>
-        </span>
-      </div>
-      <button
-        aria-checked={mixed ? "mixed" : checked}
-        aria-label="Preapprove upcoming checkpoints"
-        className={[
-          "approval-toggle",
-          checked ? "active" : "",
-          mixed ? "mixed" : "",
-        ].filter(Boolean).join(" ")}
-        disabled={disabled}
-        onClick={() => onToggle(upcoming, !checked)}
-        role="checkbox"
-        title={disabledReason ?? "Preapprove all upcoming checkpoints"}
-        type="button"
-      >
-        <span aria-hidden="true">
-          {pending ? <LoaderCircle className="spin" /> : null}
-        </span>
-        <b>{mixed ? "Some" : checked ? "On" : "Off"}</b>
-      </button>
+      <header>
+        <h3>{label}</h3>
+        {workflowActive && onTogglePreapprovals ? (
+          <div
+            aria-label={`${label} preapproval actions`}
+            className="resource-collection-actions"
+          >
+            <PreapprovalActions
+              gates={scopedGates}
+              loading={false}
+              onOpen={(gates) => onOpenPreapprovals(gates, label)}
+              onToggle={onTogglePreapprovals}
+              pendingNames={pendingPreapprovalNames}
+            />
+          </div>
+        ) : null}
+      </header>
+      {resources.length === 0 ? (
+        <p className="resource-collection-empty">
+          No configured resources.
+        </p>
+      ) : (
+        <div className="resource-collection-scroll">
+          <table className="resource-collection-table">
+            <thead>
+              <tr>
+                <th scope="col">Resource</th>
+                <th scope="col">State</th>
+                {showRuntimeSummary ? (
+                  <th scope="col">Runtime summary</th>
+                ) : null}
+                <th scope="col">Approvals</th>
+                {hasActions ? <th scope="col">Actions</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {resources.map((resource) => {
+                const gates = scopedGates.filter(
+                  (gate) => gate.resourceId === resource.id,
+                );
+                const blocking = gates.find((gate) => (
+                  gate.state === "blocking" && gate.approvalTargetId
+                ));
+                const upcoming = activePreapprovalGates(gates);
+                const logs = resource.capabilities.find(
+                  (capability) => capability.kind === "logs",
+                );
+                const reset = resource.capabilities.find(
+                  (capability) => capability.kind === "reset",
+                );
+                return (
+                  <tr key={resource.id}>
+                    <th scope="row">
+                      <button
+                        onClick={() => onSelect(resource.id)}
+                        type="button"
+                      >
+                        <strong>{resource.label}</strong>
+                        <small>
+                          {resource.resourceType ?? resource.resourcePlural}
+                        </small>
+                      </button>
+                    </th>
+                    <td>
+                      <span className={`collection-state ${statusClassName(
+                        resourceState(resource),
+                      )}`}>
+                        <StatusIndicator
+                          status={resource.phase ?? resource.status}
+                        />
+                        {resourceState(resource)}
+                      </span>
+                    </td>
+                    {showRuntimeSummary ? (
+                      <td><RuntimeSummaryCell node={resource} /></td>
+                    ) : null}
+                    <td>
+                      {blocking?.approvalTargetId && onRequestApproval ? (
+                        <button
+                          className="table-action approval"
+                          onClick={() => onRequestApproval(
+                            blocking.approvalTargetId!,
+                          )}
+                          type="button"
+                        >
+                          <ShieldCheck aria-hidden="true" />
+                          Approve
+                        </button>
+                      ) : upcoming.length > 0 ? (
+                        <button
+                          className="table-action"
+                          onClick={() => onOpenPreapprovals(
+                            upcoming,
+                            resource.label,
+                          )}
+                          type="button"
+                        >
+                          {upcoming.length} upcoming
+                        </button>
+                      ) : (
+                        <span className="table-empty-value">None</span>
+                      )}
+                    </td>
+                    {hasActions ? (
+                      <td>
+                        <div className="resource-table-actions">
+                          {logs?.kind === "logs" ? (
+                            <a
+                              className="table-action"
+                              href={`/logs?${new URLSearchParams({
+                                nodeId: resource.id,
+                              }).toString()}`}
+                              rel="noopener noreferrer"
+                              target="_blank"
+                            >
+                              <Logs aria-hidden="true" />
+                              Logs
+                              <ExternalLink aria-hidden="true" />
+                            </a>
+                          ) : null}
+                          {reset?.kind === "reset" ? (
+                            <button
+                              className="table-action destructive"
+                              onClick={() => onReset(reset.resetTargetId)}
+                              type="button"
+                            >
+                              <Trash2 aria-hidden="true" />
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -756,93 +1183,108 @@ function Comparisons({ node }: Readonly<{ node: ManageNode }>) {
 }
 
 
-function RelationshipList({
-  direction,
-  onSelect,
-  relationships,
-}: Readonly<{
-  direction: ManageRelationship["direction"];
-  onSelect: (nodeId: string) => void;
-  relationships: ManageRelationship[];
-}>) {
-  if (relationships.length === 0) return null;
-  const prerequisite = direction === "requires";
+function ConfigurationOverview({ node }: Readonly<{ node: ManageNode }>) {
+  if (node.comparisons.length > 0) return <Comparisons node={node} />;
+  const fields = node.details.filter((detail) => detail.kind === "spec");
   return (
-    <section className="relationship-group">
-      <h3>{prerequisite ? "Requires" : "Required by"}</h3>
-      <div className="relationship-list">
-        {relationships.map((relationship, index) => (
-          <button
-            aria-label={`${
-              prerequisite ? "Open prerequisite" : "Open dependent"
-            } ${relationship.targetName}, ${
-              relationship.targetPhase ?? relationship.targetStatus
-            }`}
-            disabled={!relationship.targetId}
-            key={`${relationship.direction}-${relationship.targetId ?? relationship.targetName}-${index}`}
-            onClick={() => {
-              if (relationship.targetId) onSelect(relationship.targetId);
-            }}
-            type="button"
-          >
-            <StatusIndicator
-              status={relationship.targetPhase ?? relationship.targetStatus}
-            />
-            <span>
-              <strong>{relationship.targetName}</strong>
-              <small>
-                {relationship.targetPhase ?? relationship.targetStatus}
-                {relationship.targetPlural
-                  ? ` · ${relationship.targetPlural}`
-                  : ""}
-              </small>
-            </span>
-            {relationship.targetId ? <ArrowRight aria-hidden="true" /> : null}
-          </button>
-        ))}
-      </div>
+    <section
+      aria-label="Configuration"
+      className="workspace-section configuration-overview"
+    >
+      <h3>Configuration</h3>
+      {fields.length === 0 ? (
+        <p>No configuration fields are defined yet.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Field</th>
+              <th scope="col">Saved configuration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {fields.map((detail) => (
+              <tr key={`${detail.label}-${detail.kind}`}>
+                <th scope="row">{detail.label}</th>
+                <td>
+                  {displayValue({ present: true, value: detail.value })}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }
 
 
-function Relationships({
+function ResourceDefinitionSummary({
   node,
-  onSelect,
-}: Readonly<{
-  node: ManageNode;
-  onSelect: (nodeId: string) => void;
-}>) {
-  const relationships = node.relationships ?? [];
-  const requires = relationships.filter(
-    (relationship) => relationship.direction === "requires",
-  );
-  const requiredBy = relationships.filter(
-    (relationship) => relationship.direction === "required-by",
-  );
-  if (relationships.length === 0) return null;
+}: Readonly<{ node: ManageNode }>) {
+  const statusFields = [
+    ...(node.activityAt ? [{
+      label: "Last activity",
+      value: activityTimestamp(node.activityAt),
+    }] : []),
+    ...node.details
+      .filter((detail) => (
+        detail.kind !== "spec"
+        && detail.kind !== "dependency"
+        && detail.kind !== "phase"
+      ))
+      .map((detail) => ({
+        label: detail.label,
+        value: displayValue({ present: true, value: detail.value }),
+      })),
+  ];
+  const definitionFields = node.details
+    .filter((detail) => detail.kind === "spec")
+    .map((detail) => ({
+      label: detail.label,
+      value: displayValue({ present: true, value: detail.value }),
+    }));
+  if (statusFields.length === 0 && definitionFields.length === 0) return null;
   return (
-    <section
-      aria-label="Runtime dependencies"
-      className="workspace-section relationship-section"
-    >
-      <RelationshipList
-        direction="requires"
-        onSelect={onSelect}
-        relationships={requires}
-      />
-      <RelationshipList
-        direction="required-by"
-        onSelect={onSelect}
-        relationships={requiredBy}
-      />
-    </section>
+    <details className="resource-definition-summary" open>
+      <summary>
+        <span>Resource summary</span>
+        <ChevronDown aria-hidden="true" />
+      </summary>
+      <table>
+        <tbody>
+          {statusFields.length > 0 ? (
+            <tr className="resource-definition-group">
+              <th colSpan={2} scope="colgroup">Status</th>
+            </tr>
+          ) : null}
+          {statusFields.map((field) => (
+            <tr key={`status-${field.label}`}>
+              <th scope="row">{field.label}</th>
+              <td>{field.value}</td>
+            </tr>
+          ))}
+          {definitionFields.length > 0 ? (
+            <tr className="resource-definition-group">
+              <th colSpan={2} scope="colgroup">Definition</th>
+            </tr>
+          ) : null}
+          {definitionFields.map((field) => (
+            <tr key={`definition-${field.label}`}>
+              <th scope="row">{field.label}</th>
+              <td>{field.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }
 
 
 export function ResourceWorkspace({
   node,
+  nodes = {},
   navigationBackLabel,
   onSelect,
   onDelete,
@@ -860,8 +1302,10 @@ export function ResourceWorkspace({
   workflowSteps = [],
   connectivityState,
   onCheckConnectivity,
+  workflowPhase,
 }: Readonly<{
   node: ManageNode;
+  nodes?: Record<string, ManageNode>;
   navigationBackLabel?: string | null;
   onSelect: (nodeId: string) => void;
   onDelete?: () => void;
@@ -882,9 +1326,14 @@ export function ResourceWorkspace({
   workflowSteps?: ManageNode[];
   connectivityState?: ConnectivityTargetState;
   onCheckConnectivity?: (targetIds: string[]) => void;
+  workflowPhase?: string | null;
 }>) {
   const [outputTarget, setOutputTarget] = useState<string | null>(null);
   const [logTarget, setLogTarget] = useState<string | null>(null);
+  const [preapprovalSelection, setPreapprovalSelection] = useState<{
+    gates: ApprovalGateSummary[];
+    title: string;
+  } | null>(null);
   // The workspace is keyed on node.id by its parent, so panel targets
   // reset by remount instead of a one-frame-late effect.
   const [pendingAction, setPendingAction] =
@@ -902,6 +1351,26 @@ export function ResourceWorkspace({
     && presenceSubmitted !== presenceDeployed
     && !presenceSubmitted
   );
+  const workflowActive = ["pending", "running"].includes(
+    String(workflowPhase ?? "").toLowerCase(),
+  );
+  const descendants = useMemo(
+    () => resourceDescendants(node, nodes),
+    [node, nodes],
+  );
+  const groupNode = node.kind === "group" || node.kind === "section";
+  const configOnly = Boolean(
+    node.resourcePlural && CONFIG_ONLY_PLURALS.has(node.resourcePlural),
+  );
+  const selectedGates = workflowActive
+    ? approvalGates.filter((gate) => (
+      gate.category === "checkpoint"
+      && gate.resourceId === node.id
+    ))
+    : [];
+  const collectionLabel = groupNode
+    ? groupCountLabel(node, descendants.length)
+    : "Related resources";
   return (
     <article className="workspace">
       <header className="workspace-header">
@@ -918,17 +1387,20 @@ export function ResourceWorkspace({
             </button>
           ) : null}
           <div>
-            <span className="resource-kind">{node.kind.replace("-", " ")}</span>
-            <h2>{node.label}</h2>
-            <p>{node.description ?? node.id}</p>
+            <div className="workspace-title">
+              <h2>{node.label}</h2>
+              {groupNode ? <span className="group-label">(GROUP)</span> : null}
+            </div>
+            {!groupNode && !configOnly ? (
+              <span className={`phase-badge resource-phase ${statusClassName(
+                String(node.phase ?? node.status),
+              )}`}>
+                {node.phase ?? node.status}
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="workspace-states">
-          <span className={`phase-badge ${statusClassName(String(
-            node.phase ?? node.status,
-          ))}`}>
-            {node.phase ?? node.status}
-          </span>
           {node.status === "blocked" && node.phase !== "Blocked" ? (
             <span className="phase-badge status-blocked">
               Update blocked
@@ -936,26 +1408,40 @@ export function ResourceWorkspace({
           ) : null}
         </div>
       </header>
-      <ResourceActions
-        approvals={approvals.filter((candidate) => candidate.nodeId === node.id)}
-        cleanupRequired={cleanupRequired}
-        node={node}
-        onLogs={(targetId) => {
-          setOutputTarget(null);
-          setLogTarget(targetId);
-        }}
-        onApproval={(targetId) => onRequestApproval?.(targetId)}
-        onDelete={onDelete}
-        onOutput={(targetId) => {
-          setLogTarget(null);
-          setOutputTarget(targetId);
-        }}
-        onReset={(targetId) => setPendingAction({
-          kind: "reset",
-          targetId,
-        })}
-        resetInProgress={resetInProgress}
-      />
+      {!groupNode ? (
+        <ResourceActions
+          approvals={approvals.filter(
+            (candidate) => candidate.nodeId === node.id,
+          )}
+          cleanupRequired={cleanupRequired}
+          node={node}
+          onLogs={(targetId) => {
+            setOutputTarget(null);
+            setLogTarget(targetId);
+          }}
+          onApproval={(targetId) => onRequestApproval?.(targetId)}
+          onDelete={onDelete}
+          onOpenPreapprovals={(gates) => setPreapprovalSelection({
+            gates,
+            title: node.label,
+          })}
+          onOutput={(targetId) => {
+            setLogTarget(null);
+            setOutputTarget(targetId);
+          }}
+          onReset={(targetId) => setPendingAction({
+            kind: "reset",
+            targetId,
+          })}
+          onTogglePreapprovals={
+            workflowActive ? onTogglePreapprovals : undefined
+          }
+          pendingPreapprovalNames={pendingPreapprovalNames}
+          preapprovalGates={selectedGates}
+          preapprovalLoading={approvalGatesLoading}
+          resetInProgress={resetInProgress}
+        />
+      ) : null}
       {connectivityState && onCheckConnectivity ? (
         <ValidityDashboard
           ariaLabel="Resource checks"
@@ -964,17 +1450,6 @@ export function ResourceWorkspace({
           connectivityStates={[connectivityState]}
           environmentGroups={[]}
           onCheckConnectivity={onCheckConnectivity}
-        />
-      ) : null}
-      {onTogglePreapprovals ? (
-        <ResourcePreapproval
-          gates={approvalGates.filter((gate) => (
-            gate.category === "checkpoint"
-            && gate.resourceId === node.id
-          ))}
-          loading={approvalGatesLoading}
-          onToggle={onTogglePreapprovals}
-          pendingNames={pendingPreapprovalNames}
         />
       ) : null}
       {cleanupRequired || resetInProgress ? (
@@ -1014,26 +1489,53 @@ export function ResourceWorkspace({
       />
       <RecentOperationFailure node={node} operations={operations} />
       <FailedWorkflowSteps onSelect={onSelect} steps={workflowSteps} />
-      <Relationships node={node} onSelect={onSelect} />
-      <dl className="facts-grid">
-        <div>
-          <dt>Status</dt>
-          <dd>{node.status}</dd>
-        </div>
-        <div>
-          <dt>Current state</dt>
-          <dd>{node.valueSummary ?? node.phase ?? "Unknown"}</dd>
-        </div>
-        {node.details
-          .filter((detail) => detail.kind !== "dependency")
-          .slice(0, 4)
-          .map((detail) => (
-          <div key={`${detail.label}-${detail.kind}`}>
-            <dt>{detail.label}</dt>
-            <dd>{displayValue({ present: true, value: detail.value })}</dd>
-          </div>
-          ))}
-      </dl>
+      {groupNode ? (
+        <ResourceCollectionTable
+          approvalGates={approvalGates}
+          label={collectionLabel}
+          onOpenPreapprovals={(gates, title) => setPreapprovalSelection({
+            gates,
+            title,
+          })}
+          onRequestApproval={onRequestApproval}
+          onReset={(targetId) => setPendingAction({
+            kind: "reset",
+            targetId,
+          })}
+          onSelect={onSelect}
+          onTogglePreapprovals={onTogglePreapprovals}
+          pendingPreapprovalNames={pendingPreapprovalNames}
+          resources={descendants}
+          workflowActive={workflowActive}
+        />
+      ) : configOnly ? (
+        <>
+          <ConfigurationOverview node={node} />
+          {descendants.length > 0 ? (
+            <ResourceCollectionTable
+              approvalGates={approvalGates}
+              label="Related resources"
+              onOpenPreapprovals={(gates, title) => setPreapprovalSelection({
+                gates,
+                title,
+              })}
+              onRequestApproval={onRequestApproval}
+              onReset={(targetId) => setPendingAction({
+                kind: "reset",
+                targetId,
+              })}
+              onSelect={onSelect}
+              onTogglePreapprovals={onTogglePreapprovals}
+              pendingPreapprovalNames={pendingPreapprovalNames}
+              resources={descendants}
+              showRuntimeSummary
+              workflowActive={workflowActive}
+            />
+          ) : null}
+        </>
+      ) : (
+        <ResourceDefinitionSummary node={node} />
+      )}
       {logTarget ? (
         <LogPanel
           nodeId={node.id}
@@ -1056,9 +1558,18 @@ export function ResourceWorkspace({
           targetId={pendingAction.targetId}
         />
       ) : null}
+      {preapprovalSelection && onTogglePreapprovals ? (
+        <PreapprovalSelectionDialog
+          gates={preapprovalSelection.gates}
+          onClose={() => setPreapprovalSelection(null)}
+          onToggle={onTogglePreapprovals}
+          pendingNames={pendingPreapprovalNames}
+          title={preapprovalSelection.title}
+        />
+      ) : null}
       <Findings node={node} />
-      <Comparisons node={node} />
-      <RuntimeStatusPanel node={node} />
+      {!configOnly && !groupNode ? <Comparisons node={node} /> : null}
+      {!configOnly && !groupNode ? <RuntimeStatusPanel node={node} /> : null}
     </article>
   );
 }

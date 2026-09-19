@@ -318,8 +318,16 @@ class _RuntimeStatus:
     def __init__(self):
         self.calls = []
 
-    def inspect(self, node_id, plural, name, *, force=False):
-        self.calls.append((node_id, plural, name, force))
+    def inspect(
+        self,
+        node_id,
+        plural,
+        name,
+        *,
+        force=False,
+        resource_phase=None,
+    ):
+        self.calls.append((node_id, plural, name, force, resource_phase))
         return RuntimeStatus(
             node_id=node_id,
             observed_at="2026-08-30T14:00:00+00:00",
@@ -406,7 +414,7 @@ def test_runtime_status_resolves_the_observed_resource_node(tmp_path):
         }],
     }
     assert status.calls == [
-        (node_id, "datasnapshots", "source-snapshot", True),
+        (node_id, "datasnapshots", "source-snapshot", True, None),
     ]
 
 

@@ -1294,6 +1294,16 @@ def _resolve_default_consumer_group(env, kafka_selector=None) -> str:
     return DEFAULT_LEGACY_CONSUMER_GROUP
 
 
+def _configured_consumer_group_names(
+    env,
+    kafka_selector=None,
+) -> list[str]:
+    catalog = _resource_catalog(env)
+    if catalog is not None and not hasattr(catalog, "_legacy_env"):
+        return catalog.consumer_group_names(kafka_selector)
+    return list(getattr(env, "kafka_consumer_groups", None) or [])
+
+
 def _topic_hint(topics: Sequence[str]) -> str:
     return f"Specify: TOPIC_NAME <{'|'.join(topics)}>."
 
@@ -1333,21 +1343,46 @@ def _resolve_default_topic_name(env, kafka_selector, kafka_resource) -> str:
 
 @kafka_group.command(name="describe-consumer-group")
 @_kafka_selector_option
+@click.option(
+    "--skip-time-lag",
+    is_flag=True,
+    help="Skip per-partition timestamp probes and return offsets faster.",
+)
 @click.argument('group_name', required=False, default=None,
                 shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
-def describe_group_command(ctx, kafka_selector, group_name):
+def describe_group_command(ctx, kafka_selector, skip_time_lag, group_name):
     kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
     if group_name is None:
         group_name = _resolve_default_consumer_group(ctx.env, kafka_selector)
-    result = kafka_.describe_consumer_group(kafka_resource, group_name=group_name)
+    if skip_time_lag:
+        result = kafka_.describe_consumer_group(
+            kafka_resource,
+            group_name=group_name,
+            include_time_lag=False,
+        )
+    else:
+        result = kafka_.describe_consumer_group(
+            kafka_resource,
+            group_name=group_name,
+        )
     click.echo(result.value)
 
 
 @kafka_group.command(name="list-consumer-groups")
 @_kafka_selector_option
+@click.option(
+    "--configured-only",
+    is_flag=True,
+    help="List consumer groups referenced by the migration configuration.",
+)
 @click.pass_obj
-def list_consumer_groups_cmd(ctx, kafka_selector):
+def list_consumer_groups_cmd(ctx, kafka_selector, configured_only):
+    if configured_only:
+        click.echo("\n".join(
+            _configured_consumer_group_names(ctx.env, kafka_selector)
+        ))
+        return
     result = kafka_.list_consumer_groups(resolve_kafka_resource(ctx, kafka_selector))
     click.echo(result.value)
 
