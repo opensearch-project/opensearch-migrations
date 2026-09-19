@@ -9,21 +9,28 @@ from urllib.parse import quote
 import requests
 import uvicorn
 
-from ..application.manage_state import ManageStateService
-from ..application.observations import ObservationCoordinator
-from ..application.config_documents import ConfigurationDocumentService
+from ..application.cluster_curl import (
+    MAX_RESPONSE_CHARACTERS,
+    ClusterCurlService,
+)
 from ..application.connectivity import (
     ConnectivityCheckService,
     RepositoryCheckJobRunner,
 )
+from ..application.config_documents import ConfigurationDocumentService
 from ..application.config_submission import SavedConfigSubmissionService
 from ..application.external_resources import ExternalResourceService
-from ..application.outputs import OutputService
 from ..application.logs import KubernetesLogSource, LogStreamService
+from ..application.manage_state import ManageStateService
+from ..application.observations import ObservationCoordinator
 from ..application.operations import OperationManager
+from ..application.outputs import OutputService
 from ..application.actions import ApprovalService
 from ..application.resets import ResetService
-from ..application.runtime_status import RuntimeStatusService
+from ..application.runtime_status import (
+    BoundedConsoleRunner,
+    RuntimeStatusService,
+)
 from ..commands.argo_utils import DEFAULT_ARGO_SERVER_URL
 from ..commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 from ..models.secret_store import SecretStore
@@ -32,7 +39,7 @@ from ..resource_tree import build_resource_tree
 from ..services.argo_observation_service import make_argo_observation_service
 from ..services.config_edit_service import ConfigEditService
 from ..services.script_runner import ScriptRunner
-from .app import WebAppSettings, create_app
+from .app import WebAppSettings, WebRuntimeServices, create_app
 from .kubernetes import pin_kubernetes_runtime
 
 
@@ -180,9 +187,18 @@ def run_server(
                 custom_api=k8s.custom_api,
             ),
             logs=log_streams,
-            runtime_status=RuntimeStatusService(
-                namespace=namespace,
-                custom_api=k8s.custom_api,
+            runtime_services=WebRuntimeServices(
+                runtime_status=RuntimeStatusService(
+                    namespace=namespace,
+                    custom_api=k8s.custom_api,
+                ),
+                cluster_curl=ClusterCurlService(
+                    console_runner=BoundedConsoleRunner(
+                        timeout_seconds=30,
+                        env=k8s.subprocess_env,
+                        max_characters=MAX_RESPONSE_CHARACTERS,
+                    )
+                ),
             ),
             settings=WebAppSettings(
                 workflow_name=workflow_name,
@@ -190,12 +206,12 @@ def run_server(
                     os.environ.get("WORKFLOW_CLOUDWATCH_REGION"),
                     os.environ.get("WORKFLOW_CLOUDWATCH_LOG_GROUP"),
                 ),
-            ),
-            config_schema_path=Path(
-                os.environ.get(
-                    "MIGRATION_UNIFIED_SCHEMA_PATH",
-                    "/root/schema/workflowMigration.schema.json",
-                )
+                config_schema_path=Path(
+                    os.environ.get(
+                        "MIGRATION_UNIFIED_SCHEMA_PATH",
+                        "/root/schema/workflowMigration.schema.json",
+                    )
+                ),
             ),
         )
         uvicorn.run(

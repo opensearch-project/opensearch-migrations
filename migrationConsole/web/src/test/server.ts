@@ -39,6 +39,18 @@ export const server = setupServer(
       }],
     }),
   ),
+  http.post("*/api/v1/nodes/:nodeId/cluster-curl", ({ params }) =>
+    HttpResponse.json({
+      nodeId: params.nodeId,
+      clusterName: String(params.nodeId).split(":").at(-1) ?? "cluster",
+      observedAt: "2026-09-20T12:00:00Z",
+      method: "GET",
+      path: "/_cat/indices?pretty&v",
+      success: true,
+      output: "green open test",
+      error: null,
+    }),
+  ),
   http.get("*/api/v1/operations", () =>
     HttpResponse.json({ operations: [] }),
   ),

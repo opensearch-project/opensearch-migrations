@@ -109,6 +109,7 @@ class _NodeDraft:
     description: Optional[str] = None
     phase: Optional[str] = None
     value_summary: Optional[str] = None
+    created_at: Optional[str] = None
     activity_at: Optional[str] = None
     child_ids: List[str] = field(default_factory=list)
     diagnostics: Tuple[ManageDiagnostic, ...] = ()
@@ -119,6 +120,8 @@ class _NodeDraft:
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
     resource_type: Optional[str] = None
+    source_refs: Tuple[str, ...] = ()
+    target_refs: Tuple[str, ...] = ()
     config_presence: Mapping[str, bool] = field(default_factory=dict)
     navigation_key: Tuple[str, ...] = ()
 
@@ -455,6 +458,7 @@ class ManageStateService:
             *_resource_workflow_diagnostics(resource),
         )
         capabilities = _resource_capabilities(resource, output_refs.get(resource.name, ()))
+        source_refs, target_refs = _resource_scope_refs(resource)
         draft = _NodeDraft(
             id=resource_id,
             parent_id=parent_id,
@@ -464,6 +468,7 @@ class ManageStateService:
             phase=resource.phase,
             status=_resource_status(resource, diagnostics),
             value_summary=_resource_value_summary(resource, comparisons),
+            created_at=resource.created_at,
             activity_at=_resource_activity_at(resource),
             diagnostics=diagnostics,
             capabilities=capabilities,
@@ -476,6 +481,8 @@ class ManageStateService:
                 resource.plural,
                 resource.config_parameters or resource.spec,
             ),
+            source_refs=source_refs,
+            target_refs=target_refs,
             config_presence=dict(resource.config_presence or {}),
             navigation_key=_snapshot_migration_navigation_key(resource),
         )
@@ -954,6 +961,28 @@ def _resource_details(resource: ResourceNode) -> Tuple[ManageDetail, ...]:
     return tuple(details)
 
 
+def _resource_scope_refs(
+    resource: ResourceNode,
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    parameters = resource.config_parameters or resource.spec
+
+    def reference(key: str) -> Tuple[str, ...]:
+        value = parameters.get(key)
+        return (value,) if isinstance(value, str) and value else ()
+
+    source_refs = (
+        (resource.name,)
+        if resource.plural == "sourceconfigs"
+        else reference("sourceLabel")
+    )
+    target_refs = (
+        (resource.name,)
+        if resource.plural == "targetconfigs"
+        else reference("targetLabel")
+    )
+    return source_refs, target_refs
+
+
 _ACTIVITY_TIMESTAMP_KEYS = {
     "completionTime",
     "finished",
@@ -1386,6 +1415,7 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
             description=draft.description,
             phase=draft.phase,
             value_summary=draft.value_summary,
+            created_at=draft.created_at,
             activity_at=draft.activity_at,
             diagnostics=draft.diagnostics,
             capabilities=draft.capabilities,
@@ -1395,6 +1425,8 @@ def _finalize_nodes(drafts: Mapping[str, _NodeDraft]) -> Dict[str, ManageNode]:
             resource_plural=draft.resource_plural,
             resource_name=draft.resource_name,
             resource_type=draft.resource_type,
+            source_refs=draft.source_refs,
+            target_refs=draft.target_refs,
             config_presence=draft.config_presence,
             navigation_key=draft.navigation_key,
         )
@@ -1432,6 +1464,7 @@ def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
         "navigationKey": list(draft.navigation_key),
         "phase": draft.phase,
         "valueSummary": draft.value_summary,
+        "createdAt": draft.created_at,
         "activityAt": draft.activity_at,
         "childIds": list(draft.child_ids),
         "diagnostics": [item.to_dict() for item in draft.diagnostics],
@@ -1445,6 +1478,8 @@ def _draft_dict(draft: _NodeDraft) -> Dict[str, Any]:
         "resourcePlural": draft.resource_plural,
         "resourceName": draft.resource_name,
         "resourceType": draft.resource_type,
+        "sourceRefs": list(draft.source_refs),
+        "targetRefs": list(draft.target_refs),
         "configPresence": dict(draft.config_presence),
     }
 

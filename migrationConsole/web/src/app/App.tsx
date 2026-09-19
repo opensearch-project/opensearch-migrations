@@ -14,6 +14,7 @@ import {
 import {
   Activity,
   CircleAlert,
+  Copy,
   LogOut,
   LoaderCircle,
   Menu,
@@ -84,6 +85,17 @@ import {
   type ResourceViewMode,
 } from "../features/tree/resourceView";
 import { ResourceWorkspace } from "../features/workspace/ResourceWorkspace";
+import { ClusterCurlDock } from "../features/workspace/ClusterCurlDock";
+import {
+  clusterCurlTargets,
+} from "../features/workspace/clusterCurlTargets";
+import { RuntimeStatusDock } from "../features/workspace/RuntimeStatusDock";
+import {
+  copyRuntimeDashboardUrl,
+  hydrateRuntimeDashboardFromHash,
+  RUNTIME_DASHBOARD_CHANGE_EVENT,
+  syncRuntimeDashboardUrl,
+} from "../features/workspace/runtimeDashboardState";
 import { LogPanel } from "../features/logviewer/LogPanel";
 import { StatusIndicator } from "../features/status/StatusIndicator";
 import {
@@ -1792,6 +1804,77 @@ function StandaloneLogs({ nodeId }: Readonly<{ nodeId: string }>) {
 }
 
 
+function StandaloneRuntimeDashboard() {
+  useState(() => {
+    hydrateRuntimeDashboardFromHash();
+    return true;
+  });
+  const state = useQuery({
+    queryKey: ["manage-state"],
+    queryFn: getManageState,
+  });
+  const availableClusters = clusterCurlTargets(state.data?.nodes ?? {});
+  useEffect(() => {
+    const syncUrl = () => syncRuntimeDashboardUrl();
+    syncUrl();
+    globalThis.addEventListener(RUNTIME_DASHBOARD_CHANGE_EVENT, syncUrl);
+    globalThis.addEventListener("storage", syncUrl);
+    return () => {
+      globalThis.removeEventListener(RUNTIME_DASHBOARD_CHANGE_EVENT, syncUrl);
+      globalThis.removeEventListener("storage", syncUrl);
+    };
+  }, []);
+  return (
+    <main className="standalone-runtime-dashboard-page">
+      <header className="runtime-dashboard-header">
+        <div>
+          <strong>Runtime dashboard</strong>
+          <span>Pinned status and cluster requests</span>
+        </div>
+        <button
+          aria-label="Copy runtime dashboard link"
+          className="icon-button"
+          onClick={() => void copyRuntimeDashboardUrl()}
+          title="Copy a link that restores this dashboard"
+          type="button"
+        >
+          <Copy aria-hidden="true" />
+        </button>
+      </header>
+      {state.isPending ? (
+        <div className="standalone-page-status">
+          <LoaderCircle aria-hidden="true" className="spin" />
+          Loading runtime resources
+        </div>
+      ) : null}
+      {state.error ? (
+        <div className="standalone-page-status error">
+          {state.error instanceof Error
+            ? state.error.message
+            : "Runtime resources are unavailable."}
+        </div>
+      ) : null}
+      {state.data ? (
+        <div className="standalone-runtime-dashboard-docks">
+          <RuntimeStatusDock
+            activeNode={null}
+            nodes={state.data.nodes}
+            standalone
+          />
+          {availableClusters.length > 0 ? (
+            <ClusterCurlDock
+              activeCluster={null}
+              availableClusters={availableClusters}
+              standalone
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </main>
+  );
+}
+
+
 export function App() {
   const params = new URLSearchParams(globalThis.location.search);
   if (globalThis.location.pathname === "/connectivity-logs") {
@@ -1804,6 +1887,12 @@ export function App() {
   );
   if (standaloneNodeId) {
     return <StandaloneLogs nodeId={standaloneNodeId} />;
+  }
+  if (
+    globalThis.location.pathname === "/runtime-dashboard"
+    || globalThis.location.pathname === "/cluster-curl"
+  ) {
+    return <StandaloneRuntimeDashboard />;
   }
   return <ManageApp />;
 }

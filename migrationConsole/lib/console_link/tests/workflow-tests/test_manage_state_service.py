@@ -82,6 +82,7 @@ def test_no_workflow_still_returns_cluster_resources_without_presentation_markup
     resource = _node(snapshot, "captureproxies:capture")
     assert resource.label == "capture"
     assert resource.phase == "Ready"
+    assert resource.created_at == "2026-08-12T12:00:00Z"
     assert resource.activity_at == "2026-08-12T12:00:00Z"
     assert {"edit", "logs", "reset"} <= set(_capabilities(resource))
 
@@ -173,6 +174,7 @@ def test_resource_activity_uses_the_latest_status_or_workflow_timestamp():
 
     resource_node = _node(snapshot, "datasnapshots:catalog")
     step_node = snapshot.nodes[resource_node.child_ids[0]]
+    assert resource_node.created_at == "2026-08-12T12:00:00Z"
     assert resource_node.activity_at == "2026-08-12T12:08:00Z"
     assert step_node.activity_at == "2026-08-12T12:07:00Z"
 
@@ -466,6 +468,49 @@ def test_deployed_snapshot_migration_identity_comes_from_its_spec():
 
     migration = _node(snapshot, "snapshotmigrations:source-target-snap-slice-0")
     assert migration.navigation_key == ("source", "target", "snap", "slice-0")
+    assert migration.source_refs == ("source",)
+    assert migration.target_refs == ("target",)
+
+
+def test_resource_activity_scope_uses_config_references_and_config_identity():
+    raw = {
+        "sourceconfigs": [_cr(
+            "sourceconfigs",
+            "source",
+        )],
+        "targetconfigs": [_cr(
+            "targetconfigs",
+            "target",
+        )],
+        "captureproxies": [_cr(
+            "captureproxies",
+            "capture",
+            spec={"sourceLabel": "source"},
+        )],
+        "trafficreplays": [_cr(
+            "trafficreplays",
+            "replay",
+            spec={
+                "sourceLabel": "source",
+                "targetLabel": "target",
+            },
+        )],
+    }
+
+    snapshot = _service(raw).observe()
+
+    source = _node(snapshot, "sourceconfigs:source")
+    target = _node(snapshot, "targetconfigs:target")
+    capture = _node(snapshot, "captureproxies:capture")
+    replay = _node(snapshot, "trafficreplays:replay")
+    assert source.source_refs == ("source",)
+    assert source.target_refs == ()
+    assert target.source_refs == ()
+    assert target.target_refs == ("target",)
+    assert capture.source_refs == ("source",)
+    assert capture.target_refs == ()
+    assert replay.source_refs == ("source",)
+    assert replay.target_refs == ("target",)
 
 
 def test_edit_capability_targets_the_config_processor_branch_from_provenance():

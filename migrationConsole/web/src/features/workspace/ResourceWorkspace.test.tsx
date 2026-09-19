@@ -106,6 +106,122 @@ const upcomingGate: ApprovalGateSummary = {
 
 
 describe("resource workspace runtime presentation", () => {
+  it("provides one top-level runtime dashboard breakout", async () => {
+    const open = vi.spyOn(globalThis, "open").mockReturnValue(null);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResourceWorkspace
+          node={manageSnapshot.nodes["resource:captureproxies:capture"]}
+          nodes={manageSnapshot.nodes}
+          workflowPhase="Running"
+        />
+      </QueryClientProvider>,
+    );
+
+    const breakouts = screen.getAllByRole("button", {
+      name: "Open runtime dashboard in new tab",
+    });
+    expect(breakouts).toHaveLength(1);
+    await userEvent.click(breakouts[0]);
+    expect(open).toHaveBeenCalledWith(
+      expect.stringMatching(/^http:\/\/localhost:\d+\/runtime-dashboard#v1=/),
+      "_blank",
+      "noopener,noreferrer",
+    );
+    open.mockRestore();
+  });
+
+  it("opens selected source and target activity in a standalone dashboard", async () => {
+    const base = manageSnapshot.nodes[
+      "resource:captureproxies:capture"
+    ];
+    const source: ManageNode = {
+      ...base,
+      id: "resource:sourceconfigs:source",
+      label: "source",
+      resourceName: "source",
+      resourcePlural: "sourceconfigs",
+      resourceType: "Source cluster",
+      sourceRefs: ["source"],
+      targetRefs: [],
+    };
+    const target: ManageNode = {
+      ...base,
+      id: "resource:targetconfigs:target",
+      label: "target",
+      resourceName: "target",
+      resourcePlural: "targetconfigs",
+      resourceType: "Target cluster",
+      sourceRefs: [],
+      targetRefs: ["target"],
+    };
+    const capture: ManageNode = {
+      ...base,
+      sourceRefs: ["source"],
+      targetRefs: [],
+    };
+    const open = vi.spyOn(globalThis, "open").mockReturnValue(null);
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResourceWorkspace
+          node={source}
+          nodes={{
+            [source.id]: source,
+            [target.id]: target,
+            [capture.id]: capture,
+          }}
+          workflowPhase="Running"
+        />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show activity" }));
+    const dialog = screen.getByRole("dialog", { name: "Show activity" });
+    expect(within(dialog).getByRole("checkbox", { name: /source source/i }))
+      .toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: /target target/i }))
+      .toBeChecked();
+    expect(within(dialog).getByRole("checkbox", {
+      name: "Cluster indices",
+    })).toBeChecked();
+    await user.click(within(dialog).getByRole("checkbox", {
+      name: "Capture proxies",
+    }));
+    await user.click(within(dialog).getByRole("button", {
+      name: "Show activity",
+    }));
+
+    expect(open).toHaveBeenCalledWith(
+      expect.stringMatching(/^http:\/\/localhost:\d+\/runtime-dashboard#v1=/),
+      "_blank",
+      "noopener,noreferrer",
+    );
+    open.mockRestore();
+  });
+
+  it("shows when a resource was created and last updated", () => {
+    const node = structuredClone(
+      manageSnapshot.nodes["resource:captureproxies:capture"],
+    );
+    node.createdAt = "2026-08-12T15:40:00Z";
+    node.activityAt = "2026-08-12T16:00:00Z";
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ResourceWorkspace
+          node={node}
+          workflowPhase="Succeeded"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("rowheader", { name: "Created" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: "Last activity" }))
+      .toBeInTheDocument();
+  });
+
   it("hides preapproval actions after the workflow finishes", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>

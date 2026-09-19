@@ -96,7 +96,7 @@ describe("validity dashboard", () => {
     expect(screen.getByText(
       "Valid: the configured reference is available.",
     )).toBeInTheDocument();
-    expect(screen.getByRole("separator", {
+    expect(screen.getByRole("slider", {
       name: "Resize validity details",
     })).toBeInTheDocument();
 
@@ -157,7 +157,7 @@ describe("validity dashboard", () => {
     }));
 
     const panel = screen.getByRole("tabpanel");
-    const separator = screen.getByRole("separator", {
+    const separator = screen.getByRole("slider", {
       name: "Resize validity details",
     });
     expect(panel).toHaveStyle({ height: "212px" });
@@ -180,7 +180,7 @@ describe("validity dashboard", () => {
     }));
 
     expect(screen.getByRole("tabpanel")).toHaveStyle({ height: "318px" });
-    expect(screen.getByRole("separator", {
+    expect(screen.getByRole("slider", {
       name: "Resize validity details",
     })).toHaveAttribute("aria-valuenow", "318");
     scrollHeight.mockRestore();

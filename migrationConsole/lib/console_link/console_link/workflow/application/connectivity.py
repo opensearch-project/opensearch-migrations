@@ -10,6 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import logging
 import os
 from pathlib import Path
 import shlex
@@ -27,6 +28,7 @@ from ...models.cluster import Cluster
 
 RESULT_MARKER = "__MIGRATION_CONNECTIVITY_RESULT__"
 MAX_LOG_BYTES = 64 * 1024
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -139,9 +141,17 @@ class RepositoryCheckJobRunner:
                 )
             except ApiException as error:
                 if error.status != 404:
-                    pass
+                    logger.warning(
+                        "Failed to delete repository check Job %s",
+                        job_name,
+                        exc_info=True,
+                    )
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to delete repository check Job %s",
+                    job_name,
+                    exc_info=True,
+                )
 
     def _current_console_image(self) -> str:
         configured = os.environ.get("MIGRATION_CONSOLE_IMAGE", "").strip()
@@ -565,39 +575,53 @@ class ConnectivityCheckService:
 def _connectivity_targets(
     resources: Mapping[str, Any],
 ) -> tuple[ConnectivityTarget, ...]:
-    targets = []
-    for source in resources.get("sources") or ():
-        source_name = str(source.get("refName") or "")
-        targets.append(ConnectivityTarget(
-            id=f"source:{source_name}",
-            kind="source",
-            ref_name=source_name,
-            label=f"Source {source_name}",
-            edit_path=tuple(source.get("editPath") or ()),
-            client_config=dict(source.get("clientConfig") or {}),
-        ))
-        for repository in source.get("repositories") or ():
-            repository_name = str(repository.get("refName") or "")
-            targets.append(ConnectivityTarget(
-                id=f"repository:{source_name}:{repository_name}",
-                kind="repository",
-                ref_name=repository_name,
-                label=f"Repository {repository_name}",
-                edit_path=tuple(repository.get("editPath") or ()),
-                client_config=dict(repository.get("clientConfig") or {}),
-                provider=str(repository.get("provider") or ""),
-            ))
-    for target in resources.get("targets") or ():
-        target_name = str(target.get("refName") or "")
-        targets.append(ConnectivityTarget(
-            id=f"target:{target_name}",
-            kind="target",
-            ref_name=target_name,
-            label=f"Target {target_name}",
-            edit_path=tuple(target.get("editPath") or ()),
-            client_config=dict(target.get("clientConfig") or {}),
-        ))
+    sources = resources.get("sources") or ()
+    targets = [
+        _cluster_connectivity_target(source, "source")
+        for source in sources
+    ]
+    targets.extend(
+        _repository_connectivity_target(source, repository)
+        for source in sources
+        for repository in source.get("repositories") or ()
+    )
+    targets.extend(
+        _cluster_connectivity_target(target, "target")
+        for target in resources.get("targets") or ()
+    )
     return tuple(sorted(targets, key=lambda target: target.id))
+
+
+def _cluster_connectivity_target(
+    resource: Mapping[str, Any],
+    kind: str,
+) -> ConnectivityTarget:
+    ref_name = str(resource.get("refName") or "")
+    return ConnectivityTarget(
+        id=f"{kind}:{ref_name}",
+        kind=kind,
+        ref_name=ref_name,
+        label=f"{kind.capitalize()} {ref_name}",
+        edit_path=tuple(resource.get("editPath") or ()),
+        client_config=dict(resource.get("clientConfig") or {}),
+    )
+
+
+def _repository_connectivity_target(
+    source: Mapping[str, Any],
+    repository: Mapping[str, Any],
+) -> ConnectivityTarget:
+    source_name = str(source.get("refName") or "")
+    repository_name = str(repository.get("refName") or "")
+    return ConnectivityTarget(
+        id=f"repository:{source_name}:{repository_name}",
+        kind="repository",
+        ref_name=repository_name,
+        label=f"Repository {repository_name}",
+        edit_path=tuple(repository.get("editPath") or ()),
+        client_config=dict(repository.get("clientConfig") or {}),
+        provider=str(repository.get("provider") or ""),
+    )
 
 
 def _selected_targets(

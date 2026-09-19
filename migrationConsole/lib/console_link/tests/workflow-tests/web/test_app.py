@@ -16,6 +16,7 @@ from console_link.workflow.application.connectivity import (
     ConnectivityTarget,
     PreparedConnectivityChecks,
 )
+from console_link.workflow.application.cluster_curl import ClusterCurlResult
 from console_link.workflow.application.config_review import ConfigReviewChange
 from console_link.workflow.application.config_submission import (
     PreparedConfigSubmission,
@@ -71,7 +72,11 @@ from console_link.workflow.application.runtime_status import (
     RuntimeStatusMetrics,
     RuntimeStatusSection,
 )
-from console_link.workflow.web.app import WebAppSettings, create_app
+from console_link.workflow.web.app import (
+    WebAppSettings,
+    WebRuntimeServices,
+    create_app,
+)
 from console_link.workflow.web.openapi import main as generate_openapi
 
 
@@ -376,7 +381,7 @@ def test_runtime_status_resolves_the_observed_resource_node(tmp_path):
     app = create_app(
         static_dir=_static_bundle(tmp_path),
         coordinator=_Coordinator(Observation(snapshot=snapshot)),
-        runtime_status=status,
+        runtime_services=WebRuntimeServices(runtime_status=status),
     )
 
     with TestClient(app) as client:
@@ -423,7 +428,7 @@ def test_runtime_status_rejects_nodes_without_a_resource_identity(tmp_path):
     app = create_app(
         static_dir=_static_bundle(tmp_path),
         coordinator=_Coordinator(Observation(snapshot=_snapshot())),
-        runtime_status=status,
+        runtime_services=WebRuntimeServices(runtime_status=status),
     )
 
     with TestClient(app) as client:
@@ -433,6 +438,98 @@ def test_runtime_status_rejects_nodes_without_a_resource_identity(tmp_path):
 
     assert response.status_code == 404
     assert status.calls == []
+
+
+class _ClusterCurl:
+    def __init__(self):
+        self.calls = []
+
+    def execute(
+        self,
+        node_id,
+        plural,
+        name,
+        *,
+        method,
+        path,
+        headers,
+        body,
+    ):
+        self.calls.append((
+            node_id,
+            plural,
+            name,
+            method,
+            path,
+            headers,
+            body,
+        ))
+        return ClusterCurlResult(
+            node_id=node_id,
+            cluster_name=name,
+            observed_at="2026-09-19T18:00:00+00:00",
+            method=method,
+            path=path,
+            success=True,
+            output="green open documents",
+        )
+
+
+def test_cluster_curl_resolves_source_node_and_returns_typed_output(tmp_path):
+    snapshot = _snapshot()
+    original_id = "resource:captureproxies:capture"
+    node_id = "resource:sourceconfigs:source"
+    source = ManageNode(
+        **{
+            **snapshot.nodes[original_id].__dict__,
+            "id": node_id,
+            "resource_plural": "sourceconfigs",
+            "resource_name": "source",
+        }
+    )
+    snapshot = ManageSnapshot(
+        **{
+            **snapshot.__dict__,
+            "root_ids": (node_id,),
+            "nodes": {node_id: source},
+        }
+    )
+    cluster_curl = _ClusterCurl()
+    app = create_app(
+        static_dir=_static_bundle(tmp_path),
+        coordinator=_Coordinator(Observation(snapshot=snapshot)),
+        runtime_services=WebRuntimeServices(cluster_curl=cluster_curl),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/nodes/{node_id}/cluster-curl",
+            json={
+                "method": "GET",
+                "path": "/_cat/indices",
+                "headers": [],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "nodeId": node_id,
+        "clusterName": "source",
+        "observedAt": "2026-09-19T18:00:00Z",
+        "method": "GET",
+        "path": "/_cat/indices",
+        "success": True,
+        "output": "green open documents",
+    }
+    assert cluster_curl.calls == [(
+        node_id,
+        "sourceconfigs",
+        "source",
+        "GET",
+        "/_cat/indices",
+        [],
+        None,
+    )]
 
 
 class _Outputs:
@@ -1439,7 +1536,7 @@ def test_config_schema_exposes_the_cluster_enriched_editor_schema(tmp_path):
     )
     app = create_app(
         static_dir=_static_bundle(tmp_path),
-        config_schema_path=schema_path,
+        settings=WebAppSettings(config_schema_path=schema_path),
     )
 
     with TestClient(app) as client:

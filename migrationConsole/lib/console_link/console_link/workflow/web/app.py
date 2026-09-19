@@ -33,6 +33,7 @@ from ..application.operations import (
     OperationWorkResult,
 )
 from ..application.actions import ApprovalStale, ApprovalUnavailable
+from ..application.cluster_curl import ClusterCurlUnavailable
 from ..application.resets import (
     ResetPlanStale,
     ResetUnavailable,
@@ -52,6 +53,8 @@ from .contracts import (
     ConfigurationDocumentV1,
     ConfigurationSchemaV1,
     ConfigReviewV1,
+    ClusterCurlRequestV1,
+    ClusterCurlResultV1,
     ExecuteResetRequestV1,
     ExternalResourceContextRequestV1,
     ExternalResourceDetailsRequestV1,
@@ -94,6 +97,13 @@ logger = logging.getLogger(__name__)
 class WebAppSettings:
     workflow_name: str = DEFAULT_WORKFLOW_NAME
     external_logs_url: Optional[str] = None
+    config_schema_path: Optional[Path] = None
+
+
+@dataclass(frozen=True)
+class WebRuntimeServices:
+    runtime_status: Optional[Any] = None
+    cluster_curl: Optional[Any] = None
 
 
 def create_app(
@@ -108,14 +118,16 @@ def create_app(
     approvals: Optional[Any] = None,
     resets: Optional[Any] = None,
     logs: Optional[Any] = None,
-    runtime_status: Optional[Any] = None,
+    runtime_services: Optional[WebRuntimeServices] = None,
     settings: Optional[WebAppSettings] = None,
-    config_schema_path: Optional[Path] = None,
 ) -> FastAPI:
     resolved_settings = settings or WebAppSettings()
+    resolved_runtime_services = runtime_services or WebRuntimeServices()
     workflow_name = resolved_settings.workflow_name
     external_logs_url = resolved_settings.external_logs_url
-    resolved_config_schema_path = config_schema_path or Path(
+    runtime_status = resolved_runtime_services.runtime_status
+    cluster_curl = resolved_runtime_services.cluster_curl
+    resolved_config_schema_path = resolved_settings.config_schema_path or Path(
         os.environ.get(
             "MIGRATION_UNIFIED_SCHEMA_PATH",
             "/root/schema/workflowMigration.schema.json",
@@ -222,6 +234,55 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(error)) from error
         except Exception as error:
             logger.exception("Failed to inspect runtime status")
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @app.post(
+        "/api/v1/nodes/{node_id}/cluster-curl",
+        response_model=ClusterCurlResultV1,
+        response_model_exclude_none=True,
+        tags=["manage"],
+    )
+    async def node_cluster_curl(
+        node_id: str,
+        request: ClusterCurlRequestV1,
+    ) -> ClusterCurlResultV1:
+        if coordinator is None:
+            raise HTTPException(
+                status_code=503,
+                detail=OBSERVATION_NOT_CONFIGURED,
+            )
+        if cluster_curl is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Cluster curl is not configured",
+            )
+        observation = await coordinator.get_observation()
+        node = observation.snapshot.nodes.get(node_id)
+        if (
+            node is None
+            or not node.resource_plural
+            or not node.resource_name
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="Cluster curl is not available for this item.",
+            )
+        try:
+            result = await asyncio.to_thread(
+                cluster_curl.execute,
+                node.id,
+                node.resource_plural,
+                node.resource_name,
+                method=request.method,
+                path=request.path,
+                headers=request.headers,
+                body=request.body,
+            )
+            return ClusterCurlResultV1.from_domain(result)
+        except ClusterCurlUnavailable as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception as error:
+            logger.exception("Failed to run cluster curl")
             raise HTTPException(status_code=502, detail=str(error)) from error
 
     def external_resource_service():

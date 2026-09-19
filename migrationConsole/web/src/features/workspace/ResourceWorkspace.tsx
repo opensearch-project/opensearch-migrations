@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Activity,
   ArrowLeft,
   ArrowRight,
   ChevronDown,
@@ -9,7 +10,6 @@ import {
   LoaderCircle,
   Logs,
   Pencil,
-  RefreshCw,
   ShieldCheck,
   Trash2,
   TriangleAlert,
@@ -19,10 +19,23 @@ import type {
   ApprovalGateSummary,
   ManageNode,
   Operation,
-  RuntimeStatus,
 } from "../../api/client";
 import { getRuntimeStatus } from "../../api/client";
 import { OutputPanel } from "../output/OutputPanel";
+import { ClusterCurlDock } from "./ClusterCurlDock";
+import { clusterCurlTargets } from "./clusterCurlTargets";
+import { RuntimeStatusDock } from "./RuntimeStatusDock";
+import {
+  buildActivityDashboard,
+  activityTargets,
+  activityTypes,
+  CLUSTER_INDICES_ACTIVITY_ID,
+} from "./activityDashboard";
+import {
+  openRuntimeDashboard,
+  openRuntimeDashboardSnapshot,
+} from "./runtimeDashboardState";
+import { runtimeStatusSupported } from "./runtimeStatusSupport";
 import { LogPanel } from "../logviewer/LogPanel";
 import { ResetDialog } from "../actions/ResourceActionDialogs";
 import type { ApprovalCandidate } from "../actions/approvals";
@@ -38,15 +51,6 @@ interface PendingAction {
   targetId: string;
 }
 
-const RUNTIME_STATUS_PLURALS = new Set([
-  "datasnapshots",
-  "snapshotmigrations",
-  "kafkaclusters",
-  "capturedtraffics",
-  "captureproxies",
-  "trafficreplays",
-]);
-
 const CONFIG_ONLY_PLURALS = new Set(["sourceconfigs", "targetconfigs"]);
 
 const GROUP_NOUNS: Record<string, [string, string]> = {
@@ -61,18 +65,6 @@ const GROUP_NOUNS: Record<string, [string, string]> = {
 };
 
 
-function observedTime(value: string): string {
-  const observed = new Date(value);
-  return Number.isNaN(observed.valueOf())
-    ? value
-    : observed.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-}
-
-
 function activityTimestamp(value: string): string {
   const activity = new Date(value);
   return Number.isNaN(activity.valueOf())
@@ -83,210 +75,6 @@ function activityTimestamp(value: string): string {
 
 function statusClassName(value: string): string {
   return `status-${value.toLowerCase().replaceAll(/\s+/g, "-")}`;
-}
-
-
-type RuntimeStatusContentValue = NonNullable<
-  RuntimeStatus["sections"][number]["content"]
->;
-
-
-function metricValue(
-  metric: Extract<
-    RuntimeStatusContentValue,
-    { kind: "metrics" }
-  >["metrics"][number],
-): string {
-  const value = String(metric.value);
-  if (!metric.unit) return value;
-  return metric.unit === "percent"
-    ? `${value}%`
-    : `${value} ${metric.unit}`;
-}
-
-
-function RuntimeStatusContent({
-  content,
-  title,
-}: Readonly<{
-  content: RuntimeStatusContentValue;
-  title: string;
-}>) {
-  if (content.kind === "metrics") {
-    return (
-      <dl className="runtime-status-metrics">
-        {content.metrics.map((metric) => (
-          <div key={metric.key}>
-            <dt>{metric.label}</dt>
-            <dd>{metricValue(metric)}</dd>
-          </div>
-        ))}
-      </dl>
-    );
-  }
-  if (content.kind === "name-list") {
-    return (
-      <ul aria-label={`${title} values`} className="runtime-status-names">
-        {content.items.map((item) => (
-          <li key={item}><code>{item}</code></li>
-        ))}
-      </ul>
-    );
-  }
-  if (content.kind === "consumer-offsets") {
-    return (
-      <table className="runtime-status-table">
-        <caption>{title}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Consumer group</th>
-            <th scope="col">Partition</th>
-            <th scope="col">Current offset</th>
-            <th scope="col">Log end</th>
-            <th scope="col">Lag</th>
-          </tr>
-        </thead>
-        <tbody>
-          {content.offsets.map((offset) => (
-            <tr key={`${offset.group}-${offset.topic}-${offset.partition}`}>
-              <td><code>{offset.group}</code></td>
-              <td>{offset.partition}</td>
-              <td>
-                {offset.currentOffset === null
-                  || offset.currentOffset === undefined
-                  ? "Not committed"
-                  : offset.currentOffset.toLocaleString()}
-              </td>
-              <td>
-                {offset.logEndOffset === null
-                  || offset.logEndOffset === undefined
-                  ? "Unknown"
-                  : offset.logEndOffset.toLocaleString()}
-              </td>
-              <td>
-                {offset.lag === null || offset.lag === undefined
-                  ? "Unknown"
-                  : offset.lag.toLocaleString()}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  }
-  if (content.kind === "topic-partitions") {
-    return (
-      <table className="runtime-status-table">
-        <caption>{title}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Topic</th>
-            <th scope="col">Partition</th>
-            <th scope="col">Records</th>
-          </tr>
-        </thead>
-        <tbody>
-          {content.partitions.map((partition) => (
-            <tr key={`${partition.topic}-${partition.partition}`}>
-              <td><code>{partition.topic}</code></td>
-              <td>{partition.partition}</td>
-              <td>{partition.records.toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  }
-  return (
-    <pre className="runtime-status-text">{content.lines.join("\n")}</pre>
-  );
-}
-
-
-function RuntimeStatusPanel({ node }: Readonly<{ node: ManageNode }>) {
-  const forceRefresh = useRef(false);
-  const supported = Boolean(
-    node.resourcePlural
-    && RUNTIME_STATUS_PLURALS.has(node.resourcePlural),
-  );
-  const status = useQuery({
-    queryKey: ["runtime-status", node.id],
-    queryFn: async () => {
-      const force = forceRefresh.current;
-      forceRefresh.current = false;
-      return getRuntimeStatus(node.id, force);
-    },
-    enabled: supported,
-    retry: false,
-    staleTime: 5000,
-    refetchInterval: (query) => (
-      query.state.data?.pollAfterMs ?? false
-    ),
-  });
-  if (!supported) return null;
-
-  return (
-    <section
-      aria-label="Runtime status"
-      className="workspace-section runtime-status"
-    >
-      <header>
-        <div>
-          <h3>Runtime status</h3>
-          {status.data ? (
-            <span>Observed {observedTime(status.data.observedAt)}</span>
-          ) : null}
-        </div>
-        <button
-          aria-label="Refresh runtime status"
-          className="icon-button"
-          disabled={status.isFetching}
-          onClick={() => {
-            forceRefresh.current = true;
-            void status.refetch();
-          }}
-          title="Refresh runtime status"
-          type="button"
-        >
-          <RefreshCw
-            aria-hidden="true"
-            className={status.isFetching ? "spin" : ""}
-          />
-        </button>
-      </header>
-      {status.isPending ? (
-        <div className="runtime-status-loading">
-          <LoaderCircle aria-hidden="true" className="spin" />
-          <span>Reading runtime status</span>
-        </div>
-      ) : null}
-      {status.isError ? (
-        <div className="runtime-status-error">
-          <TriangleAlert aria-hidden="true" />
-          <span>{status.error.message}</span>
-        </div>
-      ) : null}
-      {status.data?.sections.map((section) => (
-        <article
-          className={`runtime-status-section status-${section.state}`}
-          key={section.key}
-        >
-          <StatusIndicator status={section.state} />
-          <div>
-            <strong>{section.title}</strong>
-            <p>{section.summary}</p>
-            {section.content ? (
-              <RuntimeStatusContent
-                content={section.content}
-                title={section.title}
-              />
-            ) : null}
-            <small>{section.source}</small>
-          </div>
-        </article>
-      ))}
-    </section>
-  );
 }
 
 
@@ -442,6 +230,120 @@ function PreapprovalSelectionDialog({
             </label>
           );
         })}
+      </div>
+    </ModalDialog>
+  );
+}
+
+
+function toggleSelection(
+  current: Set<string>,
+  value: string,
+  selected: boolean,
+): Set<string> {
+  const next = new Set(current);
+  if (selected) next.add(value);
+  else next.delete(value);
+  return next;
+}
+
+
+function ActivitySelectionDialog({
+  nodes,
+  onClose,
+}: Readonly<{
+  nodes: Record<string, ManageNode>;
+  onClose: () => void;
+}>) {
+  const targets = useMemo(() => activityTargets(nodes), [nodes]);
+  const types = useMemo(() => activityTypes(nodes), [nodes]);
+  const [selectedTargetIds, setSelectedTargetIds] = useState(
+    () => new Set(targets.map((target) => target.nodeId)),
+  );
+  const [selectedTypeIds, setSelectedTypeIds] = useState(
+    () => new Set([CLUSTER_INDICES_ACTIVITY_ID]),
+  );
+  const canOpen = selectedTargetIds.size > 0 && selectedTypeIds.size > 0;
+  const open = () => {
+    if (!canOpen) return;
+    openRuntimeDashboardSnapshot(buildActivityDashboard(
+      nodes,
+      selectedTargetIds,
+      selectedTypeIds,
+    ));
+    onClose();
+  };
+
+  return (
+    <ModalDialog
+      className="activity-selection-dialog"
+      closeLabel="Close activity selection"
+      footer={(
+        <>
+          <button onClick={onClose} type="button">Cancel</button>
+          <button
+            className="primary-button"
+            disabled={!canOpen}
+            onClick={open}
+            type="button"
+          >
+            <ExternalLink aria-hidden="true" />
+            Show activity
+          </button>
+        </>
+      )}
+      icon={<Activity aria-hidden="true" />}
+      onClose={onClose}
+      portal
+      subtitle="Choose clusters and activity types for a standalone dashboard."
+      title="Show activity"
+    >
+      <div className="activity-selection-content">
+        <fieldset>
+          <legend>Sources and targets</legend>
+          <div className="activity-selection-options">
+            {targets.map((target) => (
+              <label key={target.nodeId}>
+                <input
+                  checked={selectedTargetIds.has(target.nodeId)}
+                  onChange={(event) => setSelectedTargetIds((current) => (
+                    toggleSelection(
+                      current,
+                      target.nodeId,
+                      event.currentTarget.checked,
+                    )
+                  ))}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>{target.clusterName}</strong>
+                  <small>{target.kind}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Activity types</legend>
+          <div className="activity-selection-options">
+            {types.map((type) => (
+              <label key={type.id}>
+                <input
+                  checked={selectedTypeIds.has(type.id)}
+                  onChange={(event) => setSelectedTypeIds((current) => (
+                    toggleSelection(
+                      current,
+                      type.id,
+                      event.currentTarget.checked,
+                    )
+                  ))}
+                  type="checkbox"
+                />
+                <span><strong>{type.label}</strong></span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
       </div>
     </ModalDialog>
   );
@@ -821,10 +723,7 @@ function groupCountLabel(node: ManageNode, count: number): string {
 
 
 function RuntimeSummaryCell({ node }: Readonly<{ node: ManageNode }>) {
-  const supported = Boolean(
-    node.resourcePlural
-    && RUNTIME_STATUS_PLURALS.has(node.resourcePlural),
-  );
+  const supported = runtimeStatusSupported(node);
   const status = useQuery({
     queryKey: ["runtime-status", node.id],
     queryFn: () => getRuntimeStatus(node.id, false),
@@ -882,7 +781,7 @@ function ResourceCollectionTable({
   const scopedGates = workflowActive
     ? approvalGates.filter((gate) => (
       Boolean(gate.resourceId)
-      && resourceIds.has(gate.resourceId!)
+      && resourceIds.has(gate.resourceId)
     ))
     : [];
   const ariaLabel = label.toLowerCase().endsWith("resources")
@@ -941,6 +840,7 @@ function ResourceCollectionTable({
                 const blocking = gates.find((gate) => (
                   gate.state === "blocking" && gate.approvalTargetId
                 ));
+                const approvalTargetId = blocking?.approvalTargetId;
                 const upcoming = activePreapprovalGates(gates);
                 const logs = resource.capabilities.find(
                   (capability) => capability.kind === "logs",
@@ -975,11 +875,11 @@ function ResourceCollectionTable({
                       <td><RuntimeSummaryCell node={resource} /></td>
                     ) : null}
                     <td>
-                      {blocking?.approvalTargetId && onRequestApproval ? (
+                      {approvalTargetId && onRequestApproval ? (
                         <button
                           className="table-action approval"
                           onClick={() => onRequestApproval(
-                            blocking.approvalTargetId!,
+                            approvalTargetId,
                           )}
                           type="button"
                         >
@@ -1223,6 +1123,10 @@ function ResourceDefinitionSummary({
   node,
 }: Readonly<{ node: ManageNode }>) {
   const statusFields = [
+    ...(node.createdAt ? [{
+      label: "Created",
+      value: activityTimestamp(node.createdAt),
+    }] : []),
     ...(node.activityAt ? [{
       label: "Last activity",
       value: activityTimestamp(node.activityAt),
@@ -1334,6 +1238,7 @@ export function ResourceWorkspace({
     gates: ApprovalGateSummary[];
     title: string;
   } | null>(null);
+  const [activitySelectionOpen, setActivitySelectionOpen] = useState(false);
   // The workspace is keyed on node.id by its parent, so panel targets
   // reset by remount instead of a one-frame-late effect.
   const [pendingAction, setPendingAction] =
@@ -1362,6 +1267,13 @@ export function ResourceWorkspace({
   const configOnly = Boolean(
     node.resourcePlural && CONFIG_ONLY_PLURALS.has(node.resourcePlural),
   );
+  const availableCurlClusters = useMemo(
+    () => clusterCurlTargets({
+      ...nodes,
+      [node.id]: node,
+    }),
+    [node, nodes],
+  );
   const selectedGates = workflowActive
     ? approvalGates.filter((gate) => (
       gate.category === "checkpoint"
@@ -1372,7 +1284,8 @@ export function ResourceWorkspace({
     ? groupCountLabel(node, descendants.length)
     : "Related resources";
   return (
-    <article className="workspace">
+    <section className="runtime-workspace-stack">
+      <article className="workspace">
       <header className="workspace-header">
         <div className="workspace-heading">
           {navigationBackLabel && onNavigateBack ? (
@@ -1569,7 +1482,54 @@ export function ResourceWorkspace({
       ) : null}
       <Findings node={node} />
       {!configOnly && !groupNode ? <Comparisons node={node} /> : null}
-      {!configOnly && !groupNode ? <RuntimeStatusPanel node={node} /> : null}
-    </article>
+      </article>
+      <div className="runtime-dashboard-docks">
+        <div className="runtime-dashboard-toolbar">
+          <span>Runtime panes</span>
+          <div>
+            <button
+              className="runtime-dashboard-action"
+              disabled={availableCurlClusters.length === 0}
+              onClick={() => setActivitySelectionOpen(true)}
+              title={availableCurlClusters.length === 0
+                ? "Configure a source or target before building an activity dashboard"
+                : "Choose source and target activity for a standalone dashboard"}
+              type="button"
+            >
+              <Activity aria-hidden="true" />
+              Show activity
+            </button>
+            <button
+              aria-label="Open runtime dashboard in new tab"
+              className="icon-button"
+              onClick={openRuntimeDashboard}
+              title="Open all docked runtime panes in new tab"
+              type="button"
+            >
+              <ExternalLink aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        <RuntimeStatusDock
+          activeNode={!configOnly && !groupNode ? node : null}
+          nodes={nodes}
+        />
+        <ClusterCurlDock
+          activeCluster={configOnly && node.resourceName
+            ? {
+              clusterName: node.resourceName,
+              nodeId: node.id,
+            }
+            : null}
+          availableClusters={availableCurlClusters}
+        />
+      </div>
+      {activitySelectionOpen ? (
+        <ActivitySelectionDialog
+          nodes={{ ...nodes, [node.id]: node }}
+          onClose={() => setActivitySelectionOpen(false)}
+        />
+      ) : null}
+    </section>
   );
 }

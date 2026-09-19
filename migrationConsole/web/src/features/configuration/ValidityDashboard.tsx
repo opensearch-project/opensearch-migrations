@@ -290,7 +290,7 @@ function ResizableValidityPanel({
   }, [item.id]);
 
   const finishResize = (
-    event: PointerEvent<HTMLDivElement>,
+    event: PointerEvent<HTMLInputElement>,
   ) => {
     if (!resizeStartRef.current) return;
     resizeStartRef.current = null;
@@ -300,7 +300,7 @@ function ResizableValidityPanel({
     }
   };
 
-  const resizeWithKeyboard = (event: KeyboardEvent<HTMLDivElement>) => {
+  const resizeWithKeyboard = (event: KeyboardEvent<HTMLInputElement>) => {
     const currentHeight = height
       ?? panelRef.current?.getBoundingClientRect().height
       ?? VALIDITY_PANEL_MIN_HEIGHT;
@@ -342,37 +342,41 @@ function ResizableValidityPanel({
           onCheckConnectivity={onCheckConnectivity}
         />
       </div>
-      <div
-        aria-label="Resize validity details"
-        aria-orientation="horizontal"
-        aria-valuemax={maximumPanelHeight()}
-        aria-valuemin={VALIDITY_PANEL_MIN_HEIGHT}
-        aria-valuenow={panelHeight}
-        className="validity-resize-handle"
-        onKeyDown={resizeWithKeyboard}
-        onPointerCancel={finishResize}
-        onPointerDown={(event) => {
-          const panel = panelRef.current;
-          if (!panel) return;
-          event.preventDefault();
-          userSizedRef.current = true;
-          resizeStartRef.current = {
-            height: panel.getBoundingClientRect().height,
-            pointerY: event.clientY,
-          };
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const start = resizeStartRef.current;
-          if (!start) return;
-          updateHeight(start.height + event.clientY - start.pointerY);
-        }}
-        onPointerUp={finishResize}
-        role="separator"
-        tabIndex={0}
-        title="Drag to resize validity details"
-      >
+      <div className="validity-resize-handle">
         <GripHorizontal aria-hidden="true" />
+        <input
+          aria-label="Resize validity details"
+          aria-valuenow={panelHeight}
+          max={maximumPanelHeight()}
+          min={VALIDITY_PANEL_MIN_HEIGHT}
+          onChange={(event) => {
+            userSizedRef.current = true;
+            updateHeight(Number(event.currentTarget.value));
+          }}
+          onKeyDown={resizeWithKeyboard}
+          onPointerCancel={finishResize}
+          onPointerDown={(event) => {
+            const panel = panelRef.current;
+            if (!panel) return;
+            event.preventDefault();
+            userSizedRef.current = true;
+            resizeStartRef.current = {
+              height: panel.getBoundingClientRect().height,
+              pointerY: event.clientY,
+            };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const start = resizeStartRef.current;
+            if (!start) return;
+            updateHeight(start.height + event.clientY - start.pointerY);
+          }}
+          onPointerUp={finishResize}
+          step={VALIDITY_PANEL_KEYBOARD_STEP}
+          title="Drag to resize validity details"
+          type="range"
+          value={panelHeight}
+        />
       </div>
     </div>
   );

@@ -727,9 +727,10 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
   );
 
   const runtime = await screen.findByRole("region", {
-    name: "Runtime status",
+    name: "Runtime status for capture",
   });
-  expect(runtime).toBe(runtime.closest(".workspace")?.lastElementChild);
+  expect(runtime.closest(".runtime-dashboard-docks"))
+    .toBeInTheDocument();
   expect(within(runtime).getByText("Snapshot is 50% complete"))
     .toBeInTheDocument();
   expect(within(runtime).getByText("Shards successful"))
@@ -760,7 +761,7 @@ test("shows resource runtime status and forces an explicit refresh", async () =>
   expect(forceValues).toEqual(["false"]);
 
   await userEvent.click(within(runtime).getByRole("button", {
-    name: "Refresh runtime status",
+    name: "Refresh runtime status for capture",
   }));
 
   await waitFor(() => expect(forceValues).toEqual(["false", "true"]));
@@ -1541,6 +1542,55 @@ test("renders managed logs as a dedicated full-window route", async () => {
   expect(follow).toBeChecked();
 
   globalThis.history.replaceState({}, "", "/");
+});
+
+
+test("renders the runtime dashboard as a dedicated full-window route", async () => {
+  const curlState = structuredClone(manageSnapshot);
+  const baseNode = curlState.nodes["resource:captureproxies:capture"];
+  curlState.nodes["resource:sourceconfigs:source"] = {
+    ...baseNode,
+    id: "resource:sourceconfigs:source",
+    label: "source",
+    childIds: [],
+    resourcePlural: "sourceconfigs",
+    resourceName: "source",
+    resourceType: "Source cluster",
+  };
+  curlState.nodes["resource:targetconfigs:target"] = {
+    ...baseNode,
+    id: "resource:targetconfigs:target",
+    label: "target",
+    childIds: [],
+    resourcePlural: "targetconfigs",
+    resourceName: "target",
+    resourceType: "Target cluster",
+  };
+  server.use(
+    http.get(
+      "*/api/v1/manage/state",
+      () => HttpResponse.json(curlState),
+    ),
+  );
+  try {
+    globalThis.history.pushState({}, "", "/runtime-dashboard");
+    renderApp(null);
+
+    expect(await screen.findByRole("region", {
+      name: "Cluster curl explorers",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Copy runtime dashboard link",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", {
+      name: "Curl explorer 1 cluster",
+    })).toHaveValue("resource:sourceconfigs:source");
+    expect(screen.queryByRole("heading", { name: "Workflow Manage" }))
+      .not.toBeInTheDocument();
+    expect(await screen.findByText("green open test")).toBeInTheDocument();
+  } finally {
+    globalThis.history.replaceState({}, "", "/");
+  }
 });
 
 

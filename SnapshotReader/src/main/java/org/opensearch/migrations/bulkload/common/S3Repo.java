@@ -33,6 +33,8 @@ public class S3Repo implements SourceRepo, AutoCloseable {
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
     private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
+    private static final String READ_OBJECT_STAGE = "read-object";
+    private static final String READ_OBJECT_LABEL = "Read repository object";
 
     public static final String INDICES_PREFIX_STR = "indices/";
     private final Path s3LocalDir;
@@ -282,8 +284,8 @@ public class S3Repo implements SourceRepo, AutoCloseable {
             String message = failureMessage(e);
             stages.add(failed("list-prefix", "List repository prefix", message));
             stages.add(skipped(
-                "read-object",
-                "Read repository object",
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
                 "Object read was not attempted because the repository prefix could not be listed."
             ));
             return new RepositoryAccessCheckResult(
@@ -301,8 +303,8 @@ public class S3Repo implements SourceRepo, AutoCloseable {
             .findFirst();
         if (readableObject.isEmpty()) {
             stages.add(partial(
-                "read-object",
-                "Read repository object",
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
                 "No object is currently available under the configured prefix to verify read access."
             ));
             return new RepositoryAccessCheckResult(
@@ -322,8 +324,8 @@ public class S3Repo implements SourceRepo, AutoCloseable {
                 .build();
             s3Client.getObject(request, AsyncResponseTransformer.toBytes()).join();
             stages.add(passed(
-                "read-object",
-                "Read repository object",
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
                 "An object under the configured repository prefix is readable."
             ));
             return new RepositoryAccessCheckResult(
@@ -335,7 +337,7 @@ public class S3Repo implements SourceRepo, AutoCloseable {
             );
         } catch (RuntimeException e) {
             String message = failureMessage(e);
-            stages.add(failed("read-object", "Read repository object", message));
+            stages.add(failed(READ_OBJECT_STAGE, READ_OBJECT_LABEL, message));
             return new RepositoryAccessCheckResult(
                 RepositoryAccessCheckResult.Status.FAILED,
                 "s3",

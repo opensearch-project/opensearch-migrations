@@ -138,10 +138,12 @@ class BoundedConsoleRunner:
         executable: str = "console",
         timeout_seconds: int = DEFAULT_COMMAND_TIMEOUT_SECONDS,
         env: Optional[Mapping[str, str]] = None,
+        max_characters: int = MAX_DETAIL_CHARACTERS,
     ):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
         self.env = dict(env) if env is not None else None
+        self.max_characters = max_characters
 
     def run(self, args: Sequence[str]) -> ConsoleCommandResult:
         process = subprocess.Popen(
@@ -165,7 +167,7 @@ class BoundedConsoleRunner:
                 stdout, stderr = process.communicate()
             return ConsoleCommandResult(
                 success=False,
-                output=_bounded_text(stdout),
+                output=_bounded_text(stdout, self.max_characters),
                 error=(
                     "Status command timed out after "
                     f"{self.timeout_seconds} seconds."
@@ -173,8 +175,8 @@ class BoundedConsoleRunner:
             )
         return ConsoleCommandResult(
             success=process.returncode == 0,
-            output=_bounded_text(stdout),
-            error=_bounded_text(stderr) or None,
+            output=_bounded_text(stdout, self.max_characters),
+            error=_bounded_text(stderr, self.max_characters) or None,
         )
 
 
@@ -552,84 +554,13 @@ class RuntimeStatusService:
                 source=CONFIGURED_CONSUMER_GROUPS_SOURCE,
             )
 
-        commands = [
-            [
-                "kafka",
-                "describe-consumer-group",
-                "--kafka",
-                cluster,
-                "--skip-time-lag",
-                group,
-            ]
-            for group in groups
-        ]
-        with ThreadPoolExecutor(max_workers=len(commands)) as executor:
-            results = list(executor.map(self.console_runner.run, commands))
-
-        offsets = []
-        failures = []
-        for group, result in zip(groups, results):
-            if not result.success:
-                failures.append(
-                    f"{group}: "
-                    f"{result.error or result.output or 'status failed'}"
-                )
-                continue
-            offsets.extend(
-                offset
-                for offset in _consumer_offsets(result.output, group)
-                if offset.topic == topic
-            )
-
-        content = (
-            RuntimeStatusConsumerOffsets(tuple(offsets))
-            if offsets
-            else None
+        offsets, failures = _load_consumer_positions(
+            self.console_runner,
+            cluster,
+            topic,
+            groups,
         )
-        if failures:
-            summary = (
-                f"{len(failures)} of {len(groups)} consumer group checks "
-                "failed."
-            )
-            if offsets:
-                summary += (
-                    f" {len(offsets)} partition "
-                    f"position{'s' if len(offsets) != 1 else ''} available."
-                )
-            return RuntimeStatusSection(
-                key="consumer-positions",
-                title=CONSUMER_POSITIONS_TITLE,
-                state="error",
-                summary=summary,
-                source=DESCRIBE_CONSUMER_GROUP_SOURCE,
-                content=content or RuntimeStatusText(tuple(failures)),
-            )
-        if not offsets:
-            return RuntimeStatusSection(
-                key="consumer-positions",
-                title=CONSUMER_POSITIONS_TITLE,
-                state="ok",
-                summary=(
-                    "No configured replay consumer has committed an offset "
-                    "for this topic."
-                ),
-                source=DESCRIBE_CONSUMER_GROUP_SOURCE,
-            )
-
-        group_count = len({offset.group for offset in offsets})
-        return RuntimeStatusSection(
-            key="consumer-positions",
-            title=CONSUMER_POSITIONS_TITLE,
-            state="ok",
-            summary=(
-                f"{len(offsets)} partition "
-                f"position{'s' if len(offsets) != 1 else ''} across "
-                f"{group_count} consumer "
-                f"group{'s' if group_count != 1 else ''}."
-            ),
-            source=DESCRIBE_CONSUMER_GROUP_SOURCE,
-            content=content,
-        )
+        return _consumer_positions_section(groups, offsets, failures)
 
     def _name_list_section(
         self,
@@ -674,6 +605,97 @@ class RuntimeStatusService:
             summary=message,
             source="not available",
         )
+
+
+def _load_consumer_positions(
+    console_runner: Any,
+    cluster: str,
+    topic: str,
+    groups: Sequence[str],
+) -> tuple[list[RuntimeStatusConsumerOffset], list[str]]:
+    commands = [
+        [
+            "kafka",
+            "describe-consumer-group",
+            "--kafka",
+            cluster,
+            "--skip-time-lag",
+            group,
+        ]
+        for group in groups
+    ]
+    with ThreadPoolExecutor(max_workers=len(commands)) as executor:
+        results = list(executor.map(console_runner.run, commands))
+
+    offsets = []
+    failures = []
+    for group, result in zip(groups, results):
+        if not result.success:
+            failures.append(
+                f"{group}: {result.error or result.output or 'status failed'}"
+            )
+            continue
+        offsets.extend(
+            offset
+            for offset in _consumer_offsets(result.output, group)
+            if offset.topic == topic
+        )
+    return offsets, failures
+
+
+def _consumer_positions_section(
+    groups: Sequence[str],
+    offsets: Sequence[RuntimeStatusConsumerOffset],
+    failures: Sequence[str],
+) -> RuntimeStatusSection:
+    content = (
+        RuntimeStatusConsumerOffsets(tuple(offsets))
+        if offsets
+        else None
+    )
+    if failures:
+        summary = (
+            f"{len(failures)} of {len(groups)} consumer group checks failed."
+        )
+        if offsets:
+            summary += (
+                f" {len(offsets)} partition "
+                f"position{'s' if len(offsets) != 1 else ''} available."
+            )
+        return RuntimeStatusSection(
+            key="consumer-positions",
+            title=CONSUMER_POSITIONS_TITLE,
+            state="error",
+            summary=summary,
+            source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+            content=content or RuntimeStatusText(tuple(failures)),
+        )
+    if not offsets:
+        return RuntimeStatusSection(
+            key="consumer-positions",
+            title=CONSUMER_POSITIONS_TITLE,
+            state="ok",
+            summary=(
+                "No configured replay consumer has committed an offset "
+                "for this topic."
+            ),
+            source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+        )
+
+    group_count = len({offset.group for offset in offsets})
+    return RuntimeStatusSection(
+        key="consumer-positions",
+        title=CONSUMER_POSITIONS_TITLE,
+        state="ok",
+        summary=(
+            f"{len(offsets)} partition "
+            f"position{'s' if len(offsets) != 1 else ''} across "
+            f"{group_count} consumer "
+            f"group{'s' if group_count != 1 else ''}."
+        ),
+        source=DESCRIBE_CONSUMER_GROUP_SOURCE,
+        content=content,
+    )
 
 
 def _command_error_section(
@@ -749,24 +771,7 @@ def _status_metrics(
             value=str(phase),
         ))
     summary = status.get("summary") or {}
-    for key, value in summary.items():
-        normalized_key = key.lower()
-        if key == "dataProcessedUnit":
-            continue
-        if terminal and normalized_key in ETA_KEYS:
-            continue
-        if value is not None:
-            unit = None
-            if key == "percentageCompleted":
-                unit = "percent"
-            elif key == "dataProcessed":
-                unit = str(summary.get("dataProcessedUnit") or "MiB")
-            metrics.append(RuntimeStatusMetric(
-                key=key,
-                label=_humanize(key),
-                value=_metric_value(value),
-                unit=unit,
-            ))
+    metrics.extend(_summary_metrics(summary, terminal))
     updated_at = status.get("updatedAt")
     if updated_at:
         metrics.append(RuntimeStatusMetric(
@@ -775,6 +780,35 @@ def _status_metrics(
             value=str(updated_at),
         ))
     return RuntimeStatusMetrics(tuple(metrics)) if metrics else None
+
+
+def _summary_metrics(
+    summary: Mapping[str, Any],
+    terminal: bool,
+) -> list[RuntimeStatusMetric]:
+    metrics = []
+    for key, value in summary.items():
+        if key == "dataProcessedUnit":
+            continue
+        if terminal and key.lower() in ETA_KEYS:
+            continue
+        if value is None:
+            continue
+        metrics.append(RuntimeStatusMetric(
+            key=key,
+            label=_humanize(key),
+            value=_metric_value(value),
+            unit=_metric_unit(key, summary),
+        ))
+    return metrics
+
+
+def _metric_unit(key: str, summary: Mapping[str, Any]) -> Optional[str]:
+    if key == "percentageCompleted":
+        return "percent"
+    if key == "dataProcessed":
+        return str(summary.get("dataProcessedUnit") or "MiB")
+    return None
 
 
 def _metric_value(value: Any) -> str | int | float | bool:
@@ -803,8 +837,11 @@ def _humanize(value: str) -> str:
     return "".join(result).capitalize()
 
 
-def _bounded_text(value: Optional[str]) -> str:
-    return (value or "").strip()[:MAX_DETAIL_CHARACTERS]
+def _bounded_text(
+    value: Optional[str],
+    max_characters: int = MAX_DETAIL_CHARACTERS,
+) -> str:
+    return (value or "").strip()[:max_characters]
 
 
 def _detail_lines(value: str) -> Tuple[str, ...]:

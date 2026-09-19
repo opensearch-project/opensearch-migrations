@@ -27,6 +27,9 @@ import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckRes
 
 @Slf4j
 public class GcsRepo implements SourceRepo {
+    private static final String READ_OBJECT_STAGE = "read-object";
+    private static final String READ_OBJECT_LABEL = "Read repository object";
+
     private final Path localDir;
     private final Storage storageClient;
     private final SnapshotFileFinder fileFinder;
@@ -257,8 +260,8 @@ public class GcsRepo implements SourceRepo {
             String message = failureMessage(e);
             stages.add(failed("list-prefix", "List repository prefix", message));
             stages.add(skipped(
-                "read-object",
-                "Read repository object",
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
                 "Object read was not attempted because the repository prefix could not be listed."
             ));
             return new RepositoryAccessCheckResult(
@@ -279,8 +282,8 @@ public class GcsRepo implements SourceRepo {
         }
         if (readableObject == null) {
             stages.add(partial(
-                "read-object",
-                "Read repository object",
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
                 "No object is currently available under the configured prefix to verify read access."
             ));
             return new RepositoryAccessCheckResult(
@@ -295,8 +298,8 @@ public class GcsRepo implements SourceRepo {
         try (ReadChannel channel = readableObject.reader()) {
             channel.read(ByteBuffer.allocate(1));
             stages.add(passed(
-                "read-object",
-                "Read repository object",
+                READ_OBJECT_STAGE,
+                READ_OBJECT_LABEL,
                 "An object under the configured repository prefix is readable."
             ));
             return new RepositoryAccessCheckResult(
@@ -308,7 +311,7 @@ public class GcsRepo implements SourceRepo {
             );
         } catch (RuntimeException | IOException e) {
             String message = failureMessage(e);
-            stages.add(failed("read-object", "Read repository object", message));
+            stages.add(failed(READ_OBJECT_STAGE, READ_OBJECT_LABEL, message));
             return new RepositoryAccessCheckResult(
                 RepositoryAccessCheckResult.Status.FAILED,
                 "gcs",

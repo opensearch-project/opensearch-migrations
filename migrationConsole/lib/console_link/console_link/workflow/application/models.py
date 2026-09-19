@@ -173,6 +173,7 @@ class ManageNode:
     description: Optional[str] = None
     phase: Optional[str] = None
     value_summary: Optional[str] = None
+    created_at: Optional[str] = None
     activity_at: Optional[str] = None
     diagnostics: Tuple[ManageDiagnostic, ...] = ()
     capabilities: Tuple[ManageCapability, ...] = ()
@@ -182,6 +183,8 @@ class ManageNode:
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
     resource_type: Optional[str] = None
+    source_refs: Tuple[str, ...] = ()
+    target_refs: Tuple[str, ...] = ()
     config_presence: Mapping[str, bool] = field(default_factory=dict)
     config_state: Optional[ManageConfigState] = None
     navigation_key: Tuple[str, ...] = ()
@@ -208,6 +211,8 @@ class ManageNode:
             result["phase"] = self.phase
         if self.value_summary:
             result["valueSummary"] = self.value_summary
+        if self.created_at:
+            result["createdAt"] = self.created_at
         if self.activity_at:
             result["activityAt"] = self.activity_at
         if self.resource_plural:
@@ -216,6 +221,10 @@ class ManageNode:
             result["resourceName"] = self.resource_name
         if self.resource_type:
             result["resourceType"] = self.resource_type
+        if self.source_refs:
+            result["sourceRefs"] = list(self.source_refs)
+        if self.target_refs:
+            result["targetRefs"] = list(self.target_refs)
         if self.config_presence:
             result["configPresence"] = dict(self.config_presence)
         if self.config_state is not None:

@@ -21,6 +21,7 @@ from ..application.external_resources import (
 from ..application.config_documents import ConfigurationDocument
 from ..application.config_review import ConfigReviewChange
 from ..application.config_submission import SavedConfigReview
+from ..application.cluster_curl import ClusterCurlResult
 from ..application.operations import Operation
 from ..application.actions import (
     ApprovalGateInventory,
@@ -185,6 +186,7 @@ class ManageNodeV1(WebModel):
     status: str
     phase: Optional[str] = None
     value_summary: Optional[str] = None
+    created_at: Optional[datetime] = None
     activity_at: Optional[datetime] = None
     diagnostics: List[DiagnosticV1] = Field(default_factory=list)
     capabilities: List[NodeCapabilityV1] = Field(default_factory=list)
@@ -194,6 +196,8 @@ class ManageNodeV1(WebModel):
     resource_plural: Optional[str] = None
     resource_name: Optional[str] = None
     resource_type: Optional[str] = None
+    source_refs: List[str] = Field(default_factory=list)
+    target_refs: List[str] = Field(default_factory=list)
     config_presence: Dict[str, bool] = Field(default_factory=dict)
     config_state: Optional[ConfigNodeStateV1] = None
     navigation_key: List[str] = Field(default_factory=list)
@@ -571,6 +575,28 @@ class RuntimeStatusSectionV1(WebModel):
             source=section.source,
             content=_runtime_status_content(section.content),
         )
+
+
+class ClusterCurlRequestV1(WebModel):
+    method: Literal["GET", "POST", "PUT", "DELETE", "HEAD"] = "GET"
+    path: str
+    headers: List[str] = Field(default_factory=list)
+    body: Optional[str] = None
+
+
+class ClusterCurlResultV1(WebModel):
+    node_id: str
+    cluster_name: str
+    observed_at: datetime
+    method: Literal["GET", "POST", "PUT", "DELETE", "HEAD"]
+    path: str
+    success: bool
+    output: str
+    error: Optional[str] = None
+
+    @classmethod
+    def from_domain(cls, result: ClusterCurlResult) -> "ClusterCurlResultV1":
+        return cls.model_validate(result.__dict__)
 
 
 class RuntimeStatusV1(WebModel):

@@ -275,9 +275,10 @@ function targetForPath(
     target.editPath.every((part, index) => path[index] === part)
     || path.every((part, index) => target.editPath[index] === part)
   ));
-  return matches.sort(
+  matches.sort(
     (left, right) => right.editPath.length - left.editPath.length,
-  )[0] ?? null;
+  );
+  return matches[0] ?? null;
 }
 
 

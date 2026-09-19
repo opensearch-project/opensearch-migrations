@@ -7,6 +7,10 @@ export type ManageSnapshot = components["schemas"]["ManageSnapshotV1"];
 export type ManageNode = components["schemas"]["ManageNodeV1"];
 export type ManageRelationship = components["schemas"]["RelationshipV1"];
 export type RuntimeStatus = components["schemas"]["RuntimeStatusV1"];
+export type ClusterCurlRequest =
+  components["schemas"]["ClusterCurlRequestV1"];
+export type ClusterCurlResult =
+  components["schemas"]["ClusterCurlResultV1"];
 export type ConfigurationDocument =
   components["schemas"]["ConfigurationDocumentV1"];
 export type ConfigurationSchema =
@@ -137,6 +141,30 @@ export async function getRuntimeStatus(
     throw new ConfigApiError(
       response.status,
       "Runtime status is unavailable",
+      error,
+    );
+  }
+  return data;
+}
+
+
+export async function runClusterCurl(
+  nodeId: string,
+  request: ClusterCurlRequest,
+  signal?: AbortSignal,
+): Promise<ClusterCurlResult> {
+  const { data, error, response } = await client.POST(
+    "/api/v1/nodes/{node_id}/cluster-curl",
+    {
+      params: { path: { node_id: nodeId } },
+      body: request,
+      signal,
+    },
+  );
+  if (!response.ok || error || !data) {
+    throw new ConfigApiError(
+      response.status,
+      "Cluster request could not be completed",
       error,
     );
   }
