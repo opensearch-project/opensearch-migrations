@@ -31,13 +31,13 @@
     {
       "fromSource": "source",
       "toTarget": "target",
-      "perSnapshotConfig": {
-        "snap1": [
-          {
-            "documentBackfillConfig": {}
-          }
-        ]
-      }
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "documentBackfillConfig": {},
+          "label": "slice-0"
+        }
+      ]
     }
   ]
 }

@@ -189,29 +189,29 @@ transformsSources:
 snapshotMigrationConfigs:
   - fromSource: source1
     toTarget: target1
-    perSnapshotConfig:
-      testsnapshot:
-        - metadataMigrationConfig:
-            transformsSource: transform-basic
-            metadataTransforms:
-              language: javascript
-              file: metadata.js
-              bindingsObject:
-                fieldName: mountable_transform_marker
-                fieldType: keyword
-          documentBackfillConfig:
-            transformsSource: transform-sequence
-            documentTransforms:
-              - language: javascript
-                file: document-1.js
-                bindingsObject:
-                  fieldName: mountable_transform_marker
-                  fieldValue: backfilled
-              - language: javascript
-                file: document-2.js
-                bindingsObject:
-                  fieldName: mountable_transform_order
-                  fieldValue: second
+    fromSnapshot: testsnapshot
+    slice: slice-0
+    metadataMigrationConfig:
+      transformsSource: transform-basic
+      metadataTransforms:
+        language: javascript
+        file: metadata.js
+        bindingsObject:
+          fieldName: mountable_transform_marker
+          fieldType: keyword
+    documentBackfillConfig:
+      transformsSource: transform-sequence
+      documentTransforms:
+        - language: javascript
+          file: document-1.js
+          bindingsObject:
+            fieldName: mountable_transform_marker
+            fieldValue: backfilled
+        - language: javascript
+          file: document-2.js
+          bindingsObject:
+            fieldName: mountable_transform_order
+            fieldValue: second
 
 traffic:
   replayers:

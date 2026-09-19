@@ -8,10 +8,12 @@ import org.opensearch.migrations.bulkload.common.GcsRepo.CannotFindSnapshotRepoR
 import org.opensearch.migrations.bulkload.common.GcsRepo.CannotListObjects;
 
 import com.google.api.gax.paging.Page;
+import com.google.cloud.ReadChannel;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.Storage.BlobListOption;
+import com.google.cloud.storage.StorageException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +24,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -178,6 +182,58 @@ public class GcsRepoTest {
         List<String> result = testRepo.listFilesInRoot();
 
         assertEquals(List.of("index-0", "index-1"), result);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void checkAccess_WhenObjectCanBeRead_ReturnsValid() throws Exception {
+        Blob object = mock(Blob.class);
+        ReadChannel channel = mock(ReadChannel.class);
+        when(object.getName()).thenReturn("directory/index-2");
+        when(object.reader()).thenReturn(channel);
+        when(channel.read(any())).thenReturn(1);
+        Page<Blob> page = mock(Page.class);
+        when(page.getValues()).thenReturn(List.of(object));
+        when(mockStorage.list(eq("bucket-name"), any(BlobListOption[].class))).thenReturn(page);
+
+        var result = testRepo.checkAccess();
+
+        assertThat(result.status(), org.hamcrest.Matchers.equalTo(RepositoryAccessCheckResult.Status.VALID));
+        assertThat(result.isSuccessful(), is(true));
+        assertThat(result.stages(), hasSize(2));
+        verify(channel).read(any());
+        verify(channel).close();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void checkAccess_WhenPrefixIsEmpty_ReturnsPartiallyVerified() {
+        Page<Blob> page = mock(Page.class);
+        when(page.getValues()).thenReturn(List.of());
+        when(mockStorage.list(eq("bucket-name"), any(BlobListOption[].class))).thenReturn(page);
+
+        var result = testRepo.checkAccess();
+
+        assertThat(result.status(),
+            org.hamcrest.Matchers.equalTo(RepositoryAccessCheckResult.Status.PARTIALLY_VERIFIED));
+        assertThat(result.isSuccessful(), is(true));
+        assertThat(result.stages().get(1).status(),
+            org.hamcrest.Matchers.equalTo(RepositoryAccessCheckResult.StageStatus.PARTIALLY_VERIFIED));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void checkAccess_WhenPrefixCannotBeListed_ReturnsFailed() {
+        when(mockStorage.list(eq("bucket-name"), any(BlobListOption[].class)))
+            .thenThrow(new StorageException(403, "access denied"));
+
+        var result = testRepo.checkAccess();
+
+        assertThat(result.status(), org.hamcrest.Matchers.equalTo(RepositoryAccessCheckResult.Status.FAILED));
+        assertThat(result.isSuccessful(), is(false));
+        assertThat(result.stages().get(0).message(), containsString("access denied"));
+        assertThat(result.stages().get(1).status(),
+            org.hamcrest.Matchers.equalTo(RepositoryAccessCheckResult.StageStatus.SKIPPED));
     }
 
     @Test

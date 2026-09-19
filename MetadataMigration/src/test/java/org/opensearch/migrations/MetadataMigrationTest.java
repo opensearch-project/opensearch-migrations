@@ -155,4 +155,46 @@ public class MetadataMigrationTest {
                 event -> event.contains("Starting Metadata Evaluation")), equalTo(true));
         }
     }
+
+    @Test
+    void repositoryCheckEmitsStructuredJson() throws Exception {
+        Files.writeString(tempDir.resolve("index-0"), "{}");
+        try (var closeableLogSetup = new CloseableLogSetup(MetadataMigration.class.getName())) {
+            var mm = spy(new MetadataMigration());
+            doNothing().when(mm).exitWithCode(anyInt());
+            mm.run(new String[] {
+                "check-repository",
+                "--repo-uri", tempDir.toUri().toString(),
+                "--output", "json"
+            });
+
+            var logEvents = closeableLogSetup.getLogEvents();
+
+            assertThat(logEvents, hasSize(1));
+            var root = new ObjectMapper().readTree(logEvents.get(0));
+            assertThat(root.get("status").asText(), equalTo("valid"));
+            assertThat(root.get("provider").asText(), equalTo("file"));
+            assertThat(root.get("errorCode").asInt(), equalTo(0));
+            assertThat(root.get("stages").size(), equalTo(2));
+            verify(mm).exitWithCode(0);
+        }
+    }
+
+    @Test
+    void emptyRepositoryCheckIsAVisiblePartialSuccess() throws Exception {
+        try (var closeableLogSetup = new CloseableLogSetup(MetadataMigration.class.getName())) {
+            var mm = spy(new MetadataMigration());
+            doNothing().when(mm).exitWithCode(anyInt());
+            mm.run(new String[] {
+                "check-repository",
+                "--repo-uri", tempDir.toUri().toString()
+            });
+
+            var logEvents = closeableLogSetup.getLogEvents();
+
+            assertThat(logEvents.stream().anyMatch(
+                event -> event.contains("Repository access: Partially verified")), equalTo(true));
+            verify(mm).exitWithCode(0);
+        }
+    }
 }

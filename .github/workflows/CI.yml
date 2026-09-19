@@ -140,6 +140,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test Jenkins kind setup scripts
         run: ./jenkins/tests/configureKindClusterTest.sh
+      - name: Test Workflow Web UI kubectl helper
+        run: ./deployment/k8s/tests/workflowWebScriptTest.sh
 
   generate-test-matrix:
     runs-on: ubuntu-22.04
@@ -281,6 +283,7 @@ jobs:
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
           - ./orchestrationSpecs
+          - ./migrationConsole/web
     env:
       # The secrets context is unavailable in a step `if`, so gate on this instead.
       HAS_CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN != '' }}
@@ -290,9 +293,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-env
+      - name: Install workflow web Python dependencies
+        if: matrix.npm-project == './migrationConsole/web'
+        working-directory: ./migrationConsole/lib/console_link
+        run: pipenv install --deploy
       - name: Install NPM dependencies
         run: npm ci
-      - name: Run CDK Jest Tests (using mocked images)
+      - name: Run NPM tests
         run: npm run test
       - name: Run orchestration CRD integration tests
         if: matrix.npm-project == './orchestrationSpecs'

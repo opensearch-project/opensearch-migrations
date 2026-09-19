@@ -456,6 +456,54 @@ def test_cli_cluster_connection_check(runner, mocker):
     api_mock.assert_called()
 
 
+def test_cli_cluster_connection_check_json(runner, mocker):
+    mocker.patch.object(
+        middleware.clusters,
+        'connection_check',
+        side_effect=[
+            middleware.clusters.ConnectionResult.success(cluster_version="2.15"),
+            middleware.clusters.ConnectionResult.failure(
+                message="Authentication failed.",
+                code="authentication-failed",
+                http_status=401,
+            ),
+        ],
+    )
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(VALID_SERVICES_YAML), '--json', 'clusters', 'connection-check'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "source_cluster": {
+            "status": "valid",
+            "connection_established": True,
+            "connection_message": "Successfully connected!",
+            "cluster_version": "2.15",
+            "stages": [{
+                "name": "cluster-api",
+                "status": "passed",
+                "message": "Connected and authenticated.",
+            }],
+        },
+        "target_cluster": {
+            "status": "failed",
+            "connection_established": False,
+            "connection_message": "Authentication failed.",
+            "stages": [{
+                "name": "cluster-api",
+                "status": "failed",
+                "message": "Authentication failed.",
+                "code": "authentication-failed",
+                "http_status": 401,
+            }],
+        },
+    }
+
+
 def test_cli_cluster_connection_check_proxy(runner, mocker, proxy_enabled_yaml_path):
     middleware_mock = mocker.spy(middleware.clusters, 'connection_check')
     api_mock = mocker.patch.object(Cluster, 'call_api')

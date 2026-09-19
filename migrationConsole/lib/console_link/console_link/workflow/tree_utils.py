@@ -409,7 +409,7 @@ def _is_retry_group(node: Dict[str, Any]) -> bool:
     return 'tryApply' in child_names and 'waitForFix' in child_names
 
 
-def _extract_denial_reason(message: str) -> Optional[str]:
+def extract_denial_reason(message: str) -> Optional[str]:
     """Extract the human-readable denial reason from a VAP error message."""
     if not message:
         return None
@@ -484,8 +484,9 @@ def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
     if final_try.get('phase') == 'Failed' and final_wait and final_wait.get('phase') == 'Running':
         collapsed['phase'] = 'Running'
         collapsed['is_approval'] = True
+        collapsed['approval_node_id'] = final_wait.get('id')
         collapsed['inputs'] = final_wait.get('inputs', {})
-        collapsed['denial_reason'] = _extract_denial_reason(final_try.get('message', ''))
+        collapsed['denial_reason'] = extract_denial_reason(final_try.get('message', ''))
 
     return collapsed
 

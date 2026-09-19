@@ -44,6 +44,8 @@ describe("migration resource projections", () => {
         const partitions = projectedByPath.get("CapturedTraffic:partitions");
         expect(partitions?.changeRestriction).toBe("gated");
         expect(partitions?.invariant).toBe("nonDecreasing");
+        expect(projectedByPath.get("CapturedTraffic:replicas")?.changeRestriction)
+            .toBe("gated");
 
         expect(projectedByPath.get("KafkaCluster:auth.type")?.changeRestriction).toBe("impossible");
         expect(projectedByPath.get("KafkaCluster:clusterSpecOverrides")?.changeRestriction).toBe("gated");

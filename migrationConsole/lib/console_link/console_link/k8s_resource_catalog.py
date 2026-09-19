@@ -517,7 +517,7 @@ def _source_proxy_config(config: Optional[Dict]) -> Optional[Dict]:
         return None
     return {
         key: config[key]
-        for key in ("name", "endpoint", "allow_insecure")
+        for key in ("name", "endpoint", "allow_insecure", "client_cert")
         if key in config
     }
 

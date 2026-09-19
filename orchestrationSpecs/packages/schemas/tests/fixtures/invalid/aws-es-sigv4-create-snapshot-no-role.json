@@ -35,13 +35,13 @@
     {
       "fromSource": "source",
       "toTarget": "target",
-      "perSnapshotConfig": {
-        "snap1": [
-          {
-            "metadataMigrationConfig": {}
-          }
-        ]
-      }
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "metadataMigrationConfig": {},
+          "label": "slice-0"
+        }
+      ]
     }
   ]
 }

@@ -7,23 +7,30 @@
         "snapshots": {
           "snap1": {
             "repoName": "",
-            "config": { "createSnapshotConfig": {} }
+            "config": {
+              "createSnapshotConfig": {}
+            }
           }
         }
       }
-
     }
   },
   "targetClusters": {
-    "target": { "endpoint": "http://target:9200" }
+    "target": {
+      "endpoint": "http://target:9200"
+    }
   },
   "snapshotMigrationConfigs": [
     {
       "fromSource": "source",
       "toTarget": "does-not-exist",
-      "perSnapshotConfig": {
-        "snap1": [{ "metadataMigrationConfig": {} }]
-      }
+      "fromSnapshot": "snap1",
+      "slices": [
+        {
+          "metadataMigrationConfig": {},
+          "label": "slice-0"
+        }
+      ]
     }
   ]
 }

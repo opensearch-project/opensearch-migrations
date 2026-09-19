@@ -1,6 +1,6 @@
 import console_link.middleware.clusters as clusters_
 
-import requests_mock as requests_mock_lib
+import requests
 import unittest.mock as mock
 
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
@@ -15,6 +15,15 @@ def test_connection_check_with_exception(mocker):
     api_mock.assert_called()
     assert 'Attempt to connect to cluster failed' in result.connection_message
     assert not result.connection_established
+    assert result.status == clusters_.ConnectionCheckStatus.FAILED
+    assert result.stages == (
+        clusters_.ConnectionCheckStage(
+            name="cluster-api",
+            status=clusters_.ConnectionCheckStageStatus.FAILED,
+            message="Attempt to connect to cluster failed",
+            code="unexpected-error",
+        ),
+    )
 
 
 def test_connection_check_succesful(requests_mock):
@@ -25,6 +34,57 @@ def test_connection_check_succesful(requests_mock):
     assert result.connection_established
     assert result.connection_message == 'Successfully connected!'
     assert result.cluster_version == '2.15'
+    assert result.status == clusters_.ConnectionCheckStatus.VALID
+    assert result.to_dict() == {
+        "status": "valid",
+        "connection_established": True,
+        "connection_message": "Successfully connected!",
+        "cluster_version": "2.15",
+        "stages": [{
+            "name": "cluster-api",
+            "status": "passed",
+            "message": "Connected and authenticated.",
+            "http_status": 200,
+        }],
+    }
+
+
+def test_connection_check_classifies_authentication_failure(mocker):
+    cluster = create_valid_cluster()
+    response = requests.Response()
+    response.status_code = 401
+    response.reason = "Unauthorized"
+    response.url = f"{cluster.endpoint}/"
+    response._content = b'{"message":"The configured credentials were rejected."}'
+    api_mock = mocker.patch.object(Cluster, 'call_api', return_value=response)
+
+    result = clusters_.connection_check(cluster)
+
+    api_mock.assert_called_once()
+    assert result.status == clusters_.ConnectionCheckStatus.FAILED
+    assert result.stages[0].code == "authentication-failed"
+    assert result.stages[0].http_status == 401
+    assert "authentication" in result.connection_message.lower()
+    assert result.diagnostic_log == (
+        "HTTP 401 Unauthorized\n\n"
+        '{"message":"The configured credentials were rejected."}'
+    )
+
+
+def test_connection_check_classifies_tls_failure(mocker):
+    cluster = create_valid_cluster()
+    api_mock = mocker.patch.object(
+        Cluster,
+        'call_api',
+        side_effect=requests.exceptions.SSLError("certificate verify failed"),
+    )
+
+    result = clusters_.connection_check(cluster)
+
+    api_mock.assert_called_once()
+    assert result.status == clusters_.ConnectionCheckStatus.FAILED
+    assert result.stages[0].code == "tls-failed"
+    assert "certificate verify failed" in result.stages[0].message
 
 
 def test_cat_indices_with_refresh(requests_mock):
@@ -159,37 +219,38 @@ def test_call_api_timeout_returns_friendly_message():
     assert "HTTPSConnectionPool" not in result.error_message
 
 
-def test_connection_check_serverless_unknown_type_surfaces_warning(requests_mock):
-    cluster = create_valid_cluster(
-        endpoint="https://abc123.us-east-1.aoss.amazonaws.com",
-        auth_type=AuthMethod.NO_AUTH,
-    )
-    # GET / returns 404 (serverless)
-    requests_mock.get(f"{cluster.endpoint}/", status_code=404)
-    # KNN probe returns 403 (missing permissions)
-    requests_mock.put(requests_mock_lib.ANY, status_code=403,
-                      json={"error": {"reason": "User does not have permissions"}})
-    # _cat/indices succeeds (read access works)
-    requests_mock.get(f"{cluster.endpoint}/_cat/indices", text="")
-
-    result = clusters_.connection_check(cluster)
-    assert result.connection_established
-    assert "Warning" in result.connection_message
-    assert "403" in result.connection_message
-    assert "permissions" in result.connection_message
-
-
-def test_connection_check_serverless_known_type_no_warning(requests_mock):
+def test_connection_check_serverless_uses_read_only_probe(requests_mock):
     cluster = create_valid_cluster(
         endpoint="https://abc123.us-east-1.aoss.amazonaws.com",
         auth_type=AuthMethod.NO_AUTH,
     )
     requests_mock.get(f"{cluster.endpoint}/", status_code=404)
-    requests_mock.put(requests_mock_lib.ANY, status_code=400,
-                      text="KNN features not supported on TIMESERIES collection type")
     requests_mock.get(f"{cluster.endpoint}/_cat/indices", text="")
 
     result = clusters_.connection_check(cluster)
+
     assert result.connection_established
-    assert "Warning" not in result.connection_message
+    assert result.status == clusters_.ConnectionCheckStatus.VALID
     assert "Successfully connected" in result.connection_message
+    assert result.stages[0].http_status == 200
+    assert all(request.method == "GET" for request in requests_mock.request_history)
+
+
+def test_connection_check_serverless_read_probe_failure_is_structured(requests_mock):
+    cluster = create_valid_cluster(
+        endpoint="https://abc123.us-east-1.aoss.amazonaws.com",
+        auth_type=AuthMethod.NO_AUTH,
+    )
+    requests_mock.get(f"{cluster.endpoint}/", status_code=404)
+    requests_mock.get(
+        f"{cluster.endpoint}/_cat/indices",
+        status_code=403,
+        json={"error": {"reason": "User does not have permissions"}},
+    )
+
+    result = clusters_.connection_check(cluster)
+
+    assert not result.connection_established
+    assert result.status == clusters_.ConnectionCheckStatus.FAILED
+    assert result.stages[0].code == "authorization-failed"
+    assert result.stages[0].http_status == 403

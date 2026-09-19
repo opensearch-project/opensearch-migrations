@@ -9,6 +9,7 @@
     "outputs": {},
     "started_at": "2026-01-01T00:00:01Z",
     "is_approval": true,
+    "approval_node_id": "wait1",
     "denial_reason": null,
     "children": []
   }

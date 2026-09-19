@@ -2,11 +2,13 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.google.cloud.ReadChannel;
 import com.google.cloud.NoCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
@@ -16,6 +18,12 @@ import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.StorageOptions;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.failed;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.failureMessage;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.partial;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.passed;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.skipped;
 
 @Slf4j
 public class GcsRepo implements SourceRepo {
@@ -219,6 +227,103 @@ public class GcsRepo implements SourceRepo {
             .log();
 
         return strippedKeys;
+    }
+
+    /**
+     * Checks the same GCS credential and endpoint path used by snapshot readers without requiring
+     * that a snapshot already exists. Object reads are restricted to one byte so this check cannot
+     * accidentally download a large shard file.
+     */
+    public RepositoryAccessCheckResult checkAccess() {
+        var stages = new ArrayList<RepositoryAccessCheckResult.Stage>();
+        String prefix = normalizedRepoPrefix();
+        com.google.api.gax.paging.Page<Blob> blobs;
+        try {
+            var options = new ArrayList<BlobListOption>();
+            options.add(BlobListOption.pageSize(25));
+            if (!prefix.isEmpty()) {
+                options.add(BlobListOption.prefix(prefix));
+            }
+            blobs = storageClient.list(
+                gcsRepoUri.bucketName,
+                options.toArray(new BlobListOption[0])
+            );
+            stages.add(passed(
+                "list-prefix",
+                "List repository prefix",
+                "The configured repository prefix is accessible."
+            ));
+        } catch (RuntimeException e) {
+            String message = failureMessage(e);
+            stages.add(failed("list-prefix", "List repository prefix", message));
+            stages.add(skipped(
+                "read-object",
+                "Read repository object",
+                "Object read was not attempted because the repository prefix could not be listed."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.FAILED,
+                "gcs",
+                gcsRepoUri.uri,
+                "Unable to list the configured GCS repository prefix.",
+                List.copyOf(stages)
+            );
+        }
+
+        Blob readableObject = null;
+        for (Blob blob : blobs.getValues()) {
+            if (blob.getName() != null && !blob.getName().isBlank() && !blob.getName().endsWith("/")) {
+                readableObject = blob;
+                break;
+            }
+        }
+        if (readableObject == null) {
+            stages.add(partial(
+                "read-object",
+                "Read repository object",
+                "No object is currently available under the configured prefix to verify read access."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.PARTIALLY_VERIFIED,
+                "gcs",
+                gcsRepoUri.uri,
+                "The GCS repository prefix is accessible, but object read access could not yet be verified.",
+                List.copyOf(stages)
+            );
+        }
+
+        try (ReadChannel channel = readableObject.reader()) {
+            channel.read(ByteBuffer.allocate(1));
+            stages.add(passed(
+                "read-object",
+                "Read repository object",
+                "An object under the configured repository prefix is readable."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.VALID,
+                "gcs",
+                gcsRepoUri.uri,
+                "The GCS repository prefix can be listed and its objects can be read.",
+                List.copyOf(stages)
+            );
+        } catch (RuntimeException | IOException e) {
+            String message = failureMessage(e);
+            stages.add(failed("read-object", "Read repository object", message));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.FAILED,
+                "gcs",
+                gcsRepoUri.uri,
+                "The GCS repository prefix is accessible, but an object could not be read.",
+                List.copyOf(stages)
+            );
+        }
+    }
+
+    private String normalizedRepoPrefix() {
+        if (gcsRepoUri.key.isEmpty()) {
+            return "";
+        }
+        return gcsRepoUri.key.endsWith("/") ? gcsRepoUri.key : gcsRepoUri.key + "/";
     }
 
     public static class CannotFindSnapshotRepoRoot extends RfsException implements SnapshotReadFailure {

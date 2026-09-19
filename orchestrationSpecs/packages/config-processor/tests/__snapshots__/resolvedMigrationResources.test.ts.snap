@@ -4,6 +4,11 @@ exports[`resolved migration resources extracts resolved resource parameters from
 [
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "version",
+      "auth.type",
+      "nodePool.replicas",
+    ],
     "kind": "KafkaCluster",
     "name": "default",
     "parameters": {
@@ -81,6 +86,13 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "kafkaClusterName",
+      "kafkaBrokers",
+      "topicName",
+      "partitions",
+      "replicas",
+    ],
     "kind": "CapturedTraffic",
     "name": "source-proxy-topic",
     "parameters": {
@@ -110,6 +122,12 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "podReplicas",
+      "listenPort",
+      "internetFacing",
+      "serviceType",
+    ],
     "kind": "CaptureProxy",
     "name": "source-proxy",
     "parameters": {
@@ -167,6 +185,10 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "snapshotPrefix",
+      "indexAllowlist",
+    ],
     "kind": "DataSnapshot",
     "name": "source-snap1",
     "parameters": {
@@ -192,6 +214,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "snapshotPrefix": "snap1",
       "solrCollections": [],
       "solrExternalBackupName": "",
+      "solrTopology": "",
       "sourceAllowInsecure": true,
       "sourceAuthBasicSecretName": "",
       "sourceAuthMtlsCaCertHash": "",
@@ -207,8 +230,14 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "documentBackfillPodReplicas",
+      "sourceVersion",
+      "documentBackfillIndexAllowlist",
+      "metadataMigrationIndexAllowlist",
+    ],
     "kind": "SnapshotMigration",
-    "name": "source-target-snap1-migration-0",
+    "name": "source-target-snap1-slice-0",
     "parameters": {
       "dataSnapshotResourceName": "source-snap1",
       "dependsOn": [
@@ -254,7 +283,6 @@ exports[`resolved migration resources extracts resolved resource parameters from
         },
       },
       "documentBackfillServerGeneratedIds": "AUTO",
-      "documentBackfillSkipApproval": false,
       "documentBackfillUseRecoverySource": false,
       "documentBackfillUseTargetClusterForWorkCoordination": false,
       "externalSnapshotName": "",
@@ -281,13 +309,11 @@ exports[`resolved migration resources extracts resolved resource parameters from
           "memory": "1800Mi",
         },
       },
-      "metadataMigrationSkipEvaluateApproval": false,
-      "metadataMigrationSkipMigrateApproval": false,
       "metadataMigrationTransformerConfig": "",
       "metadataMigrationTransformerConfigBase64": "",
       "metadataMigrationTransformerConfigFile": "",
       "metadataMigrationUseRecoverySource": false,
-      "migrationLabel": "migration-0",
+      "migrationLabel": "slice-0",
       "snapshotLabel": "snap1",
       "snapshotRepoAwsRegion": "us-east-2",
       "snapshotRepoEndpoint": "",
@@ -313,8 +339,13 @@ exports[`resolved migration resources extracts resolved resource parameters from
   },
   {
     "apiVersion": "migrations.opensearch.org/v1alpha1",
+    "displayFields": [
+      "podReplicas",
+      "speedupFactor",
+      "removeAuthHeader",
+    ],
     "kind": "TrafficReplay",
-    "name": "source-proxy-target-replay",
+    "name": "replay",
     "parameters": {
       "dependsOn": [
         "source-proxy",

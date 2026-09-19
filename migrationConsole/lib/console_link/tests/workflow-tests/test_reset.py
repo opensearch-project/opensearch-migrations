@@ -1,5 +1,6 @@
 """Tests for workflow reset command (deletion-based CRD reset)."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -511,6 +512,129 @@ class TestResetCommandDelete:
 
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset', 'snap-a', '--cascade'])
+
+        assert result.exit_code == 0
+        mock_delete_targets.assert_called_once_with(resources, 'ma', True)
+
+    @patch(
+        "console_link.workflow.services.config_edit_service."
+        "ConfigEditService"
+    )
+    @patch("console_link.workflow.application.resets.ResetService")
+    @patch(
+        "console_link.workflow.commands.reset."
+        "_resolve_named_reset_targets"
+    )
+    @patch("console_link.workflow.commands.reset.load_k8s_config")
+    def test_reset_resubmit_uses_version_bound_plan_then_replaces_workflow(
+        self,
+        _mock_k8s,
+        mock_resolve,
+        mock_reset_service_class,
+        mock_edit_service_class,
+    ):
+        targets = [
+            ("capturedtraffics", "p2-topic", "Ready", ["default"]),
+        ]
+        mock_resolve.return_value = targets
+        reset_service = mock_reset_service_class.return_value
+        reset_service.plan_many.return_value = SimpleNamespace(
+            token="plan-token",
+            targets=(
+                SimpleNamespace(
+                    plural="capturedtraffics",
+                    name="p2-topic",
+                ),
+            ),
+        )
+        edit_service = mock_edit_service_class.return_value
+        edit_service.submit_saved_config.return_value = {
+            "workflow_name": "migration-workflow",
+        }
+
+        result = CliRunner().invoke(
+            workflow_cli,
+            ["reset", "capturedtraffic.p2-topic", "--resubmit"],
+        )
+
+        assert result.exit_code == 0
+        edit_service.validate_saved_config_for_submit.assert_called_once()
+        reset_service.plan_many.assert_called_once_with(
+            ("reset:capturedtraffics:p2-topic",)
+        )
+        reset_service.execute.assert_called_once_with("plan-token")
+        edit_service.submit_saved_config.assert_called_once_with(
+            "migration-workflow"
+        )
+        assert "replacement workflow submitted" in result.output
+
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_dry_run_json_returns_cascaded_plan(self, mock_find, mock_list, _mock_k8s):
+        resources = [
+            ('datasnapshots', 'snap-a', 'Ready', []),
+            ('snapshotmigrations', 'mig-a', 'Pending', ['snap-a']),
+        ]
+        mock_find.return_value = resources[0]
+        mock_list.return_value = resources
+
+        runner = CliRunner()
+        result = runner.invoke(
+            workflow_cli,
+            ['reset', 'datasnapshot.snap-a', '--cascade', '--dry-run', '--output', 'json'],
+        )
+
+        assert result.exit_code == 0
+        plan = json.loads(result.output)
+        assert [target['path'] for target in plan['targets']] == [
+            'datasnapshot.snap-a',
+            'snapshotmigration.mig-a',
+        ]
+        assert plan['warnings'] == [
+            'reset does not delete indexes on the target cluster. If the snapshot migration created indexes on '
+            'the target, remove them with: console clusters clear-indices --cluster target'
+        ]
+
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_exact_reset_fails_when_unconfirmed_dependent_exists(self, mock_find, mock_list, _mock_k8s):
+        snap = ('datasnapshots', 'snap-a', 'Ready', [])
+        mock_find.return_value = snap
+        mock_list.return_value = [
+            snap,
+            ('snapshotmigrations', 'mig-a', 'Pending', ['snap-a']),
+        ]
+
+        runner = CliRunner()
+        result = runner.invoke(workflow_cli, ['reset', '--exact', 'datasnapshot.snap-a'])
+
+        assert result.exit_code != 0
+        assert 'additional dependent resources now exist' in result.output
+        assert 'snapshotmigration.mig-a' in result.output
+
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_exact_reset_deletes_only_confirmed_target_set(
+        self, mock_find, mock_list, mock_delete_targets, _mock_k8s, _mock_storage
+    ):
+        resources = [
+            ('datasnapshots', 'snap-a', 'Ready', []),
+            ('snapshotmigrations', 'mig-a', 'Pending', ['snap-a']),
+        ]
+        mock_find.side_effect = resources
+        mock_list.return_value = resources
+        mock_delete_targets.return_value = True
+
+        runner = CliRunner()
+        result = runner.invoke(
+            workflow_cli,
+            ['reset', '--exact', 'datasnapshot.snap-a', 'snapshotmigration.mig-a'],
+        )
 
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with(resources, 'ma', True)

@@ -70,14 +70,19 @@ spec:
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
               --arg clientAuthPem "$CLIENT_AUTH_PEM" \
               '. + {
-              "kafkaClusterConfiguration": {
-                "default": {
-                  "autoCreate": {}
-                }
-              },
               "traffic": {
+                "kafkaClusters": {
+                  "default": {
+                    "autoCreate": {},
+                    "topics": {
+                      "capture-proxy": {}
+                    }
+                  }
+                },
                 "proxies": {
                   "capture-proxy": {
+                    "kafka": "default",
+                    "kafkaTopic": "capture-proxy",
                     "source": "source1",
                     "proxyConfig": ({
                       "listenPort": 9201,
@@ -92,7 +97,7 @@ spec:
                         "mode": "certManager",
                         "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
                         "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
-                        "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                        "clientAuth": {"trustedClientCaPem": $clientAuthPem}
                       }
                     } else {} end))
                   }
@@ -165,14 +170,19 @@ spec:
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
               | .snapshotMigrationConfigs = []
               | . + {
-                "kafkaClusterConfiguration": {
-                  "default": {
-                    "autoCreate": {}
-                  }
-                },
                 "traffic": {
+                  "kafkaClusters": {
+                    "default": {
+                      "autoCreate": {},
+                      "topics": {
+                        "capture-proxy": {}
+                      }
+                    }
+                  },
                   "proxies": {
                     "capture-proxy": {
+                      "kafka": "default",
+                      "kafkaTopic": "capture-proxy",
                       "source": "source1",
                       "proxyConfig": ({
                         "listenPort": 9201,
@@ -187,7 +197,7 @@ spec:
                           "mode": "certManager",
                           "issuerRef": {"name": "migrations-ca", "kind": "ClusterIssuer"},
                           "dnsNames": ["capture-proxy.ma.svc.cluster.local", "capture-proxy"],
-                          "clientAuth": {"trustedClientCaPem": $clientAuthPem, "required": false}
+                          "clientAuth": {"trustedClientCaPem": $clientAuthPem}
                         }
                       } else {} end))
                     }

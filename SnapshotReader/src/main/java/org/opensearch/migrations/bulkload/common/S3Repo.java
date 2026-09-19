@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletionException;
 
@@ -20,6 +21,12 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
+
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.failed;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.failureMessage;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.partial;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.passed;
+import static org.opensearch.migrations.bulkload.common.RepositoryAccessCheckResult.skipped;
 
 @Slf4j
 public class S3Repo implements SourceRepo, AutoCloseable {
@@ -249,6 +256,101 @@ public class S3Repo implements SourceRepo, AutoCloseable {
             .log();
 
         return strippedKeys;
+    }
+
+    /**
+     * Checks the same S3 credential and endpoint path used by snapshot readers without requiring
+     * that a snapshot already exists. Object reads are restricted to one byte so this check cannot
+     * accidentally download a large shard file.
+     */
+    public RepositoryAccessCheckResult checkAccess() {
+        var stages = new ArrayList<RepositoryAccessCheckResult.Stage>();
+        String prefix = normalizedRepoPrefix();
+        ListObjectsV2Response response;
+        try {
+            response = s3Client.listObjectsV2(ListObjectsV2Request.builder()
+                .bucket(s3RepoUri.bucketName)
+                .prefix(prefix.isEmpty() ? null : prefix)
+                .maxKeys(25)
+                .build()).join();
+            stages.add(passed(
+                "list-prefix",
+                "List repository prefix",
+                "The configured repository prefix is accessible."
+            ));
+        } catch (RuntimeException e) {
+            String message = failureMessage(e);
+            stages.add(failed("list-prefix", "List repository prefix", message));
+            stages.add(skipped(
+                "read-object",
+                "Read repository object",
+                "Object read was not attempted because the repository prefix could not be listed."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.FAILED,
+                "s3",
+                s3RepoUri.uri,
+                "Unable to list the configured S3 repository prefix.",
+                List.copyOf(stages)
+            );
+        }
+
+        var readableObject = response.contents().stream()
+            .filter(object -> object.key() != null && !object.key().isBlank())
+            .filter(object -> !object.key().endsWith("/"))
+            .findFirst();
+        if (readableObject.isEmpty()) {
+            stages.add(partial(
+                "read-object",
+                "Read repository object",
+                "No object is currently available under the configured prefix to verify read access."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.PARTIALLY_VERIFIED,
+                "s3",
+                s3RepoUri.uri,
+                "The S3 repository prefix is accessible, but object read access could not yet be verified.",
+                List.copyOf(stages)
+            );
+        }
+
+        try {
+            var request = GetObjectRequest.builder()
+                .bucket(s3RepoUri.bucketName)
+                .key(readableObject.get().key())
+                .range("bytes=0-0")
+                .build();
+            s3Client.getObject(request, AsyncResponseTransformer.toBytes()).join();
+            stages.add(passed(
+                "read-object",
+                "Read repository object",
+                "An object under the configured repository prefix is readable."
+            ));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.VALID,
+                "s3",
+                s3RepoUri.uri,
+                "The S3 repository prefix can be listed and its objects can be read.",
+                List.copyOf(stages)
+            );
+        } catch (RuntimeException e) {
+            String message = failureMessage(e);
+            stages.add(failed("read-object", "Read repository object", message));
+            return new RepositoryAccessCheckResult(
+                RepositoryAccessCheckResult.Status.FAILED,
+                "s3",
+                s3RepoUri.uri,
+                "The S3 repository prefix is accessible, but an object could not be read.",
+                List.copyOf(stages)
+            );
+        }
+    }
+
+    private String normalizedRepoPrefix() {
+        if (s3RepoUri.key.isEmpty()) {
+            return "";
+        }
+        return s3RepoUri.key.endsWith("/") ? s3RepoUri.key : s3RepoUri.key + "/";
     }
 
     public static class CannotListObjectsInS3 extends RfsException implements SnapshotReadFailure {

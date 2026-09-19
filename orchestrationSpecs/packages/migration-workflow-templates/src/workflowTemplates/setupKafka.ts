@@ -117,7 +117,9 @@ function makeDeployKafkaNodePool(args: {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaNodePool",
         metadata: {
-            name: "dual-role", // TODO - make this a user setting!
+            // KafkaNodePool names are namespace-scoped. Reusing a fixed role
+            // name makes a second managed Kafka cluster collide with the first.
+            name: args.clusterName,
             ownerReferences: makeOwnerReferences(args.clusterName, args.ownerUid),
             labels: {
                 "strimzi.io/cluster": args.clusterName,
