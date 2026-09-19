@@ -1,5 +1,6 @@
 import boto3
 import hashlib
+import logging
 import os
 import pytest
 import re
@@ -28,6 +29,24 @@ def aws_credentials():
 def test_valid_cluster_config():
     cluster = create_valid_cluster()
     assert isinstance(cluster, Cluster)
+
+
+def test_cluster_initialization_does_not_log_config_values(caplog):
+    endpoint = "https://admin:embedded-secret@opensearchtarget:9200"
+    password = "configured-password"
+    caplog.set_level(logging.INFO)
+
+    Cluster({
+        "endpoint": endpoint,
+        "basic_auth": {
+            "username": "admin",
+            "password": password,
+        },
+    })
+
+    assert "Initializing cluster client with auth type basic_auth" in caplog.text
+    assert endpoint not in caplog.text
+    assert password not in caplog.text
 
 
 def test_invalid_auth_type_refused():

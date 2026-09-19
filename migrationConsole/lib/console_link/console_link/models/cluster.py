@@ -215,8 +215,7 @@ class Cluster:
 
     def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         logger.info(
-            "Initializing cluster client for endpoint %s with auth type %s",
-            config.get("endpoint"),
+            "Initializing cluster client with auth type %s",
             next(
                 (
                     auth.name.lower()

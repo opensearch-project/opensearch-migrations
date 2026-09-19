@@ -7,7 +7,6 @@ import pytest
 from console_link.workflow.application.connectivity import (
     ConnectivityCheckService,
     ConnectivityTarget,
-    PreparedConnectivityChecks,
     RepositoryCheckJobRunner,
     RESULT_MARKER,
 )
