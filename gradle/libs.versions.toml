@@ -181,7 +181,6 @@ semver4j = { module = "org.semver4j:semver4j", version.ref = "semver4j" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 
 testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
-testcontainers-azure = {module = "org.testcontainers:testcontainers-azure", version.ref = "testcontainers" }
 testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers-modules" }
 testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers-modules" }
 testcontainers-localstack = {module = "org.testcontainers:localstack", version.ref = "testcontainers-modules" }

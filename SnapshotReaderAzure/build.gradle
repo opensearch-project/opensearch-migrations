@@ -38,7 +38,16 @@ dependencies {
     testImplementation libs.log4j.slf4j2.impl
     testImplementation libs.testcontainers
     testImplementation libs.testcontainers.junit.jupiter
-    testImplementation libs.testcontainers.azure
 
     testRuntimeOnly libs.junit.jupiter.engine
+}
+
+// AzureRepoIntegrationTest talks to Azurite over plain HTTP, and the Azure SDK refuses to send a
+// bearer token over HTTP. Supplying Azurite's development account key makes AzureRepo.create take
+// its shared-key branch instead of the ambient-identity fallback, so the test still exercises the
+// real endpoint resolution. This is a fixed emulator constant published in Microsoft's docs, not a
+// secret; it matches ACCOUNT_KEY in AzureRepoIntegrationTest.
+tasks.named('isolatedTest') {
+    environment 'AZURE_STORAGE_ACCOUNT_KEY',
+        'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=='
 }
