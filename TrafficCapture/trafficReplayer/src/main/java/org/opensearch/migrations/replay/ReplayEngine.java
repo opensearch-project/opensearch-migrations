@@ -15,14 +15,15 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
-import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -52,28 +53,6 @@ public class ReplayEngine {
         new java.util.concurrent.ConcurrentHashMap<>();
     private static final org.slf4j.Logger heartbeatLogger =
         org.slf4j.LoggerFactory.getLogger("ReplayHeartbeat");
-
-    /**
-     *
-     * @param networkSendOrchestrator
-     * @param contentTimeController
-     * @param timeShifter
-     */
-    public ReplayEngine(
-        RequestSenderOrchestrator networkSendOrchestrator,
-        BufferedFlowController contentTimeController,
-        TimeShifter timeShifter
-    ) {
-        this(
-            networkSendOrchestrator,
-            contentTimeController,
-            timeShifter,
-            new ReplayProgressController(
-                Runnable::run,
-                new ReplayReadGate(contentTimeController.getBufferTimeWindow(), contentTimeController)
-            )
-        );
-    }
 
     public ReplayEngine(
         RequestSenderOrchestrator networkSendOrchestrator,
@@ -139,6 +118,7 @@ public class ReplayEngine {
     }
 
     public <T> TrackedFuture<String, T> scheduleRequestLifecycle(
+        PartitionGenerationId partitionGenerationId,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant originalStart,
         Instant originalEnd,
@@ -149,7 +129,8 @@ public class ReplayEngine {
             RequestSenderOrchestrator.RetryVisitor<T>
         > retryVisitorFactory,
         Function<HttpRequestTransformationStatus, T> filteredResultFactory,
-        Duration quiescentDurationForRequest
+        Duration quiescentDurationForRequest,
+        TargetConnectionOwner.RequestProcessingRegistration processingRegistration
     ) {
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
         if (quiescentDurationForRequest != null) {
@@ -163,6 +144,7 @@ public class ReplayEngine {
         var requestKey = ctx.getReplayerRequestKey();
         return networkSendOrchestrator.scheduleRequestLifecycle(
             requestKey,
+            partitionGenerationId,
             ctx,
             start.minus(EXPECTED_TRANSFORMATION_DURATION),
             start,
@@ -170,15 +152,18 @@ public class ReplayEngine {
             permitPool,
             preparation,
             retryVisitorFactory,
-            filteredResultFactory
+            filteredResultFactory,
+            processingRegistration
         );
     }
 
     public RequestSenderOrchestrator.TransactionRuntime transactionRuntime(
+        PartitionGenerationId partitionGenerationId,
         IReplayContexts.IReplayerHttpTransactionContext context
     ) {
         return networkSendOrchestrator.transactionRuntime(
             context.getReplayerRequestKey(),
+            partitionGenerationId,
             context.getChannelKeyContext()
         );
     }
@@ -224,10 +209,70 @@ public class ReplayEngine {
     public TrackedFuture<String, SessionOutcome> closeConnection(
         IReplayContexts.IChannelKeyContext ctx,
         int channelSessionNumber,
+        PartitionGenerationId partitionGenerationId,
+        Instant timestamp
+    ) {
+        return closeConnectionWithAcceptance(
+            ctx,
+            channelSessionNumber,
+            partitionGenerationId,
+            timestamp
+        ).termination();
+    }
+
+    public RequestSenderOrchestrator.ScheduledClose closeConnectionWithAcceptance(
+        IReplayContexts.IChannelKeyContext ctx,
+        int channelSessionNumber,
+        PartitionGenerationId partitionGenerationId,
+        Instant timestamp
+    ) {
+        return closeConnectionWithAcceptance(
+            ctx,
+            channelSessionNumber,
+            partitionGenerationId,
+            null,
+            timestamp
+        );
+    }
+
+    public RequestSenderOrchestrator.ScheduledClose closeConnectionWithAcceptance(
+        IReplayContexts.IChannelKeyContext ctx,
+        int channelSessionNumber,
+        PartitionGenerationId partitionGenerationId,
+        long capturedOrdinal,
+        Instant timestamp
+    ) {
+        return closeConnectionWithAcceptance(
+            ctx,
+            channelSessionNumber,
+            partitionGenerationId,
+            Long.valueOf(capturedOrdinal),
+            timestamp
+        );
+    }
+
+    private RequestSenderOrchestrator.ScheduledClose closeConnectionWithAcceptance(
+        IReplayContexts.IChannelKeyContext ctx,
+        int channelSessionNumber,
+        PartitionGenerationId partitionGenerationId,
+        Long capturedOrdinal,
         Instant timestamp
     ) {
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
-        return networkSendOrchestrator.scheduleActorClose(ctx, channelSessionNumber, atTime);
+        return capturedOrdinal == null
+            ? networkSendOrchestrator.scheduleActorCloseWithAcceptance(
+                ctx,
+                channelSessionNumber,
+                partitionGenerationId,
+                atTime
+            )
+            : networkSendOrchestrator.scheduleActorCloseWithAcceptance(
+                ctx,
+                channelSessionNumber,
+                partitionGenerationId,
+                capturedOrdinal,
+                atTime
+            );
     }
 
     public void setFirstTimestamp(Instant firstPacketTimestamp) {

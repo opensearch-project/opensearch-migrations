@@ -11,7 +11,6 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -33,21 +32,20 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TerminalSourceConnectionId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
-import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
-import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
+import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -90,6 +88,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @Override
             public CompletionStage<Void> onAborted(SessionOutcome.Aborted aborted) {
                 return aborted.reason() == AbortReason.SOURCE_REASSIGNMENT
+                    || aborted.reason() == AbortReason.SHUTDOWN
                     ? CompletableFuture.completedFuture(null)
                     : CompletableFuture.failedFuture(aborted.cause());
             }
@@ -101,11 +100,20 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         });
     }
 
-    static void settleProgressWhenTransactionCompletes(
-        @NonNull CompletionStage<?> transactionCompletion,
+    static void settleProgressAfterProcessingLifecycleIsHandled(
+        @NonNull org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestProcessingRegistration
+            processingRegistration,
         @NonNull WorkToken progressToken
     ) {
-        transactionCompletion.whenComplete((ignored, failure) -> progressToken.close());
+        processingRegistration.completion().whenComplete((outcome, failure) -> {
+            if (failure != null) {
+                progressToken.close();
+            } else {
+                processingRegistration.lifecycleHandled().whenComplete(
+                    (ignored, lifecycleFailure) -> progressToken.close()
+                );
+            }
+        });
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
@@ -294,15 +302,33 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 }
             );
 
-            var runtime = replayEngine.transactionRuntime(ctx);
             var partition = trafficCaptureSource.sourcePartitionFor(requestKey.trafficStreamKey);
+            var runtime = replayEngine.transactionRuntime(
+                partition.partitionGenerationId(),
+                ctx
+            );
             sessionPartitions.put(runtime.requestId().session(), partition);
-            var progressToken = replayEngine.admitWork(
+            var recordId = trafficCaptureSource.recordIdFor(requestKey.trafficStreamKey);
+            var owner = Objects.requireNonNull(
+                TrafficReplayerCore.this.intakeOwner,
+                "replay-intake owner"
+            );
+            var generationRegistration = owner.submitRequiredHandled(
+                new ReplayIntakeOwner.RegisterRequestGeneration(
+                    partition.partitionGenerationId(),
+                    runtime.requestId(),
+                    recordId instanceof KafkaRecordId
+                )
+            );
+            var progressAdmission = replayEngine.admitWork(
                 partition,
                 runtime.requestId(),
                 request.getFirstPacketTimestamp()
             );
-            var recordId = trafficCaptureSource.recordIdFor(requestKey.trafficStreamKey);
+            var progressToken = generationRegistration.thenCombine(
+                progressAdmission,
+                (ignored, token) -> token
+            );
             var evidenceState = new TransactionEvidenceState(
                 ctx,
                 recordId instanceof KafkaRecordId ? ReplayIdentity.replayRequestId(requestKey) : null
@@ -326,48 +352,54 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture,
                 evidenceState
             );
+            var lifecycleSettlement = new CompletableFuture<CompletionStage<Void>>();
             progressToken.whenComplete((token, admissionFailure) -> {
                 if (admissionFailure != null) {
                     var cause = unwrap(admissionFailure);
+                    lifecycleSettlement.complete(CompletableFuture.failedFuture(cause));
                     targetCompletion.completeExceptionally(cause);
                     transaction.fail(cause);
                     return;
                 }
-                settleProgressWhenTransactionCompletes(transaction.completion(), token);
-                runtime.register(transaction).whenComplete((ignored, registrationFailure) -> {
-                    if (registrationFailure != null) {
-                        var cause = unwrap(registrationFailure);
-                        targetCompletion.completeExceptionally(cause);
-                        transaction.fail(cause);
-                        return;
-                    }
-                    try {
-                        var scheduledTarget = sendRequestAfterGoingThroughWorkQueue(
-                            ctx,
-                            request,
-                            requestKey,
-                            finishedAccumulatingResponseFuture,
-                            quiescentDurationForRequest
-                        );
-                        scheduledTarget.future.whenComplete((summary, targetFailure) -> {
-                            if (targetFailure == null) {
-                                targetCompletion.complete(summary);
-                            } else {
-                                targetCompletion.completeExceptionally(unwrap(targetFailure));
-                            }
-                        });
-                    } catch (Throwable t) {
-                        targetCompletion.completeExceptionally(t);
-                        transaction.fail(t);
-                    }
-                });
+                var processingRegistration = runtime.processingRegistration(transaction);
+                lifecycleSettlement.complete(processingRegistration.lifecycleHandled());
+                settleProgressAfterProcessingLifecycleIsHandled(
+                    processingRegistration,
+                    token
+                );
+                try {
+                    var scheduledTarget = sendRequestAfterGoingThroughWorkQueue(
+                        ctx,
+                        request,
+                        requestKey,
+                        partition.partitionGenerationId(),
+                        processingRegistration,
+                        finishedAccumulatingResponseFuture,
+                        quiescentDurationForRequest
+                    );
+                    scheduledTarget.future.whenComplete((summary, targetFailure) -> {
+                        if (targetFailure == null) {
+                            targetCompletion.complete(summary);
+                        } else {
+                            targetCompletion.completeExceptionally(unwrap(targetFailure));
+                        }
+                    });
+                } catch (Throwable t) {
+                    targetCompletion.completeExceptionally(t);
+                    transaction.fail(t);
+                }
             });
 
             var allWorkFinishedForTransactionFuture = new TextTrackedFuture<>(
                 transaction.completion()
                     .thenCompose(outcome -> handleTransactionOutcome(evidenceState, outcome))
+                    .thenCombine(
+                        lifecycleSettlement.thenCompose(stage -> stage),
+                        (ignored, lifecycleIgnored) -> (Void) null
+                    )
                     .toCompletableFuture(),
-                () -> "waiting for replay transaction disposition for " + runtime.requestId()
+                () -> "waiting for replay transaction disposition and lifecycle handling for "
+                    + runtime.requestId()
             );
             log.atTrace().setMessage("Adding {} to targetTransactionInProgressMap").addArgument(requestKey).log();
             requestWorkTracker.put(requestKey, allWorkFinishedForTransactionFuture);
@@ -465,32 +497,45 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                         state.target,
                         state.targetFailure
                     );
-                    finishRecordAssociationsAfterTupleDurability(state);
                     return CompletableFuture.completedFuture(
                         new EvidenceOutcome.Durable("synchronous tuple consumer")
                     );
                 }
-                return packageAndWriteTuple(
-                    tupleHandlingContext,
-                    tupleWriter,
-                    state.source,
-                    state.target,
-                    state.targetFailure
-                ).thenRun(() -> finishRecordAssociationsAfterTupleDurability(state))
-                .handle((ignored, failure) ->
+                CompletionStage<Void> tupleWrite;
+                try {
+                    tupleWrite = packageAndWriteTuple(
+                        tupleHandlingContext,
+                        tupleWriter,
+                        state.source,
+                        state.target,
+                        state.targetFailure
+                    );
+                } catch (Throwable failure) {
+                    return CompletableFuture.completedFuture(
+                        new EvidenceOutcome.Failed(fatalTupleWriteFailure(state.context, failure))
+                    );
+                }
+                return tupleWrite.handle((ignored, failure) ->
                     failure == null
                         ? new EvidenceOutcome.Durable("whole tuple durable")
-                        : new EvidenceOutcome.Failed(unwrap(failure))
+                        : new EvidenceOutcome.Failed(fatalTupleWriteFailure(state.context, failure))
                 );
             } catch (Throwable t) {
                 return CompletableFuture.completedFuture(new EvidenceOutcome.Failed(unwrap(t)));
             }
         }
 
-        private void finishRecordAssociationsAfterTupleDurability(TransactionEvidenceState state) {
-            if (state.replayRequestId != null) {
-                recordWorkTracker.submitAssociationFinished(state.replayRequestId);
-            }
+        private Error fatalTupleWriteFailure(
+            IReplayContexts.IReplayerHttpTransactionContext context,
+            Throwable failure
+        ) {
+            return new Error(
+                "Fatal tuple write failure for " + context + ". The replayer is stopping without "
+                    + "marking contributing source records complete because tuple output was not "
+                    + "durably written. Fix the tuple sink failure before restarting; otherwise "
+                    + "replay will remain blocked at these records.",
+                unwrap(failure)
+            );
         }
 
         private CompletionStage<Void> handleTransactionOutcome(
@@ -563,6 +608,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
+            ReplayIdentity.PartitionGenerationId partitionGenerationId,
+            org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestProcessingRegistration
+                processingRegistration,
             TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
             Duration quiescentDurationForRequest) {
             log.atDebug().setMessage("[{}] Admitting request before asynchronous preparation")
@@ -571,13 +619,15 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var httpSentRequestFuture = TrafficReplayerCore.this.transformAndSendRequest(
                 inputRequestTransformerFactory,
                 replayEngine,
+                partitionGenerationId,
                 finishedAccumulatingResponseFuture,
                 ctx,
                 request.getFirstPacketTimestamp(),
                 request.getLastPacketTimestamp(),
                 request.packetBytes::stream,
                 quiescentDurationForRequest,
-                permitPool
+                permitPool,
+                processingRegistration
             );
             httpSentRequestFuture.future.whenComplete(
                 (v, t) -> log.atTrace()
@@ -640,22 +690,35 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .log();
                 actorTermination = replayEngine.cancelConnection(ctx, channelSessionNumber).future;
             } else {
-                var progressAdmission = admitSessionWork(
-                    sessionKey,
-                    channelInteractionNum,
-                    "captured-close",
-                    timestamp,
-                    connectionKey
+                var partition = trafficCaptureSource.sourcePartitionFor(connectionKey);
+                var progressAdmission = replayEngine.admitWork(
+                    partition,
+                    new ReplaySessionWorkId(
+                        sessionKey,
+                        channelInteractionNum,
+                        "captured-close"
+                    ),
+                    timestamp
                 );
                 actorTermination = progressAdmission.thenCompose(token -> {
                     progressToken.set(token);
                     replayEngine.setFirstTimestamp(timestamp);
-                    return replayEngine.closeConnection(ctx, channelSessionNumber, timestamp)
-                        .future
-                        .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome);
-                }).thenRun(() -> terminalAssociation.ifPresent(
-                    recordWorkTracker::submitAssociationFinished
-                ));
+                    var scheduledClose = replayEngine.closeConnectionWithAcceptance(
+                        ctx,
+                        channelSessionNumber,
+                        partition.partitionGenerationId(),
+                        Math.addExact(channelSessionNumber, channelInteractionNum),
+                        timestamp
+                    );
+                    return scheduledClose.admissionAccepted()
+                        .thenRun(() -> terminalAssociation.ifPresent(
+                            recordWorkTracker::submitAssociationFinished
+                        ))
+                        .thenCompose(ignored ->
+                            scheduledClose.termination().future
+                                .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome)
+                        );
+                });
             }
             actorTermination.whenComplete((ignored, failure) ->
                 log.atDebug()
@@ -683,31 +746,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull ITrafficStreamKey connectionKey
         ) {
             trafficCaptureSource.onConnectionAccumulationComplete(connectionKey);
-        }
-
-        private CompletionStage<WorkToken> admitSessionWork(
-            ConnectionSessionKey sessionKey,
-            int interactionIndex,
-            String operation,
-            Instant sourceTime,
-            ITrafficStreamKey connectionKey
-        ) {
-            var partition = connectionKey == null
-                ? sessionPartitions.get(sessionKey)
-                : trafficCaptureSource.sourcePartitionFor(connectionKey);
-            if (partition == null) {
-                throw new IllegalStateException(
-                    "No partition generation is known for replay session work: "
-                        + sessionKey
-                        + ", operation="
-                        + operation
-                );
-            }
-            return replayEngine.admitWork(
-                partition,
-                new ReplaySessionWorkId(sessionKey, interactionIndex, operation),
-                sourceTime
-            );
         }
 
         private ConnectionSessionKey sessionKey(

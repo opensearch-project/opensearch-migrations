@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 
 import lombok.Getter;
 import lombok.NonNull;
@@ -26,6 +27,8 @@ public class TransformedTargetRequestAndResponseList implements AutoCloseable {
     @Getter
     protected final List<AggregatedRawResponse> responseList;
 
+    private final List<TargetAttemptOutcome<AggregatedRawResponse>> attemptHistory;
+
     public TransformedTargetRequestAndResponseList(
         DiagnosticPayload diagnosticPayload,
         @NonNull HttpRequestTransformationStatus transformationStatus
@@ -33,6 +36,7 @@ public class TransformedTargetRequestAndResponseList implements AutoCloseable {
         this.diagnosticPayload = new AtomicReference<>(diagnosticPayload);
         this.transformationStatus = transformationStatus;
         this.responseList = new ArrayList<>();
+        this.attemptHistory = new ArrayList<>();
     }
 
     public TransformedTargetRequestAndResponseList(
@@ -58,11 +62,22 @@ public class TransformedTargetRequestAndResponseList implements AutoCloseable {
     }
 
     public void addResponse(AggregatedRawResponse r) {
-        responseList.add(r);
+        addAttemptOutcome(new TargetAttemptOutcome.TargetResponseObtained<>(r));
+    }
+
+    public void addAttemptOutcome(TargetAttemptOutcome<AggregatedRawResponse> outcome) {
+        attemptHistory.add(outcome);
+        if (outcome instanceof TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained) {
+            responseList.add(obtained.response());
+        }
     }
 
     public List<AggregatedRawResponse> responses() {
         return Collections.unmodifiableList(responseList);
+    }
+
+    public List<TargetAttemptOutcome<AggregatedRawResponse>> attemptHistory() {
+        return Collections.unmodifiableList(attemptHistory);
     }
 
     @Override

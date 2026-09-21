@@ -2,7 +2,7 @@ package org.opensearch.migrations.replay.tracing;
 
 import java.time.Duration;
 
-import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
@@ -11,7 +11,7 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
+public final class ConnectionActorMetrics implements TargetConnectionOwner.Metrics {
     public static final AttributeKey<String> REASON_ATTRIBUTE = AttributeKey.stringKey("reason");
     public static final AttributeKey<String> CHILD_ATTRIBUTE = AttributeKey.stringKey("child");
 
@@ -55,7 +55,7 @@ public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
     }
 
     @Override
-    public void headWaitChanged(@NonNull ConnectionActor.HeadWaitReason reason, int delta) {
+    public void headWaitChanged(@NonNull TargetConnectionOwner.HeadWaitReason reason, int delta) {
         headWait.add(delta, Attributes.of(REASON_ATTRIBUTE, reason.metricLabel()));
     }
 
@@ -70,7 +70,7 @@ public final class ConnectionActorMetrics implements ConnectionActor.Metrics {
     }
 
     @Override
-    public void pendingAbortChildChanged(@NonNull ConnectionActor.AbortChild child, int delta) {
+    public void pendingAbortChildChanged(@NonNull TargetConnectionOwner.AbortChild child, int delta) {
         pendingAbortChild.add(delta, Attributes.of(CHILD_ATTRIBUTE, child.metricLabel()));
     }
 

@@ -5,13 +5,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
-import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.ProcessingCancellationResult;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 
@@ -137,9 +137,11 @@ public final class ReplayTransaction<R> {
     private static final class PendingCommand {
         private final CompletableFuture<Void> acknowledgement = new CompletableFuture<>();
         private final Runnable transition;
+        private final boolean acknowledgeIfAlreadyTerminated;
 
-        private PendingCommand(Runnable transition) {
+        private PendingCommand(Runnable transition, boolean acknowledgeIfAlreadyTerminated) {
             this.transition = transition;
+            this.acknowledgeIfAlreadyTerminated = acknowledgeIfAlreadyTerminated;
         }
     }
 
@@ -172,8 +174,10 @@ public final class ReplayTransaction<R> {
     private boolean sourceSettlementReserved;
     private boolean targetSettlementReserved;
     private boolean failureReserved;
+    private boolean cancellationReserved;
     private boolean metricsActive;
     private boolean resourcesReleased;
+    private boolean cancellationTerminal;
     private boolean terminated;
 
     public ReplayTransaction(
@@ -325,6 +329,7 @@ public final class ReplayTransaction<R> {
                 );
             }
             failureReserved = true;
+            cancellationReserved = false;
             pendingFailure = cause;
             command = reserveCommandLocked(() -> {
                 completeFailureLocked(cause);
@@ -333,8 +338,61 @@ public final class ReplayTransaction<R> {
         return enqueueCommand(command);
     }
 
+    /**
+     * Requests cancellation and reports which terminal path had already won the transaction.
+     *
+     * <p>The result is a value because normal processing may finish between the connection owner's
+     * cancellation decision and this transaction's mailbox. Infrastructure failures while
+     * admitting or applying the cancellation remain exceptional.</p>
+     */
+    public CompletionStage<ProcessingCancellationResult> requestCancellation(
+        @NonNull java.util.concurrent.CancellationException cause
+    ) {
+        PendingCommand command;
+        synchronized (stateLock) {
+            if (terminated) {
+                return CompletableFuture.completedFuture(
+                    cancellationWonLocked()
+                        ? new ProcessingCancellationResult.CancellationWon()
+                        : new ProcessingCancellationResult.ProcessingCompletionWon()
+                );
+            }
+            if (failureReserved) {
+                return CompletableFuture.completedFuture(
+                    cancellationReserved
+                        ? new ProcessingCancellationResult.CancellationWon()
+                        : new ProcessingCancellationResult.ProcessingCompletionWon()
+                );
+            }
+            failureReserved = true;
+            cancellationReserved = true;
+            pendingFailure = cause;
+            command = reserveCommandLocked(
+                () -> {
+                    cancellationTerminal = true;
+                    completeFailureLocked(cause);
+                },
+                true
+            );
+        }
+        return enqueueCommand(command).thenApply(ignored -> {
+            synchronized (stateLock) {
+                return cancellationWonLocked()
+                    ? new ProcessingCancellationResult.CancellationWon()
+                    : new ProcessingCancellationResult.ProcessingCompletionWon();
+            }
+        });
+    }
+
     private PendingCommand reserveCommandLocked(Runnable transition) {
-        var command = new PendingCommand(transition);
+        return reserveCommandLocked(transition, false);
+    }
+
+    private PendingCommand reserveCommandLocked(
+        Runnable transition,
+        boolean acknowledgeIfAlreadyTerminated
+    ) {
+        var command = new PendingCommand(transition, acknowledgeIfAlreadyTerminated);
         pendingCommands.add(command);
         return command;
     }
@@ -354,13 +412,21 @@ public final class ReplayTransaction<R> {
                 return;
             }
             if (terminated) {
-                command.acknowledgement.completeExceptionally(unavailableFailureLocked());
+                if (command.acknowledgeIfAlreadyTerminated) {
+                    command.acknowledgement.complete(null);
+                } else {
+                    command.acknowledgement.completeExceptionally(unavailableFailureLocked());
+                }
                 return;
             }
             assertInMailbox();
             command.transition.run();
             command.acknowledgement.complete(null);
         }
+    }
+
+    private boolean cancellationWonLocked() {
+        return cancellationTerminal || targetOutcome instanceof TargetOutcome.Cancelled<?>;
     }
 
     private void activateMetricsFromMailbox() {

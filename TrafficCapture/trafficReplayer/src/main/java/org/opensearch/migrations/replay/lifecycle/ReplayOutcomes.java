@@ -54,6 +54,39 @@ public final class ReplayOutcomes {
         }
     }
 
+    public sealed interface TargetAttemptOutcome<T>
+        permits TargetAttemptOutcome.TargetResponseObtained,
+            TargetAttemptOutcome.NoTargetResponseObtained {
+
+        <R> R visit(Visitor<T, R> visitor);
+
+        interface Visitor<T, R> {
+            R onTargetResponseObtained(TargetResponseObtained<T> outcome);
+
+            R onNoTargetResponseObtained(NoTargetResponseObtained<T> outcome);
+        }
+
+        record TargetResponseObtained<T>(@NonNull T response) implements TargetAttemptOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onTargetResponseObtained(this);
+            }
+        }
+
+        record NoTargetResponseObtained<T>(
+            @NonNull String reason
+        ) implements TargetAttemptOutcome<T> {
+            @Override
+            public <R> R visit(Visitor<T, R> visitor) {
+                return visitor.onNoTargetResponseObtained(this);
+            }
+        }
+    }
+
+    /**
+     * Legacy transaction-settlement vocabulary retained at the pre-S7 transaction boundary.
+     * New connection/request owners use {@link TargetAttemptOutcome} instead.
+     */
     public sealed interface TargetOutcome<T>
         permits TargetOutcome.Succeeded,
             TargetOutcome.Failed,
@@ -109,6 +142,15 @@ public final class ReplayOutcomes {
                 return visitor.onClassifiedSkip(this);
             }
         }
+    }
+
+    public sealed interface ProcessingCancellationResult
+        permits ProcessingCancellationResult.CancellationWon,
+            ProcessingCancellationResult.ProcessingCompletionWon {
+
+        record CancellationWon() implements ProcessingCancellationResult {}
+
+        record ProcessingCompletionWon() implements ProcessingCancellationResult {}
     }
 
     public sealed interface SourceOutcome

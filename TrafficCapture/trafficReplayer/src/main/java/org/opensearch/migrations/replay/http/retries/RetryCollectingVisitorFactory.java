@@ -1,13 +1,14 @@
 package org.opensearch.migrations.replay.http.retries;
 
-import java.util.Collections;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TransformedTargetRequestAndResponseList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
@@ -45,13 +46,32 @@ public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<Trans
         public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<
             TransformedTargetRequestAndResponseList>> visit(
             io.netty.buffer.ByteBuf requestBytes,
-            org.opensearch.migrations.replay.AggregatedRawResponse aggregatedResponse,
-            Throwable failure
+            TargetAttemptOutcome<AggregatedRawResponse> outcome
         ) {
-            if (failure != null) {
-                return retryAfterFailure(failure);
-            }
-            assert aggregatedResponse != null;
+            return outcome.visit(new TargetAttemptOutcome.Visitor<>() {
+                @Override
+                public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<
+                    TransformedTargetRequestAndResponseList>> onTargetResponseObtained(
+                    TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained
+                ) {
+                    return evaluateTargetResponse(requestBytes, obtained.response());
+                }
+
+                @Override
+                public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<
+                    TransformedTargetRequestAndResponseList>> onNoTargetResponseObtained(
+                    TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> notObtained
+                ) {
+                    return retryAfterNoResponse(notObtained);
+                }
+            });
+        }
+
+        private TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<
+            TransformedTargetRequestAndResponseList>> evaluateTargetResponse(
+            io.netty.buffer.ByteBuf requestBytes,
+            AggregatedRawResponse aggregatedResponse
+        ) {
             var collector = collectorRef.get();
             if (collector == null) {
                 return TextTrackedFuture.failedFuture(
@@ -59,10 +79,12 @@ public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<Trans
                     () -> "retry visitor was invoked after its result was transferred"
                 );
             }
-            collector.addResponse(aggregatedResponse);
+            collector.addAttemptOutcome(
+                new TargetAttemptOutcome.TargetResponseObtained<>(aggregatedResponse)
+            );
             return shouldRetry.shouldRetry(
                 requestBytes,
-                Collections.unmodifiableList(collector.getResponseList()),
+                collector.responses(),
                 aggregatedResponse,
                 finishedAccumulatingResponseFuture
             ).thenCompose(
@@ -72,13 +94,23 @@ public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<Trans
         }
 
         private TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<
-            TransformedTargetRequestAndResponseList>> retryAfterFailure(Throwable failure) {
+            TransformedTargetRequestAndResponseList>> retryAfterNoResponse(
+            TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> outcome
+        ) {
+            var collector = collectorRef.get();
+            if (collector == null) {
+                return TextTrackedFuture.failedFuture(
+                    new IllegalStateException("retry collector ownership was already transferred"),
+                    () -> "retry visitor was invoked after its result was transferred"
+                );
+            }
+            collector.addAttemptOutcome(outcome);
             return TextTrackedFuture.completedFuture(
                 new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
                     RequestSenderOrchestrator.RetryDirective.RETRY,
                     null
                 ),
-                () -> "Returning a future to retry due to an unknown exception: " + failure
+                () -> "Returning a future to retry because no target response was obtained: " + outcome.reason()
             );
         }
 

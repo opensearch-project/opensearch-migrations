@@ -357,3 +357,84 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - Traceability: S4b completes R11 and R12 for tracker closure plus observed-prefix commit authority.
   It establishes R13 through cross-record response association and commit blocking; the required
   delayed tuple-durability proof and final vocabulary deletion remain assigned to S5 and S7.
+
+## S5 — two request milestones and persistent request registry
+
+### Start
+
+- Re-read the execution contract in §3.1, the S5 plan boundary, the traceability matrix in §6.5,
+  and the authoritative connection/request child LLD.
+- Confirmed that `TargetConnectionOwner` and every `RequestReplayOwner` share one selected Netty
+  event loop. There is no separate connection-owner executor, and no owner-confined mutable state
+  may be read or changed off that event loop.
+- Confirmed that admission and execution are distinct ordered queues. Transformation readiness may
+  arrive out of order but cannot change captured execution order, and only the execution head may
+  reserve a target turn.
+- Confirmed the two independent request milestones: `ConnectionTurnFinished` ends target
+  connection ordering and advances the execution head; `RequestProcessingFinished` occurs only
+  after tuple durability and removes the request from the connection-owned registry after required
+  replay-intake acceptance.
+- Confirmed that `FirstTargetWriteSubmitted` is observable only at Netty's first accepted write,
+  changes local connection cancellation state exactly once, and is never sent to replay intake.
+- Confirmed the exact attempt outcome split: `TargetResponseObtained` includes successful and
+  unsuccessful complete responses; `NoTargetResponseObtained` alone represents absence of a target
+  response. Abort and retry-policy throws may not be converted into exceptional control flow that
+  fabricates a retry.
+- Planned evidence: request-state and owner transition tables, out-of-order preparation with ordered
+  turns, turn completion before delayed tuple durability, registry retention through tuple
+  durability, exactly-once milestones, first-write locality, and impossible transition plus rejected
+  owner submission reaching `ProcessSupervisor`.
+- Traceability target: establish the S5 portions of R1, R2, R8, R10, R13, and R19. Final disposition
+  vocabulary deletion and unconditional tuple-writer retry remain assigned to S7.
+
+### Progress checkpoint — S5a production owner contracts
+
+- Replaced `ConnectionActor` in production with event-loop-confined `TargetConnectionOwner` and
+  per-request `RequestReplayOwner`. Admission and execution use separate FIFO queues, request and
+  close inputs share one explicit captured-ordinal space, and the request registry survives target
+  turn completion.
+- Added typed request admission. Acceptance occurs only after registry insertion, processing
+  registration, preparation ownership transfer, and queue insertion. Rejection leaves preparation
+  and processing cleanup with the sender.
+- Added typed processing-cancellation arbitration. Permanent request-processing outcomes are
+  `TupleDurable` and `RequestCleanupFinished`; the owner does not infer cancellation from a
+  `Throwable` subtype. The legacy `TargetOutcome` remains isolated at the pre-S7
+  `ReplayTransaction` boundary; no new compatibility settlement vocabulary was retained.
+- Split target-attempt results into `TargetResponseObtained` and `NoTargetResponseObtained`.
+  Retry-policy throws remain failures, and target abort returns an explicit value instead of
+  fabricating a retry through exceptional control flow.
+- Routed `ConnectionRequestFinished` and `RequestProcessingFinished` through replay intake.
+  Connection-turn completion removes only the execution entry and advances the head; normal
+  processing completion waits for tuple durability and both required intake acceptances before
+  registry removal.
+- Made `FirstTargetWriteSubmitted` a connection-local, one-shot callback at Netty's accepted
+  `writeAndFlush` boundary. It is not a replay-intake input and retries do not repeat it.
+
+| S5a requirement | Production location | Focused evidence in the current test migration |
+|---|---|---|
+| Typed admission and cleanup ownership | `TargetConnectionOwner.RequestAdmissionResult`; `RequestSenderOrchestrator.scheduleRequestLifecycle` | wrong-generation, late-admission, rejected-submission, and throwing-`begin()` cases |
+| Separate captured-order queues | `TargetConnectionOwner.admissionCommands` and `executionCommands`; ordinal validation | out-of-order preparation; nonzero request/request/close ordinals |
+| Two milestones and persistent registry | `settleRequest`; `applyRequestProcessingCompletion`; replay-intake lifecycle routing | target head advances before delayed tuple durability; registry waits for intake acceptance |
+| Typed cancellation races | `ProcessingCancellationResult`; `ReplayTransaction.requestCancellation`; owner arbitration | both decision-before-completion and completion-before-decision orders |
+| First-write locality | `NettyPacketToHttpConsumer.writePacketAndUpdateFuture`; connection-owner callback | accepted-write locality, one-shot delivery, and retry reuse |
+| Fatal owner transitions | owner transition runner and injected fatal handler | rejected immediate/scheduled submissions, failed lifecycle acceptance, and unexpected cancellation |
+
+- A parallel contract review found two admission defects: an accepted request could be rolled back to
+  sender ownership when `RequestPreparation.begin()` threw, and mailbox rejection could remove from
+  the owner-confined registry on the submitting thread. Both were fixed. Registry/obligation rollback
+  now occurs only in the owner mailbox; after accepted ownership, a throwing `begin()` remains an
+  owner-fatal transition. A regression test covers that accepted-ownership boundary.
+- The required read-only Claude Code review first snapshotted the pre-fix staged tree and independently
+  reported the off-event-loop registry mutation as Medium severity. Disposition: valid and already
+  fixed before its response arrived. A fresh review of the final staged tree explicitly verified both
+  admission fixes and returned `NO_ACTIONABLE_FINDINGS`.
+- The exact production-only staged tree compiled in an isolated worktree with
+  `:TrafficCapture:trafficReplayer:compileJava --parallel --max-workers=18`. The serialized
+  `TargetConnectionOwnerTest` suite passed 48/48.
+- A serialized 109-test lifecycle sweep passed 108 tests. The sole failure,
+  `globalRunwayLossReachesAnActorCreatedDuringShutdown`, asserts that an unstarted preparation future
+  is cancelled through legacy `ReplayTransactionRegistry` runway-loss behavior. The request itself
+  completes exceptionally as required. This stale transitional assertion is assigned to the
+  immediate test-migration slice; no production bridge will be added for vocabulary deleted in S7.
+- S5 remains open. The focused test migration, owner/test decomposition, and complete green module
+  run are required before adding the S5 End entry.
