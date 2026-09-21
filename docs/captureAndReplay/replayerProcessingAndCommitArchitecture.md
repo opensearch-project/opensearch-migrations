@@ -1109,7 +1109,7 @@ When demand requires more records and no earlier request is outstanding, replay 
 `RequestNextPartitionBatch` for that partition generation. The Kafka source resumes the partition
 only while that request remains outstanding and no generation-cleanup or lifecycle condition
 prohibits reading. When a poll returns records for that partition, the source pauses it before the
-next poll and sends the complete partition batch to replay intake. Replay intake cannot request the
+next poll and sends the complete partition batch to replay intake. Replay intake must not request the
 next batch until it has applied every record in the current one.
 
 An empty poll does not resolve the request. The partition remains requested and resumed. Local
@@ -1224,13 +1224,13 @@ usually resolve requests quickly; slow or missing responses keep demand open unt
 deterministic boundary or earlier terminal source evidence. After retry input resolves, final
 source-response accumulation for tuple output remains independent.
 
-This is not a hard memory ceiling. Reading through one request's retry window may encounter many
+This is **NOT** a hard memory ceiling. Reading through one request's retry window may encounter many
 other connections and requests, and Kafka may return a large batch before a pause takes effect.
 `N` limits ordinary retry-ready request supply; it does not bound unresolved requests, bytes,
 records, incomplete source accumulators, or tuple-only work. A hard count or byte cap can still
 deadlock if it stops intake before a record needed to complete, close, or expire retained state.
-The design therefore accepts that extreme traffic density or record size may exhaust memory rather
-than introducing such a deadlock by construction.
+This design therefore accepts that extreme traffic density or record size may _**exhaust memory rather
+than introducing such a deadlock by construction**_.
 
 Periodic proxy publication prevents a quiet or low-volume connection from retaining one nonempty
 record until connection close. It does not create a replayer memory ceiling: a record can still be
@@ -1270,7 +1270,7 @@ When revocation begins, the Kafka source submits one scoped graceful-cancellatio
 intake. That input identifies the revoked partition generation and the grace deadline.
 
 1. replay intake stops admitting new work from that partition generation;
-2. work whose target request has not been sent is cancelled immediately;
+2. as each owner processes the cancellation, it immediately cancels work whose target request has not been sent, including work queued behind a request that is still finishing; 
 3. a request already sent to the target may finish target processing and durable tuple output
    during the grace interval;
 4. tuple output already started may continue during that interval;
