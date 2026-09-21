@@ -29,6 +29,7 @@ import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
+import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
@@ -345,6 +346,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         );
         this.currentReplayEngine.set(replayEngine);
         var dispositionLedger = new RecordDispositionLedger(replayIntakeOwner::submitRequired);
+        var recordWorkTracker = new RecordWorkTracker(
+            replayIntakeOwner::submitRequired,
+            replayIntakeOwner::isOwnerThread,
+            recordId -> log.atTrace()
+                .setMessage("Record work tracker completed {} while legacy commit authority remains active")
+                .addArgument(recordId)
+                .log()
+        );
         var accumulationCallbacks = new TrafficReplayerAccumulationCallbacks(
             replayEngine,
             tupleWriter,
@@ -353,7 +362,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             trafficSource,
             quiescentDuration,
             permitPool,
-            dispositionLedger
+            dispositionLedger,
+            recordWorkTracker
         );
         trafficSource.setSourcePartitionLifecycleListener(
             SourcePartitionLifecycleListener.combine(
@@ -366,10 +376,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                 accumulationCallbacks,
-                trafficSource.usesStructuralExpiration()
+                trafficSource.usesStructuralExpiration(),
+                recordWorkTracker,
+                trafficSource::recordIdFor
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
-        replayIntakeOwner.configureOwnedComponents(permitPool, progressController, dispositionLedger);
+        replayIntakeOwner.configureOwnedComponents(
+            permitPool,
+            progressController,
+            dispositionLedger,
+            recordWorkTracker
+        );
         replayIntakeOwner.start();
         try {
             replayIntakeOwner.startReading(

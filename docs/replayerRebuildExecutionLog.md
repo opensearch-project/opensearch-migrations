@@ -231,3 +231,57 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   `unpartitioned-session`, blocking intake-owner wait, or raw `int sourceGeneration` owner input.
 - Traceability: S3 proves the replay-intake portion of R1 and R19. The remaining owner inventories
   and R2-R18 stay open for their assigned milestones.
+
+## S4a — intake-owned record/work association
+
+### Start
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Confirmed that the legacy disposition/commit path remains the sole authority throughout S4a; the
+  new tracker is non-production association evidence only until the atomic S4b cutover.
+- Confirmed one `RecordWorkTracker` per `KafkaRecordId`, open while observations are applied, with a
+  many-association set, atomic relabeling, and one completion latch. Association completion cannot
+  itself choose or submit a Kafka disposition in this milestone.
+- Confirmed associations are created per observation for the operation actually affected. Request
+  assembly associations move without a gap to `ReplayRequestId`; every later source-response record
+  remains associated with that request until tuple durability.
+- Planned evidence uses literal `RecordScript` expectations: mixed request-N EOM/request-N+1 read,
+  keep-alive, request-spanning records, cross-record source response, duplicate association
+  idempotence, relabel without transient completion, and no completion while any expected
+  association remains.
+- Traceability target: establish tracker-state proofs for R11-R13. Commit-order authority and
+  production completion emission remain open until S4b.
+
+### End
+
+- Re-read the execution contract in §3.1, the S4a boundary, and traceability matrix in §6.5.
+- Added intake-owned `RecordWorkTracker` state for each accepted `KafkaRecordId`: a many-operation
+  association set, close-to-new-associations flag, completion latch, and reverse operation index.
+  Duplicate association of one record with one operation is idempotent; selective completion removes
+  only the named operation; completion is emitted internally once and `associationFinished` returns
+  no commit authority.
+- The accumulator now registers Kafka records before applying them, associates each applicable
+  observation with its current source-request assembly or `ReplayRequestId`, atomically relabels
+  every contributing request-assembly record when the request is reconstituted, and closes the
+  tracker only after the entire record is successfully applied.
+- A keep-alive observation that both finishes request N's source response and begins request N+1 now
+  gives its containing record both independent associations. Dropped, closed, expired, or otherwise
+  abandoned incomplete requests release only their source-assembly associations.
+- Every record contributing source-response observations remains associated with the same
+  `ReplayRequestId`. Synchronous and asynchronous tuple paths return one immutable
+  `AssociationFinished` input to replay intake only after tuple durability; tuple failure leaves the
+  association unfinished.
+- Added literal `RecordScript` oracle tests for a mixed keep-alive record and a response spanning
+  Kafka records. Added tracker tests for duplicate association idempotence, several associations per
+  record, relabeling across already-closed records without transient completion, immediate empty
+  completion, owner-input return, and off-owner mutation rejection.
+- Direct clean `javac` compilation passed for all 175 main, 21 test-fixture, and 119 test source
+  files. A focused JUnit Platform run passed 32 tests covering the new association model plus the
+  existing randomized accumulator settlement, keep-alive/terminal reconstruction, replay-intake
+  owner, fatal handling, and shutdown suites.
+- `git diff --check` passed. The legacy `RecordDispositionLedger`, `holdTrafficStream`, and
+  ignored-record callback remain the sole commit authority exactly for this non-production S4a
+  checkpoint; the new tracker's completion listener is diagnostic evidence only.
+- Traceability: S4a establishes the tracker-state portions of R11 and R12 and the cross-record
+  response association portion of R13. Commit-prefix authority remains open for S4b; the complete
+  request-processing and delayed durable-tuple proofs remain assigned to S5 and S7.

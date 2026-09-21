@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+
 import org.apache.kafka.common.TopicPartition;
 
 import lombok.NonNull;
@@ -74,10 +76,40 @@ public final class ReplayIdentity {
 
     public sealed interface ReplayWorkId permits ReplayRequestId, ReplaySessionWorkId {}
 
-    public record ReplayRequestId(@NonNull ConnectionSessionKey session, int requestIndex) implements ReplayWorkId {
+    public sealed interface RecordAssociationId permits
+        SourceRequestAssemblyId,
+        ReplayRequestId,
+        TerminalSourceConnectionId {}
+
+    public record SourceRequestAssemblyId(
+        @NonNull ConnectionSessionKey session,
+        int requestIndex
+    ) implements RecordAssociationId {
+        public SourceRequestAssemblyId {
+            if (requestIndex < 0) {
+                throw new IllegalArgumentException("requestIndex must not be negative");
+            }
+        }
+    }
+
+    public record ReplayRequestId(
+        @NonNull ConnectionSessionKey session,
+        int requestIndex
+    ) implements ReplayWorkId, RecordAssociationId {
         public ReplayRequestId {
             if (requestIndex < 0) {
                 throw new IllegalArgumentException("requestIndex must not be negative");
+            }
+        }
+    }
+
+    public record TerminalSourceConnectionId(
+        @NonNull ConnectionSessionKey session,
+        int interactionIndex
+    ) implements RecordAssociationId {
+        public TerminalSourceConnectionId {
+            if (interactionIndex < 0) {
+                throw new IllegalArgumentException("interactionIndex must not be negative");
             }
         }
     }
@@ -92,6 +124,20 @@ public final class ReplayIdentity {
                 throw new IllegalArgumentException("interactionIndex must not be negative");
             }
         }
+    }
+
+    public static ReplayRequestId replayRequestId(@NonNull UniqueReplayerRequestKey requestKey) {
+        return new ReplayRequestId(
+            new ConnectionSessionKey(
+                new SourceConnectionKey(
+                    requestKey.trafficStreamKey.getNodeId(),
+                    requestKey.trafficStreamKey.getConnectionId()
+                ),
+                requestKey.sourceRequestIndexSessionIdentifier,
+                requestKey.trafficStreamKey.getSourceGeneration()
+            ),
+            requestKey.getReplayerRequestIndex()
+        );
     }
 
     public sealed interface RecordId permits KafkaRecordId, TrafficStreamRecordId, SourceControlRecordId {}

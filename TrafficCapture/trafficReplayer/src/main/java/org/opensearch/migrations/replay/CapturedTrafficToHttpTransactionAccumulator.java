@@ -3,15 +3,26 @@ package org.opensearch.migrations.replay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.kafka.KafkaCaptureControlRecord;
 import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
+import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordAssociationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceRequestAssemblyId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
@@ -59,6 +70,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final SpanWrappingAccumulationCallbacks listener;
     private final Duration connectionTimeout;
     private final boolean structuralExpiration;
+    private final RecordWorkTracker recordWorkTracker;
+    private final Function<ITrafficStreamKey, RecordId> recordIdMapper;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -149,8 +162,33 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         AccumulationCallbacks accumulationCallbacks,
         boolean structuralExpiration
     ) {
+        this(
+            minTimeout,
+            hintStringToConfigureTimeout,
+            accumulationCallbacks,
+            structuralExpiration,
+            null,
+            null
+        );
+    }
+
+    public CapturedTrafficToHttpTransactionAccumulator(
+        Duration minTimeout,
+        String hintStringToConfigureTimeout,
+        AccumulationCallbacks accumulationCallbacks,
+        boolean structuralExpiration,
+        RecordWorkTracker recordWorkTracker,
+        Function<ITrafficStreamKey, RecordId> recordIdMapper
+    ) {
         this.connectionTimeout = minTimeout;
         this.structuralExpiration = structuralExpiration;
+        if ((recordWorkTracker == null) != (recordIdMapper == null)) {
+            throw new IllegalArgumentException(
+                "recordWorkTracker and recordIdMapper must either both be set or both be absent"
+            );
+        }
+        this.recordWorkTracker = recordWorkTracker;
+        this.recordIdMapper = recordIdMapper;
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY, new BehavioralPolicy() {
             @Override
             public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
@@ -267,8 +305,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     public void accept(SourceInput sourceInput) {
         var trafficStreamAndKey = (ITrafficStreamWithKey) sourceInput;
         var tsk = trafficStreamAndKey.getKey();
+        var kafkaRecordId = trackedKafkaRecordId(tsk);
+        if (kafkaRecordId != null) {
+            recordWorkTracker.register(kafkaRecordId);
+        }
         if (trafficStreamAndKey instanceof KafkaCaptureControlRecord) {
             listener.onTrafficStreamIgnored(tsk);
+            closeTrackedRecord(kafkaRecordId);
             return;
         }
         // Synthetic close from partition reassignment
@@ -337,7 +380,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     .addArgument(accum.state)
                     .addArgument(() -> o.getCaptureCase().name())
                     .log();
+                var stateBeforeObservation = accum.state;
+                var sourceAssociation = sourceAssociationForObservation(accum, o);
+                var replayAssociation = replayAssociationForObservation(accum, o);
+                associate(kafkaRecordId, sourceAssociation);
+                associate(kafkaRecordId, replayAssociation);
                 var connectionStatus = addObservationToAccumulation(accum, tsk, o);
+                updateAssociationsAfterObservation(
+                    kafkaRecordId,
+                    accum,
+                    o,
+                    stateBeforeObservation,
+                    sourceAssociation,
+                    replayAssociation
+                );
                 if (CONNECTION_STATUS.CLOSED == connectionStatus) {
                     log.atDebug().setMessage("Connection terminated: removing {}:{} from liveStreams map")
                         .addArgument(partitionId)
@@ -361,6 +417,126 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 || accum.state == Accumulation.State.IGNORING_LAST_REQUEST
                 || trafficStream.getSubStreamCount() == 0;
             listener.onTrafficStreamIgnored(tsk);
+        }
+        closeTrackedRecord(kafkaRecordId);
+    }
+
+    private KafkaRecordId trackedKafkaRecordId(ITrafficStreamKey trafficStreamKey) {
+        if (recordWorkTracker == null) {
+            return null;
+        }
+        var recordId = Objects.requireNonNull(
+            recordIdMapper.apply(trafficStreamKey),
+            "recordIdMapper returned null"
+        );
+        return recordId instanceof KafkaRecordId kafkaRecordId ? kafkaRecordId : null;
+    }
+
+    private void closeTrackedRecord(KafkaRecordId recordId) {
+        if (recordId != null) {
+            recordWorkTracker.closeToNewAssociations(recordId);
+        }
+    }
+
+    private void associate(KafkaRecordId recordId, RecordAssociationId association) {
+        if (recordId != null && association != null) {
+            recordWorkTracker.associate(recordId, association);
+        }
+    }
+
+    private SourceRequestAssemblyId sourceAssociationForObservation(
+        Accumulation accumulation,
+        TrafficObservation observation
+    ) {
+        var isRead = observation.hasRead() || observation.hasReadSegment();
+        if ((accumulation.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK && isRead)
+            || (accumulation.state == Accumulation.State.ACCUMULATING_READS
+                && (isRead
+                    || observation.hasSegmentEnd()
+                    || observation.hasEndOfMessageIndicator()
+                    || observation.hasRequestDropped()
+                    || observation.hasClose()
+                    || observation.hasConnectionException()))) {
+            return sourceRequestAssemblyId(accumulation);
+        }
+        return null;
+    }
+
+    private ReplayRequestId replayAssociationForObservation(
+        Accumulation accumulation,
+        TrafficObservation observation
+    ) {
+        if (accumulation.state != Accumulation.State.ACCUMULATING_WRITES) {
+            return null;
+        }
+        if (!(observation.hasWrite()
+            || observation.hasWriteSegment()
+            || observation.hasSegmentEnd()
+            || observation.hasRead()
+            || observation.hasReadSegment()
+            || observation.hasClose()
+            || observation.hasConnectionException())) {
+            return null;
+        }
+        return currentReplayRequestId(accumulation);
+    }
+
+    private void updateAssociationsAfterObservation(
+        KafkaRecordId recordId,
+        Accumulation accumulation,
+        TrafficObservation observation,
+        Accumulation.State stateBeforeObservation,
+        SourceRequestAssemblyId sourceAssociation,
+        ReplayRequestId replayAssociation
+    ) {
+        if (recordId == null) {
+            return;
+        }
+        if (stateBeforeObservation == Accumulation.State.ACCUMULATING_READS
+            && observation.hasEndOfMessageIndicator()) {
+            recordWorkTracker.relabelAll(
+                Objects.requireNonNull(sourceAssociation, "request-completing source association"),
+                currentReplayRequestId(accumulation)
+            );
+        } else if (stateBeforeObservation == Accumulation.State.ACCUMULATING_WRITES
+            && (observation.hasRead() || observation.hasReadSegment())) {
+            Objects.requireNonNull(replayAssociation, "response association before keep-alive rotation");
+            recordWorkTracker.associate(recordId, sourceRequestAssemblyId(accumulation));
+        } else if (stateBeforeObservation == Accumulation.State.ACCUMULATING_READS
+            && observation.hasClose()) {
+            finishAssociationIfPresent(
+                Objects.requireNonNull(sourceAssociation, "source association closed before request completion")
+            );
+        }
+    }
+
+    private SourceRequestAssemblyId sourceRequestAssemblyId(Accumulation accumulation) {
+        return new SourceRequestAssemblyId(
+            connectionSessionKey(accumulation),
+            accumulation.getIndexOfCurrentRequest()
+        );
+    }
+
+    private ConnectionSessionKey connectionSessionKey(Accumulation accumulation) {
+        return new ConnectionSessionKey(
+            new SourceConnectionKey(
+                accumulation.trafficChannelKey.getNodeId(),
+                accumulation.trafficChannelKey.getConnectionId()
+            ),
+            accumulation.startingSourceRequestIndex,
+            accumulation.sourceGeneration
+        );
+    }
+
+    private ReplayRequestId currentReplayRequestId(Accumulation accumulation) {
+        return ReplayIdentity.replayRequestId(
+            accumulation.getRrPair().getHttpTransactionContext().getReplayerRequestKey()
+        );
+    }
+
+    private void finishAssociationIfPresent(RecordAssociationId association) {
+        if (recordWorkTracker != null && !recordWorkTracker.recordsFor(association).isEmpty()) {
+            recordWorkTracker.associationFinished(association);
         }
     }
 
@@ -597,9 +773,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     private void handleDroppedRequestForAccumulation(Accumulation accum) {
+        var sourceAssociation = accum.state == Accumulation.State.ACCUMULATING_READS
+            ? sourceRequestAssemblyId(accum)
+            : null;
         if (accum.hasRrPair()) {
             var rrPair = accum.getRrPair();
             rrPair.getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
+        }
+        if (sourceAssociation != null) {
+            finishAssociationIfPresent(sourceAssociation);
         }
         log.atTrace().setMessage("resetting to forget {}").addArgument(accum.trafficChannelKey).log();
         accum.resetToIgnoreAndForgetCurrentRequest();
@@ -708,6 +890,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         try {
             switch (accumulation.state) {
                 case ACCUMULATING_READS:
+                    var sourceAssociation = sourceRequestAssemblyId(accumulation);
                     // This is a safer bet than sending a partial response. If we drop 1 in a million requests
                     // where the next TrafficStream had an EOM message and that TrafficStream was dropped, we'll
                     // NOT send many more requests that never would have made it to the source cluster because
@@ -736,6 +919,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         // OffsetLifecycleTracker.removeAndReturnNewHead (double-remove).
                         accumulation.resetForNextRequest();
                     }
+                    finishAssociationIfPresent(sourceAssociation);
                     return;
                 case ACCUMULATING_WRITES:
                     handleEndOfResponse(accumulation, status);

@@ -26,9 +26,13 @@ import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
+import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
 import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplaySessionWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
@@ -202,6 +206,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private final AsyncPermitPool permitPool;
         private final ReplayDispositionPolicy dispositionPolicy;
         private final RecordDispositionLedger dispositionLedger;
+        private final RecordWorkTracker recordWorkTracker;
         private final SourceReconstructionPolicy sourceReconstructionPolicy;
         private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new ConcurrentHashMap<>();
 
@@ -213,7 +218,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             ITrafficCaptureSource trafficCaptureSource,
             Duration quiescentDuration,
             AsyncPermitPool permitPool,
-            RecordDispositionLedger dispositionLedger
+            RecordDispositionLedger dispositionLedger,
+            RecordWorkTracker recordWorkTracker
         ) {
             this.replayEngine = replayEngine;
             this.tupleWriter = tupleWriter;
@@ -227,6 +233,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 trafficCaptureSource.usesStructuralExpiration()
             );
             this.dispositionLedger = dispositionLedger;
+            this.recordWorkTracker = recordWorkTracker;
         }
 
         private final class TransactionEvidenceState {
@@ -234,9 +241,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             private RequestResponsePacketPair source;
             private TransformedTargetRequestAndResponseList target;
             private Throwable targetFailure;
+            private final ReplayRequestId replayRequestId;
 
-            private TransactionEvidenceState(IReplayContexts.IReplayerHttpTransactionContext context) {
+            private TransactionEvidenceState(
+                IReplayContexts.IReplayerHttpTransactionContext context,
+                ReplayRequestId replayRequestId
+            ) {
                 this.context = context;
+                this.replayRequestId = replayRequestId;
             }
         }
 
@@ -346,7 +358,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 runtime.requestId(),
                 request.getFirstPacketTimestamp()
             );
-            var evidenceState = new TransactionEvidenceState(ctx);
+            var recordId = trafficCaptureSource.recordIdFor(requestKey.trafficStreamKey);
+            var evidenceState = new TransactionEvidenceState(
+                ctx,
+                recordId instanceof KafkaRecordId ? ReplayIdentity.replayRequestId(requestKey) : null
+            );
             var transaction = new ReplayTransaction<TransformedTargetRequestAndResponseList>(
                 runtime.requestId(),
                 runtime.mailbox(),
@@ -569,6 +585,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                         state.target,
                         state.targetFailure
                     );
+                    finishRecordAssociationsAfterTupleDurability(state);
                     return CompletableFuture.completedFuture(
                         new EvidenceOutcome.Durable("synchronous tuple consumer")
                     );
@@ -579,13 +596,20 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     state.source,
                     state.target,
                     state.targetFailure
-                ).handle((ignored, failure) ->
+                ).thenRun(() -> finishRecordAssociationsAfterTupleDurability(state))
+                .handle((ignored, failure) ->
                     failure == null
                         ? new EvidenceOutcome.Durable("whole tuple durable")
                         : new EvidenceOutcome.Failed(unwrap(failure))
                 );
             } catch (Throwable t) {
                 return CompletableFuture.completedFuture(new EvidenceOutcome.Failed(unwrap(t)));
+            }
+        }
+
+        private void finishRecordAssociationsAfterTupleDurability(TransactionEvidenceState state) {
+            if (state.replayRequestId != null) {
+                recordWorkTracker.submitAssociationFinished(state.replayRequestId);
             }
         }
 

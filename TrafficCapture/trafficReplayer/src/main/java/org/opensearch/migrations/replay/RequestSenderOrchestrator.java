@@ -35,6 +35,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.lifecycle.ActorMailbox;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.NettyEventLoopActorMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
@@ -1645,17 +1646,7 @@ public class RequestSenderOrchestrator {
     }
 
     private static ReplayRequestId toReplayRequestId(UniqueReplayerRequestKey requestKey) {
-        return new ReplayRequestId(
-            new ConnectionSessionKey(
-                new SourceConnectionKey(
-                    requestKey.trafficStreamKey.getNodeId(),
-                    requestKey.trafficStreamKey.getConnectionId()
-                ),
-                requestKey.sourceRequestIndexSessionIdentifier,
-                requestKey.trafficStreamKey.getSourceGeneration()
-            ),
-            requestKey.getReplayerRequestIndex()
-        );
+        return ReplayIdentity.replayRequestId(requestKey);
     }
 
     private static ConnectionSessionKey toConnectionSessionKey(

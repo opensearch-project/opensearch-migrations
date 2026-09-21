@@ -73,6 +73,7 @@ public final class ReplayIntakeOwner {
     private AsyncPermitPool permitPool;
     private ReplayProgressController progressController;
     private RecordDispositionLedger dispositionLedger;
+    private RecordWorkTracker recordWorkTracker;
     private ITrafficCaptureSource source;
     private CapturedTrafficToHttpTransactionAccumulator accumulator;
     private Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier;
@@ -109,6 +110,16 @@ public final class ReplayIntakeOwner {
         this.permitPool = permitPool;
         this.progressController = progressController;
         this.dispositionLedger = dispositionLedger;
+    }
+
+    public void configureOwnedComponents(
+        @NonNull AsyncPermitPool permitPool,
+        @NonNull ReplayProgressController progressController,
+        @NonNull RecordDispositionLedger dispositionLedger,
+        @NonNull RecordWorkTracker recordWorkTracker
+    ) {
+        configureOwnedComponents(permitPool, progressController, dispositionLedger);
+        this.recordWorkTracker = recordWorkTracker;
     }
 
     public void start() {
@@ -216,6 +227,8 @@ public final class ReplayIntakeOwner {
             case AsyncPermitPool.Input permitInput -> permitPool.apply(permitInput);
             case ReplayProgressController.Input progressInput -> progressController.apply(progressInput);
             case RecordDispositionLedger.Input ledgerInput -> dispositionLedger.apply(ledgerInput);
+            case RecordWorkTracker.Input trackerInput ->
+                Objects.requireNonNull(recordWorkTracker, "recordWorkTracker").apply(trackerInput);
         }
     }
 
