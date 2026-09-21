@@ -4,8 +4,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -25,6 +23,7 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
@@ -111,7 +110,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void stampedPartialRequestSettlesOnlyAfterStructuralProof() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -167,7 +166,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void replayCursorManifestProofMatchesScannerDispositionWhenScanningIsDisabled() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new ScanForbiddenConsumer();
         try (var source = source(mockConsumer, clock, false)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -219,7 +218,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void replayCursorEvidenceCanBreakFullOwnershipBackpressureWhenScanningIsDisabled() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new ScanForbiddenConsumer();
         try (var source = source(mockConsumer, clock, false, 3)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -269,7 +268,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void replayCursorDeclarationProofMatchesScannerDispositionWhenScanningIsDisabled() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new ScanForbiddenConsumer();
         try (var source = source(mockConsumer, clock, false)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -346,7 +345,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
     }
 
     private DispositionOutcome runDispositionEquivalenceScenario(boolean scanAheadEnabled) throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock, scanAheadEnabled)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -440,7 +439,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void futureTrafficIsReportedAsALivenessFollowUp() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -470,7 +469,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void transientMetadataFailureRemainsInconclusiveAndTheNextScanCanConfirmAbsence() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new TransientMetadataFailureConsumer();
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -509,7 +508,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void mismatchedGenerationCompletionCannotEraseCurrentStructuralExpirationState() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, true));
@@ -561,7 +560,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void unstampedLegacyTrafficCannotProduceAbsenceProof() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, trafficRecord(0, false));
@@ -580,7 +579,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void replayCursorSettlesLivenessRecordsWithoutCreatingAccumulations() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, snapshotRecord(0, 10));
@@ -608,7 +607,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void replayCursorSettlesNoMoreWritesRecordsWithoutCreatingAccumulations() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             scheduleFirstPoll(mockConsumer, noMoreWritesRecord(0, NODE));
@@ -636,7 +635,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void peerDeclarationDiscardsLaterTrafficButStillReturnsACommitBearingRecord() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             mockConsumer.schedulePollTask(() -> {
@@ -663,7 +662,7 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
 
     @Test
     void selfDeclarationDoesNotDiscardTrafficAfterReassignment() throws Exception {
-        var clock = new MutableClock(Instant.ofEpochSecond(1));
+        var clock = new FakeClock(Instant.ofEpochSecond(1));
         var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
         try (var source = source(mockConsumer, clock)) {
             mockConsumer.schedulePollTask(() -> {
@@ -999,33 +998,4 @@ class KafkaStructuralExpirationTest extends InstrumentationTest {
         boolean activeConnection
     ) {}
 
-    private static final class MutableClock extends Clock {
-        private final AtomicReference<Instant> now;
-
-        private MutableClock(Instant initial) {
-            now = new AtomicReference<>(initial);
-        }
-
-        private void advance(Duration duration) {
-            now.updateAndGet(current -> current.plus(duration));
-        }
-
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            if (!ZoneOffset.UTC.equals(zone)) {
-                throw new IllegalArgumentException("Only UTC is supported");
-            }
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return now.get();
-        }
-    }
 }

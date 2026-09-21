@@ -3,8 +3,6 @@ package org.opensearch.migrations.replay.kafka;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -20,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.testing.FakeClock;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
@@ -52,29 +51,6 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
             @Override
             public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
         };
-
-    private static final class MutableClock extends Clock {
-        private Instant now = Instant.EPOCH;
-
-        @Override
-        public ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-
-        void advance(Duration duration) {
-            now = now.plus(duration);
-        }
-    }
 
     private static final class RecordingCommitMetrics implements TrackingKafkaConsumer.Metrics {
         int unresolvedObligations;
@@ -169,7 +145,7 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
     @Test
     void commitMetricsFollowAcceptanceAcknowledgementAndGenerationLoss() {
         var mockConsumer = buildMockConsumer();
-        var clock = new MutableClock();
+        var clock = new FakeClock();
         var metrics = new RecordingCommitMetrics();
         var committedKeys = new ArrayList<ITrafficStreamKey>();
         var consumer = new TrackingKafkaConsumer(

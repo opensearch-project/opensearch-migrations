@@ -1,16 +1,13 @@
 package org.opensearch.migrations.replay.lifecycle;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.testing.TestEventLoop;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
@@ -26,7 +23,7 @@ import org.junit.jupiter.api.Test;
 class ReplayTransactionTest {
     @Test
     void lifecycleMetricsFollowMailboxOwnedPhasesAndRetireAtCompletion() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(9));
         var evidence = new CompletableFuture<EvidenceOutcome>();
@@ -66,7 +63,7 @@ class ReplayTransactionTest {
 
     @Test
     void runwayLossIsMonotonicAndRetiredAtFailure() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var metrics = new RecordingMetrics(mailbox);
         var transaction = new ReplayTransaction<String>(
             request(),
@@ -104,7 +101,7 @@ class ReplayTransactionTest {
 
     @Test
     void ownedResourcesSettleAfterEvidenceAndCommitInvocation() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(0));
         record.commitCompletion = new CompletableFuture<>();
@@ -143,7 +140,7 @@ class ReplayTransactionTest {
 
     @Test
     void resourceCleanupFailureRecordsAFailedTerminalOutcome() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var metrics = new RecordingMetrics(mailbox);
         var cleanupFailure = new AssertionError("resource cleanup failed");
         AutoCloseable resource = () -> {
@@ -180,7 +177,7 @@ class ReplayTransactionTest {
 
     @Test
     void rejectedResourceAdmissionDoesNotTransferCleanupAuthority() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var transaction = new ReplayTransaction<String>(
             request(),
             mailbox,
@@ -208,7 +205,7 @@ class ReplayTransactionTest {
 
     @Test
     void rejectedEvidenceCallbackDoesNotAdvanceLifecycleOutsideTheMailbox() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(18));
         var evidence = new CompletableFuture<EvidenceOutcome>();
@@ -230,7 +227,7 @@ class ReplayTransactionTest {
 
     @Test
     void laterCommitCompletionDoesNotReenterTheTransactionMailbox() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(21));
         record.commitCompletion = new CompletableFuture<>();
@@ -260,7 +257,7 @@ class ReplayTransactionTest {
 
     @Test
     void successfulTransactionWaitsForEvidenceThenFiresCommitAndCompletes() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(1));
         var evidence = new CompletableFuture<EvidenceOutcome>();
@@ -286,7 +283,7 @@ class ReplayTransactionTest {
 
     @Test
     void completionDoesNotWaitForKafkaCommitAcknowledgement() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(5));
         record.commitCompletion = new CompletableFuture<>();
@@ -314,7 +311,7 @@ class ReplayTransactionTest {
 
     @Test
     void laterSourceRunwayLossDoesNotAffectTheCompletedTransaction() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(11));
         record.commitCompletion = new CompletableFuture<>();
@@ -350,7 +347,7 @@ class ReplayTransactionTest {
 
     @Test
     void failureAfterCommitWasFiredDoesNotReopenTheCompletedTransaction() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(10));
         record.commitCompletion = new CompletableFuture<>();
@@ -385,7 +382,7 @@ class ReplayTransactionTest {
 
     @Test
     void cancellationRetainsWithoutWritingEvidenceAndReleasesResources() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(2));
         var evidenceCalls = new AtomicInteger();
@@ -418,7 +415,7 @@ class ReplayTransactionTest {
 
     @Test
     void duplicateOutcomeIsRejectedAndCallerCannotCancelCompletion() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(3));
         register(ledger, record, request().toString());
@@ -441,7 +438,7 @@ class ReplayTransactionTest {
 
     @Test
     void evidenceFailureRetainsAndHalts() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(4));
         register(ledger, record, request().toString());
@@ -467,7 +464,7 @@ class ReplayTransactionTest {
 
     @Test
     void classifiedPoisonCommitsOnlyAfterDurableEvidence() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(7));
         var evidence = new CompletableFuture<EvidenceOutcome>();
@@ -490,7 +487,7 @@ class ReplayTransactionTest {
 
     @Test
     void revokedRunwayRetainsAnOtherwiseSuccessfulTransaction() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(8));
         var evidence = new CompletableFuture<EvidenceOutcome>();
@@ -515,7 +512,7 @@ class ReplayTransactionTest {
 
     @Test
     void explicitFailureRejectsLateOutcomesAndReleasesResourcesOnce() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(6));
         var resource = new TestResource();
@@ -550,7 +547,7 @@ class ReplayTransactionTest {
 
     @Test
     void explicitFailureRetainsOwnedRecordsSoTheLedgerStillQuiesces() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var record = new TestRecordHandle(record(15));
         register(ledger, record, request().toString());
@@ -579,7 +576,7 @@ class ReplayTransactionTest {
 
     @Test
     void dynamicallyOwnedResourcesCloseAtTerminationAndLateResourcesCloseImmediately() {
-        var mailbox = new QueuedMailbox();
+        var mailbox = new TestEventLoop();
         var transaction = new ReplayTransaction<String>(
             request(),
             mailbox,
@@ -759,47 +756,4 @@ class ReplayTransactionTest {
         }
     }
 
-    private static final class QueuedMailbox implements ActorMailbox {
-        private final Queue<Runnable> tasks = new ArrayDeque<>();
-        private boolean running;
-        private boolean rejectNewTasks;
-
-        @Override
-        public void execute(Runnable command) {
-            if (rejectNewTasks) {
-                throw new java.util.concurrent.RejectedExecutionException("mailbox rejected task");
-            }
-            tasks.add(command);
-        }
-
-        @Override
-        public boolean inMailbox() {
-            return running;
-        }
-
-        @Override
-        public Instant now() {
-            return Instant.EPOCH;
-        }
-
-        @Override
-        public ScheduledTask schedule(Runnable command, Duration delay) {
-            throw new UnsupportedOperationException();
-        }
-
-        void runUntilIdle() {
-            while (!tasks.isEmpty()) {
-                running = true;
-                try {
-                    tasks.remove().run();
-                } finally {
-                    running = false;
-                }
-            }
-        }
-
-        void rejectNewTasks() {
-            rejectNewTasks = true;
-        }
-    }
 }

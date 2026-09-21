@@ -1,15 +1,12 @@
 package org.opensearch.migrations.replay.lifecycle;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.Map;
-import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.testing.TestEventLoop;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
@@ -20,7 +17,7 @@ import org.junit.jupiter.api.Test;
 class ReplayTransactionRegistryTest {
     @Test
     void rememberedRunwayLossReachesLateTransactionsExactlyOnce() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         registry.observeRunwayLost(ReplayTransaction.RunwayLossReason.SOURCE_REASSIGNMENT);
         registry.observeRunwayLost(ReplayTransaction.RunwayLossReason.SHUTDOWN);
@@ -70,7 +67,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void terminationWaitsForEveryRegisteredTransactionAndRejectsLateRegistration() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var first = new CompletableFuture<Void>();
         var second = new CompletableFuture<Void>();
@@ -103,7 +100,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void lateTypedRegistrationReleasesItsOwnedRecordAndResource() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         registry.beginTermination();
@@ -130,7 +127,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void duplicateTypedRegistrationReleasesTheRejectedTransaction() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var existing = new CompletableFuture<Void>();
@@ -160,7 +157,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void duplicateRegistrationOfTheSameTransactionDoesNotTerminateTheOwnedInstance() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var transaction = new ReplayTransaction<String>(
             request(1),
@@ -197,7 +194,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void transactionFailurePropagatesOnlyAfterTheRegistryDrains() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var failed = new CompletableFuture<Void>();
         var stillRunning = new CompletableFuture<Void>();
@@ -227,7 +224,7 @@ class ReplayTransactionRegistryTest {
      */
     @Test
     void cancellingOutstandingTransactionsLetsAnAbortedSessionTerminate() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var stranded = new ReplayTransaction<String>(
@@ -279,7 +276,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void rejectedRegistrationDoesNotMutateTheTransactionOutsideTheMailbox() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var resource = new CloseWatchingResource();
@@ -301,7 +298,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void rejectedTransactionCompletionDoesNotSettleTheRegistryOutsideTheMailbox() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var transactionCompletion = new CompletableFuture<Void>();
         registry.register(request(0), transactionCompletion);
@@ -318,7 +315,7 @@ class ReplayTransactionRegistryTest {
 
     @Test
     void rejectedCancellationDoesNotFailTheTransactionOutsideTheMailbox() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var ledger = new RecordDispositionLedger(Runnable::run);
         var registry = new ReplayTransactionRegistry(session(), mailbox);
         var resource = new CloseWatchingResource();
@@ -419,54 +416,11 @@ class ReplayTransactionRegistryTest {
 
     private static Map<ReplayRequestId, String> unresolved(
         ReplayTransactionRegistry registry,
-        DeterministicMailbox mailbox
+        TestEventLoop mailbox
     ) {
         var snapshot = registry.unresolvedTransactions().toCompletableFuture();
         mailbox.runUntilIdle();
         return snapshot.join();
     }
 
-    private static final class DeterministicMailbox implements ActorMailbox {
-        private final Queue<Runnable> commands = new ArrayDeque<>();
-        private boolean running;
-        private boolean rejectNewTasks;
-
-        @Override
-        public void execute(Runnable command) {
-            if (rejectNewTasks) {
-                throw new java.util.concurrent.RejectedExecutionException("mailbox rejected task");
-            }
-            commands.add(command);
-        }
-
-        @Override
-        public boolean inMailbox() {
-            return running;
-        }
-
-        @Override
-        public Instant now() {
-            return Instant.EPOCH;
-        }
-
-        @Override
-        public ScheduledTask schedule(Runnable command, Duration delay) {
-            throw new UnsupportedOperationException();
-        }
-
-        private void runUntilIdle() {
-            while (!commands.isEmpty()) {
-                running = true;
-                try {
-                    commands.remove().run();
-                } finally {
-                    running = false;
-                }
-            }
-        }
-
-        private void rejectNewTasks() {
-            rejectNewTasks = true;
-        }
-    }
 }
