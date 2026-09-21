@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -363,7 +364,11 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                         .setFirstLineByteLength(16).setHeadersByteLength(12).build())
                 .build())
             .build();
-        var record = new ProducerRecord<>(TOPIC, "key-" + offset, stream.toByteArray());
+        var record = new ProducerRecord<>(
+            TOPIC,
+            "key-" + offset,
+            CaptureRecord.newBuilder().setTrafficStream(stream).build().toByteArray()
+        );
         producer.send(record).get();
         log.atInfo().setMessage("Produced record offset={} conn={}").addArgument(offset).addArgument(CONN_ID).log();
     }

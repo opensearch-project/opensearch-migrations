@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -336,7 +337,7 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
                 .build())
             .build();
         try (var baos = new ByteArrayOutputStream()) {
-            stream.writeTo(baos);
+            CaptureRecord.newBuilder().setTrafficStream(stream).build().writeTo(baos);
             mc.addRecord(new ConsumerRecord<>(TOPIC, 0, offset, "k", baos.toByteArray()));
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -361,8 +361,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                 accumulationCallbacks,
-                trafficSource.usesStructuralExpiration(),
-                trafficSource::updateScanBlocker
+                trafficSource.usesStructuralExpiration()
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
         try {

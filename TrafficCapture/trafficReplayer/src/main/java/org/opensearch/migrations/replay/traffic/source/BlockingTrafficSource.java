@@ -257,14 +257,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public void updateScanBlocker(
-        ITrafficStreamKey trafficStreamKey,
-        FollowUpRequirement followUpRequirement
-    ) {
-        underlyingSource.updateScanBlocker(trafficStreamKey, followUpRequirement);
-    }
-
-    @Override
     public boolean usesStructuralExpiration() {
         return underlyingSource.usesStructuralExpiration();
     }

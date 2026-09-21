@@ -66,11 +66,6 @@ public interface ITrafficCaptureSource extends AutoCloseable {
 
     default void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {}
 
-    default void updateScanBlocker(
-        ITrafficStreamKey trafficStreamKey,
-        FollowUpRequirement followUpRequirement
-    ) {}
-
     default boolean usesStructuralExpiration() {
         return false;
     }

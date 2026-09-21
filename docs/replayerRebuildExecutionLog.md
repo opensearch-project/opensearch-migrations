@@ -56,3 +56,54 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   obsolete production path. This is a baseline build-order constraint, not a fixture failure.
 - Open obligations: all R1-R19 remain implementation obligations. S0 supplies deterministic proof
   infrastructure only.
+
+## S1 — envelope decoding and compile restoration
+
+### Start
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Confirmed that the active proxy writes exactly one `CaptureRecord` envelope per Kafka application
+  record and that replay intake must dispatch its payload exhaustively without trial decoding or a
+  raw-`TrafficStream` compatibility path.
+- Confirmed the milestone boundary: heartbeat and capability-probe records are accepted, counted,
+  and immediately settled after application, while their final broker-time state machine remains an
+  explicit non-production gap until S12.
+- Deletion scope follows the implementation-step ordering rule in §5: remove the liveness scanner,
+  absence-proof records, control evidence, and behavioral policy now; retain the ownership budget
+  until S11 and generation-interruption scaffolding until its replacement owner/cancellation steps.
+- Planned evidence: current-proxy traffic envelopes replay, traffic/heartbeat/probe dump formatting
+  is explicit, unset and malformed envelopes fail as protocol violations, and S0 fixture self-tests
+  compile and pass once the main source set is restored.
+
+### End
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Deleted the obsolete liveness scanner, absence-proof/control-evidence records, behavioral policy,
+  and their defining tests. Retained ownership-budget and generation-interruption scaffolding only
+  for their later replacement steps, as required by the plan's migration order.
+- Kafka replay intake now parses exactly one `CaptureRecord` and dispatches `TrafficStream`,
+  `WriterPartitionHeartbeat`, `CaptureCapabilityProbe`, and `PAYLOAD_NOT_SET` exhaustively. There is
+  no raw-`TrafficStream` compatibility path.
+- Heartbeats and capability probes are accepted, counted, and routed through the existing
+  ignored-record settlement callback. Their broker-time semantics remain explicitly open until S12.
+- `KafkaTopicDumper` and `TrafficStreamDumper` now handle every envelope payload explicitly in raw
+  and HTTP dump modes. Malformed and unset envelopes are protocol violations instead of skipped
+  records. Removed the deliberately non-defining empty-success expiration dumper test identified by
+  §6.2.
+- Migrated every traffic-replayer Kafka test producer/helper to publish the current proxy's
+  `CaptureRecord` wire format; the distinct base64 file-input fixture remains unchanged.
+- Added focused S1 tests for exhaustive payload decoding and counters, heartbeat/probe formatting,
+  and malformed/unset protocol violations.
+- `git diff --check`: passed.
+- Source searches confirmed no production or test references remain to `KafkaLivenessScanner`,
+  `KafkaLivenessSnapshotRecord`, `KafkaNoMoreWritesRecord`, `KafkaSupersededTrafficRecord`,
+  `AbsenceProof`, `CompleteSnapshotSpan`, `FollowUpRequirement`, `ScanEvidence`,
+  `SourceControlEvent`, or `KafkaBehavioralPolicy`; no Kafka source still parses a raw
+  `TrafficStream`.
+- `./gradlew :TrafficCapture:trafficReplayer:compileJava
+  :TrafficCapture:trafficReplayer:compileTestJava --no-daemon`: blocked before Gradle startup because
+  the sandbox cannot open the existing `~/.gradle` wrapper lock, and the approval service rejected
+  escalation with its own encrypted-summary validation error. Compilation and focused tests remain
+  pending PR CI; this is an execution-environment blocker, not a changed design obligation.
+- Traceability: S1 restores the envelope boundary used by later obligations but does not claim any
+  R1-R19 obligation complete. All remain open for their assigned implementation steps.

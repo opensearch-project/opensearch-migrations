@@ -6,21 +6,16 @@ import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.kafka.KafkaLivenessSnapshotRecord;
-import org.opensearch.migrations.replay.kafka.KafkaNoMoreWritesRecord;
-import org.opensearch.migrations.replay.kafka.KafkaSupersededTrafficRecord;
+import org.opensearch.migrations.replay.kafka.KafkaCaptureControlRecord;
 import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
-import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
 import org.opensearch.migrations.replay.traffic.source.SourceInput;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -64,7 +59,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final SpanWrappingAccumulationCallbacks listener;
     private final Duration connectionTimeout;
     private final boolean structuralExpiration;
-    private final BiConsumer<ITrafficStreamKey, FollowUpRequirement> scanBlockerListener;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -146,19 +140,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         String hintStringToConfigureTimeout,
         AccumulationCallbacks accumulationCallbacks
     ) {
-        this(minTimeout, hintStringToConfigureTimeout, accumulationCallbacks, false, (key, requirement) -> {});
+        this(minTimeout, hintStringToConfigureTimeout, accumulationCallbacks, false);
     }
 
     public CapturedTrafficToHttpTransactionAccumulator(
         Duration minTimeout,
         String hintStringToConfigureTimeout,
         AccumulationCallbacks accumulationCallbacks,
-        boolean structuralExpiration,
-        BiConsumer<ITrafficStreamKey, FollowUpRequirement> scanBlockerListener
+        boolean structuralExpiration
     ) {
         this.connectionTimeout = minTimeout;
         this.structuralExpiration = structuralExpiration;
-        this.scanBlockerListener = scanBlockerListener;
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY, new BehavioralPolicy() {
             @Override
             public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
@@ -273,15 +265,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(SourceInput sourceInput) {
-        if (sourceInput instanceof SourceControlEvent.ConfirmedDead confirmedDead) {
-            acceptConfirmedDead(confirmedDead);
-            return;
-        }
         var trafficStreamAndKey = (ITrafficStreamWithKey) sourceInput;
         var tsk = trafficStreamAndKey.getKey();
-        if (trafficStreamAndKey instanceof KafkaLivenessSnapshotRecord
-            || trafficStreamAndKey instanceof KafkaNoMoreWritesRecord
-            || trafficStreamAndKey instanceof KafkaSupersededTrafficRecord) {
+        if (trafficStreamAndKey instanceof KafkaCaptureControlRecord) {
             listener.onTrafficStreamIgnored(tsk);
             return;
         }
@@ -376,48 +362,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 || trafficStream.getSubStreamCount() == 0;
             listener.onTrafficStreamIgnored(tsk);
         }
-        if (!connectionClosed) {
-            scanBlockerListener.accept(tsk, followUpRequirementFor(accum));
-        }
-    }
-
-    private void acceptConfirmedDead(SourceControlEvent.ConfirmedDead confirmedDead) {
-        var evidence = confirmedDead.evidence();
-        var connection = evidence.connection();
-        var accumulation = liveStreams.getIfPresent(connection.nodeId(), connection.connectionId());
-        if (accumulation == null
-            || accumulation.sourceGeneration != evidence.partition().sourceGeneration()) {
-            log.atDebug()
-                .setMessage("Ignoring stale confirmed-dead control for {} in generation {}")
-                .addArgument(connection)
-                .addArgument(evidence.partition()::sourceGeneration)
-                .log();
-            return;
-        }
-        var proof = evidence.proof();
-        if (accumulation.hasRrPair()) {
-            accumulation.getRrPair().structuralProofId = proof.proofId();
-        }
-        connectionsExpiredCounter.incrementAndGet();
-        log.atInfo()
-            .setMessage("Closing source accumulation for {} from structural proof {}")
-            .addArgument(connection)
-            .addArgument(proof::proofId)
-            .log();
-        fireAccumulationsCallbacksAndClose(
-            accumulation,
-            RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD
-        );
-        liveStreams.remove(connection.nodeId(), connection.connectionId());
-    }
-
-    private FollowUpRequirement followUpRequirementFor(Accumulation accumulation) {
-        return switch (accumulation.state) {
-            case ACCUMULATING_READS -> FollowUpRequirement.REQUEST_COMPLETION;
-            case ACCUMULATING_WRITES -> FollowUpRequirement.RESPONSE_COMPLETION;
-            case WAITING_FOR_NEXT_READ_CHUNK, IGNORING_LAST_REQUEST ->
-                FollowUpRequirement.CONNECTION_TERMINATION;
-        };
     }
 
     private Accumulation createInitialAccumulation(ITrafficStreamWithKey streamWithKey) {

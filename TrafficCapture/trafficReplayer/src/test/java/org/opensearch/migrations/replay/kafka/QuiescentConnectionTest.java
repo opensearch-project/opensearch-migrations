@@ -8,6 +8,7 @@ import java.util.HashMap;
 
 import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -59,7 +60,7 @@ class QuiescentConnectionTest extends InstrumentationTest {
                         .build())
                     .build();
                 try (var baos = new ByteArrayOutputStream()) {
-                    ts.writeTo(baos);
+                    CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
                     mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "k", baos.toByteArray()));
                 } catch (Exception e) { throw new RuntimeException(e); }
             });
@@ -101,7 +102,7 @@ class QuiescentConnectionTest extends InstrumentationTest {
                         .build())
                     .build();
                 try (var baos = new ByteArrayOutputStream()) {
-                    ts.writeTo(baos);
+                    CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
                     mc.addRecord(new ConsumerRecord<>(TOPIC, 0, 0, "k", baos.toByteArray()));
                 } catch (Exception e) { throw new RuntimeException(e); }
             });

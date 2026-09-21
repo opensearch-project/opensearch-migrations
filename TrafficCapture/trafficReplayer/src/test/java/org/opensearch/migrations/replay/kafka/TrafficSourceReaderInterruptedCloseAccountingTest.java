@@ -17,6 +17,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartition
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -293,7 +294,7 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
                     .build()).build())
             .build();
         try (var baos = new ByteArrayOutputStream()) {
-            ts.writeTo(baos);
+            CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
             mc.addRecord(new ConsumerRecord<>(tp.topic(), tp.partition(), offset, "k", baos.toByteArray()));
         } catch (Exception e) {
             throw new RuntimeException(e);
