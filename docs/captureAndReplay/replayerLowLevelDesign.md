@@ -256,6 +256,13 @@ The combined implementation must prove:
 - replay intake has at most one outstanding Kafka batch request for each partition generation;
 - every delivered partition batch matches exactly one outstanding request and is applied before
   replay intake requests the next batch for that partition;
+- replay intake requests another partition batch while fewer than `N` requests have resolved retry
+  input and unfinished target turns;
+- fast complete responses can satisfy retry-ready supply before `B + W`, while slow or missing
+  responses keep demand open until complete or explicitly unavailable;
+- a target-finished or cancelled request cannot be added back to retry-ready supply by later
+  retry-input resolution;
+- target-write start remains local cancellation state rather than a replay-intake message;
 - a queued Kafka-source input wakes a long poll without interrupting rebalance callback work or
   another Kafka operation;
 - no request-processing completion occurs before tuple durability;

@@ -39,8 +39,9 @@ The architecture must make these properties straightforward to reason about:
 10. Expected outcomes are explicit typed values. An unexpected exception escaping an owner is a
    process failure.
 11. Kafka input is requested one partition batch at a time. Replay intake requests another batch
-    when its reconstituted-request supply is below the configured target, and while an active
-    target connection turn has unresolved source-response input for retry policy.
+    while the partition has fewer than the configured number of requests whose retry-policy
+    source-response input is complete or explicitly unavailable and whose target turn has not
+    finished.
 12. Correctness-relevant asynchronous work has a required typed return path to the owner that must
     act on its result.
 13. Proxy-side periodic connection-record publication affects only where `TrafficStream` records
@@ -106,7 +107,7 @@ flowchart LR
     Request --> Target
     Request -->|"start tuple write"| Tuple
     Tuple -->|"tuple durable"| Request
-    Actor -->|"ConnectionRequestStarted;<br/>ConnectionRequestFinished;<br/>request processing finished"| Intake
+    Actor -->|"ConnectionRequestFinished;<br/>request processing finished"| Intake
     Intake -->|"commit request"| Kafka
 ```
 
@@ -134,7 +135,7 @@ inputs never change that owner's state at the same time:
 | State | Owner | Inputs that the owner applies one at a time |
 | --- | --- | --- |
 | Kafka consumer, assignment, positions, pause state, outstanding partition-batch requests, and commit staging | Kafka source | Kafka-source queue inputs; polls; assignment, revocation, and loss callbacks; seeks; commit callbacks |
-| Record decoding, source HTTP assembly, heartbeat expiration, Kafka-record completion, and per-partition input demand | Replay intake | Assigned-generation messages; nonempty partition batches; finalized-archive partition end; `ConnectionRequestStarted`; `ConnectionRequestFinished`; retry-input resolution; request-processing-finished messages; cancellation; partition-cleanup completion; shutdown |
+| Record decoding, source HTTP assembly, heartbeat expiration, Kafka-record completion, and per-partition input demand | Replay intake | Assigned-generation messages; nonempty partition batches; finalized-archive partition end; `ConnectionRequestFinished`; retry-input resolution; request-processing-finished messages; cancellation; partition-cleanup completion; shutdown |
 | Target channel, request registry, admission queue, execution queue, active target turn, and ordered close | Target connection | Request and close admission; preparation completion; replay-time timer events; connection-turn completion; request-processing completion; channel events; routed retry and final source-response messages; partition cancellation |
 | One request's preparation, target attempts, retry state, frozen source-response input for retry, final captured source-response result, tuple output, and cleanup | Request replay | Begin preparation; begin target turn; target-attempt results; source response available or unavailable for retry; final source response complete or incomplete; retry timers; tuple durability; cancellation |
 
@@ -160,19 +161,15 @@ request is finished.
 connection and has released resources needed only by those attempts. The request-replay owner
 reports this milestone to the connection owner, which may then begin the next ready request.
 
-The connection owner reports the target-turn lifecycle to replay intake with two typed messages:
+The connection owner reports `ConnectionRequestFinished` to replay intake when the request will
+make no more target attempts on the connection. It is the externally visible form of
+connection-turn completion. It does not mean that tuple output or all processing for the request
+has finished. The message carries the request identity and partition generation so replay intake
+removes only the matching request from Kafka demand supply.
 
-- `ConnectionRequestStarted` means that the request actually began its turn on the target
-  connection. The turn counts as started at the request's first accepted target write: the
-  request-replay owner reports that first accepted write, and the connection owner then emits
-  exactly one `ConnectionRequestStarted`. Being queued, transforming, waiting for its scheduled
-  time, or waiting for a concurrency permit is not started.
-- `ConnectionRequestFinished` means that the request will make no more target attempts on the
-  connection. It is the externally visible form of connection-turn completion. It does not mean
-  that tuple output or all processing for the request has finished.
-
-Each message carries the request identity and partition generation so replay intake updates only
-the matching demand state.
+The request and connection owners track the first accepted target write locally because graceful
+cancellation treats an unsent request differently from one that has begun sending to the target
+server. That local fact is not sent to replay intake and does not control Kafka demand.
 
 **Request-processing completion** means that the request's terminal target result, captured
 source-response result for tuple output, and durable tuple output are all complete. The
@@ -662,9 +659,10 @@ Replay intake:
   progression;
 - owns all incomplete source-request and source-response assembly;
 - tracks each reconstituted request's deterministic source-response boundary for retry policy;
-- tracks `ConnectionRequestStarted` and `ConnectionRequestFinished` for each request;
+- tracks whether each reconstituted request remains in target supply and whether its retry-policy
+  source-response input is resolved;
 - recomputes per-partition Kafka input demand after every input that can change it: an applied
-  partition batch, either connection-request lifecycle message, retry-input resolution, a
+  partition batch, `ConnectionRequestFinished`, retry-input resolution, a
   finalized-archive partition end, cancellation, or partition-generation cleanup;
 - processes `WriterPartitionHeartbeat` records;
 - applies broker-time expiration after missed heartbeats;
@@ -921,10 +919,9 @@ Only one request owns the target-connection turn at a time. The connection owner
 after the request-replay owner reports connection-turn completion. Source-response and tuple work
 for an earlier request may remain active while a later request uses the connection.
 
-A target turn counts as started at the request's first accepted target write. When the
-request-replay owner reports that first accepted write, the connection owner emits exactly one
-`ConnectionRequestStarted` to replay intake. A queued or prepared request does not emit that
-message. Failure to deliver this required message is process-fatal.
+The request-replay owner records its first accepted target write and reports that local transition
+to the connection owner. The connection owner uses it only to distinguish unsent work from work
+that has begun sending during cancellation. It is not forwarded to replay intake.
 
 The connection owner obtains the target-concurrency permit only for the prepared execution-queue
 head, immediately before its first target send. It never obtains permits for requests waiting
@@ -1076,32 +1073,33 @@ revocation nor shutdown prohibits intake. Clearing one pause reason cannot clear
 
 Let:
 
-- `P` be the configured request-supply target per target Netty event-loop thread, defaulting to
-  `2`;
+- `P` be the configured retry-ready request-supply target per target Netty event-loop thread,
+  defaulting to `2`;
 - `T` be the target Netty event-loop thread count fixed at replayer startup; and
 - `N = P * T` be the resulting request-supply target for each partition.
 
-Startup requires `P >= 1` and `T >= 1`. Replay intake counts reconstituted requests from that
-partition that are available for or active in target replay and for which it has not accepted
-`ConnectionRequestFinished`.
+Startup requires `P >= 1` and `T >= 1`. For one partition, replay intake counts a request when all
+of the following are true:
 
-Replay intake requests records while either:
+1. replay intake reconstituted and admitted the request;
+2. replay intake has not accepted `ConnectionRequestFinished` or removed the request through
+   cancellation; and
+3. retry input is frozen as either a complete captured source response or
+   `SourceResponseUnavailableForRetry`.
 
-1. its count is less than `N`; or
-2. at least one request from that partition has emitted `ConnectionRequestStarted`, has not emitted
-   `ConnectionRequestFinished`, and has not received its immutable source-response input for retry
-   policy.
+Replay intake requests another partition batch while this count is below `N`. A request may begin
+target replay before it contributes to the count. This count controls Kafka input demand, not
+target admission or target ordering.
 
-The second condition is proactive: replay intake continues reading before the target result is
-known because that result may need the captured source response to decide whether to retry. The
-condition ends when replay intake supplies either the complete source response for retry or
-`SourceResponseUnavailableForRetry`, or when `ConnectionRequestFinished` proves that no later retry
-decision exists. Final source-response accumulation for tuple output does not keep the condition
-true.
+When retry input resolves for a request that still belongs to target supply, replay intake adds
+that request to the count exactly once. `ConnectionRequestFinished` or cancellation removes it
+exactly once if it was counted and marks it ineligible for later addition. Retry-input resolution
+after that point may still affect tuple processing but cannot change Kafka demand.
 
-Broadening “active” to every request whose turn has not finished is incorrect. Under steady
-traffic, the newest queued request normally has unresolved retry input; counting that request as
-active would keep the partition continuously readable even though its target turn has not begun.
+This rule adapts to captured response latency. Complete responses usually make requests
+retry-ready before `B + W`. Slow or missing responses require the deterministic boundary or
+earlier close, expiration, or finalized-input evidence. The rule does not make `W` a fixed
+read-ahead interval.
 
 Replay intake applies a complete partition batch before recomputing demand. It does not discard the
 remainder of that batch or skip offsets. Batch overshoot may therefore increase the request count
@@ -1121,25 +1119,18 @@ without waiting for another Kafka record.
 ```mermaid
 flowchart TD
     A["Replay intake applies an input that can change demand for partition P"]
-    B{"Fewer than N reconstituted requests<br/>remain in target replay?"}
-    C{"Any active target connection turn from P<br/>with unresolved retry source-response input?"}
-    D["Submit one RequestNextPartitionBatch<br/>if none is outstanding"]
-    E["Do not request another batch"]
-    F["Kafka source combines the request with<br/>generation-cleanup and lifecycle state,<br/>then resumes or keeps P paused"]
-    G["Kafka returns records for P"]
-    H["Kafka source pauses P and sends<br/>one PartitionRecordBatch"]
-    I["Replay intake applies the entire batch"]
+    B{"Fewer than N requests have resolved retry input<br/>and unfinished target turns?"}
+    C["Submit one RequestNextPartitionBatch<br/>if none is outstanding"]
+    D["Do not request another batch"]
+    E["Kafka source combines demand with<br/>generation-cleanup and lifecycle state,<br/>then resumes or keeps P paused"]
+    F["Kafka returns records for P"]
+    G["Kafka source pauses P and sends<br/>one PartitionRecordBatch"]
+    H["Replay intake applies the entire batch"]
 
     A --> B
-    B -->|"yes"| D
-    B -->|"no"| C
-    C -->|"yes"| D
-    C -->|"no"| E
-    D --> F
-    F --> G
-    G --> H
-    H --> I
-    I --> A
+    B -->|"yes"| C
+    B -->|"no"| D
+    C --> E --> F --> G --> H --> A
 ```
 
 `TrafficObservation.ts` remains the source event time used by the time shifter and connection owner
@@ -1178,11 +1169,13 @@ request-completing observation is applied before any higher-offset record can es
 is available to retry policy even when its source timestamps span more than `W`. Every record type
 can establish `R`; its payload is irrelevant to the timestamp comparison.
 
-`W` is a capture Kafka broker-time window, not a replay wall-clock timeout and not a Kafka
-read-ahead amount. It is independent of the proxy's record-composition interval `F`, the heartbeat
-interval `H`, and the expiration interval `E`; no correctness rule requires an inequality among
-them, and record granularity, publication latency, heartbeats, and permitted skew mean the observed
-boundary need not be exactly `W` of source elapsed time.
+`W` is a capture Kafka broker-time window, not a replay wall-clock timeout, and it does not
+prescribe a fixed Kafka read-ahead amount. Kafka demand counts retry-ready requests, so a complete
+captured response may resolve demand much earlier than `B + W`; only a slow or missing response
+needs a later record to cross the boundary. `W` is independent of the proxy's record-composition
+interval `F`, the heartbeat interval `H`, and the expiration interval `E`; no correctness rule
+requires an inequality among them, and record granularity, publication latency, heartbeats, and
+permitted skew mean the observed boundary need not be exactly `W` of source elapsed time.
 [Capture and Replay Architecture §10](captureAndReplayArchitecture.md#10-target-replay-and-durable-tuples)
 carries the full rationale.
 
@@ -1225,23 +1218,19 @@ certified `finalized`; an arbitrary `range` ending supplies no such evidence.
 
 ### 8.3 Progress and capacity
 
-The two readable conditions remove the circular wait from the previous design:
-
-- when a partition has no usable request supply, it remains readable; and
-- while a target connection turn could still need later Kafka input for retry policy, its partition
-  remains readable until that need is settled.
-
-Consequently, a Kafka pause cannot withhold the input needed for an active target replay to decide
-whether to retry. After the retry boundary, the connection can advance according to target policy
-even while tuple source-response accumulation remains unfinished.
+Counting only requests with resolved retry input prevents the request-supply target from pausing a
+partition while the supply itself still depends on later Kafka evidence. Complete responses
+usually resolve requests quickly; slow or missing responses keep demand open until their
+deterministic boundary or earlier terminal source evidence. After retry input resolves, final
+source-response accumulation for tuple output remains independent.
 
 This is not a hard memory ceiling. Reading through one request's retry window may encounter many
 other connections and requests, and Kafka may return a large batch before a pause takes effect.
-`N` limits ordinary reconstituted-request supply; it does not bound bytes, records, incomplete
-source accumulators, or tuple-only work. A hard count or byte cap can still deadlock if it stops
-intake before a record needed to complete, close, or expire retained state. The design therefore
-accepts that extreme traffic density or record size may exhaust memory rather than introducing
-such a deadlock by construction.
+`N` limits ordinary retry-ready request supply; it does not bound unresolved requests, bytes,
+records, incomplete source accumulators, or tuple-only work. A hard count or byte cap can still
+deadlock if it stops intake before a record needed to complete, close, or expire retained state.
+The design therefore accepts that extreme traffic density or record size may exhaust memory rather
+than introducing such a deadlock by construction.
 
 Periodic proxy publication prevents a quiet or low-volume connection from retaining one nonempty
 record until connection close. It does not create a replayer memory ceiling: a record can still be
@@ -1530,11 +1519,11 @@ anything not known to have committed.
 
 ### 12.9 Kafka input demand cannot withhold retry evidence
 
-Replay intake requests another partition batch while it has fewer than `N` reconstituted requests.
-A request with an active target connection turn and unresolved source-response input for retry also
-causes another batch to be requested. Replay intake therefore cannot stop requesting batches while
-an active target replay could need the later record that either completes its source response or
-crosses its deterministic retry boundary.
+Replay intake requests another partition batch while it has fewer than `N` requests with resolved
+retry input and unfinished target turns. An unresolved retry input does not contribute to that
+count. Replay intake therefore cannot satisfy its request-supply target solely with requests that
+still depend on a later record to complete their captured source response or cross their
+deterministic retry boundary.
 
 Crossing the boundary releases only the retry wait. Final source-response accumulation, tuple
 output, and Kafka-record completion remain independent and may continue afterward.
@@ -1550,9 +1539,9 @@ output, and Kafka-record completion remain independent and may continue afterwar
 - Every explicitly retained reference-counted object is released exactly once.
 - Every normally completed request-replay owner produces exactly one connection-turn completion
   and exactly one request-processing completion.
-- Every begun target turn causes exactly one `ConnectionRequestStarted` and exactly one
-  `ConnectionRequestFinished` to reach replay intake. Queued or prepared requests that never begin
-  a target turn emit neither.
+- Every normally or gracefully completed target turn causes exactly one
+  `ConnectionRequestFinished` to reach replay intake. A request cancelled before target sending
+  returns cancellation cleanup instead.
 - Cancellation may arrive before or after connection-turn completion. It never produces
   request-processing completion for unfinished processing.
 
@@ -1592,8 +1581,8 @@ output, and Kafka-record completion remain independent and may continue afterwar
   connection queue.
 - The connection owner advances after connection-turn completion without waiting for tuple
   durability.
-- `ConnectionRequestStarted` and `ConnectionRequestFinished` each reach replay intake exactly once
-  and cause demand to be recomputed.
+- `ConnectionRequestFinished` reaches replay intake exactly once for a normally or gracefully
+  completed target turn and causes demand to be recomputed.
 - Exactly one write-tuple request is sent when tuple inputs become available. The writer may make
   multiple attempts, and exactly one request-processing completion reaches replay intake through
   the connection owner after tuple durability.
@@ -1654,17 +1643,16 @@ output, and Kafka-record completion remain independent and may continue afterwar
   continued group-maintenance polling. Batch demand, prior-generation cleanup, and
   revocation/shutdown are independent pause reasons; clearing one cannot resume a partition while
   another remains.
-- With `N = P * T`, `P` defaults to two requests per target Netty event-loop thread and `T` is
-  fixed at startup. Replay intake requests a new partition batch whenever fewer than `N`
-  reconstituted requests from it remain available for or active in target replay.
-- A request with an active target connection turn and unresolved retry source-response input keeps
-  another batch requested even when the request-supply count is already at or above `N`.
-- Demand is recomputed after an applied partition batch, `ConnectionRequestStarted`,
-  `ConnectionRequestFinished`, retry-input resolution, finalized-archive partition end,
-  cancellation, and generation cleanup. Empty polls leave the existing request outstanding and
-  are not sent to replay intake.
-- A queued request with unresolved retry input does not count as an active target turn before
-  `ConnectionRequestStarted`.
+- With `N = P * T`, `P` defaults to two retry-ready requests per target Netty event-loop thread and
+  `T` is fixed at startup. Replay intake requests a new partition batch whenever fewer than `N`
+  requests have resolved retry input and unfinished target turns.
+- A complete captured response can make a request retry-ready well before `B + W`.
+- A slow or missing response keeps demand open until complete or explicitly unavailable.
+- Demand is recomputed after an applied partition batch, `ConnectionRequestFinished`, retry-input
+  resolution, finalized-archive partition end, cancellation, and generation cleanup. Empty polls
+  leave the existing request outstanding and are not sent to replay intake.
+- A request may begin target replay before retry input resolves. Resolving retry input after
+  `ConnectionRequestFinished` or cancellation does not add that request back to supply.
 - Startup rejects `P < 1`, `T < 1`, and `W <= 0`; the defaults produce `N = 2 * T` and a
   five-second `W`.
 - One poll may satisfy requests for several partitions. Kafka source pauses every partition

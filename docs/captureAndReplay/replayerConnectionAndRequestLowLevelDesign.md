@@ -350,15 +350,13 @@ tuple output, regardless of whether its HTTP or bulk-item result is successful.
 `NoTargetResponseObtained` means no target response was obtained. It is not an unsuccessful HTTP
 response.
 
-The first accepted target write is what makes a request **started** for demand accounting: it is
-the canonical trigger for `ConnectionRequestStarted` referenced by the mid- and top-level designs.
 When Netty accepts the request's first target write, the request owner reports
-`FirstTargetWriteSubmitted` to the connection owner, and the connection owner submits exactly one
-`ConnectionRequestStarted` to replay intake. A request that is queued, prepared, or holds the turn
-but has not yet had a write accepted is not started. Retries do not emit another started message.
+`FirstTargetWriteSubmitted` to the connection owner on their shared event loop. The connection
+owner uses this fact to distinguish unsent work from work that has begun sending when it handles
+cancellation. Retries do not repeat this transition.
 
-If required submission of `ConnectionRequestStarted` fails, the process terminates. The target
-write is not reclassified as unsent.
+`FirstTargetWriteSubmitted` is local to the target connection. It is not forwarded to replay
+intake and does not affect Kafka input demand.
 
 ## 9. Retry decisions
 
@@ -439,8 +437,8 @@ The connection owner:
 1. verifies that the request owns the active turn;
 2. clears the active-turn field;
 3. removes the request's execution entry;
-4. submits exactly one `ConnectionRequestFinished` to replay intake if
-   `ConnectionRequestStarted` was emitted;
+4. submits exactly one `ConnectionRequestFinished` to replay intake for a normally or gracefully
+   completed target turn;
 5. schedules or immediately examines the next execution-queue head; and
 6. retains the request in its registry until full processing or cleanup finishes.
 
@@ -674,11 +672,11 @@ On `GracefulConnectionCancellation(deadline)`, the connection owner:
   chain until the deadline; and
 - allows a tuple already required by such a request to begin and finish during the grace interval.
 
-An admitted request that never started returns cancellation cleanup but emits neither
-`ConnectionRequestStarted` nor `ConnectionRequestFinished`.
+An admitted request cancelled before it begins sending returns cancellation cleanup and emits no
+`ConnectionRequestFinished`.
 
-A request that emitted `ConnectionRequestStarted` and then reaches a terminal or cancelled target
-turn emits exactly one `ConnectionRequestFinished`.
+A request whose target turn finishes normally or during graceful cancellation emits exactly one
+`ConnectionRequestFinished`.
 
 ### 17.2 Force cancellation
 
@@ -746,7 +744,11 @@ Long-running activity reporting observes these registrations but cannot complete
 - A target response, including an unsuccessful response, finishes target-server work when the
   existing retry policy requires no further attempt.
 - No target response retries indefinitely until cancellation.
-- Exactly one started and finished message reaches replay intake for a begun target turn.
+- The first accepted target write changes local cancellation state exactly once, and retries do not
+  repeat that transition.
+- Exactly one `ConnectionRequestFinished` reaches replay intake for a normally or gracefully
+  completed target turn.
+- Cancellation before target sending emits cleanup and no `ConnectionRequestFinished`.
 - Exactly one request-processing completion reaches replay intake after tuple durability.
 
 ### 19.3 Source-response and tuple
