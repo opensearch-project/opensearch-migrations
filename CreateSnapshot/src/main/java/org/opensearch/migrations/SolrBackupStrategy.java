@@ -224,13 +224,26 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     }
 
     private static void validateSolrRepoSupported(RepoUri parsedUri) {
-        // Solr + GCS is intentionally out of scope for this release: the metadata
-        // (ClusterReaderExtractor) and document (RfsMigrateDocuments) read paths only
-        // handle file:// and s3:// for Solr sources. Reject gs:// so a user cannot create or
-        // import-prepare a Solr snapshot in a repository the downstream stages cannot read.
-        if (parsedUri instanceof RepoUri.GcsRepoUri) {
+        // Solr + GCS and Solr + Azure are intentionally out of scope for this release: the
+        // metadata (ClusterReaderExtractor) and document (RfsMigrateDocuments) read paths only
+        // handle file:// and s3:// for Solr sources. Reject both cloud schemes so a user cannot
+        // create or import-prepare a Solr snapshot in a repository the downstream stages cannot
+        // read. Called from the constructor, so it gates every Solr path at once: create mode,
+        // import mode, cloud backup, and standalone backup. That is what lets the instanceof
+        // chains below stay correct without an Azure branch, since Azure never reaches them.
+        //
+        // Switches over the sealed type rather than testing instanceof so that a new cloud
+        // variant has to be classified here explicitly instead of silently passing the gate.
+        var unsupportedScheme = switch (parsedUri) {
+            case RepoUri.GcsRepoUri g -> "gs://";
+            case RepoUri.AzureRepoUri a -> "azure://";
+            case RepoUri.S3RepoUri s -> null;
+            case RepoUri.FileRepoUri f -> null;
+        };
+        if (unsupportedScheme != null) {
             throw new ParameterException(
-                "Solr backup to gs:// is not supported in this release; use --repo-uri with a file:// or s3:// scheme.");
+                "Solr backup to " + unsupportedScheme + " is not supported in this release;"
+                    + " use --repo-uri with a file:// or s3:// scheme.");
         }
     }
 
@@ -926,6 +939,11 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             case RepoUri.S3RepoUri s -> ensureS3LocationExists(s.rawUri(), args.snapshotName, args.s3Region, args.endpoint);
             case RepoUri.FileRepoUri f -> ensureFileSystemLocationExists(f.path(), args.snapshotName);
             case RepoUri.GcsRepoUri g -> {} // GCS doesn't require pre-created directories
+            // Unreachable: validateSolrRepoSupported rejects azure:// in the constructor. Kept as
+            // a loud guard rather than an empty arm so that if the rejection is ever relaxed, this
+            // fails at the first Azure backup instead of silently skipping location setup.
+            case RepoUri.AzureRepoUri a -> throw new IllegalStateException(
+                "Solr backup to azure:// is rejected at construction; reaching runCloudBackup is a bug");
         }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,

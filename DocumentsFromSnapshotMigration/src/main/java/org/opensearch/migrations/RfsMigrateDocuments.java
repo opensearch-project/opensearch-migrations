@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
+import org.opensearch.migrations.bulkload.common.AzureRepo;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -488,6 +489,9 @@ public class RfsMigrateDocuments {
                 case RepoUri.GcsRepoUri g -> throw new ParameterException(
                     "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
+                case RepoUri.AzureRepoUri a -> throw new ParameterException(
+                    "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
+                );
             }
             if (args.coordinatorArgs.host == null) {
                 throw new ParameterException(
@@ -524,6 +528,13 @@ public class RfsMigrateDocuments {
                 if (args.localDir == null) {
                     throw new ParameterException(
                         "If a GCS repo is being used, --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.AzureRepoUri a -> {
+                if (args.localDir == null) {
+                    throw new ParameterException(
+                        "If an Azure repo is being used, --local-dir must be set."
                     );
                 }
             }
@@ -807,6 +818,11 @@ public class RfsMigrateDocuments {
                 case RepoUri.GcsRepoUri g -> GcsRepo.create(
                     Paths.get(arguments.localDir),
                     new GcsUri(g.rawUri()),
+                    arguments.endpoint,
+                    finder);
+                case RepoUri.AzureRepoUri a -> AzureRepo.create(
+                    Paths.get(arguments.localDir),
+                    a.azureUri(),
                     arguments.endpoint,
                     finder);
                 case RepoUri.S3RepoUri s -> S3Repo.create(

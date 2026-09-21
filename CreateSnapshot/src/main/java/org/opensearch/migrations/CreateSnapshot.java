@@ -191,6 +191,7 @@ public class CreateSnapshot {
             // Snapshot creation writes to the repo, so unlike the read paths in
             // ClusterReaderExtractor and RfsMigrateDocuments it needs no --local-dir.
             case RepoUri.GcsRepoUri g -> { /* no additional arguments required */ }
+            case RepoUri.AzureRepoUri a -> { /* no additional arguments required */ }
             case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
         }
         try {
