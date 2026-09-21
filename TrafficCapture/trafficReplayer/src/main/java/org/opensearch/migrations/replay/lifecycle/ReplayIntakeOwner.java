@@ -9,7 +9,10 @@
 package org.opensearch.migrations.replay.lifecycle;
 
 import java.io.EOFException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -19,12 +22,15 @@ import java.util.concurrent.ThreadFactory;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.SourceInput;
-import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 
 /**
  * Sole owner of replay-intake mutable state and source-record application.
@@ -40,8 +46,10 @@ public final class ReplayIntakeOwner {
         StartSourceRead,
         SourceReadCompleted,
         SourceReadFailed,
+        RegisterRequestGeneration,
         StopReading,
         CloseAccumulator,
+        Fence,
         StopOwner {}
 
     public record StartSourceRead(
@@ -58,9 +66,17 @@ public final class ReplayIntakeOwner {
 
     record SourceReadFailed(long sequence, @NonNull Throwable failure) implements Input {}
 
+    public record RegisterRequestGeneration(
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ReplayRequestId requestId,
+        boolean kafkaBacked
+    ) implements Input {}
+
     public record StopReading(@NonNull CompletableFuture<Void> completion) implements Input {}
 
     public record CloseAccumulator(@NonNull CompletableFuture<Void> completion) implements Input {}
+
+    public record Fence() implements Input {}
 
     public record StopOwner(@NonNull CompletableFuture<Void> completion) implements Input {}
 
@@ -73,11 +89,25 @@ public final class ReplayIntakeOwner {
     private AsyncPermitPool permitPool;
     private ReplayProgressController progressController;
     private RecordWorkTracker recordWorkTracker;
+    private static final class RequestGenerationState {
+        private final PartitionGenerationId expected;
+        private final boolean kafkaBacked;
+        private boolean connectionRequestFinished;
+
+        private RequestGenerationState(PartitionGenerationId expected, boolean kafkaBacked) {
+            this.expected = expected;
+            this.kafkaBacked = kafkaBacked;
+        }
+    }
+
+    private final Map<ReplayRequestId, RequestGenerationState> requestGenerations =
+        new LinkedHashMap<>();
     private ITrafficCaptureSource source;
     private CapturedTrafficToHttpTransactionAccumulator accumulator;
     private Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier;
     private CompletableFuture<Void> readingCompletion;
     private CompletableFuture<List<SourceInput>> currentRead;
+    private final List<CompletableFuture<Void>> stopReadingCompletions = new ArrayList<>();
     private long currentReadSequence;
     private boolean reading;
     private boolean stopReading;
@@ -155,6 +185,14 @@ public final class ReplayIntakeOwner {
         return completion.minimalCompletionStage();
     }
 
+    /**
+     * Completes after every replay-intake input already queued by the caller or by an earlier
+     * owner transition has been applied.
+     */
+    public CompletionStage<Void> fence() {
+        return submitRequiredHandled(new Fence());
+    }
+
     public CompletionStage<Void> closePermits(@NonNull CancellationException cause) {
         return permitPool.close(cause);
     }
@@ -180,18 +218,45 @@ public final class ReplayIntakeOwner {
 
     public boolean submitRequired(@NonNull ReplayIntakeInput input) {
         if (!started || !inputQueue.submit(input)) {
-            fatalHandler.onFatal(new Error(
-                "Required replay-intake input submission was rejected: " + input.getClass().getSimpleName()
-            ));
+            reportRejectedSubmission(input);
             return false;
         }
         return true;
     }
 
+    public CompletionStage<Void> submitRequiredHandled(@NonNull ReplayIntakeInput input) {
+        var handled = new CompletableFuture<Void>();
+        if (!started || !inputQueue.submit(input, handled)) {
+            var rejection = new IllegalStateException(
+                "replay-intake owner rejected " + input.getClass().getSimpleName()
+            );
+            handled.completeExceptionally(rejection);
+            reportRejectedSubmission(input);
+        }
+        return handled.minimalCompletionStage();
+    }
+
+    private void reportRejectedSubmission(ReplayIntakeInput input) {
+        fatalHandler.onFatal(new Error(
+            "Required replay-intake input submission was rejected: " + input.getClass().getSimpleName()
+        ));
+    }
+
     private void runLoop() {
         try {
             while (running) {
-                apply(inputQueue.take());
+                var queued = inputQueue.take();
+                try {
+                    apply(queued.input());
+                    if (queued.handled() != null) {
+                        queued.handled().complete(null);
+                    }
+                } catch (Throwable t) {
+                    if (queued.handled() != null) {
+                        queued.handled().completeExceptionally(t);
+                    }
+                    throw t;
+                }
             }
             termination.complete(null);
         } catch (InterruptedException e) {
@@ -212,7 +277,122 @@ public final class ReplayIntakeOwner {
             case ReplayProgressController.Input progressInput -> progressController.apply(progressInput);
             case RecordWorkTracker.Input trackerInput ->
                 Objects.requireNonNull(recordWorkTracker, "recordWorkTracker").apply(trackerInput);
+            case RequestLifecycleInput requestInput -> applyRequestLifecycleInput(requestInput);
         }
+    }
+
+    private void applyRequestLifecycleInput(RequestLifecycleInput input) {
+        var generationState = requireExpectedGeneration(input);
+        validateKafkaAssociations(input.requestId(), generationState);
+        switch (input) {
+            case RequestLifecycleInput.ConnectionRequestFinished finished -> {
+                if (generationState.connectionRequestFinished) {
+                    throw new IllegalStateException(
+                        "duplicate ConnectionRequestFinished for "
+                            + finished.requestId()
+                    );
+                }
+                generationState.connectionRequestFinished = true;
+                // S10 consumes this milestone for retry-ready demand. S5 establishes the typed
+                // owner crossing and exactly-once connection ordering boundary.
+            }
+            case RequestLifecycleInput.RequestProcessingFinished finished -> {
+                if (!generationState.connectionRequestFinished) {
+                    throw new IllegalStateException(
+                        "RequestProcessingFinished arrived without ConnectionRequestFinished for "
+                            + finished.requestId()
+                    );
+                }
+                if (generationState.kafkaBacked) {
+                    Objects.requireNonNull(recordWorkTracker, "recordWorkTracker")
+                        .associationFinished(finished.requestId());
+                }
+                requestGenerations.remove(finished.requestId());
+            }
+        }
+    }
+
+    private RequestGenerationState requireExpectedGeneration(RequestLifecycleInput input) {
+        var generationState = requestGenerations.get(input.requestId());
+        if (generationState == null) {
+            throw new IllegalStateException(
+                input.getClass().getSimpleName()
+                    + " arrived without source generation registration for "
+                    + input.requestId()
+            );
+        }
+        if (!generationState.expected.equals(input.partitionGenerationId())) {
+            throw new IllegalStateException(
+                "request lifecycle partition-generation mismatch for "
+                    + input.requestId()
+                    + "; source registration="
+                    + generationState.expected
+                    + ", received="
+                    + input.partitionGenerationId()
+            );
+        }
+        return generationState;
+    }
+
+    private void registerRequestGeneration(RegisterRequestGeneration registration) {
+        if (registration.partitionGenerationId().localSequence()
+            != registration.requestId().session().sourceGeneration()) {
+            throw new IllegalStateException(
+                "request source generation mismatch for " + registration.requestId()
+            );
+        }
+        var generationState = new RequestGenerationState(
+            registration.partitionGenerationId(),
+            registration.kafkaBacked()
+        );
+        if (requestGenerations.putIfAbsent(registration.requestId(), generationState) != null) {
+            throw new IllegalStateException(
+                "request source generation was already registered: " + registration.requestId()
+            );
+        }
+        try {
+            validateKafkaAssociations(registration.requestId(), generationState);
+        } catch (Throwable failure) {
+            requestGenerations.remove(registration.requestId());
+            throw failure;
+        }
+    }
+
+    private void validateKafkaAssociations(
+        ReplayRequestId requestId,
+        RequestGenerationState generationState
+    ) {
+        if (!generationState.kafkaBacked) {
+            if (recordWorkTracker != null && !recordWorkTracker.recordsFor(requestId).isEmpty()) {
+                throw new IllegalStateException(
+                    "Non-Kafka request unexpectedly has Kafka record associations: " + requestId
+                );
+            }
+            return;
+        }
+        var tracker = Objects.requireNonNull(recordWorkTracker, "recordWorkTracker");
+        var records = tracker.recordsFor(requestId);
+        if (records.isEmpty()) {
+            throw new IllegalStateException(
+                "Kafka-backed request has no record association: " + requestId
+            );
+        }
+        records.forEach(recordId -> {
+            var associatedGeneration = new PartitionGenerationId(
+                new TopicPartition(recordId.topic(), recordId.partition()),
+                recordId.sourceGeneration()
+            );
+            if (!generationState.expected.equals(associatedGeneration)) {
+                throw new IllegalStateException(
+                    "Kafka record association generation mismatch for "
+                        + requestId
+                        + "; source registration="
+                        + generationState.expected
+                        + ", record="
+                        + recordId
+                );
+            }
+        });
     }
 
     private void applyOwnerInput(Input input) {
@@ -220,8 +400,10 @@ public final class ReplayIntakeOwner {
             case StartSourceRead start -> beginReading(start);
             case SourceReadCompleted completed -> applySourceBatch(completed);
             case SourceReadFailed failed -> applySourceFailure(failed);
+            case RegisterRequestGeneration registration -> registerRequestGeneration(registration);
             case StopReading stop -> applyStopReading(stop);
             case CloseAccumulator close -> applyCloseAccumulator(close);
+            case Fence ignored -> {}
             case StopOwner stop -> applyStopOwner(stop);
         }
     }
@@ -299,13 +481,17 @@ public final class ReplayIntakeOwner {
 
     private void applyStopReading(StopReading stop) {
         stopReading = true;
+        if (!reading) {
+            stop.completion().complete(null);
+            return;
+        }
+        stopReadingCompletions.add(stop.completion());
         var read = currentRead;
         if (read != null) {
             read.cancel(true);
         } else {
             finishReading(null);
         }
-        stop.completion().complete(null);
     }
 
     private void applyCloseAccumulator(CloseAccumulator close) {
@@ -339,9 +525,14 @@ public final class ReplayIntakeOwner {
         reading = false;
         if (failure == null) {
             readingCompletion.complete(null);
+            stopReadingCompletions.forEach(completion -> completion.complete(null));
         } else {
             readingCompletion.completeExceptionally(failure);
+            stopReadingCompletions.forEach(
+                completion -> completion.completeExceptionally(failure)
+            );
         }
+        stopReadingCompletions.clear();
     }
 
     private void requireCurrentRead(long sequence) {

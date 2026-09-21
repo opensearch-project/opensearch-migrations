@@ -4,9 +4,9 @@ import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.kafka.TrackingKafkaConsumer;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
-import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.IInstrumentConstructor;
 import org.opensearch.migrations.tracing.IRootOtelContext;
@@ -19,7 +19,7 @@ public interface IRootReplayerContext extends IRootOtelContext, IInstrumentConst
 
     AsyncPermitPool.Metrics getPermitPoolMetrics();
 
-    ConnectionActor.Metrics getConnectionActorMetrics();
+    TargetConnectionOwner.Metrics getConnectionActorMetrics();
 
     TargetExchangeState.Metrics getTargetExchangeStateMetrics();
 

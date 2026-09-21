@@ -8,7 +8,9 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 
 import lombok.NonNull;
 
@@ -18,21 +20,48 @@ import lombok.NonNull;
  * <p>The queue owns no replay state. Only {@link ReplayIntakeOwner} removes inputs.
  */
 public final class ReplayIntakeInputQueue {
-    private final LinkedBlockingQueue<ReplayIntakeInput> inputs = new LinkedBlockingQueue<>();
+    record QueuedInput(
+        @NonNull ReplayIntakeInput input,
+        CompletableFuture<Void> handled
+    ) {}
+
+    private final LinkedBlockingQueue<QueuedInput> inputs = new LinkedBlockingQueue<>();
     private boolean accepting = true;
 
     public synchronized boolean submit(@NonNull ReplayIntakeInput input) {
+        return submit(input, null);
+    }
+
+    synchronized boolean submit(
+        @NonNull ReplayIntakeInput input,
+        CompletableFuture<Void> handled
+    ) {
         if (!accepting) {
             return false;
         }
-        return inputs.offer(input);
+        return inputs.offer(new QueuedInput(input, handled));
     }
 
-    ReplayIntakeInput take() throws InterruptedException {
+    QueuedInput take() throws InterruptedException {
         return inputs.take();
     }
 
     synchronized void close() {
+        if (!accepting) {
+            return;
+        }
         accepting = false;
+        QueuedInput queued;
+        while ((queued = inputs.poll()) != null) {
+            if (queued.handled() != null) {
+                queued.handled().completeExceptionally(
+                    new RejectedExecutionException(
+                        "Replay-intake input queue closed before queued "
+                            + queued.input().getClass().getSimpleName()
+                            + " was handled"
+                    )
+                );
+            }
+        }
     }
 }

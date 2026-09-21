@@ -5,7 +5,6 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -14,9 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -29,10 +29,14 @@ import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.RequestLifecycleInput;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
@@ -59,7 +63,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     private static final Duration ACTOR_TERMINATION_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
     private static final Duration REMAINING_WORK_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
 
-    public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
     private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
     private final AtomicReference<ReplayEngine> currentReplayEngine = new AtomicReference<>();
 
@@ -71,6 +74,38 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     /** Returns the current replay engine, or null if not yet initialized. */
     public ReplayEngine getCurrentReplayEngine() {
         return currentReplayEngine.get();
+    }
+
+    static TargetConnectionOwner.RequestLifecycleSink requestLifecycleSink(
+        @NonNull Function<RequestLifecycleInput, CompletionStage<Void>> submitter
+    ) {
+        return new TargetConnectionOwner.RequestLifecycleSink() {
+            @Override
+            public CompletionStage<Void> connectionRequestFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return submitter.apply(
+                    new RequestLifecycleInput.ConnectionRequestFinished(
+                        partitionGenerationId,
+                        requestId
+                    )
+                );
+            }
+
+            @Override
+            public CompletionStage<Void> requestProcessingFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return submitter.apply(
+                    new RequestLifecycleInput.RequestProcessingFinished(
+                        partitionGenerationId,
+                        requestId
+                    )
+                );
+            }
+        };
     }
 
     public interface IStreamableWorkTracker<T> extends IWorkTracker<T> {
@@ -109,68 +144,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     protected final ClientConnectionPool clientConnectionPool;
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
+    private final AtomicBoolean fatalShutdownClaimed;
     private final ReplayProcessFatalHandler.ProcessTerminator fatalProcessTerminator;
-
-    public TrafficReplayerTopLevel(
-        IRootReplayerContext context,
-        URI serverUri,
-        IAuthTransformerFactory authTransformerFactory,
-        Supplier<IJsonTransformer> jsonTransformerSupplier,
-        ClientConnectionPool clientConnectionPool,
-        int maxConcurrentRequests,
-        IStreamableWorkTracker<Void> workTracker
-    ) {
-        this(context, serverUri, authTransformerFactory, jsonTransformerSupplier,
-            clientConnectionPool, maxConcurrentRequests, workTracker, new BulkItemErrorClassifier());
-    }
-
-    public TrafficReplayerTopLevel(
-        IRootReplayerContext context,
-        URI serverUri,
-        IAuthTransformerFactory authTransformerFactory,
-        Supplier<IJsonTransformer> jsonTransformerSupplier,
-        ClientConnectionPool clientConnectionPool,
-        int maxConcurrentRequests,
-        IStreamableWorkTracker<Void> workTracker,
-        BulkItemErrorClassifier errorClassifier
-    ) {
-        this(
-            context,
-            serverUri,
-            authTransformerFactory,
-            jsonTransformerSupplier,
-            clientConnectionPool,
-            maxConcurrentRequests,
-            workTracker,
-            errorClassifier,
-            ExceptionTypeAllowlist.empty()
-        );
-    }
-
-    public TrafficReplayerTopLevel(
-        IRootReplayerContext context,
-        URI serverUri,
-        IAuthTransformerFactory authTransformerFactory,
-        Supplier<IJsonTransformer> jsonTransformerSupplier,
-        ClientConnectionPool clientConnectionPool,
-        int maxConcurrentRequests,
-        IStreamableWorkTracker<Void> workTracker,
-        BulkItemErrorClassifier errorClassifier,
-        ExceptionTypeAllowlist poisonAllowlist
-    ) {
-        this(
-            context,
-            serverUri,
-            authTransformerFactory,
-            jsonTransformerSupplier,
-            clientConnectionPool,
-            maxConcurrentRequests,
-            workTracker,
-            errorClassifier,
-            poisonAllowlist,
-            new ProcessSupervisor()
-        );
-    }
 
     public TrafficReplayerTopLevel(
         IRootReplayerContext context,
@@ -198,6 +173,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
+        fatalShutdownClaimed = new AtomicBoolean();
         this.fatalProcessTerminator = Objects.requireNonNull(fatalProcessTerminator);
     }
 
@@ -240,14 +216,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 loadSslContext(serverUri, allowInsecureConnections), serverUri),
             connectionPoolName != null
                 ? connectionPoolName
-                : getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
+                : TARGET_CONNECTION_POOL_NAME,
             numSendingThreads,
             metrics
         );
-    }
-
-    public static String getTargetConnectionPoolName(int i) {
-        return TARGET_CONNECTION_POOL_NAME + (i == 0 ? "" : Integer.toString(i));
     }
 
     @SneakyThrows
@@ -326,13 +298,22 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             topLevelContext.getPermitPoolMetrics()
         );
         this.intakeOwner = replayIntakeOwner;
+        var requestLifecycleSink = requestLifecycleSink(
+            replayIntakeOwner::submitRequiredHandled
+        );
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
+            (replaySession, ctx, firstTargetWriteSubmitted) -> new NettyPacketToHttpConsumer(
+                replaySession,
+                ctx,
+                targetServerResponseTimeout,
+                firstTargetWriteSubmitted
+            ),
             trafficSource::acknowledgeSessionTermination,
             topLevelContext.getConnectionActorMetrics(),
             topLevelContext.getTargetExchangeStateMetrics(),
             topLevelContext.getResourceOwnershipMetrics(),
+            requestLifecycleSink,
             fatalHandler
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
@@ -389,27 +370,26 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             recordWorkTracker
         );
         replayIntakeOwner.start();
+        Throwable primaryFailure = null;
+        var readingCompletion = replayIntakeOwner.startReading(
+            trafficSource,
+            trafficToHttpTransactionAccumulator,
+            topLevelContext::createReadChunkContext
+        ).toCompletableFuture();
         try {
-            replayIntakeOwner.startReading(
-                trafficSource,
-                trafficToHttpTransactionAccumulator,
-                topLevelContext::createReadChunkContext
-            ).toCompletableFuture().get();
-        } catch (InterruptedException ex) {
-            throw ex;
-        } catch (Exception e) {
-            log.atWarn().setCause(e).setMessage("Terminating runReplay due to exception").log();
-            throw e;
-        } finally {
-            try {
-                replayIntakeOwner.closeAccumulator().toCompletableFuture().get();
-                wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
-                assert shutdownFutureRef.get() != null || requestWorkTracker.isEmpty()
-                    : "expected to wait for all the in flight requests to fully flush and self destruct themselves";
-            } finally {
-                finishIntakeLifecycle(replayIntakeOwner);
+            readingCompletion.get();
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            if (!(failure instanceof InterruptedException)) {
+                log.atWarn().setCause(failure).setMessage("Terminating runReplay due to exception").log();
             }
         }
+        finishIntakeLifecycle(
+            replayIntakeOwner,
+            readingCompletion,
+            primaryFailure,
+            () -> wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator)
+        );
     }
 
     /**
@@ -655,28 +635,38 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
-    @Override
-    protected boolean shouldRetry() {
-        return shutdownFutureRef.get() == null;
-    }
-
     @SneakyThrows
     @Override
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
         log.atWarn().setCause(error).setMessage("Shutting down {}").addArgument(this).log();
-        shutdownReasonRef.compareAndSet(null, error);
+        if (error != null) {
+            fatalShutdownClaimed.set(true);
+            shutdownReasonRef.compareAndSet(null, error);
+        }
         var existingShutdown = claimShutdown(error);
         if (existingShutdown != null) {
+            if (error != null) {
+                var lateFatalCancellation = new CancellationException(
+                    "fatal replay shutdown superseded orderly shutdown"
+                );
+                var replayIntakeOwner = intakeOwner;
+                if (replayIntakeOwner != null) {
+                    replayIntakeOwner.stopReading();
+                    replayIntakeOwner.closePermits(lateFatalCancellation);
+                }
+                signalRemainingWorkShutdown(error);
+                existingShutdown.completeExceptionally(error);
+            }
             return existingShutdown;
         }
         var cancellationCause = new CancellationException("replay is shutting down");
         var replayEngine = currentReplayEngine.get();
         var replayIntakeOwner = intakeOwner;
-        if (replayIntakeOwner != null) {
-            replayIntakeOwner.stopReading();
-            replayIntakeOwner.closePermits(cancellationCause);
-        }
         if (error != null) {
+            if (replayIntakeOwner != null) {
+                replayIntakeOwner.stopReading();
+                replayIntakeOwner.closePermits(cancellationCause);
+            }
             signalRemainingWorkShutdown(error);
             shutdownFutureRef.get().completeExceptionally(error);
             log.atError()
@@ -762,13 +752,25 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     ) {
         var completion = new CompletableFuture<Void>();
         var stage = new AtomicReference<>(ShutdownStage.TERMINATING_CONNECTION_ACTORS);
+        var replayIntakeOwner = intakeOwner;
         Runnable beginShutdown = () -> {
+            var fatalReason = shutdownReasonRef.get();
+            if (fatalShutdownClaimed.get() && fatalReason != null) {
+                stage.set(ShutdownStage.DONE);
+                completion.completeExceptionally(fatalReason);
+                return;
+            }
             try {
                 var actorShutdown = replayEngine == null
                     ? CompletableFuture.<Void>completedFuture(null)
                     : replayEngine.shutdownConnections(cause);
-                actorShutdown
-                    .whenComplete((ignored, failure) -> {
+                var permitShutdown = replayIntakeOwner == null
+                    ? CompletableFuture.<Void>completedFuture(null)
+                    : replayIntakeOwner.closePermits(cause);
+                CompletableFuture.allOf(
+                    actorShutdown.toCompletableFuture(),
+                    permitShutdown.toCompletableFuture()
+                ).whenComplete((ignored, failure) -> {
                         stage.set(ShutdownStage.DONE);
                         if (failure == null) {
                             completion.complete(null);
@@ -782,7 +784,19 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             }
         };
         reportShutdownProgressUntilComplete(stage, completion, replayEngine);
-        beginShutdown.run();
+        var intakeFence = replayIntakeOwner == null
+            ? CompletableFuture.<Void>completedFuture(null)
+            : replayIntakeOwner.stopReading()
+                .thenCompose(ignored -> replayIntakeOwner.fence())
+                .toCompletableFuture();
+        intakeFence.whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                stage.set(ShutdownStage.DONE);
+                completion.completeExceptionally(failure);
+            } else {
+                beginShutdown.run();
+            }
+        });
         return completion;
     }
 
@@ -819,18 +833,98 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }, CompletableFuture.delayedExecutor(SHUTDOWN_PROGRESS_REPORT_INTERVAL.toSeconds(), TimeUnit.SECONDS));
     }
 
-    void finishIntakeLifecycle(
-        ReplayIntakeOwner replayIntakeOwner
+    @FunctionalInterface
+    interface LifecycleCleanupStep {
+        void run() throws ExecutionException, InterruptedException;
+    }
+
+    static void runLifecycleCleanup(
+        Throwable primaryFailure,
+        LifecycleCleanupStep... cleanupSteps
     ) throws ExecutionException, InterruptedException {
+        var failure = primaryFailure;
+        var interrupted = Thread.interrupted() || primaryFailure instanceof InterruptedException;
+        for (var cleanupStep : cleanupSteps) {
+            try {
+                cleanupStep.run();
+            } catch (Throwable cleanupFailure) {
+                if (cleanupFailure instanceof InterruptedException) {
+                    interrupted = true;
+                    Thread.interrupted();
+                }
+                if (failure == null) {
+                    failure = cleanupFailure;
+                } else if (failure != cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+        }
+        if (interrupted) {
+            // Callers may translate or swallow the checked exception, so retain the cancellation signal too.
+            Thread.currentThread().interrupt();
+        }
+        rethrowLifecycleFailure(failure);
+    }
+
+    private static void rethrowLifecycleFailure(
+        Throwable failure
+    ) throws ExecutionException, InterruptedException {
+        if (failure == null) {
+            return;
+        }
+        if (failure instanceof InterruptedException interruptedException) {
+            throw interruptedException;
+        }
+        if (failure instanceof ExecutionException executionException) {
+            throw executionException;
+        }
+        if (failure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        throw new ExecutionException(failure);
+    }
+
+    private void awaitReplayShutdownForIntake() throws ExecutionException, InterruptedException {
         var shutdown = shutdownFutureRef.get();
-        if (shutdown != null && !shutdown.isDone()) {
-            shutdown.get();
+        if (shutdown == null) {
+            shutdown = shutdown(null);
         }
-        replayIntakeOwner.stopOwner().toCompletableFuture().get();
-        replayIntakeOwner.termination().toCompletableFuture().get();
-        if (intakeOwner == replayIntakeOwner) {
-            intakeOwner = null;
-        }
+        shutdown.get();
+    }
+
+    void finishIntakeLifecycle(
+        ReplayIntakeOwner replayIntakeOwner,
+        CompletableFuture<Void> readingCompletion,
+        Throwable primaryFailure,
+        LifecycleCleanupStep finishReplay
+    ) throws ExecutionException, InterruptedException {
+        runLifecycleCleanup(
+            primaryFailure,
+            () -> {
+                if (!readingCompletion.isDone()) {
+                    replayIntakeOwner.stopReading().toCompletableFuture().get();
+                    readingCompletion.get();
+                }
+            },
+            () -> replayIntakeOwner.closeAccumulator().toCompletableFuture().get(),
+            () -> replayIntakeOwner.fence().toCompletableFuture().get(),
+            finishReplay,
+            this::awaitReplayShutdownForIntake,
+            () -> {
+                assert fatalShutdownClaimed.get() || requestWorkTracker.isEmpty()
+                    : "expected orderly shutdown to finalize every in-flight request";
+            },
+            () -> replayIntakeOwner.stopOwner().toCompletableFuture().get(),
+            () -> {
+                replayIntakeOwner.termination().toCompletableFuture().get();
+                if (intakeOwner == replayIntakeOwner) {
+                    intakeOwner = null;
+                }
+            }
+        );
     }
 
     @Override

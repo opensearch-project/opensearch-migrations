@@ -12,6 +12,9 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -37,28 +40,27 @@ public class RequestTransformerAndSender<T> {
             @Override
             public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<T>> visit(
                 io.netty.buffer.ByteBuf requestBytes,
-                AggregatedRawResponse aggResponse,
-                Throwable t
+                TargetAttemptOutcome<AggregatedRawResponse> outcome
             ) {
-                resultsConsumer.accept(aggResponse);
-                if (!shouldRetry()) {
-                    return TextTrackedFuture.completedFuture(
-                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                            RequestSenderOrchestrator.RetryDirective.DONE,
-                            null),
-                        () -> "Returning a future to NOT retry because the class is currently prohibiting retries"
-                    );
-                }
-                if (t != null) {
-                    return TextTrackedFuture.completedFuture(
-                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                            RequestSenderOrchestrator.RetryDirective.RETRY,
-                            null),
-                        () -> "Returning a future to retry due to a connection exception"
-                    );
-                }
-                assert (aggResponse != null);
-                return perRequestStatefulVisitor.visit(requestBytes, aggResponse, null);
+                outcome.visit(new TargetAttemptOutcome.Visitor<
+                    AggregatedRawResponse,
+                    Void>() {
+                    @Override
+                    public Void onTargetResponseObtained(
+                        TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained
+                    ) {
+                        resultsConsumer.accept(obtained.response());
+                        return null;
+                    }
+
+                    @Override
+                    public Void onNoTargetResponseObtained(
+                        TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> notObtained
+                    ) {
+                        return null;
+                    }
+                });
+                return perRequestStatefulVisitor.visit(requestBytes, outcome);
             }
 
             @Override
@@ -66,14 +68,6 @@ public class RequestTransformerAndSender<T> {
                 perRequestStatefulVisitor.close();
             }
         };
-    }
-
-    /**
-     * This is called by before passing the response through the visitor returned by the retryVisitorFactory.
-     * This is used to suppress retrying when the system is being shut down.
-     */
-    protected boolean shouldRetry() {
-        return true;
     }
 
     /**
@@ -105,16 +99,19 @@ public class RequestTransformerAndSender<T> {
     public TrackedFuture<String, T> transformAndSendRequest(
         PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
         ReplayEngine replayEngine,
+        PartitionGenerationId partitionGenerationId,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         @NonNull Instant start,
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier,
         Duration quiescentDurationForRequest,
-        @NonNull AsyncPermitPool permitPool
+        @NonNull AsyncPermitPool permitPool,
+        @NonNull TargetConnectionOwner.RequestProcessingRegistration processingRegistration
     ) {
         try {
             return replayEngine.scheduleRequestLifecycle(
+                partitionGenerationId,
                 ctx,
                 start,
                 end,
@@ -134,7 +131,8 @@ public class RequestTransformerAndSender<T> {
                     var filtered = (T) new TransformedTargetRequestAndResponseList(null, transformationStatus);
                     return filtered;
                 },
-                quiescentDurationForRequest
+                quiescentDurationForRequest,
+                processingRegistration
             );
         } catch (Exception e) {
             log.debug("Caught exception while admitting the request lifecycle", e);
