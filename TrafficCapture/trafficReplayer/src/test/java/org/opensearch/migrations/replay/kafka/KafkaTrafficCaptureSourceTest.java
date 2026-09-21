@@ -169,7 +169,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     }
 
     @Test
-    void asyncCommitCompletesOnlyAfterKafkaAcknowledgesIt() throws Exception {
+    void recordProcessingCompletionFlushesTheEligibleKafkaPosition() throws Exception {
         var mockConsumer = new BlockingCommitMockConsumer();
         try (var source = new KafkaTrafficCaptureSource(
             rootContext,
@@ -193,7 +193,9 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             );
             key.getTrafficStreamsContext().close();
 
-            var acknowledgement = source.commitTrafficStreamAsync(key);
+            var acknowledgement = source.recordProcessingFinished(
+                (KafkaRecordId) source.recordIdFor(key)
+            ).toCompletableFuture();
             try {
                 mockConsumer.awaitCommitStarted();
                 Assertions.assertFalse(acknowledgement.isDone());
@@ -205,76 +207,6 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             Assertions.assertEquals(1L, mockConsumer.committed(
                 Collections.singleton(new TopicPartition(TEST_TOPIC_NAME, 0))
             ).get(new TopicPartition(TEST_TOPIC_NAME, 0)).offset());
-        }
-    }
-
-    @Test
-    void acceptedAsyncCommitBecomesUnknownWhenItsSourceGenerationIsLost() throws Exception {
-        var mockConsumer = new BlockingCommitMockConsumer();
-        var partition = new TopicPartition(TEST_TOPIC_NAME, 0);
-        try (var source = new KafkaTrafficCaptureSource(
-            rootContext,
-            mockConsumer,
-            TEST_TOPIC_NAME,
-            Duration.ofHours(1)
-        )) {
-            configureSource(source);
-            initializeMockConsumerTopic(mockConsumer);
-            mockConsumer.schedulePollTask(() -> {
-                mockConsumer.rebalance(Collections.singletonList(partition));
-                addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
-            });
-            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
-                .get(5, TimeUnit.SECONDS)
-                .get(0);
-            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
-            key.getTrafficStreamsContext().close();
-
-            var acknowledgement = source.commitTrafficStreamAsync(key);
-            Assertions.assertFalse(acknowledgement.isDone());
-            mockConsumer.awaitCommitStarted();
-
-            try {
-                source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition));
-
-                Assertions.assertThrows(
-                    SourceCommitUnknownAfterRevocationException.class,
-                    acknowledgement::join
-                );
-            } finally {
-                mockConsumer.releaseCommit();
-            }
-        }
-    }
-
-    @Test
-    void asyncCommitReportsWhenTheSourceNeverAcceptedIt() throws Exception {
-        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
-        var partition = new TopicPartition(TEST_TOPIC_NAME, 0);
-        try (var source = new KafkaTrafficCaptureSource(
-            rootContext,
-            mockConsumer,
-            TEST_TOPIC_NAME,
-            Duration.ofHours(1)
-        )) {
-            configureSource(source);
-            initializeMockConsumerTopic(mockConsumer);
-            mockConsumer.schedulePollTask(() -> {
-                mockConsumer.rebalance(Collections.singletonList(partition));
-                addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
-            });
-            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
-                .get(5, TimeUnit.SECONDS)
-                .get(0);
-            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
-            key.getTrafficStreamsContext().close();
-
-            source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition));
-
-            Assertions.assertThrows(
-                SourceCommitNotAcceptedException.class,
-                () -> source.commitTrafficStreamAsync(key).join()
-            );
         }
     }
 
@@ -299,7 +231,14 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 .get(0);
             var key = ((ITrafficStreamWithKey) sourceInput).getKey();
 
-            source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition));
+            mockConsumer.schedulePollTask(
+                () -> source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition))
+            );
+            Assertions.assertTrue(
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .isEmpty()
+            );
 
             Assertions.assertTrue(source.hasPendingSourceControl());
             var interruptedClose = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
@@ -321,7 +260,6 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 )
             ).toCompletableFuture().get(5, TimeUnit.SECONDS);
             key.getTrafficStreamsContext().close();
-            source.releaseTrafficStreamWithoutCommit(key);
         }
     }
 
@@ -394,7 +332,9 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             for (var input : inputs) {
                 var key = ((ITrafficStreamWithKey) input).getKey();
                 key.getTrafficStreamsContext().close();
-                source.releaseTrafficStreamWithoutCommit(key);
+                source.recordProcessingFinished(
+                    (KafkaRecordId) source.recordIdFor(key)
+                ).toCompletableFuture().get(5, TimeUnit.SECONDS);
             }
         }
     }

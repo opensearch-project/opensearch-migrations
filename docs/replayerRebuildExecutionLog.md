@@ -285,3 +285,75 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - Traceability: S4a establishes the tracker-state portions of R11 and R12 and the cross-record
   response association portion of R13. Commit-prefix authority remains open for S4b; the complete
   request-processing and delayed durable-tuple proofs remain assigned to S5 and S7.
+
+## S4b — atomic commit-authority cutover
+
+### Start
+
+- Re-read the execution contract in §3.1, the S4b cutover boundary, and the traceability matrix in
+  §6.5.
+- Confirmed that this milestone must replace commit authority atomically: the legacy record handle,
+  disposition ledger, accumulator ignored-record callback, disposition policy, target result, and
+  request lifecycle may not commit or retain Kafka records after the cutover.
+- Confirmed that Kafka ordering is the order records were observed by this consumer, not arithmetic
+  continuity of physical offsets. Each active `PartitionGenerationId` therefore owns one deque whose
+  head alone controls contiguous-prefix advancement.
+- Confirmed that `RecordProcessingFinished(KafkaRecordId)` is accepted exactly once after the
+  intake-owned record tracker closes with no remaining associations. Active-generation duplicate or
+  unknown completion is fatal; stale-generation completion is diagnostic-only because Kafka will
+  redeliver that generation's records.
+- Planned evidence: physical offset gaps, completed records blocked behind an unfinished observed
+  head, multi-record contiguous advancement, active duplicate/unknown registration or completion,
+  stale-generation fencing, mixed records shared by several requests, and source-response records
+  held through request-processing completion.
+- Traceability target: complete R11 and R12 for the record/commit model and establish the S4b portion
+  of R13. Durable tuple ordering remains assigned to S5 and S7.
+
+### End
+
+- Re-read the execution contract in §3.1, the S4b boundary, and the traceability matrix in §6.5.
+- Added generation-scoped `ObservedRecordCommitQueue`, bound to its Kafka owner thread and ordered by
+  the records actually returned by polls. It permits physical offset gaps and stages a commit only
+  when completion drains a consecutive prefix from the observed head.
+- Kafka records are registered before decoding/intake delivery. The intake-owned
+  `RecordWorkTracker` now emits exactly one `RecordProcessingFinished(KafkaRecordId)` after a record
+  is closed to new associations and every distinct assembly, request, or terminal-close association
+  has finished.
+- `KafkaTrafficCaptureSource.recordProcessingFinished` is the sole production crossing that releases
+  the source record context, advances the observed prefix, and flushes its staged Kafka commit.
+  Active-generation duplicate or unknown completion is an invariant failure. A late completion for
+  a revoked generation cannot touch its successor queue.
+- Added immutable observed-queue snapshots for heartbeat and next-touch monitoring, so non-owner
+  monitoring threads do not read owner-confined mutable queue state.
+- Removed production use of `RecordDispositionLedger`, `ReplayDispositionPolicy`,
+  `TrafficStreamRecordHandle`, request-level record retention, accumulator ignored-record commits,
+  and target-result `haltReplay`. Deleted `ReplayDispositionPolicy`, `OffsetLifecycleTracker`, their
+  authority-defining tests, and the obsolete defensive `holdTrafficStream` representation.
+- Target outcomes now affect target/evidence reporting only. Source reconstruction associates a
+  natural terminal-close record with `TerminalSourceConnectionId` and releases it only after the
+  ordered target close is accepted.
+- Added deterministic queue tests for out-of-order completion, physical gaps, blocked heads,
+  contiguous advancement, duplicate registration, duplicate completion, unknown completion, stale
+  generations, partition loss, and immediate touch for staged commits. Added an off-owner monitoring
+  snapshot test.
+- Added a deterministic randomized property test covering 200 mixed-record/request association
+  graphs. It proves no record completes while any associated request remains and every record emits
+  completion exactly once. Literal `RecordScript` tests continue to prove mixed keep-alive and
+  cross-record source-response associations.
+- Updated source, rebalance, actor, and request-lifecycle tests to drive `AsyncPermitPool` and Kafka
+  callbacks through their real single-owner executors instead of caller-thread fixtures.
+- Clean direct `javac` compilation passed for all 175 main, 21 test-fixture, and 107 retained test
+  source files. The temporary local JUnit launcher used because Gradle cannot create its sandboxed
+  lock socket was removed from the tree.
+- Focused S4b suites passed: observed queue (3), tracking consumer (7), record tracker including the
+  randomized property (6), association accumulator (2), Kafka source (11), request lifecycle (21),
+  top-level shutdown (4), replay intake (3), simple accumulator (5), and replay progress (3).
+  A 46-test lifecycle sweep passed. A 68-test Kafka/source sweep initially passed 66 tests; the two
+  failures were legacy fixtures violating owner-thread rules, and both passed after fixture repair.
+- `git diff --check` passed. Production source search finds no legacy record-handle commit/release,
+  `haltReplay`, `holdTrafficStream`, target/request commit authority, or accumulator ignored-record
+  commit call. The no-op legacy callback adapter and uninstantiated disposition vocabulary remain
+  isolated for deletion in S7; neither participates in production correctness.
+- Traceability: S4b completes R11 and R12 for tracker closure plus observed-prefix commit authority.
+  It establishes R13 through cross-record response association and commit blocking; the required
+  delayed tuple-durability proof and final vocabulary deletion remain assigned to S5 and S7.

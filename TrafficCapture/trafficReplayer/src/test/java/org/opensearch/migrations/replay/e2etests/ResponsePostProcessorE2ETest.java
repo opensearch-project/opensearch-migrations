@@ -66,11 +66,6 @@ class ResponsePostProcessorE2ETest extends FullTrafficReplayerTest {
             }
 
             @Override
-            public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-                return null;
-            }
-
-            @Override
             public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
                 return CompletableFuture.completedFuture(null);
             }

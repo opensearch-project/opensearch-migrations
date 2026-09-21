@@ -9,7 +9,12 @@
 package org.opensearch.migrations.replay.lifecycle;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Random;
+import java.util.Set;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
@@ -119,6 +124,60 @@ class RecordWorkTrackerTest {
         var tracker = new RecordWorkTracker(ignored -> {}, () -> false, ignored -> {});
 
         Assertions.assertThrows(IllegalStateException.class, () -> tracker.register(RECORD));
+    }
+
+    @Test
+    void randomizedSharedRecordsWaitForEveryAssociatedRequest() {
+        var random = new Random(0x5A4B_C0DEL);
+        for (int trial = 0; trial < 200; trial++) {
+            var completions = new ArrayList<KafkaRecordId>();
+            var tracker = ownerTracker(new ArrayList<>(), completions);
+            var requests = new ArrayList<ReplayRequestId>();
+            int requestCount = 2 + random.nextInt(5);
+            for (int requestIndex = 0; requestIndex < requestCount; requestIndex++) {
+                requests.add(new ReplayRequestId(SESSION, requestIndex));
+            }
+
+            var expectedAssociations = new LinkedHashMap<KafkaRecordId, Set<ReplayRequestId>>();
+            int recordCount = 1 + random.nextInt(20);
+            for (int recordIndex = 0; recordIndex < recordCount; recordIndex++) {
+                var record = new KafkaRecordId("traffic", 2, 100L + recordIndex, 3);
+                tracker.register(record);
+
+                var shuffledRequests = new ArrayList<>(requests);
+                Collections.shuffle(shuffledRequests, random);
+                int associationCount = recordIndex == 0
+                    ? requestCount
+                    : 1 + random.nextInt(requestCount);
+                var associations = Set.copyOf(
+                    shuffledRequests.subList(0, associationCount)
+                );
+                expectedAssociations.put(record, associations);
+                associations.forEach(request -> tracker.associate(record, request));
+                tracker.closeToNewAssociations(record);
+            }
+            Assertions.assertTrue(completions.isEmpty());
+
+            var completionOrder = new ArrayList<>(requests);
+            Collections.shuffle(completionOrder, random);
+            var finishedRequests = new HashSet<ReplayRequestId>();
+            for (var request : completionOrder) {
+                tracker.associationFinished(request);
+                finishedRequests.add(request);
+                var expectedCompleted = expectedAssociations.entrySet()
+                    .stream()
+                    .filter(entry -> finishedRequests.containsAll(entry.getValue()))
+                    .map(java.util.Map.Entry::getKey)
+                    .collect(java.util.stream.Collectors.toSet());
+                Assertions.assertEquals(expectedCompleted, new HashSet<>(completions));
+                Assertions.assertEquals(
+                    completions.size(),
+                    new HashSet<>(completions).size(),
+                    "a record completion may be emitted only once"
+                );
+            }
+            Assertions.assertEquals(expectedAssociations.keySet(), new HashSet<>(completions));
+        }
     }
 
     private static RecordWorkTracker ownerTracker(

@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -24,18 +23,15 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
-import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
-import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
 import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
-import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplaySessionWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TerminalSourceConnectionId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
@@ -82,16 +78,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.summary = summary;
             this.failure = failure;
         }
-    }
-
-    static CompletableFuture<Void> combineConnectionCloseOperations(
-        CompletionStage<Void> sourceDisposition,
-        CompletionStage<Void> actorTermination
-    ) {
-        return CompletableFuture.allOf(
-            sourceDisposition.toCompletableFuture(),
-            actorTermination.toCompletableFuture()
-        );
     }
 
     static CompletionStage<Void> acceptOrderedCloseOutcome(SessionOutcome outcome) {
@@ -204,8 +190,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         /** How long to delay the first request on a resumed connection. Configurable via CLI. */
         private final Duration quiescentDuration;
         private final AsyncPermitPool permitPool;
-        private final ReplayDispositionPolicy dispositionPolicy;
-        private final RecordDispositionLedger dispositionLedger;
         private final RecordWorkTracker recordWorkTracker;
         private final SourceReconstructionPolicy sourceReconstructionPolicy;
         private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new ConcurrentHashMap<>();
@@ -218,7 +202,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             ITrafficCaptureSource trafficCaptureSource,
             Duration quiescentDuration,
             AsyncPermitPool permitPool,
-            RecordDispositionLedger dispositionLedger,
             RecordWorkTracker recordWorkTracker
         ) {
             this.replayEngine = replayEngine;
@@ -228,11 +211,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.trafficCaptureSource = trafficCaptureSource;
             this.quiescentDuration = quiescentDuration;
             this.permitPool = permitPool;
-            this.dispositionPolicy = new ReplayDispositionPolicy();
             this.sourceReconstructionPolicy = new SourceReconstructionPolicy(
                 trafficCaptureSource.usesStructuralExpiration()
             );
-            this.dispositionLedger = dispositionLedger;
             this.recordWorkTracker = recordWorkTracker;
         }
 
@@ -252,74 +233,37 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
         }
 
-        private final class TrafficStreamRecordHandle implements RecordDispositionLedger.RecordHandle {
-            private final ITrafficStreamKey key;
-            private final RecordId id;
-
-            private TrafficStreamRecordHandle(ITrafficStreamKey key) {
-                this.key = key;
-                this.id = trafficCaptureSource.recordIdFor(key);
-            }
-
-            @Override
-            public RecordId id() {
-                return id;
-            }
-
-            @Override
-            public SourcePartitionKey sourcePartition() {
-                return trafficCaptureSource.sourcePartitionFor(key);
-            }
-
-            @Override
-            public void closeContext() {
-                key.getTrafficStreamsContext().close();
-            }
-
-            @Override
-            public void releaseWithoutCommit() {
-                trafficCaptureSource.releaseTrafficStreamWithoutCommit(key);
-            }
-
-            @Override
-            public CompletionStage<Void> commit() {
-                return trafficCaptureSource.commitTrafficStreamAsync(key);
-            }
-        }
-
         SourcePartitionLifecycleListener sourcePartitionLifecycleListener() {
-            return SourcePartitionLifecycleListener.combine(
-                dispositionLedger,
-                new SourcePartitionLifecycleListener() {
-                    @Override
-                    public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {
-                        // The disposition ledger owns assignment state.
-                    }
+            return new SourcePartitionLifecycleListener() {
+                @Override
+                public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {}
 
-                    @Override
-                    public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
-                        var revoked = java.util.Set.copyOf(partitions);
-                        sessionPartitions.forEach((sessionKey, partition) -> {
-                            if (!revoked.contains(partition)) {
-                                return;
+                @Override
+                public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {
+                    var revoked = java.util.Set.copyOf(partitions);
+                    sessionPartitions.forEach((sessionKey, partition) -> {
+                        if (!revoked.contains(partition)) {
+                            return;
+                        }
+                        replayEngine.observeRunwayLost(
+                            sessionKey,
+                            ReplayTransaction.RunwayLossReason.SOURCE_REASSIGNMENT
+                        ).whenComplete((ignored, failure) -> {
+                            if (failure != null) {
+                                failReplayForSessionLifecycle(sessionKey, unwrap(failure));
                             }
-                            replayEngine.observeRunwayLost(
-                                sessionKey,
-                                ReplayTransaction.RunwayLossReason.SOURCE_REASSIGNMENT
-                            ).whenComplete((ignored, failure) -> {
-                                if (failure != null) {
-                                    failReplayForSessionLifecycle(sessionKey, unwrap(failure));
-                                }
-                            });
                         });
-                    }
-
-                    @Override
-                    public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {
-                        // The disposition ledger owns generation retirement.
-                    }
+                    });
                 }
-            );
+
+                @Override
+                public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {
+                    var retired = java.util.Set.copyOf(partitions);
+                    sessionPartitions.entrySet().removeIf(
+                        entry -> retired.contains(entry.getValue())
+                    );
+                }
+            };
         }
 
         @Override
@@ -368,9 +312,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 runtime.mailbox(),
                 (requestId, sourceOutcome, targetOutcome) ->
                     writeTransactionEvidence(evidenceState),
-                dispositionPolicy,
-                dispositionLedger,
-                List.of(),
                 List.of(ctx),
                 topLevelContext.getReplayTransactionMetrics()
             );
@@ -444,16 +385,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             return rrPair -> {
                 evidenceState.source = rrPair;
                 finishedAccumulatingResponseFuture.future.complete(rrPair);
-                registerTransactionRecords(transaction, rrPair.getTrafficStreamsHeld())
-                    .thenCompose(recordIds -> transaction.settleSource(
-                            sourceReconstructionPolicy.classify(rrPair),
-                            recordIds
-                        )
-                        .whenComplete((ignored, failure) -> {
-                            if (failure != null) {
-                                retainRecordsRejectedBySettlement(transaction, recordIds, unwrap(failure));
-                            }
-                        }))
+                transaction.settleSource(sourceReconstructionPolicy.classify(rrPair))
                     .whenComplete((ignored, failure) -> {
                         if (failure != null) {
                             transaction.fail(unwrap(failure));
@@ -516,58 +448,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             });
         }
 
-        private CompletionStage<List<RecordId>> registerTransactionRecords(
-            ReplayTransaction<?> transaction,
-            List<ITrafficStreamKey> keys
-        ) {
-            var handlesById = new LinkedHashMap<RecordId, TrafficStreamRecordHandle>();
-            for (var key : keys) {
-                var handle = new TrafficStreamRecordHandle(key);
-                handlesById.putIfAbsent(handle.id(), handle);
-            }
-            var registrations = handlesById.values()
-                .stream()
-                .map(handle -> dispositionLedger.register(handle, transaction.ledgerOwner()).toCompletableFuture())
-                .toArray(CompletableFuture[]::new);
-            return CompletableFuture.allOf(registrations)
-                .thenApply(ignored -> List.copyOf(handlesById.keySet()));
-        }
-
-        /**
-         * settleSource rejects the records it was handed when the transaction has already terminated,
-         * which leaves them registered with the ledger but owned by something that will never dispose
-         * them.  An obligation nobody can resolve holds the quiescence gate open forever, so retain them
-         * here; retention is always safe because a rejected settlement carries no commit authority.
-         */
-        private void retainRecordsRejectedBySettlement(
-            ReplayTransaction<?> transaction,
-            List<RecordId> recordIds,
-            Throwable cause
-        ) {
-            if (recordIds.isEmpty()) {
-                return;
-            }
-            log.atWarn()
-                .setCause(cause)
-                .setMessage("Source settlement was rejected for {}; retaining its {} record(s) directly")
-                .addArgument(transaction::ledgerOwner)
-                .addArgument(recordIds::size)
-                .log();
-            var disposition = new RecordDisposition.Retain("source-settlement-rejected");
-            for (var recordId : recordIds) {
-                dispositionLedger.dispose(recordId, transaction.ledgerOwner(), disposition)
-                    .whenComplete((ignored, failure) -> {
-                        if (failure != null) {
-                            log.atError()
-                                .setCause(failure)
-                                .setMessage("Could not retain orphaned record {}")
-                                .addArgument(recordId)
-                                .log();
-                        }
-                    });
-            }
-        }
-
         private CompletionStage<EvidenceOutcome> writeTransactionEvidence(TransactionEvidenceState state) {
             if (state.source == null) {
                 return CompletableFuture.completedFuture(
@@ -619,70 +499,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ) {
             countFinalOutcome(state.target, state.targetFailure, outcome.targetOutcome());
             recordTargetResponseCodes(state.target);
-            if (!outcome.haltReplay()) {
-                return CompletableFuture.completedFuture(null);
-            }
-            return CompletableFuture.failedFuture(transactionHaltError(outcome));
-        }
-
-        private Error transactionHaltError(ReplayTransaction.TransactionOutcome outcome) {
-            return outcome.evidenceOutcome().visit(new EvidenceOutcome.Visitor<>() {
-                @Override
-                public Error onDurable(EvidenceOutcome.Durable durable) {
-                    return new Error(
-                        "Replay transaction " + outcome.requestId() + " retained its source records after "
-                            + outcome.disposition().reasonCode(),
-                        targetFailureCause(outcome.targetOutcome())
-                    );
-                }
-
-                @Override
-                public Error onFailed(EvidenceOutcome.Failed failed) {
-                    return new Error(
-                        "Fatal tuple write failure for " + outcome.requestId()
-                            + ". Source records were retained because tuple output was not durably written.",
-                        failed.cause()
-                    );
-                }
-
-                @Override
-                public Error onNotRequired(EvidenceOutcome.NotRequired notRequired) {
-                    return new Error(
-                        "Replay transaction " + outcome.requestId() + " retained its source records after "
-                            + outcome.disposition().reasonCode(),
-                        targetFailureCause(outcome.targetOutcome())
-                    );
-                }
-            });
-        }
-
-        private <T> Throwable targetFailureCause(TargetOutcome<T> outcome) {
-            return outcome.visit(new TargetOutcome.Visitor<T, Throwable>() {
-                @Override
-                public Throwable onSucceeded(TargetOutcome.Succeeded<T> succeeded) {
-                    return null;
-                }
-
-                @Override
-                public Throwable onFailed(TargetOutcome.Failed<T> failed) {
-                    return failed.cause();
-                }
-
-                @Override
-                public Throwable onCancelled(TargetOutcome.Cancelled<T> cancelled) {
-                    return cancelled.cause();
-                }
-
-                @Override
-                public Throwable onFiltered(TargetOutcome.Filtered<T> filtered) {
-                    return null;
-                }
-
-                @Override
-                public Throwable onClassifiedSkip(TargetOutcome.ClassifiedSkip<T> classifiedSkip) {
-                    return null;
-                }
-            });
+            return CompletableFuture.completedFuture(null);
         }
 
         private TargetOutcome<TransformedTargetRequestAndResponseList> toTargetOutcome(
@@ -715,11 +532,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             Throwable failure
         ) {
             if (failure instanceof CancellationException) {
-                // The transaction was abandoned by a session teardown or a source reassignment.  Its
-                // records were retained, so another worker can replay them; this is not a replay failure.
                 log.atInfo()
-                    .setMessage("Replay transaction for {} was cancelled before settling; its source "
-                        + "records were retained for a later attempt")
+                    .setMessage("Replay transaction for {} was cancelled before settling")
                     .addArgument(context)
                     .log();
                 return;
@@ -727,13 +541,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var fatalError = failure instanceof Error error
                 ? error
                 : new Error(
-                    "Fatal replay transaction failure for " + context
-                        + ". Source records were retained because the transaction did not reach a safe commit.",
+                    "Fatal replay transaction failure for " + context,
                     failure
                 );
             log.atError()
                 .setCause(failure)
-                .setMessage("Replay transaction failed for {}; shutting down without committing its source records")
+                .setMessage("Replay transaction failed for {}; shutting down")
                 .addArgument(context)
                 .log();
             shutdown(fatalError);
@@ -813,24 +626,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             int channelSessionNumber,
             RequestResponsePacketPair.ReconstructionStatus status,
             @NonNull Instant timestamp,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+            @NonNull ITrafficStreamKey connectionKey,
+            @NonNull Optional<TerminalSourceConnectionId> terminalAssociation
         ) {
             var sessionKey = sessionKey(ctx, channelSessionNumber);
             var progressToken = new AtomicReference<WorkToken>();
-            CompletionStage<Void> sourceDisposition;
             CompletionStage<Void> actorTermination;
+            trafficCaptureSource.onConnectionAccumulationComplete(connectionKey);
             if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
                 log.atInfo()
-                    .setMessage("Cancelling replay session {} after source generation interruption; heldRecords={}")
+                    .setMessage("Cancelling replay session {} after source generation interruption")
                     .addArgument(sessionKey)
-                    .addArgument(trafficStreamKeysBeingHeld::size)
                     .log();
-                sourceDisposition = disposeSourceRecords(
-                    trafficStreamKeysBeingHeld,
-                    new RecordDisposition.Retain("source-reassigned"),
-                    "interrupted connection close"
-                );
-                notifyConnectionDone(trafficStreamKeysBeingHeld);
                 actorTermination = replayEngine.cancelConnection(ctx, channelSessionNumber).future;
             } else {
                 var progressAdmission = admitSessionWork(
@@ -838,13 +645,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     channelInteractionNum,
                     "captured-close",
                     timestamp,
-                    trafficStreamKeysBeingHeld
-                );
-                notifyConnectionDone(trafficStreamKeysBeingHeld);
-                sourceDisposition = disposeSourceRecords(
-                    trafficStreamKeysBeingHeld,
-                    sourceReconstructionPolicy.sourceOnlyDisposition(status, "captured connection close"),
-                    "captured connection close"
+                    connectionKey
                 );
                 actorTermination = progressAdmission.thenCompose(token -> {
                     progressToken.set(token);
@@ -852,15 +653,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     return replayEngine.closeConnection(ctx, channelSessionNumber, timestamp)
                         .future
                         .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome);
-                });
+                }).thenRun(() -> terminalAssociation.ifPresent(
+                    recordWorkTracker::submitAssociationFinished
+                ));
             }
-            sourceDisposition.whenComplete((ignored, failure) ->
-                log.atDebug()
-                    .setMessage("Source close disposition settled for {}; failure={}")
-                    .addArgument(sessionKey)
-                    .addArgument(failure)
-                    .log()
-            );
             actorTermination.whenComplete((ignored, failure) ->
                 log.atDebug()
                     .setMessage("Target actor termination settled for {}; failure={}")
@@ -868,46 +664,25 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .addArgument(failure)
                     .log()
             );
-            combineConnectionCloseOperations(sourceDisposition, actorTermination)
-                .whenComplete((ignored, failure) -> {
-                    sessionPartitions.remove(sessionKey);
-                    var ownedProgressToken = progressToken.get();
-                    if (ownedProgressToken != null) {
-                        ownedProgressToken.close();
-                    }
-                    if (failure != null) {
-                        failReplayForSessionLifecycle(sessionKey, unwrap(failure));
-                    }
-                });
+            actorTermination.whenComplete((ignored, failure) -> {
+                sessionPartitions.remove(sessionKey);
+                var ownedProgressToken = progressToken.get();
+                if (ownedProgressToken != null) {
+                    ownedProgressToken.close();
+                }
+                if (failure != null) {
+                    failReplayForSessionLifecycle(sessionKey, unwrap(failure));
+                }
+            });
         }
 
         @Override
         public void onTrafficStreamsExpired(
             RequestResponsePacketPair.ReconstructionStatus status,
             @NonNull IReplayContexts.IChannelKeyContext ctx,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+            @NonNull ITrafficStreamKey connectionKey
         ) {
-            notifyConnectionDone(trafficStreamKeysBeingHeld);
-            disposeSourceRecords(
-                trafficStreamKeysBeingHeld,
-                sourceReconstructionPolicy.sourceOnlyDisposition(status, "source accumulation expired"),
-                "source accumulation expired"
-            );
-        }
-
-        private void notifyConnectionDone(List<ITrafficStreamKey> keys) {
-            if (keys != null && !keys.isEmpty()) {
-                trafficCaptureSource.onConnectionAccumulationComplete(keys.get(0));
-            }
-        }
-
-        @Override
-        public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
-            disposeSourceRecords(
-                List.of(ctx.getTrafficStreamKey()),
-                new RecordDisposition.Commit("source-record-ignored"),
-                "ignored source record"
-            );
+            trafficCaptureSource.onConnectionAccumulationComplete(connectionKey);
         }
 
         private CompletionStage<WorkToken> admitSessionWork(
@@ -915,11 +690,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             int interactionIndex,
             String operation,
             Instant sourceTime,
-            List<ITrafficStreamKey> keys
+            ITrafficStreamKey connectionKey
         ) {
-            var partition = keys == null || keys.isEmpty()
+            var partition = connectionKey == null
                 ? sessionPartitions.get(sessionKey)
-                : trafficCaptureSource.sourcePartitionFor(keys.get(0));
+                : trafficCaptureSource.sourcePartitionFor(connectionKey);
             if (partition == null) {
                 throw new IllegalStateException(
                     "No partition generation is known for replay session work: "
@@ -955,57 +730,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .setCause(failure)
                 .setMessage("Replay session lifecycle failed for {}; shutting down")
                 .addArgument(sessionKey)
-                .log();
-            shutdown(fatalError);
-        }
-
-        private CompletionStage<Void> disposeSourceRecords(
-            List<ITrafficStreamKey> keys,
-            RecordDisposition disposition,
-            String operation
-        ) {
-            if (keys == null || keys.isEmpty()) {
-                return CompletableFuture.completedFuture(null);
-            }
-            var handlesById = new LinkedHashMap<RecordId, TrafficStreamRecordHandle>();
-            for (var key : keys) {
-                var handle = new TrafficStreamRecordHandle(key);
-                handlesById.putIfAbsent(handle.id(), handle);
-            }
-            var owner = operation + ":" + handlesById.keySet();
-            var registrations = handlesById.values()
-                .stream()
-                .map(handle -> dispositionLedger.register(handle, owner).toCompletableFuture())
-                .toArray(CompletableFuture[]::new);
-            var completion = CompletableFuture.allOf(registrations)
-                .thenCompose(ignored -> CompletableFuture.allOf(
-                    handlesById.keySet()
-                        .stream()
-                        .map(recordId -> dispositionLedger.dispose(recordId, owner, disposition).toCompletableFuture())
-                        .toArray(CompletableFuture[]::new)
-                ));
-            completion.whenComplete((ignored, failure) -> {
-                if (failure != null) {
-                    failReplayForSourceDisposition(operation, handlesById.keySet(), unwrap(failure));
-                }
-            });
-            return completion;
-        }
-
-        private void failReplayForSourceDisposition(
-            String operation,
-            java.util.Set<RecordId> recordIds,
-            Throwable failure
-        ) {
-            var fatalError = new Error(
-                "Fatal source-record disposition failure during " + operation + " for " + recordIds,
-                failure
-            );
-            log.atError()
-                .setCause(failure)
-                .setMessage("Source-record disposition failed during {} for {}; shutting down")
-                .addArgument(operation)
-                .addArgument(recordIds)
                 .log();
             shutdown(fatalError);
         }
@@ -1117,8 +841,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             owner::submitRequired,
             new ReplayReadGate(Duration.ZERO, noFlowControl)
         );
-        var ledger = new RecordDispositionLedger(owner::submitRequired);
-        owner.configureOwnedComponents(permits, progress, ledger);
+        owner.configureOwnedComponents(permits, progress);
         owner.start();
         try {
             owner.startReading(

@@ -38,8 +38,6 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
-import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
-import org.opensearch.migrations.replay.lifecycle.SourceCommitUnknownAfterRevocationException;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.lifecycle.UnconfiguredSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
@@ -132,7 +130,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final AtomicLong capabilityProbeRecordsRead;
     private final ChannelContextManager channelContextManager;
     private final AtomicBoolean isClosed;
-    private final ConcurrentHashMap<ITrafficStreamKey, CompletableFuture<Void>> pendingCommitAcknowledgements =
+    private final ConcurrentHashMap<KafkaRecordId, ITrafficStreamKey> observedRecordContexts =
         new ConcurrentHashMap<>();
     /** Active connections per Kafka partition. Entries removed when connections are closed */
     final ConcurrentHashMap<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections =
@@ -216,7 +214,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             topic,
             keepAliveInterval,
             clock,
-            this::onKeyFinishedCommitting,
             globalContext.getKafkaCommitStateMetrics(),
             maximumOwnedRecords,
             maximumOwnedBytes
@@ -236,7 +233,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     ) {
         for (var lostPartition : lostPartitions) {
             retiringSourcePartitions.add(lostPartition);
-            failPendingCommitAcknowledgements(lostPartition);
+            releaseObservedRecordContexts(lostPartition);
             int partition = lostPartition.partition();
             var active = partitionToActiveConnections.get(partition);
             if (active == null) {
@@ -282,16 +279,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
     }
 
-    private void failPendingCommitAcknowledgements(SourcePartitionKey lostPartition) {
-        var cause = new SourceCommitUnknownAfterRevocationException(lostPartition);
-        pendingCommitAcknowledgements.forEach((key, acknowledgement) -> {
-            if (!(key instanceof KafkaCommitOffsetData kafkaKey)
-                || kafkaKey.getPartition() != lostPartition.partition()
-                || kafkaKey.getGeneration() != lostPartition.sourceGeneration()
-                || !pendingCommitAcknowledgements.remove(key, acknowledgement)) {
+    private void releaseObservedRecordContexts(SourcePartitionKey lostPartition) {
+        observedRecordContexts.forEach((recordId, key) -> {
+            if (recordId.partition() != lostPartition.partition()
+                || recordId.sourceGeneration() != lostPartition.sourceGeneration()
+                || !observedRecordContexts.remove(recordId, key)) {
                 return;
             }
-            acknowledgement.completeExceptionally(cause);
+            releaseRecordContext(key);
         });
     }
 
@@ -393,27 +388,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             trafficSourceReaderInterruptedCloseQueue.size(),
             Map.copyOf(pendingByGeneration)
         );
-    }
-
-    private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
-        var acknowledgement = pendingCommitAcknowledgements.remove(trafficStreamKey);
-        try {
-            releaseRecordContext(trafficStreamKey);
-            if (acknowledgement != null) {
-                acknowledgement.complete(null);
-            }
-        } catch (Throwable t) {
-            if (acknowledgement != null) {
-                acknowledgement.completeExceptionally(t);
-            } else {
-                throw t;
-            }
-        }
-    }
-
-    @Override
-    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
-        releaseRecordContext(trafficStreamKey);
     }
 
     private void releaseRecordContext(ITrafficStreamKey trafficStreamKey) {
@@ -776,7 +750,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         KafkaCommitOffsetData offsetData,
         org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> kafkaRecord
     ) {
-        return new TrafficStreamKeyWithKafkaRecordId(tsk -> {
+        var key = new TrafficStreamKeyWithKafkaRecordId(tsk -> {
             var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
             return channelContextManager.getGlobalContext()
                 .createTrafficStreamContextForKafkaSource(
@@ -785,6 +759,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     kafkaRecord.serializedKeySize() + kafkaRecord.serializedValueSize()
                 );
         }, stream, offsetData);
+        var recordId = kafkaRecordId(offsetData);
+        if (observedRecordContexts.putIfAbsent(recordId, key) != null) {
+            throw new IllegalStateException("Kafka record context was already registered: " + recordId);
+        }
+        return key;
     }
 
     @Override
@@ -808,82 +787,55 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        if (!(trafficStreamKey instanceof TrafficStreamKeyWithKafkaRecordId)) {
-            throw new IllegalArgumentException(
-                "Expected key of type "
-                    + TrafficStreamKeyWithKafkaRecordId.class
-                    + " but received "
-                    + trafficStreamKey
-                    + " (of type="
-                    + trafficStreamKey.getClass()
-                    + ")"
-            );
-        }
-        return trackingKafkaConsumer.commitKafkaKey(
-            trafficStreamKey,
-            (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey
-        );
-    }
-
-    @Override
-    public CompletableFuture<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
+    public CompletionStage<Void> recordProcessingFinished(KafkaRecordId recordId) {
         var acknowledgement = new CompletableFuture<Void>();
         try {
-            kafkaExecutor.execute(() -> acceptCommitOnSourceOwnerThread(trafficStreamKey, acknowledgement));
+            kafkaExecutor.execute(
+                () -> acceptRecordProcessingFinishedOnSourceOwnerThread(recordId, acknowledgement)
+            );
         } catch (Throwable t) {
             acknowledgement.completeExceptionally(t);
         }
-        return acknowledgement;
+        return acknowledgement.minimalCompletionStage();
     }
 
-    private void acceptCommitOnSourceOwnerThread(
-        ITrafficStreamKey trafficStreamKey,
+    private void acceptRecordProcessingFinishedOnSourceOwnerThread(
+        KafkaRecordId recordId,
         CompletableFuture<Void> acknowledgement
     ) {
         if (isClosed.get()) {
             acknowledgement.completeExceptionally(
-                new CancellationException("Kafka traffic source closed before commit acceptance")
+                new CancellationException(
+                    "Kafka traffic source closed before record-processing completion acceptance"
+                )
             );
             return;
         }
         try {
-            var previous = pendingCommitAcknowledgements.putIfAbsent(
-                trafficStreamKey,
-                acknowledgement
-            );
-            if (previous != null) {
+            var key = observedRecordContexts.remove(recordId);
+            if (key == null && trackingKafkaConsumer.isActiveGeneration(recordId)) {
                 throw new IllegalStateException(
-                    "commit acknowledgement already pending for " + trafficStreamKey
+                    "No source record context exists for active record completion " + recordId
                 );
             }
-            CommitResult result;
-            try {
-                result = commitTrafficStream(trafficStreamKey);
-                if (result == CommitResult.IGNORED || result == CommitResult.IMMEDIATE) {
-                    pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
-                }
-            } catch (Throwable t) {
-                pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
-                throw t;
+            if (key != null) {
+                releaseRecordContext(key);
             }
-            if (result == CommitResult.IGNORED) {
-                acknowledgement.completeExceptionally(
-                    new SourceCommitNotAcceptedException(sourcePartitionFor(trafficStreamKey))
-                );
-                return;
-            }
-            if (result == CommitResult.IMMEDIATE) {
-                acknowledgement.complete(null);
-                return;
-            }
-            // AFTER_NEXT_READ / BLOCKED_BY_OTHER_COMMITS: intake may end before another poll-driven
-            // flush. The source owner performs the flush directly after accepting the commit.
+            trackingKafkaConsumer.recordProcessingFinished(recordId);
             trackingKafkaConsumer.commitStagedOffsets();
+            acknowledgement.complete(null);
         } catch (Throwable t) {
-            pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
             acknowledgement.completeExceptionally(t);
         }
+    }
+
+    private KafkaRecordId kafkaRecordId(KafkaCommitOffsetData offsetData) {
+        return new KafkaRecordId(
+            trackingKafkaConsumer.topic,
+            offsetData.getPartition(),
+            offsetData.getOffset(),
+            offsetData.getGeneration()
+        );
     }
 
     @Override
@@ -898,12 +850,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 kafkaRecord.getGeneration()
             );
         }
-        return new KafkaRecordId(
-            trackingKafkaConsumer.topic,
-            kafkaRecord.getPartition(),
-            kafkaRecord.getOffset(),
-            kafkaRecord.getGeneration()
-        );
+        return kafkaRecordId(kafkaRecord);
     }
 
     @Override
@@ -950,11 +897,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     trackingKafkaConsumer.close();
                 }).get();
             } finally {
-                var cause = new CancellationException("Kafka traffic source closed before commit acknowledgement");
-                pendingCommitAcknowledgements.forEach((key, acknowledgement) ->
-                    acknowledgement.completeExceptionally(cause)
+                var cause = new CancellationException(
+                    "Kafka traffic source closed before source cleanup completed"
                 );
-                pendingCommitAcknowledgements.clear();
+                observedRecordContexts.forEach((recordId, key) -> releaseRecordContext(key));
+                observedRecordContexts.clear();
                 pendingSessionTerminationObligations.forEach((key, obligation) -> obligation.fail(cause));
                 pendingSessionTerminationObligations.clear();
                 retiringSourcePartitions.clear();

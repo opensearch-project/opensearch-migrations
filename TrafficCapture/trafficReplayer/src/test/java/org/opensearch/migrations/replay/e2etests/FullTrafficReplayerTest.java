@@ -283,11 +283,6 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     }
 
                     @Override
-                    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-                        return null;
-                    }
-
-                    @Override
                     public CompletionStage<Void> acknowledgeSessionTermination(
                         ConnectionSessionKey sessionKey
                     ) {

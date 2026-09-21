@@ -104,7 +104,10 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
             try {
                 var k = keysReceived.get(0);
                 log.info("Calling commit traffic stream for " + k);
-                trafficSource.commitTrafficStream(k);
+                trafficSource.recordProcessingFinished(
+                    (org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId)
+                        trafficSource.recordIdFor(k)
+                ).toCompletableFuture().get();
                 log.info("finished committing traffic stream");
                 log.info("Stop reads to infinity");
                 // this is a way to signal back to the main thread that this thread is done
@@ -128,7 +131,10 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         }
         readNextNStreams(rootContext, trafficSource, keysReceived, 1, 1);
 
-        trafficSource.commitTrafficStream(keysReceived.get(0));
+        trafficSource.recordProcessingFinished(
+            (org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId)
+                trafficSource.recordIdFor(keysReceived.get(0))
+        ).toCompletableFuture().get();
         log.info(
             "Called commitTrafficStream but waiting long enough for the client to leave the group.  "
                 + "That will make the previous commit a 'zombie-commit' that should easily be dropped."
@@ -155,7 +161,10 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         keysReceived = new ArrayList<>();
         log.atInfo().setMessage("re-establish... 3 ...{}").addArgument(this::renderNextCommitsAsString).log();
         readNextNStreams(rootContext, trafficSource, keysReceived, 0, 1);
-        trafficSource.commitTrafficStream(keysReceivedUntilDrop1.get(1));
+        trafficSource.recordProcessingFinished(
+            (org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId)
+                trafficSource.recordIdFor(keysReceivedUntilDrop1.get(1))
+        ).toCompletableFuture().get();
         log.atInfo().setMessage("re-establish... 4 ...{}").addArgument(this::renderNextCommitsAsString).log();
         readNextNStreams(rootContext, trafficSource, keysReceived, 1, 1);
         log.atInfo().setMessage("5 ...{}").addArgument(this::renderNextCommitsAsString).log();

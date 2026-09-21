@@ -209,12 +209,6 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         public void close() throws IOException {}
 
         @Override
-        public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-            // do nothing
-            return CommitResult.IMMEDIATE;
-        }
-
-        @Override
         public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
             return CompletableFuture.completedFuture(null);
         }

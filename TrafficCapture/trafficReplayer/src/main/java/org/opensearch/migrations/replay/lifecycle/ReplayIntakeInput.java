@@ -15,5 +15,4 @@ public sealed interface ReplayIntakeInput permits
     ReplayIntakeOwner.Input,
     AsyncPermitPool.Input,
     ReplayProgressController.Input,
-    RecordDispositionLedger.Input,
     RecordWorkTracker.Input {}

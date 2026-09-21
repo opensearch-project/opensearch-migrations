@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay.traffic.source;
 
 import java.io.EOFException;
 import java.util.List;
-import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -55,33 +54,6 @@ public class ArrayCursorTrafficCaptureSource implements ISimpleTrafficCaptureSou
         return CompletableFuture.supplyAsync(() -> List.of(
             (SourceInput) new PojoTrafficStreamAndKey(stream, key)
         ));
-    }
-
-    @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        synchronized (pQueue) { // figure out if I need to do something more efficient later
-            log.info("Commit called for " + trafficStreamKey + " with pQueue.size=" + pQueue.size());
-            var incomingCursor = ((TrafficStreamCursorKey) trafficStreamKey).arrayIndex;
-            int topCursor = pQueue.peek().arrayIndex;
-            var didRemove = pQueue.remove(trafficStreamKey);
-            if (!didRemove) {
-                log.error("no item " + incomingCursor + " to remove from " + pQueue);
-            }
-            assert didRemove;
-            if (topCursor == incomingCursor) {
-                topCursor = Optional.ofNullable(pQueue.peek())
-                    .map(k -> k.getArrayIndex())
-                    .orElse(cursorHighWatermark + 1); // most recent cursor was previously popped
-                log.info("Commit called for " + trafficStreamKey + ", and new topCursor=" + topCursor);
-                arrayCursorTrafficSourceContext.nextReadCursor.set(topCursor);
-            } else {
-                log.info("Commit called for " + trafficStreamKey + ", but topCursor=" + topCursor);
-            }
-        }
-        rootContext.channelContextManager.releaseContextFor(
-            ((TrafficStreamCursorKey) trafficStreamKey).trafficStreamsContext.getChannelKeyContext()
-        );
-        return CommitResult.IMMEDIATE;
     }
 
     @Override

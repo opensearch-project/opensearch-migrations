@@ -2,9 +2,6 @@ package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -36,7 +33,6 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     HttpMessageAndTimestamp responseData;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
-    List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
     String structuralProofId;
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
@@ -115,37 +111,18 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         responseData.setLastPacketTimestamp(packetTimeStamp);
     }
 
-    public void holdTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        if (trafficStreamKeysBeingHeld == null) {
-            trafficStreamKeysBeingHeld = new ArrayList<>();
-        }
-        if (trafficStreamKeysBeingHeld.isEmpty()
-            || trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size() - 1)) {
-            trafficStreamKeysBeingHeld.add(trafficStreamKey);
-        }
-    }
-
-    private static final List<ITrafficStreamKey> emptyUnmodifiableList = List.of();
-
-    public List<ITrafficStreamKey> getTrafficStreamsHeld() {
-        return (trafficStreamKeysBeingHeld == null)
-            ? emptyUnmodifiableList
-            : Collections.unmodifiableList(trafficStreamKeysBeingHeld);
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         RequestResponsePacketPair that = (RequestResponsePacketPair) o;
         return Objects.equal(requestData, that.requestData)
-            && Objects.equal(responseData, that.responseData)
-            && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
+            && Objects.equal(responseData, that.responseData);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(requestData, responseData, trafficStreamKeysBeingHeld);
+        return Objects.hashCode(requestData, responseData);
     }
 
     @Override

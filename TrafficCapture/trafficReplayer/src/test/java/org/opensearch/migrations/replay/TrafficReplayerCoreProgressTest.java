@@ -72,16 +72,15 @@ class TrafficReplayerCoreProgressTest {
     }
 
     @Test
-    void recordDispositionCompletionBlocksWholeReplayDrain() {
-        var recordDispositionCompletion = new CompletableFuture<Void>();
+    void replayQuiescenceBlocksWholeReplayDrain() {
+        var replayQuiescence = new CompletableFuture<Void>();
         var drain = TrafficReplayerTopLevel.combineReplayDrainGates(
             CompletableFuture.completedFuture(null),
-            CompletableFuture.completedFuture(null),
-            recordDispositionCompletion
+            replayQuiescence
         );
 
         Assertions.assertFalse(drain.isDone());
-        recordDispositionCompletion.complete(null);
+        replayQuiescence.complete(null);
         drain.join();
     }
 

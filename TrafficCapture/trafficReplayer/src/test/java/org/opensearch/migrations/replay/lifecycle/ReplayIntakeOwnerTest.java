@@ -128,8 +128,7 @@ class ReplayIntakeOwnerTest {
                 owner::submitRequired,
                 new ReplayReadGate(Duration.ZERO, Mockito.mock(BufferedFlowController.class))
             );
-            var ledger = new RecordDispositionLedger(owner::submitRequired);
-            owner.configureOwnedComponents(permitPool, progress, ledger);
+            owner.configureOwnedComponents(permitPool, progress);
         }
 
         private void start() {

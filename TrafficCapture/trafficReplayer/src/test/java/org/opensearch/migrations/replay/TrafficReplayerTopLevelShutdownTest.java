@@ -7,10 +7,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
-import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
@@ -113,96 +109,6 @@ class TrafficReplayerTopLevelShutdownTest {
         intake.stop();
     }
 
-    @Test
-    void shutdownWaitsForCommitInvocationBeforeStoppingNetty() throws Exception {
-        var connectionPool = Mockito.mock(ClientConnectionPool.class);
-        var actorShutdown = new CompletableFuture<Void>();
-        var nettyShutdown = new CompletableFuture<Void>();
-        Mockito.when(connectionPool.shutdownNow()).thenReturn(nettyShutdown);
-        var replayEngine = Mockito.mock(ReplayEngine.class);
-        Mockito.when(replayEngine.shutdownConnections(Mockito.any())).thenReturn(actorShutdown);
-        var replayer = new TrafficReplayerTopLevel(
-            Mockito.mock(IRootReplayerContext.class),
-            URI.create("http://localhost:9200"),
-            Mockito.mock(IAuthTransformerFactory.class),
-            () -> Mockito.mock(IJsonTransformer.class),
-            connectionPool,
-            1,
-            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
-        );
-        var intake = installIntakeOwner(replayer);
-        var dispositionLedger = intake.ledger();
-        var commitAcknowledgement = new CompletableFuture<Void>();
-        var recordHandle = new TestRecordHandle(commitAcknowledgement);
-        currentReplayEngine(replayer).set(replayEngine);
-        var registration = dispositionLedger.register(recordHandle, "transaction");
-        registration.toCompletableFuture().get(5, TimeUnit.SECONDS);
-
-        var shutdown = CompletableFuture.supplyAsync(() -> replayer.shutdown(null))
-            .get(5, TimeUnit.SECONDS);
-        Mockito.verify(replayEngine, Mockito.timeout(5_000)).shutdownConnections(Mockito.any());
-
-        actorShutdown.complete(null);
-        Mockito.verify(connectionPool, Mockito.never()).shutdownNow();
-        var disposition = dispositionLedger.dispose(
-            recordHandle.id(),
-            "transaction",
-            new RecordDisposition.Commit("replay-succeeded")
-        );
-        disposition.toCompletableFuture().get(5, TimeUnit.SECONDS);
-        Mockito.verify(connectionPool).shutdownNow();
-        Assertions.assertFalse(
-            commitAcknowledgement.isDone(),
-            "Kafka's later commit result must not hold replay resources"
-        );
-        Assertions.assertFalse(shutdown.isDone());
-
-        nettyShutdown.complete(null);
-        shutdown.get(5, TimeUnit.SECONDS);
-        intake.stop();
-    }
-
-    @Test
-    void shutdownStartsDirectlyAfterTheIntakeOwnerRelinquishesTheMailbox() throws Exception {
-        var connectionPool = Mockito.mock(ClientConnectionPool.class);
-        var actorShutdown = new CompletableFuture<Void>();
-        var nettyShutdown = new CompletableFuture<Void>();
-        Mockito.when(connectionPool.shutdownNow()).thenReturn(nettyShutdown);
-        var replayEngine = Mockito.mock(ReplayEngine.class);
-        Mockito.when(replayEngine.shutdownConnections(Mockito.any())).thenReturn(actorShutdown);
-        var replayer = new TrafficReplayerTopLevel(
-            Mockito.mock(IRootReplayerContext.class),
-            URI.create("http://localhost:9200"),
-            Mockito.mock(IAuthTransformerFactory.class),
-            () -> Mockito.mock(IJsonTransformer.class),
-            connectionPool,
-            1,
-            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
-        );
-        var intake = installIntakeOwner(replayer);
-        var dispositionLedger = intake.ledger();
-        currentReplayEngine(replayer).set(replayEngine);
-        replayer.finishIntakeLifecycle(intake.owner(), dispositionLedger);
-
-        var lateRegistration = dispositionLedger.register(
-            new TestRecordHandle(CompletableFuture.completedFuture(null)),
-            "late-transaction"
-        );
-        Assertions.assertThrows(
-            java.util.concurrent.CompletionException.class,
-            () -> lateRegistration.toCompletableFuture().join()
-        );
-        var shutdown = CompletableFuture.supplyAsync(() -> replayer.shutdown(null))
-            .get(5, TimeUnit.SECONDS);
-
-        Mockito.verify(replayEngine).shutdownConnections(Mockito.any());
-        Mockito.verify(connectionPool, Mockito.never()).shutdownNow();
-        actorShutdown.complete(null);
-        Mockito.verify(connectionPool).shutdownNow();
-        nettyShutdown.complete(null);
-        shutdown.get(5, TimeUnit.SECONDS);
-    }
-
     private static IntakeFixture installIntakeOwner(TrafficReplayerTopLevel replayer) {
         var owner = new ReplayIntakeOwner(failure -> {
             throw failure;
@@ -212,14 +118,13 @@ class TrafficReplayerTopLevelShutdownTest {
             owner::submitRequired,
             new ReplayReadGate(Duration.ZERO, Mockito.mock(BufferedFlowController.class))
         );
-        var ledger = new RecordDispositionLedger(owner::submitRequired);
-        owner.configureOwnedComponents(permitPool, progress, ledger);
+        owner.configureOwnedComponents(permitPool, progress);
         owner.start();
         replayer.intakeOwner = owner;
-        return new IntakeFixture(owner, ledger);
+        return new IntakeFixture(owner);
     }
 
-    private record IntakeFixture(ReplayIntakeOwner owner, RecordDispositionLedger ledger) {
+    private record IntakeFixture(ReplayIntakeOwner owner) {
         private void stop() throws Exception {
             owner.stopOwner().toCompletableFuture().get(5, TimeUnit.SECONDS);
             owner.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -260,33 +165,4 @@ class TrafficReplayerTopLevelShutdownTest {
         }
     }
 
-    private static final class TestRecordHandle implements RecordDispositionLedger.RecordHandle {
-        private final KafkaRecordId id = new KafkaRecordId("topic", 0, 1, 1);
-        private final CompletableFuture<Void> commitAcknowledgement;
-
-        private TestRecordHandle(CompletableFuture<Void> commitAcknowledgement) {
-            this.commitAcknowledgement = commitAcknowledgement;
-        }
-
-        @Override
-        public KafkaRecordId id() {
-            return id;
-        }
-
-        @Override
-        public SourcePartitionKey sourcePartition() {
-            return new SourcePartitionKey(id.topic(), id.partition(), id.sourceGeneration());
-        }
-
-        @Override
-        public void closeContext() {}
-
-        @Override
-        public void releaseWithoutCommit() {}
-
-        @Override
-        public CompletableFuture<Void> commit() {
-            return commitAcknowledgement;
-        }
-    }
 }

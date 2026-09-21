@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import java.util.Objects;
 
-import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 
 final class SourceReconstructionPolicy {
@@ -38,20 +37,4 @@ final class SourceReconstructionPolicy {
         };
     }
 
-    RecordDisposition sourceOnlyDisposition(
-        RequestResponsePacketPair.ReconstructionStatus status,
-        String operation
-    ) {
-        return switch (status) {
-            case COMPLETE -> new RecordDisposition.Commit(operation);
-            case CONFIRMED_DEAD -> new RecordDisposition.Commit("source-confirmed-dead");
-            case EXPIRED_PREMATURELY -> structuralExpiration
-                ? new RecordDisposition.Retain("source-expired-without-structural-proof")
-                : new RecordDisposition.Commit("legacy-source-expired");
-            case CLOSED_PREMATURELY ->
-                new RecordDisposition.Retain("source-closed-prematurely");
-            case TRAFFIC_SOURCE_READER_INTERRUPTED ->
-                new RecordDisposition.Retain("source-reassigned");
-        };
-    }
 }

@@ -79,7 +79,10 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
                     var ts = (ITrafficStreamWithKey) chunks.get(0);
                     Thread.sleep(DEFAULT_POLL_INTERVAL_MS * 2);
                     log.info("committing " + ts.getKey());
-                    blockingSource.commitTrafficStream(ts.getKey());
+                    blockingSource.recordProcessingFinished(
+                        (org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId)
+                            blockingSource.recordIdFor(ts.getKey())
+                    ).toCompletableFuture().get();
                     readGate.advanceTo(getTimeAtPoint(i));
                 }
             } catch (Exception e) {

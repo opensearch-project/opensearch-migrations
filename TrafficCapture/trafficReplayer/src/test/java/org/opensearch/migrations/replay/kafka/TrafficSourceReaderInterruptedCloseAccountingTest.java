@@ -47,10 +47,17 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, TOPIC, Duration.ofHours(1))) {
             source.setSourcePartitionLifecycleListener(recordLifecycleEvents(events));
-            source.trackingKafkaConsumer.onPartitionsAssigned(List.of(tp));
             var partition = new SourcePartitionKey(TOPIC, 0, 1);
 
-            source.trackingKafkaConsumer.onPartitionsLost(List.of(tp));
+            mc.schedulePollTask(() -> {
+                source.trackingKafkaConsumer.onPartitionsAssigned(List.of(tp));
+                source.trackingKafkaConsumer.onPartitionsLost(List.of(tp));
+            });
+            Assertions.assertTrue(
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .isEmpty()
+            );
 
             Assertions.assertEquals(
                 List.of("revoked:" + partition, "retired:" + partition),
@@ -78,7 +85,12 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
             var key = ((ITrafficStreamWithKey) sourceInput).getKey();
             var partition = new SourcePartitionKey(TOPIC, 0, key.getSourceGeneration());
 
-            source.trackingKafkaConsumer.onPartitionsLost(List.of(tp));
+            mc.schedulePollTask(() -> source.trackingKafkaConsumer.onPartitionsLost(List.of(tp)));
+            Assertions.assertTrue(
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .isEmpty()
+            );
 
             Assertions.assertEquals(
                 List.of("revoked:" + partition),
@@ -114,7 +126,6 @@ class TrafficSourceReaderInterruptedCloseAccountingTest extends InstrumentationT
             Assertions.assertEquals(0, retired.queuedSyntheticCloseBatches());
             Assertions.assertTrue(retired.pendingTerminationsByGeneration().isEmpty());
             key.getTrafficStreamsContext().close();
-            source.releaseTrafficStreamWithoutCommit(key);
         }
     }
 

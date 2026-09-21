@@ -25,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public final class RecordDispositionLedger implements SourcePartitionLifecycleListener {
-    public sealed interface Input extends ReplayIntakeInput permits
+    public sealed interface Input permits
         PartitionsAssigned,
         PartitionsRevoked,
         PartitionsRetired,

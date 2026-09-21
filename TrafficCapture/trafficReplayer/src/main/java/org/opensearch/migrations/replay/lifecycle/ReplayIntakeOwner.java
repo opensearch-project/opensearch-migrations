@@ -72,7 +72,6 @@ public final class ReplayIntakeOwner {
 
     private AsyncPermitPool permitPool;
     private ReplayProgressController progressController;
-    private RecordDispositionLedger dispositionLedger;
     private RecordWorkTracker recordWorkTracker;
     private ITrafficCaptureSource source;
     private CapturedTrafficToHttpTransactionAccumulator accumulator;
@@ -101,24 +100,21 @@ public final class ReplayIntakeOwner {
 
     public void configureOwnedComponents(
         @NonNull AsyncPermitPool permitPool,
-        @NonNull ReplayProgressController progressController,
-        @NonNull RecordDispositionLedger dispositionLedger
+        @NonNull ReplayProgressController progressController
     ) {
         if (started) {
             throw new IllegalStateException("replay-intake components must be configured before start");
         }
         this.permitPool = permitPool;
         this.progressController = progressController;
-        this.dispositionLedger = dispositionLedger;
     }
 
     public void configureOwnedComponents(
         @NonNull AsyncPermitPool permitPool,
         @NonNull ReplayProgressController progressController,
-        @NonNull RecordDispositionLedger dispositionLedger,
         @NonNull RecordWorkTracker recordWorkTracker
     ) {
-        configureOwnedComponents(permitPool, progressController, dispositionLedger);
+        configureOwnedComponents(permitPool, progressController);
         this.recordWorkTracker = recordWorkTracker;
     }
 
@@ -161,18 +157,6 @@ public final class ReplayIntakeOwner {
 
     public CompletionStage<Void> closePermits(@NonNull CancellationException cause) {
         return permitPool.close(cause);
-    }
-
-    public CompletionStage<Void> sealRecordRegistrations() {
-        return dispositionLedger.sealRegistrations();
-    }
-
-    public CompletionStage<Void> whenRecordDispositionsQuiescent() {
-        return dispositionLedger.whenQuiescent();
-    }
-
-    public RecordDispositionLedger dispositionLedger() {
-        return dispositionLedger;
     }
 
     public CompletionStage<Void> stopOwner() {
@@ -226,7 +210,6 @@ public final class ReplayIntakeOwner {
             case Input ownerInput -> applyOwnerInput(ownerInput);
             case AsyncPermitPool.Input permitInput -> permitPool.apply(permitInput);
             case ReplayProgressController.Input progressInput -> progressController.apply(progressInput);
-            case RecordDispositionLedger.Input ledgerInput -> dispositionLedger.apply(ledgerInput);
             case RecordWorkTracker.Input trackerInput ->
                 Objects.requireNonNull(recordWorkTracker, "recordWorkTracker").apply(trackerInput);
         }
@@ -381,7 +364,6 @@ public final class ReplayIntakeOwner {
     private void requireConfigured() {
         Objects.requireNonNull(permitPool, "permitPool");
         Objects.requireNonNull(progressController, "progressController");
-        Objects.requireNonNull(dispositionLedger, "dispositionLedger");
     }
 
     private static Throwable unwrap(Throwable failure) {

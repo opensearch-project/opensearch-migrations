@@ -36,12 +36,6 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        // do nothing
-        return CommitResult.IMMEDIATE;
-    }
-
-    @Override
     public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
         return trafficSource.acknowledgeSessionTermination(sessionKey);
     }

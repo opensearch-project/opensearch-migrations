@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -36,10 +38,14 @@ class ActorCancellationResourceTest extends InstrumentationTest {
 
     private final AtomicBoolean targetStarted = new AtomicBoolean();
     private ClientConnectionPool pool;
+    private ExecutorService permitOwnerExecutor;
     private RequestSenderOrchestrator orchestrator;
 
     @BeforeEach
     void setUp() {
+        permitOwnerExecutor = Executors.newSingleThreadExecutor(
+            runnable -> new Thread(runnable, "permit-owner-test")
+        );
         pool = new ClientConnectionPool(
             (eventLoop, context) -> {
                 throw new AssertionError("Far-future requests must not open a channel");
@@ -61,12 +67,14 @@ class ActorCancellationResourceTest extends InstrumentationTest {
     @AfterEach
     void tearDown() throws Exception {
         pool.shutdownNow().get(5, TimeUnit.SECONDS);
+        permitOwnerExecutor.shutdownNow();
+        Assertions.assertTrue(permitOwnerExecutor.awaitTermination(5, TimeUnit.SECONDS));
     }
 
     @Test
     @Timeout(10)
     void abortReleasesEveryPermitHeldByFarFuturePreparation() throws Exception {
-        var permits = new AsyncPermitPool(PERMIT_COUNT, Runnable::run);
+        var permits = new AsyncPermitPool(PERMIT_COUNT, permitOwnerExecutor);
         List<TrackedFuture<String, AggregatedRawResponse>> requests = new ArrayList<>();
         var sendTime = Instant.now().plusSeconds(60);
 
