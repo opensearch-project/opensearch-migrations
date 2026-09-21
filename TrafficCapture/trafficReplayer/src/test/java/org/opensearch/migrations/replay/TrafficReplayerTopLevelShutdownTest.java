@@ -11,8 +11,12 @@ import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -91,18 +95,12 @@ class TrafficReplayerTopLevelShutdownTest {
             1,
             Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
         );
-        var intakeMailbox = new ReplayIntakeMailbox();
-        replayer.intakeMailboxRef.set(intakeMailbox);
+        var intake = installIntakeOwner(replayer);
         currentReplayEngine(replayer).set(replayEngine);
 
-        var shutdownInvocation = CompletableFuture.supplyAsync(() -> replayer.shutdown(null));
-        var shutdown = shutdownInvocation.get(5, TimeUnit.SECONDS);
-
-        Mockito.verifyNoInteractions(replayEngine);
-        Mockito.verify(connectionPool, Mockito.never()).shutdownNow();
-
-        intakeMailbox.runUntilIdle();
-        Mockito.verify(replayEngine).shutdownConnections(Mockito.any());
+        var shutdown = CompletableFuture.supplyAsync(() -> replayer.shutdown(null))
+            .get(5, TimeUnit.SECONDS);
+        Mockito.verify(replayEngine, Mockito.timeout(5_000)).shutdownConnections(Mockito.any());
         Mockito.verify(connectionPool, Mockito.never()).shutdownNow();
         Assertions.assertFalse(shutdown.isDone());
 
@@ -112,6 +110,7 @@ class TrafficReplayerTopLevelShutdownTest {
 
         nettyShutdown.complete(null);
         shutdown.get(5, TimeUnit.SECONDS);
+        intake.stop();
     }
 
     @Test
@@ -131,21 +130,17 @@ class TrafficReplayerTopLevelShutdownTest {
             1,
             Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
         );
-        var intakeMailbox = new ReplayIntakeMailbox();
-        var dispositionLedger = new RecordDispositionLedger(intakeMailbox);
+        var intake = installIntakeOwner(replayer);
+        var dispositionLedger = intake.ledger();
         var commitAcknowledgement = new CompletableFuture<Void>();
         var recordHandle = new TestRecordHandle(commitAcknowledgement);
-        replayer.intakeMailboxRef.set(intakeMailbox);
-        replayer.dispositionLedgerRef.set(dispositionLedger);
         currentReplayEngine(replayer).set(replayEngine);
         var registration = dispositionLedger.register(recordHandle, "transaction");
-        intakeMailbox.runUntilIdle();
-        registration.toCompletableFuture().join();
+        registration.toCompletableFuture().get(5, TimeUnit.SECONDS);
 
         var shutdown = CompletableFuture.supplyAsync(() -> replayer.shutdown(null))
             .get(5, TimeUnit.SECONDS);
-        intakeMailbox.runUntilIdle();
-        Mockito.verify(replayEngine).shutdownConnections(Mockito.any());
+        Mockito.verify(replayEngine, Mockito.timeout(5_000)).shutdownConnections(Mockito.any());
 
         actorShutdown.complete(null);
         Mockito.verify(connectionPool, Mockito.never()).shutdownNow();
@@ -154,8 +149,7 @@ class TrafficReplayerTopLevelShutdownTest {
             "transaction",
             new RecordDisposition.Commit("replay-succeeded")
         );
-        intakeMailbox.runUntilIdle();
-        disposition.toCompletableFuture().join();
+        disposition.toCompletableFuture().get(5, TimeUnit.SECONDS);
         Mockito.verify(connectionPool).shutdownNow();
         Assertions.assertFalse(
             commitAcknowledgement.isDone(),
@@ -165,6 +159,7 @@ class TrafficReplayerTopLevelShutdownTest {
 
         nettyShutdown.complete(null);
         shutdown.get(5, TimeUnit.SECONDS);
+        intake.stop();
     }
 
     @Test
@@ -184,12 +179,10 @@ class TrafficReplayerTopLevelShutdownTest {
             1,
             Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
         );
-        var intakeMailbox = new ReplayIntakeMailbox();
-        var dispositionLedger = new RecordDispositionLedger(intakeMailbox);
-        replayer.intakeMailboxRef.set(intakeMailbox);
-        replayer.dispositionLedgerRef.set(dispositionLedger);
+        var intake = installIntakeOwner(replayer);
+        var dispositionLedger = intake.ledger();
         currentReplayEngine(replayer).set(replayEngine);
-        replayer.finishIntakeLifecycle(intakeMailbox);
+        replayer.finishIntakeLifecycle(intake.owner(), dispositionLedger);
 
         var lateRegistration = dispositionLedger.register(
             new TestRecordHandle(CompletableFuture.completedFuture(null)),
@@ -208,6 +201,29 @@ class TrafficReplayerTopLevelShutdownTest {
         Mockito.verify(connectionPool).shutdownNow();
         nettyShutdown.complete(null);
         shutdown.get(5, TimeUnit.SECONDS);
+    }
+
+    private static IntakeFixture installIntakeOwner(TrafficReplayerTopLevel replayer) {
+        var owner = new ReplayIntakeOwner(failure -> {
+            throw failure;
+        });
+        var permitPool = new AsyncPermitPool(1, owner::submitRequired, AsyncPermitPool.Metrics.NOOP);
+        var progress = new ReplayProgressController(
+            owner::submitRequired,
+            new ReplayReadGate(Duration.ZERO, Mockito.mock(BufferedFlowController.class))
+        );
+        var ledger = new RecordDispositionLedger(owner::submitRequired);
+        owner.configureOwnedComponents(permitPool, progress, ledger);
+        owner.start();
+        replayer.intakeOwner = owner;
+        return new IntakeFixture(owner, ledger);
+    }
+
+    private record IntakeFixture(ReplayIntakeOwner owner, RecordDispositionLedger ledger) {
+        private void stop() throws Exception {
+            owner.stopOwner().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            owner.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
     }
 
     @SuppressWarnings("unchecked")

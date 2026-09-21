@@ -1,11 +1,24 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+import org.apache.kafka.common.TopicPartition;
+
 import lombok.NonNull;
 
 public final class ReplayIdentity {
     private ReplayIdentity() {}
 
     public record SourceConnectionKey(@NonNull String nodeId, @NonNull String connectionId) {}
+
+    public record PartitionGenerationId(
+        @NonNull TopicPartition topicPartition,
+        long localSequence
+    ) {
+        public PartitionGenerationId {
+            if (localSequence < 0) {
+                throw new IllegalArgumentException("localSequence must not be negative");
+            }
+        }
+    }
 
     public record ConnectionSessionKey(
         @NonNull SourceConnectionKey connection,
@@ -49,6 +62,13 @@ public final class ReplayIdentity {
             if (sourceGeneration < 0) {
                 throw new IllegalArgumentException("sourceGeneration must not be negative");
             }
+        }
+
+        public PartitionGenerationId partitionGenerationId() {
+            return new PartitionGenerationId(
+                new TopicPartition(sourceId, partition),
+                sourceGeneration
+            );
         }
     }
 

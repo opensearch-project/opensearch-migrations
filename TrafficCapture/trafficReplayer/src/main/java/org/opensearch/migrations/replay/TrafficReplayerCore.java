@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import java.io.EOFException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -14,12 +13,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
@@ -35,7 +32,9 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplaySessionWorkId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
+import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
@@ -48,8 +47,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.SourceInput;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -130,11 +128,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     private final TargetResponseClassifier targetResponseClassifier;
 
 
-    protected final AtomicBoolean stopReadingRef;
-    protected final AtomicReference<CompletableFuture<List<SourceInput>>> nextChunkFutureRef;
-    protected final AtomicReference<AsyncPermitPool> permitPoolRef;
-    protected final AtomicReference<ReplayIntakeMailbox> intakeMailboxRef;
-    protected final AtomicReference<RecordDispositionLedger> dispositionLedgerRef;
+    protected volatile ReplayIntakeOwner intakeOwner;
 
     protected TrafficReplayerCore(
         IRootReplayerContext context,
@@ -190,11 +184,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformerSupplier, authTransformer);
         successfulRequestCount = new AtomicInteger();
         exceptionRequestCount = new AtomicInteger();
-        nextChunkFutureRef = new AtomicReference<>();
-        stopReadingRef = new AtomicBoolean();
-        permitPoolRef = new AtomicReference<>();
-        intakeMailboxRef = new AtomicReference<>();
-        dispositionLedgerRef = new AtomicReference<>();
         this.targetResponseClassifier = Objects.requireNonNull(targetResponseClassifier);
     }
 
@@ -223,7 +212,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             Consumer<SourceTargetCaptureTuple> tupleObserver,
             ITrafficCaptureSource trafficCaptureSource,
             Duration quiescentDuration,
-            AsyncPermitPool permitPool
+            AsyncPermitPool permitPool,
+            RecordDispositionLedger dispositionLedger
         ) {
             this.replayEngine = replayEngine;
             this.tupleWriter = tupleWriter;
@@ -236,10 +226,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.sourceReconstructionPolicy = new SourceReconstructionPolicy(
                 trafficCaptureSource.usesStructuralExpiration()
             );
-            this.dispositionLedger = new RecordDispositionLedger(
-                java.util.Objects.requireNonNull(intakeMailboxRef.get(), "replay intake mailbox")
-            );
-            dispositionLedgerRef.set(this.dispositionLedger);
+            this.dispositionLedger = dispositionLedger;
         }
 
         private final class TransactionEvidenceState {
@@ -371,18 +358,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 List.of(ctx),
                 topLevelContext.getReplayTransactionMetrics()
             );
-            settleProgressWhenTransactionCompletes(transaction.completion(), progressToken);
-            runtime.register(transaction).whenComplete((ignored, failure) -> {
-                if (failure != null) {
-                    transaction.fail(unwrap(failure));
-                }
-            });
-            var targetFuture = sendRequestAfterGoingThroughWorkQueue(
-                ctx,
-                request,
-                requestKey,
-                finishedAccumulatingResponseFuture,
-                quiescentDurationForRequest
+            var targetCompletion = new CompletableFuture<TransformedTargetRequestAndResponseList>();
+            var targetFuture = new TextTrackedFuture<>(
+                targetCompletion,
+                () -> "waiting to admit and replay target request " + runtime.requestId()
             );
             settleTransactionTarget(
                 transaction,
@@ -390,6 +369,42 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 finishedAccumulatingResponseFuture,
                 evidenceState
             );
+            progressToken.whenComplete((token, admissionFailure) -> {
+                if (admissionFailure != null) {
+                    var cause = unwrap(admissionFailure);
+                    targetCompletion.completeExceptionally(cause);
+                    transaction.fail(cause);
+                    return;
+                }
+                settleProgressWhenTransactionCompletes(transaction.completion(), token);
+                runtime.register(transaction).whenComplete((ignored, registrationFailure) -> {
+                    if (registrationFailure != null) {
+                        var cause = unwrap(registrationFailure);
+                        targetCompletion.completeExceptionally(cause);
+                        transaction.fail(cause);
+                        return;
+                    }
+                    try {
+                        var scheduledTarget = sendRequestAfterGoingThroughWorkQueue(
+                            ctx,
+                            request,
+                            requestKey,
+                            finishedAccumulatingResponseFuture,
+                            quiescentDurationForRequest
+                        );
+                        scheduledTarget.future.whenComplete((summary, targetFailure) -> {
+                            if (targetFailure == null) {
+                                targetCompletion.complete(summary);
+                            } else {
+                                targetCompletion.completeExceptionally(unwrap(targetFailure));
+                            }
+                        });
+                    } catch (Throwable t) {
+                        targetCompletion.completeExceptionally(t);
+                        transaction.fail(t);
+                    }
+                });
+            });
 
             var allWorkFinishedForTransactionFuture = new TextTrackedFuture<>(
                 transaction.completion()
@@ -777,7 +792,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
             var sessionKey = sessionKey(ctx, channelSessionNumber);
-            WorkToken progressToken = null;
+            var progressToken = new AtomicReference<WorkToken>();
             CompletionStage<Void> sourceDisposition;
             CompletionStage<Void> actorTermination;
             if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
@@ -794,7 +809,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 notifyConnectionDone(trafficStreamKeysBeingHeld);
                 actorTermination = replayEngine.cancelConnection(ctx, channelSessionNumber).future;
             } else {
-                progressToken = admitSessionWork(
+                var progressAdmission = admitSessionWork(
                     sessionKey,
                     channelInteractionNum,
                     "captured-close",
@@ -807,10 +822,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     sourceReconstructionPolicy.sourceOnlyDisposition(status, "captured connection close"),
                     "captured connection close"
                 );
-                replayEngine.setFirstTimestamp(timestamp);
-                actorTermination = replayEngine.closeConnection(ctx, channelSessionNumber, timestamp)
-                    .future
-                    .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome);
+                actorTermination = progressAdmission.thenCompose(token -> {
+                    progressToken.set(token);
+                    replayEngine.setFirstTimestamp(timestamp);
+                    return replayEngine.closeConnection(ctx, channelSessionNumber, timestamp)
+                        .future
+                        .thenCompose(TrafficReplayerCore::acceptOrderedCloseOutcome);
+                });
             }
             sourceDisposition.whenComplete((ignored, failure) ->
                 log.atDebug()
@@ -826,10 +844,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .addArgument(failure)
                     .log()
             );
-            var ownedProgressToken = progressToken;
             combineConnectionCloseOperations(sourceDisposition, actorTermination)
                 .whenComplete((ignored, failure) -> {
                     sessionPartitions.remove(sessionKey);
+                    var ownedProgressToken = progressToken.get();
                     if (ownedProgressToken != null) {
                         ownedProgressToken.close();
                     }
@@ -868,7 +886,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
         }
 
-        private WorkToken admitSessionWork(
+        private CompletionStage<WorkToken> admitSessionWork(
             ConnectionSessionKey sessionKey,
             int interactionIndex,
             String operation,
@@ -879,10 +897,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 ? sessionPartitions.get(sessionKey)
                 : trafficCaptureSource.sourcePartitionFor(keys.get(0));
             if (partition == null) {
-                partition = new SourcePartitionKey(
-                    "unpartitioned-session",
-                    0,
-                    sessionKey.sourceGeneration()
+                throw new IllegalStateException(
+                    "No partition generation is known for replay session work: "
+                        + sessionKey
+                        + ", operation="
+                        + operation
                 );
             }
             return replayEngine.admitWork(
@@ -1049,74 +1068,43 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
     }
 
+    /**
+     * Test-facing source drain that uses the same dedicated, typed replay-intake owner as bootstrap.
+     */
     @SneakyThrows
     public void pullCaptureFromSourceToAccumulator(
-        ITrafficCaptureSource trafficChunkStream,
-        CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator
+        ITrafficCaptureSource trafficSource,
+        CapturedTrafficToHttpTransactionAccumulator accumulator
     ) throws InterruptedException {
-        pullCaptureFromSourceToAccumulator(
-            trafficChunkStream,
-            trafficToHttpTransactionAccumulator,
-            new ReplayIntakeMailbox()
-        );
-    }
+        var owner = new ReplayIntakeOwner(failure -> {
+            throw failure;
+        });
+        var permits = new AsyncPermitPool(1, owner::submitRequired, AsyncPermitPool.Metrics.NOOP);
+        var noFlowControl = new BufferedFlowController() {
+            @Override
+            public void stopReadsPast(Instant pointInTime) {}
 
-    @SneakyThrows
-    public void pullCaptureFromSourceToAccumulator(
-        ITrafficCaptureSource trafficChunkStream,
-        CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator,
-        ReplayIntakeMailbox intakeMailbox
-    ) throws InterruptedException {
-        try {
-            while (true) {
-                log.trace("Reading next chunk from TrafficStream supplier");
-                if (stopReadingRef.get()) {
-                    break;
-                }
-                this.nextChunkFutureRef.set(
-                    trafficChunkStream.readNextTrafficStreamChunk(topLevelContext::createReadChunkContext)
-                );
-                List<SourceInput> trafficStreams;
-                try {
-                    trafficStreams = intakeMailbox.await(this.nextChunkFutureRef.get());
-                } catch (ExecutionException ex) {
-                    if (ex.getCause() instanceof EOFException) {
-                        log.atWarn().setCause(ex.getCause())
-                            .setMessage("Got an EOF on the stream.  " + "Done reading traffic streams.").log();
-                        break;
-                    } else {
-                        log.atWarn().setCause(ex).setMessage("Done reading traffic streams due to exception.").log();
-                        throw ex.getCause();
-                    }
-                }
-                if (log.isDebugEnabled()) {
-                    Optional.of(
-                        trafficStreams.stream()
-                            .filter(ITrafficStreamWithKey.class::isInstance)
-                            .map(ITrafficStreamWithKey.class::cast)
-                            .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
-                            .collect(Collectors.joining(";"))
-                    )
-                        .filter(s -> !s.isEmpty())
-                        .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
-                }
-                log.atDebug().setMessage("Read {} traffic stream(s) from source")
-                    .addArgument(trafficStreams::size)
-                    .log();
-                var batchStart = System.nanoTime();
-                trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
-                intakeMailbox.runUntilIdle();
-                var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
-                if (batchDurationMs > 5_000) {
-                    log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
-                            "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
-                        .addArgument(batchDurationMs)
-                        .addArgument(trafficStreams::size)
-                        .log();
-                }
+            @Override
+            public Duration getBufferTimeWindow() {
+                return Duration.ZERO;
             }
+        };
+        var progress = new ReplayProgressController(
+            owner::submitRequired,
+            new ReplayReadGate(Duration.ZERO, noFlowControl)
+        );
+        var ledger = new RecordDispositionLedger(owner::submitRequired);
+        owner.configureOwnedComponents(permits, progress, ledger);
+        owner.start();
+        try {
+            owner.startReading(
+                trafficSource,
+                accumulator,
+                topLevelContext::createReadChunkContext
+            ).toCompletableFuture().get();
         } finally {
-            intakeMailbox.runUntilIdle();
+            owner.stopOwner().toCompletableFuture().get();
+            owner.termination().toCompletableFuture().get();
         }
     }
 

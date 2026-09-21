@@ -5,10 +5,11 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TrafficStreamRecordId;
+import org.apache.kafka.common.TopicPartition;
 
 import lombok.NonNull;
 
@@ -20,10 +21,10 @@ import lombok.NonNull;
  * source generation retires.
  */
 final class ResolvedRecordIndex {
-    private final Map<SourcePartitionKey, OffsetRanges> kafkaOffsets = new LinkedHashMap<>();
+    private final Map<PartitionGenerationId, OffsetRanges> kafkaOffsets = new LinkedHashMap<>();
     private final Map<TrafficStreamIdentity, PartitionedRanges> trafficStreamIndexes =
         new LinkedHashMap<>();
-    private final Map<RecordId, SourcePartitionKey> exactRecords = new LinkedHashMap<>();
+    private final Map<RecordId, PartitionGenerationId> exactRecords = new LinkedHashMap<>();
 
     boolean contains(RecordId id) {
         if (id instanceof KafkaRecordId kafka) {
@@ -37,7 +38,7 @@ final class ResolvedRecordIndex {
         return exactRecords.containsKey(id);
     }
 
-    void add(RecordId id, SourcePartitionKey partition) {
+    void add(RecordId id, PartitionGenerationId partition) {
         if (id instanceof KafkaRecordId kafka) {
             kafkaOffsets.computeIfAbsent(partition, ignored -> new OffsetRanges()).add(kafka.offset());
         } else if (id instanceof TrafficStreamRecordId trafficStream) {
@@ -47,7 +48,7 @@ final class ResolvedRecordIndex {
         }
     }
 
-    long retire(SourcePartitionKey partition) {
+    long retire(PartitionGenerationId partition) {
         var ranges = kafkaOffsets.remove(partition);
         long removed = ranges == null ? 0 : ranges.size();
         var trafficIterator = trafficStreamIndexes.entrySet().iterator();
@@ -81,7 +82,7 @@ final class ResolvedRecordIndex {
             + exactRecords.size();
     }
 
-    private void addTrafficStream(TrafficStreamRecordId record, SourcePartitionKey partition) {
+    private void addTrafficStream(TrafficStreamRecordId record, PartitionGenerationId partition) {
         var ranges = trafficStreamIndexes.computeIfAbsent(
             TrafficStreamIdentity.from(record),
             ignored -> new PartitionedRanges(partition, new OffsetRanges())
@@ -99,10 +100,9 @@ final class ResolvedRecordIndex {
         ranges.ranges().add(record.trafficStreamIndex());
     }
 
-    private static SourcePartitionKey sourcePartition(KafkaRecordId record) {
-        return new SourcePartitionKey(
-            record.topic(),
-            record.partition(),
+    private static PartitionGenerationId sourcePartition(KafkaRecordId record) {
+        return new PartitionGenerationId(
+            new TopicPartition(record.topic(), record.partition()),
             record.sourceGeneration()
         );
     }
@@ -117,7 +117,7 @@ final class ResolvedRecordIndex {
     }
 
     private record PartitionedRanges(
-        @NonNull SourcePartitionKey partition,
+        @NonNull PartitionGenerationId partition,
         @NonNull OffsetRanges ranges
     ) {}
 

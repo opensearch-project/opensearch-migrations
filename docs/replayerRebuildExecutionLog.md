@@ -152,3 +152,82 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - Traceability: S2 proves R19 for immediate and scheduled connection-owner submission rejection and
   adds the required live event-loop process test. R19 remains open for the replay-intake, request,
   Kafka-source, and tuple-writer owners introduced by later steps.
+
+## S3 — dedicated replay-intake owner
+
+### Start
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Confirmed the settled owner boundary from `replayerLowLevelDesign.md` §2 and
+  `replayerKafkaSourceAndIntakeLowLevelDesign.md` §§1-4: replay intake owns one dedicated thread,
+  removes named immutable inputs from a thread-safe queue, applies one input completely, and never
+  waits synchronously for Kafka, target, or tuple completion.
+- Confirmed `ReplayIntakeMailbox` is not a migration target: its generic `Runnable` queue, inline
+  execution, and both blocking `await` methods must be deleted rather than renamed.
+- Confirmed the source remains pull-driven only for this milestone. Each source-read stage will
+  return through a typed success/failure input; the dedicated owner will apply the whole batch before
+  starting the next read.
+- Confirmed `PartitionGenerationId` must use the exact
+  `(TopicPartition topicPartition, long localSequence)` shape. Intake-owned APIs may not fabricate a
+  missing generation or retain a raw `int sourceGeneration` escape hatch.
+- Planned evidence: deterministic queue ordering and whole-input application, owner-thread
+  enforcement, required-submission rejection, injected owner failure reaching the process
+  supervisor, source read success/EOF/failure handling without an intake-thread wait, and source
+  generation identity preservation.
+- Traceability target: establish the replay-intake portion of R1 and R19. R3-R18 remain assigned to
+  their later state-machine and commit-authority milestones.
+
+### PA1 — proxy classification and estimate
+
+| Implementation group | Classification | Existing proof and remaining scope |
+|---|---|---|
+| `CaptureProxy` startup, configuration, shutdown, and process behavior | repair | Existing tests prove `0 < H < E`, configurable `F/H/E`, fail-closed default, fail-open selection, first-assignment readiness, and bounded orderly shutdown. The proxy still needs to receive and validate the run's `S` value so deployment can prove the same `E/S` values reach proxy and replayer. |
+| `KafkaCaptureFactory`, `CaptureKafkaMembership`, `CaptureAssignmentPublisher` | verified | Unit and real-Kafka tests prove out-of-group probes precede membership, initial heartbeats gate readiness, replacement assignments are installed in callback order, the last usable assignment survives empty/lost/retriable polls, and resources close exactly once before and after ownership transfer. |
+| `CaptureRoutingState` | verified | Deterministic tests prove fresh assignment-scoped writer identity, immutable connection routes, independent continuous heartbeat baselines, strict expiration-boundary rejection, registry retention through terminal acknowledgement, and local-only retirement. |
+| `CaptureKafkaPublisher` | verified | Deterministic tests prove exhaustive envelope publication, no type headers, per-connection send/ack order, serialized heartbeats, deadline and late-ack irreversibility, critical-mutation broker-time validation, publisher-lane retirement, and permanent failure after the first application-visible Kafka error. |
+| `CaptureKafkaWriteGate` | verified | Deterministic tests prove an accepted submission does not block a terminal trip, every later submission is rejected, and only the first terminal cause is published. |
+| `CaptureKafkaCapabilityProbe`, `TrafficTopicMetadata` | verified | Unit and real-Kafka tests prove one inert probe envelope per representative partition, positive `LogAppendTime` acceptance, CreateTime/missing timestamp rejection, and stable partition metadata validation. |
+| Netty pipeline and capture-offloader callbacks | verified, with proof gaps | Handler tests prove configured mutating requests wait for complete acknowledgement, fail-closed never forwards the mutation, fail-open becomes irreversible process-wide pass-through, synchronous capture failures and terminal failures reach the process path, diagnostic exceptions are nonterminal, and close is the sole terminal observation. Serializer tests prove fixed monotonic `F`, detachment before a boundary observation, contiguous connection sequence, size/terminal flush, and no empty idle record. |
+| Managed controller acknowledgement and fleet recovery | managed-only | Deliberately absent from this standalone implementation, as required by §3.1 and `proxyCaptureProtocol.md`. |
+
+- PA2 estimated repair scope: one focused proxy/deployment configuration change for shared `S`
+  plumbing and validation, plus any small wiring correction exposed by its deterministic test.
+- Missing deterministic proof estimate: four focused tests — shared `E/S` configuration,
+  unobserved detached-publication failure propagation, post-terminal observation rejection, and
+  proof that heartbeat activity cannot mutate per-connection state.
+- PA3 scope remains the two mandatory real-Kafka proxy/replayer interoperability scenarios in §6.6.
+  Existing real-Kafka proxy membership tests are component evidence, not substitutes for those
+  end-to-end scenarios.
+- No proxy mechanism currently requires replacement.
+
+### End
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Added `ReplayIntakeOwner` and `ReplayIntakeInputQueue`. The owner starts and owns the dedicated
+  `replay-intake-owner` thread, removes only sealed immutable inputs, and exhaustively applies owner,
+  permit-pool, progress-controller, and disposition-ledger inputs one at a time.
+- Source reads now return through typed success/failure inputs. The owner applies the complete
+  delivered batch before requesting the next pull, treats EOF as normal completion, and performs no
+  `join`, `get`, `await`, or semaphore acquisition on its thread.
+- Deleted `ReplayIntakeMailbox` and both blocking await paths. `TrafficReplayerTopLevel` now starts,
+  fences, closes, and stops the intake owner explicitly; shutdown and source lifecycle crossings use
+  typed inputs rather than generic `Runnable` work.
+- `AsyncPermitPool`, `ReplayProgressController`, and `RecordDispositionLedger` now expose sealed
+  component inputs for the owner crossing and guard their mutable state with `OwnerThreadGuard`.
+- `ReplayEngine.admitWork` now returns a stage. Request and close processing compose admission,
+  transaction registration, and target startup without blocking the intake owner.
+- Added exact `PartitionGenerationId(TopicPartition, long localSequence)` and carried it through
+  intake-owned progress, disposition, and resolved-record state. Removed the fabricated
+  `unpartitioned-session` fallback; missing generation identity is now a bug.
+- Required input rejection reports process-fatal. Deterministic tests prove whole-batch ordering on
+  the dedicated thread, rejected submission handling, and an injected owner failure reaching
+  `ReplayProcessFatalHandler`.
+- Direct clean `javac` compilation passed for all 175 main, 21 test-fixture, and 117 test source
+  files. This also closes the source-compilation gap recorded in S1 and S2.
+- A focused JUnit Platform run with the cached Mockito agent passed all 53 selected S1-S3 tests:
+  replay-intake ownership, process supervision, fatal handling, shutdown fencing, connection-owner
+  rejection, exhaustive Kafka envelope intake, and dump formatting.
+- `git diff --check` passed. Source searches found no `ReplayIntakeMailbox`,
+  `unpartitioned-session`, blocking intake-owner wait, or raw `int sourceGeneration` owner input.
+- Traceability: S3 proves the replay-intake portion of R1 and R19. The remaining owner inventories
+  and R2-R18 stay open for their assigned milestones.
