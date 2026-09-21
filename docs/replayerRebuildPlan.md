@@ -1,27 +1,96 @@
 # Replayer Rebuild Plan
 
-**Status:** proposed, supersedes `replayer-implementation-plan.md`
+**Status:** execution-ready implementation plan
 
 **Date:** 2026-09-21
 
-This plan turns the settled replayer design into an implementation order. It assumes
-[Replayer Low-Level Design](captureAndReplay/replayerLowLevelDesign.md) and its two children are
-authoritative and that this document adds no design decisions of its own.
+This document is the standalone execution plan for rebuilding the traffic replayer and completing
+its interoperability with the capture proxy. It defines implementation order, code disposition,
+required evidence, configuration compatibility, and final acceptance. It does not define or change
+product behavior.
 
-It differs from the plan it replaces in four ways:
+## Reader orientation
 
-1. It states what the branch does **wrong**, with mechanism and consequence, rather than only what to
-   delete. Four of the defects silently commit Kafka offsets for data that was never replayed; a
-   refactoring inventory that does not rank those cannot be prioritized correctly.
-2. It fixes the sequencing. The prior plan's Phase 1 exit criterion was `compileJava`, its test
-   deletions were last, and it opened a window in which the replayer has no expiration mechanism at
-   all. All three are corrected here.
-3. It distinguishes **split** from **replace**. Several classes the prior plan discards contain the
-   only working implementation of a mechanism the design requires.
-4. It names exit criteria per step in terms of observable behavior.
+### Authoritative design
 
-Findings carry `file:line` so every claim is checkable. Where a claim was spot-verified against the
-tree rather than taken from an audit, it is marked **(verified)**.
+Read these documents before implementing:
+
+- [Capture and Replay Architecture](captureAndReplay/captureAndReplayArchitecture.md) — externally
+  observable protocol and system behavior;
+- [Proxy Capture Protocol](captureAndReplay/proxyCaptureProtocol.md) — proxy capture, publication,
+  failure, and retirement behavior;
+- [Replayer Processing and Commit Architecture](captureAndReplay/replayerProcessingAndCommitArchitecture.md)
+  — ownership, ordering, cancellation, demand, and commit structure;
+- [Replayer Low-Level Design](captureAndReplay/replayerLowLevelDesign.md) — shared replayer owner and
+  message rules;
+- [Kafka Source and Replay Intake Low-Level Design](captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md)
+  — Kafka-source and replay-intake classes, messages, and state transitions; and
+- [Connection and Request Replay Low-Level Design](captureAndReplay/replayerConnectionAndRequestLowLevelDesign.md)
+  — target-connection, request, retry, pacing, and tuple behavior.
+
+[Asynchronous Message-Passing Programming Guide](captureAndReplay/asyncMessagePassingProgrammingGuide.md)
+provides the implementation pattern for typed owner inputs. `managedFleetCaptureRecovery.md` is a
+future compatibility boundary only; it adds no implementation scope to this plan.
+
+The documents above are authoritative. If this plan, existing code, or a test appears to conflict
+with them, stop and consult the design owner before changing behavior.
+
+### How to use this plan
+
+1. Read §1 and the execution contract in §3.1.
+2. Treat the defect inventory in §2 and class dispositions in §5 as a snapshot of the starting
+   branch. Recheck a cited location if the branch has moved.
+3. Execute S0, then S1–S15 in §4. Follow the PA1–PA3 proxy checkpoints in §3.2 alongside them.
+4. At every step boundary, update the §6.5 traceability evidence and re-read §3.1 as required there.
+5. Do not call the result complete until every condition in §10 passes.
+
+Findings use `file:line` references so the mechanism can be checked directly. Short class-relative
+paths refer to the matching package under `TrafficCapture/trafficReplayer` unless another module is
+named. A finding marked **(verified)** was spot-checked against the starting tree.
+
+### Execution map
+
+| Work | Purpose |
+|---|---|
+| S0 | Build deterministic shared test fixtures |
+| S1–S3 | Restore envelope input, honest fatal handling, and owner-thread foundations |
+| S4a–S4b | Prove record associations, then atomically replace commit authority |
+| S5–S10 | Implement request lifetime, attempt permits, source reconstruction, and retry boundaries |
+| S11–S12 | Land demand-driven Kafka intake and broker-time expiration together |
+| S13–S14 | Implement generation cancellation and protocol-violation termination |
+| S15 | Remove migration scaffolding and minimize the final implementation |
+| PA1–PA3 | Audit, repair, and prove proxy/replayer interoperability |
+
+### Key terms and notation
+
+| Term | Meaning in this plan |
+|---|---|
+| State owner | The only component allowed to mutate one named group of state |
+| Partition generation | One process-local uninterrupted ownership period for a Kafka partition |
+| Record association | One unfinished request, response, or source-assembly dependency preventing a Kafka record from finishing |
+| Connection turn finished | Target sends and retries are done, so the next request on that captured connection may run |
+| Request processing finished | Target work, final source-response handling, tuple durability, and resource release are all complete |
+| Tuple durable | The tuple sink has acknowledged durable output; submission alone is insufficient |
+| Process-fatal | The failure must reach `ProcessSupervisor`; it is not an ordinary retry or cancellation result |
+
+| Symbol | Meaning |
+|---|---|
+| `E` | Configured capture-expiration interval |
+| `S` | Maximum allowed backward Kafka `LogAppendTime` skew |
+| `F` | Proxy-local maximum interval before a nonempty connection record is detached |
+| `W` | Broker-time window for freezing unavailable source-response retry input |
+| `P` | Retry-ready request-supply target per target event-loop thread |
+| `T_threads` | Target Netty event-loop thread count fixed at startup |
+| `N` | Per-partition request-supply target, `P * T_threads` |
+| `B` | `LogAppendTime` of the record that completes a captured source request |
+| `R` | `LogAppendTime` of a later evidence record being applied |
+| `M` | Latest accepted exact heartbeat baseline for a writer and partition |
+| `T_first` | `LogAppendTime` of the first traffic record used for restart fallback |
+
+The authoritative documents use `T` independently for both event-loop thread count and first-traffic
+restart time. This plan writes `T_threads` and `T_first` to keep those unrelated meanings distinct.
+`D1`–`D18` identify starting defects, `S0`–`S15` identify implementation milestones, `PA1`–`PA3`
+identify proxy checkpoints, and `R1`–`R19` identify required replayer proofs.
 
 ## 1. Guiding principles
 
@@ -59,8 +128,14 @@ tree rather than taken from an audit, it is marked **(verified)**.
 - **Delete tests that assert the old model before changing production.** Otherwise a correct
   refactor appears as a wall of red that hides real regressions. Deleting a non-defining test is
   preferable to carrying production code whose only purpose is satisfying that test.
+- **Iterate with the smallest fast-failing test that proves the behavior.** Unit and deterministic
+  component tests are the primary implementation loop. Long-running process, broker, or end-to-end
+  tests confirm integration and final acceptance; they must not be repeatedly used to discover the
+  next implementation mistake. When a large test finds a defect, split the discovered behavior into
+  the smallest faster tests that reproduce it, fix and iterate there, then rerun the large test once
+  as confirmation.
 
-## 2. What is actually wrong
+## 2. Starting-branch defects
 
 Ordered by severity. "Fixed by" refers to §4 steps.
 
@@ -76,7 +151,7 @@ Ordered by severity. "Fixed by" refers to §4 steps.
 | D8 | A truncated source response is labelled `COMPLETE` | Close-triggered rotation calls `handleEndOfResponse(accum, COMPLETE)` (`CapturedTrafficToHttpTransactionAccumulator.java:668-677`); `ParsedHttpMessagesAsDicts.java:94,116` filters only `EXPIRED_PREMATURELY` | `CLOSED_PREMATURELY` renders partial bytes as a complete `sourceResponse` with a fabricated `response_time_ms`. A truncated status line flips a genuine target failure to success, and the record commits | S9 |
 | D9 | No-response retry is capped at 4 | `http/retries/DefaultRetry.java:18` `MAX_RETRIES = 4`, applied to the no-response path at `:51-53` | An unreachable target yields a *terminal* result after five attempts. The request is recorded finished against a target that never received it | S10 |
 | D10 | `NoTargetResponseObtained` is an exception, and any exception becomes a retry | `datahandlers/NettyPacketToHttpConsumer.abort` (`:793`) completes exceptionally; `http/retries/RetryCollectingVisitorFactory.retryAfterFailure` (`:74-83`) maps any `Throwable` to `RETRY` | Inverted in both directions: an expected no-response must be type-matched, and a genuine invariant breach ("another target request attempt is still active", `RequestSenderOrchestrator.java:701`) is laundered into a re-send | S5 |
-| D11 | `ReplayEngine.admitWork` blocks on a stage only its own thread can complete | `ReplayEngine.java:133-139` `.join()`; `lifecycle/ReplayIntakeMailbox.execute` runs inline only when `!dispatching` (`:32-37`) | Works today only because the current call path has `dispatching == false`. The first input routed through the mailbox — e.g. an `AsyncPermitPool` completion, wired at `TrafficReplayerTopLevel.java:316-318` — deadlocks with no timeout | S3 |
+| D11 | `ReplayEngine.admitWork` blocks on a stage only its own thread can complete | `ReplayEngine.java:133-139` `.join()`; `lifecycle/ReplayIntakeMailbox.execute` runs inline only when `!dispatching` (`:32-37`) | The current path works only because `dispatching == false`. The first input routed through the mailbox — e.g. an `AsyncPermitPool` completion, wired at `TrafficReplayerTopLevel.java:316-318` — deadlocks with no timeout | S3 |
 | D12 | Poll failures become empty successes | `kafka/TrackingKafkaConsumer.safePollWithSwallowedRuntimeExceptions` (`:767-820`) returns an empty `ConsumerRecords` on any `RuntimeException` (`:818`) | An auth or serialization failure becomes an indefinite stream of empty polls. The replayer looks idle and healthy while making no progress | S8 |
 | D13 | The fatal path halts instead of running the supervisor ladder | `ReplayProcessFatalHandler.onFatal` ends at `processTerminator.terminate(...)` (`:133`); both production wirings are `Runtime.getRuntime()::halt` (`TrafficReplayerTopLevel.java:171`, `TrafficReplayer.java:780`) | On event-loop loss the JVM dies immediately: up to `--tuple-max-buffer-seconds` (default 60) of buffered tuples discarded and no thread dump — losing exactly the diagnostics needed to identify the failed owner | S2 |
 | D14 | Termination waits for orderly recovery in three places | `TrafficReplayerTopLevel.java:405` unbounded `for (var timeout = ofSeconds(60);; timeout = timeout.multipliedBy(2))`; `:59` two-minute actor limit; `TrafficReplayer.java:955-957` shutdown hook `.join()`s | When the Netty group is what died, the two-minute wait is for futures only that group could complete, then the doubling loop never exits. An operator sees a hung replayer instead of exit code 80 | S2 |
@@ -101,14 +176,15 @@ each record immediately when its single owner disposes it. The design requires p
 holding many independent associations, one `RecordProcessingFinished` per record, and commit computed
 as a contiguous prefix by the Kafka source owner alone. `RecordDispositionLedger`'s unit is
 `(handle, String owner, SourcePartitionKey)` — one owner per record — and it holds no offset ordering
-at all. This is not reachable by editing.
+at all. Reaching the settled model requires replacement of that authority, not incremental edits to
+the ledger.
 
-**Owner threads.** One authorized owner thread is missing (a dedicated replay-intake thread; today
-`main` becomes it by side effect at `ReplayIntakeMailbox.java:22` via `TrafficReplayerTopLevel.java:314`),
-one unauthorized owner thread exists (`BlockingTrafficSource.java:69-73`, which only parks on a
-semaphore), and the Kafka thread is a submission target driven by `supplyAsync`/`.get()` from other
-threads rather than an owner draining its own queue. There is no `wakeup()` call anywhere in the
-replayer — only a `WakeupException` catch.
+**Owner threads.** One authorized owner thread is missing: a dedicated replay-intake thread. In the
+starting branch, `main` becomes that owner by side effect at `ReplayIntakeMailbox.java:22` via
+`TrafficReplayerTopLevel.java:314`. One unauthorized owner thread exists
+(`BlockingTrafficSource.java:69-73`, which only parks on a semaphore), and the Kafka thread is a
+submission target driven by `supplyAsync`/`.get()` from other threads rather than an owner draining
+its own queue. There is no `wakeup()` call anywhere in the replayer — only a `WakeupException` catch.
 
 **Request milestones.** The design has two per request: connection-turn finished, and
 request-processing finished after tuple durability. The branch has one settlement point.
@@ -134,12 +210,16 @@ The agent must:
    process-fatal;
 6. stop and consult me when the design is ambiguous or an implementation choice would change
    behavior not already settled by the design;
-7. never change the design to satisfy an outlier or historical test; and
+7. never change the design to satisfy an outlier or historical test;
 8. never implement managed-fleet behavior as part of this work;
-9. land S11 and S12 in one review and merge unit, with no releasable revision between them; and
+9. land S11 and S12 in one review and merge unit, with no releasable revision between them;
 10. at the start and end of every implementation step, re-read this execution contract and the
     traceability matrix in §6.5, then update the execution log with the obligations proved, still
-    open, or blocked.
+    open, or blocked; and
+11. use the smallest applicable deterministic test while implementing. If a long-running test finds
+    a defect, stop using that test as the iteration loop, split the discovered behavior into the
+    smallest faster unit or component tests that reproduce it, fix against those tests, and rerun
+    the long test only for confirmation.
 
 The final handoff must contain no temporary compatibility path other than the explicit
 externally-required aliases and retired-option adapters in §7, shadow correctness authority, disabled
@@ -226,12 +306,12 @@ create a second envelope, or add managed-fleet coordination.
 
 ## 4. Sequencing
 
-S0 precedes production changes. Steps S1–S3 are prerequisites; everything after them is independently
-reviewable except that S11 and S12 must land together. Every step lists its local exit criterion, but
-every intermediate state remains a non-production rebuild milestone. The proxy audit is a parallel
-workstream rather than an S1 prerequisite. No individual step, including S4a or S4b, is a production
-candidate. Production soundness is evaluated only after S0 and S1–S15, the replayer LLD verification
-obligations, and proxy-to-replayer interoperability are complete.
+S0 precedes production changes. S1–S3 establish the foundations; after S3, follow the listed step
+order. S4a and S4b are separate review checkpoints, while S11 and S12 must land together. Every step
+lists its local exit criterion, but every intermediate state remains a non-production rebuild
+milestone. The proxy audit is a parallel workstream rather than an S1 prerequisite. No individual
+step is a production candidate. Production soundness is evaluated only after S0 and S1–S15, the
+replayer LLD verification obligations, and proxy-to-replayer interoperability are complete.
 
 ### S0. Build deterministic fixtures before production changes
 
@@ -260,11 +340,11 @@ the fixture fail for the intended mismatch.
 
 ### S1. Restore function: envelope decoding and the compile break
 
-The branch fails `:TrafficCapture:trafficReplayer:compileJava` with 40 errors **(verified)**, all in
+The starting branch fails `:TrafficCapture:trafficReplayer:compileJava` with 40 errors **(verified)**, all in
 files this plan deletes. `ProxyNoMoreWrites` is absent from `captureProtobufs/src/main/proto/TrafficCaptureStream.proto`
 at HEAD and at `139853523^`, and is imported by four production files and three test files — so
-nothing under `kafka/` compiles or runs today, and any remembered flaky Kafka test is a memory of an
-older tree.
+nothing under `kafka/` compiles or runs in the starting tree. Test results from other revisions are
+not evidence for this branch.
 
 - Delete the liveness and absence-proof cluster (§5.1) and its tests.
 - Decode the `CaptureRecord` envelope exhaustively: `TrafficStream`, `WriterPartitionHeartbeat`,
@@ -317,7 +397,9 @@ real and the `AtomicReference` field bag at `TrafficReplayerCore.java:133-137` c
 owner-confined plain fields.
 
 **Exit:** no `join`, `get`, `await`, or semaphore acquire on the intake thread; owner-thread guard
-installed and passing under the full e2e suite.
+installed and proved by deterministic owner/input-queue tests, including rejected cross-thread
+mutation and an injected owner failure reaching `ProcessSupervisor`. End-to-end coverage is a later
+integration confirmation, not the iteration loop for this step.
 
 ### S4a. Move record→work association into intake
 
@@ -482,13 +564,14 @@ behavior does not depend on Kafka read timing.
 
 ### S11. Demand model, then delete the caps
 
-The order within this step matters — reversing it is the regression window the prior plan opened.
+The order within this step matters: deleting the caps before the demand model exists creates a
+deadlock and evidence-starvation window.
 S11 and S12 must land in the same review and merge unit. There is no releasable or production
 checkpoint after the caps are removed but before broker-time expiration is installed.
 
 - First add `RequestNextPartitionBatch` / `PartitionRecordBatch`, at most one outstanding request per
-  partition generation, `N = P * T` over requests with resolved retry input and unfinished target
-  turns, and empty polls that neither resolve a request nor reach intake.
+  partition generation, `N = P * T_threads` over requests with resolved retry input and unfinished
+  target turns, and empty polls that neither resolve a request nor reach intake.
 - Only then delete `KafkaRecordOwnershipBudget` and its two flags (D15), `BlockingTrafficSource`,
   `BufferedFlowController`, `ReplayReadGate`, `ReplayProgressController`, and
   all lookahead-based read gating. The parser compatibility adapter for the retired lookahead options
@@ -522,8 +605,8 @@ and broker-time evidence. It lands in the same review and merge unit as S11. No 
 be described or deployed as production sound.
 
 - `(writerNodeId, partition)` baselines from accepted heartbeats; the ordinary rule `R - M >= E + S`;
-  the restart fallback `R - T >= E + 2S`, replaced by the first heartbeat after `T`, which is accepted
-  unconditionally.
+  the restart fallback `R - T_first >= E + 2S`, replaced by the first heartbeat after `T_first`,
+  which is accepted unconditionally.
 - A higher-offset record more than `S` below the partition's greatest observed `LogAppendTime` is
   process-fatal before it can authorize expiration or commit.
 - An expired lifetime and a later fresh lifetime for the same `CapturedConnectionId` get different
@@ -582,6 +665,11 @@ but when two implementations are equally sound, choose the smaller one.
 
 ## 5. Class dispositions
 
+These are final-state dispositions, not a requirement to perform every deletion immediately.
+Temporary extraction or migration use is allowed only where §4 names it, and all such scaffolding
+must be gone by S15. When a class appears in more than one discussion, its implementation step
+controls the migration sequence and this section controls whether it exists in the final tree.
+
 ### 5.1 Delete
 
 **Liveness and absence-proof model:** `KafkaLivenessScanner`, `KafkaLivenessSnapshotRecord`,
@@ -603,7 +691,7 @@ at all), `ReplayTransactionMetrics`.
 `OffsetLifecycleTracker`. A throwing unconfigured listener may exist only as a temporary migration
 guard and must be deleted when typed owner queues become authoritative.
 
-**Not named in the prior plan but equally obsolete:** `KafkaCommitOffsetData`, `PojoKafkaCommitOffsetData`,
+**Additional obsolete compatibility types:** `KafkaCommitOffsetData`, `PojoKafkaCommitOffsetData`,
 `ISimpleTrafficCaptureSource`, `ITrafficStreamWithKey.isResumedConnection`.
 
 ### 5.2 Extract required mechanisms, then delete the original classes
@@ -635,7 +723,7 @@ mutates the base's `AtomicReference` field bag (`:133-137`).
 
 Also refactor rather than keep: `TargetResponseClassifier` (separate attempt outcome from
 source-vs-target comparison), `RequestTransformerAndSender` (stop passing the permit pool down),
-`ClientConnectionPool` (rekey on `ConnectionProcessingId`; expose the resolved event-loop count so `T`
+`ClientConnectionPool` (rekey on `ConnectionProcessingId`; expose the resolved event-loop count so `T_threads`
 is knowable — `numThreads == 0` currently means Netty picks `2 * availableProcessors`),
 `ConnectionReplaySession` (six constructors, four of which adapt away the cancellation signal),
 `NettyPacketToHttpConsumer` (bound the `activateLiveChannel` self-recursion at `:176`),
@@ -676,7 +764,17 @@ results.
 
 ## 6. Test strategy
 
-**Order: fixtures, then deletions, then production.** Not last.
+Build fixtures first. Delete tests that assert obsolete behavior before changing that behavior. Add
+the smallest proof tests with each implementation step rather than postponing testing until the
+rebuild is assembled.
+
+**Iteration rule:** use unit tests and deterministic, no-sleep component tests as the primary
+implementation loop. Long-running broker, process, and end-to-end tests run at named integration
+checkpoints and final acceptance; they must not be run repeatedly to discover and fix one mistake at
+a time. When a large test exposes a defect, split the discovered behavior into the smallest focused
+unit or component tests that reproduce it, fix and iterate against those faster tests, and then
+rerun the large test once to confirm the integration behavior. Retain only the thin integration
+scenario needed to prove boundaries that smaller tests cannot.
 
 ### 6.0 Tests do not create requirements
 
@@ -759,10 +857,11 @@ the correct obligation that no cap may block reads needed to reach retry or hear
   and never skip a prefix. That subsumes most of `RecordDispositionLedgerTest`'s 22 hand-written cases.
 - **Component tests with a real event loop but no socket** — `EmbeddedChannel`/`LocalEventLoopGroup` for
   ordering, permits, refcount handoff, and exit-80 on event-loop death.
-- **Integration: keep exactly six, each with a class-level `@Timeout`.** `ReplayProcessFatalHandlerTest`,
-  `e2etests/ReplayerProcessExitTest`, `e2etests/TupleWriteBlockingBehaviorTest`,
-  `e2etests/GlobalSerialReplayE2ETest`, `e2etests/FullReplayerWithTracingChecksTest`, and one real-broker
-  rebalance test.
+- **Replayer-module integration: keep exactly six, each with a class-level `@Timeout`.**
+  `ReplayProcessFatalHandlerTest`, `e2etests/ReplayerProcessExitTest`,
+  `e2etests/TupleWriteBlockingBehaviorTest`, `e2etests/GlobalSerialReplayE2ETest`,
+  `e2etests/FullReplayerWithTracingChecksTest`, and one real-broker rebalance test. The proxy and
+  cross-module interoperability scenarios in §6.6 are separate final-acceptance coverage.
 
 Fix `ReplayerProcessExitTest`'s gating while keeping its assertion. `tuplesInS3 >= committedOffset`
 (`:196`) is the single best acceptance assertion on the branch, but three assertions hang off
@@ -772,10 +871,10 @@ assertion needs positive evidence that the thing it denies had its chance: wait 
 drops, *then* assert the committed offset is still zero.
 
 Bound every unbounded loop: `KafkaCommitsWorkBetweenLongPollsTest.java:91`,
-`KafkaTestUtils.java:90,105`. Today each failure is a ten-minute CI hang with no stack. This is the
-cheapest single change in the suite.
+`KafkaTestUtils.java:90,105`. In the starting tree each failure is a ten-minute CI hang with no stack.
+This is the cheapest single change in the suite.
 
-### 6.4 The one integration test that must be written
+### 6.4 Required replayer multi-member integration coverage
 
 There is **no replayer-side multi-member test anywhere**, and `writerNodeId` appears in zero replayer
 tests — so `WriterPartitionId` and per-`(writerNodeId, partition)` heartbeat baselines have no coverage
@@ -787,8 +886,8 @@ proves the required rebalance behavior rather than copying the class wholesale.
 
 ### 6.5 Replayer-LLD traceability matrix
 
-This table mirrors the current verification list in `replayerLowLevelDesign.md` §9. Do not rely on a
-remembered item count: update the table only after consulting me if the authoritative list changes.
+This table mirrors the verification list in `replayerLowLevelDesign.md` §9. Do not rely on a
+hard-coded item count: update the table only after consulting me if the authoritative list changes.
 
 | # | Required design obligation | Implementation steps | Minimum proof |
 |---|---|---|---|
@@ -876,9 +975,9 @@ mechanisms that statement is not an executable criterion.
 
 ## 7. Configuration
 
-**Add** (none of these exists today; grep over the whole tree returns zero hits for each): `E` default
+**Add** (none of these exists in the starting tree; grep returns zero hits for each): `E` default
 30s, `S` clock-skew bound, `W` default 5s, `P` default 2, cancellation grace default 5s,
-`protocolViolationDrainLimit` fixed 60s, the ten-minute watchdog. Startup must reject `P < 1`, `T < 1`,
+`protocolViolationDrainLimit` fixed 60s, the ten-minute watchdog. Startup must reject `P < 1`, `T_threads < 1`,
 `W <= 0`, `E <= 0`, `S < 0`.
 
 **Rename the concept but preserve the established external configuration:** add
@@ -902,7 +1001,7 @@ Internal blast radius: `TrafficReplayerTopLevel.java:120,124,133,143,156,167,181
 `testFixtures/.../RootReplayerConstructorExtensions.java:31,39`, and
 `coreUtilities/.../EnvVarParameterPullerTest.java:271`.
 
-**Make authoritative:** `--num-client-threads` becomes `T` and must reject `0`.
+**Make authoritative:** `--num-client-threads` becomes `T_threads` and must reject `0`.
 
 **Retain and validate:** `--speedup-factor`, `--speedupFactor`, and workflow
 `spec.speedupFactor`. Positive configured `speedupFactor` is part of the authoritative replay-timing
@@ -947,10 +1046,10 @@ to 24 in code (`TrafficReplayer.java:155,161`) while their own descriptions and
 against Java's 1.0. If the authoritative design does not settle either default, consult me before
 choosing one; do not infer the answer from whichever existing layer is easiest to preserve.
 
-## 8. Design readings and required consultation
+## 8. Settled readings and required consultation
 
-Two previously listed questions are already answered by the authoritative design and must not be
-reopened by implementation or tests:
+The authoritative design already settles these points; implementation and tests must not reopen
+them:
 
 1. `FirstTargetWriteSubmitted` is local connection-owner cancellation state. It is not forwarded to
    replay intake and does not affect Kafka demand.
@@ -984,15 +1083,15 @@ not implement or claim:
 
 The absence of those guarantees is a documented scope boundary, not a defect in this deliverable.
 Tests expecting managed-fleet behavior are non-defining for this plan and must not cause that behavior
-to be added. There is no fleet or capture-domain controller code in the replayer today — `fleet`
+to be added. There is no fleet or capture-domain controller code in the starting replayer tree — `fleet`
 appears twice, both in prose comments, and `captureDomain` has zero hits.
 
 ## 10. What "done" means
 
-The combined implementation must prove every current item in `replayerLowLevelDesign.md` §9. The
-current document contains 19 listed obligations; the traceability table, rather than that count, is
-authoritative for execution. Four obligations this branch currently gets wrong and that no test
-covers today are:
+The combined implementation must prove every current item in `replayerLowLevelDesign.md` §9. That
+LLD currently contains 19 listed obligations; the traceability table, rather than that count, is
+authoritative for execution. Four obligations the starting branch gets wrong and that no starting
+test covers are:
 
 - one record shared by several requests cannot finish after only one request;
 - records contributing source-response bytes remain associated through tuple durability;
@@ -1003,7 +1102,7 @@ The proxy must also satisfy `proxyCaptureProtocol.md`, and an interoperability t
 supported proxy output can be consumed by the replayer through Kafka without an alternate envelope,
 header convention, or trial-decoding path.
 
-Exactly one design obligation is well covered today and should stay that way: exit code 80 on
+Exactly one design obligation is already well covered and should stay that way: exit code 80 on
 event-loop-owner loss, asserted symbolically at `ReplayProcessFatalHandlerTest.java:94`, proved through
 a forked JVM halt at `:68-89`, held distinct from 89 and from codes 1-5 at `:95-101`, and exercised
 end-to-end at `RequestSenderOrchestratorLifecycleTest.java:966-1006`.
