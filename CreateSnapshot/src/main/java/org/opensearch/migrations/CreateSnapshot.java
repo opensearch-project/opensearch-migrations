@@ -50,7 +50,7 @@ public class CreateSnapshot {
         @Parameter(
                 names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
                 required = true,
-                description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
+                description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path, azure://account/container/path (or bare absolute path)")
         public String repoUri;
 
         @Parameter(
@@ -62,7 +62,9 @@ public class CreateSnapshot {
         @Parameter(
                 names = {"--endpoint", "--s3-endpoint" },
                 required = false,
-                description = "Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)")
+                description = "Custom endpoint for the repository service (e.g. LocalStack for S3). "
+                        + "Only s3:// repos accept a repository-level endpoint; for gs:// and azure:// "
+                        + "a custom endpoint must be configured cluster-side.")
         public String endpoint;
 
         @ParametersDelegate
