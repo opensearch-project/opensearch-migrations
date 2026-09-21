@@ -8,7 +8,13 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
+import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
+import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
+import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
+import org.opensearch.migrations.tracing.TestContext;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -37,7 +43,8 @@ class ReplayProcessFatalHandlerTest {
                 events.add("terminate");
             },
             () -> events.add("log4j-flush"),
-            errorStream
+            errorStream,
+            ignored -> events.add("fatal-shutdown")
         );
         var failure = new Error(
             "event-loop owner died",
@@ -52,6 +59,7 @@ class ReplayProcessFatalHandlerTest {
                 "metric",
                 "log4j-flush",
                 "stderr-flush",
+                "fatal-shutdown",
                 "terminate"
             ),
             events
@@ -65,8 +73,8 @@ class ReplayProcessFatalHandlerTest {
     }
 
     @Test
-    void subprocessHaltsWithReasonSpecificExitCodeAfterWritingFatalDiagnostics() throws Exception {
-        var process = launchFatalChild();
+    void subprocessExitsWithReasonSpecificExitCodeAfterWritingFatalDiagnostics() throws Exception {
+        var process = launchChild(FatalChild.class);
         var exited = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         if (!exited) {
             process.destroyForcibly();
@@ -89,6 +97,28 @@ class ReplayProcessFatalHandlerTest {
         );
     }
 
+    /** Proves R19's event-loop process boundary with a live connection owner. */
+    @Test
+    void liveEventLoopDeathExitsProcessWithCode80() throws Exception {
+        var process = launchChild(EventLoopFatalChild.class);
+        var exited = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            Assertions.fail("event-loop fatal subprocess did not terminate promptly");
+        }
+        var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        Assertions.assertEquals(
+            ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED.exitCode(),
+            process.exitValue()
+        );
+        Assertions.assertTrue(output.contains("live-event-loop-session"), output);
+        Assertions.assertTrue(
+            output.contains(ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED.message()),
+            output
+        );
+    }
+
     @Test
     void fatalHaltCodesAreDistinctFromNormalReplayerExitCodes() {
         Assertions.assertEquals(80, ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED.exitCode());
@@ -101,7 +131,7 @@ class ReplayProcessFatalHandlerTest {
         }
     }
 
-    private static Process launchFatalChild() throws IOException {
+    private static Process launchChild(Class<?> childClass) throws IOException {
         var javaExecutable = System.getProperty("java.home")
             + File.separator
             + "bin"
@@ -111,7 +141,7 @@ class ReplayProcessFatalHandlerTest {
             javaExecutable,
             "-cp",
             System.getProperty("java.class.path"),
-            FatalChild.class.getName()
+            childClass.getName()
         )
             .redirectErrorStream(true)
             .start();
@@ -124,7 +154,7 @@ class ReplayProcessFatalHandlerTest {
             var handler = new ReplayProcessFatalHandler(
                 ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
                 ignored -> {},
-                Runtime.getRuntime()::halt
+                new ProcessSupervisor()
             );
             handler.onFatal(
                 new Error(
@@ -132,7 +162,48 @@ class ReplayProcessFatalHandlerTest {
                     new IllegalStateException("subprocess root cause")
                 )
             );
-            throw new AssertionError("Runtime.halt returned");
+            throw new AssertionError("System.exit returned");
+        }
+    }
+
+    public static final class EventLoopFatalChild {
+        private EventLoopFatalChild() {}
+
+        public static void main(String[] args) throws Exception {
+            try (var context = TestContext.noOtelTracking()) {
+                var connectionPool = new ClientConnectionPool(
+                    (eventLoop, channelContext) -> {
+                        throw new AssertionError("fatal child must not open a target channel");
+                    },
+                    "event-loop-fatal-child",
+                    1
+                );
+                var fatalHandler = new ReplayProcessFatalHandler(
+                    ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
+                    ignored -> {},
+                    new ProcessSupervisor()
+                );
+                var orchestrator = new RequestSenderOrchestrator(
+                    connectionPool,
+                    (session, requestContext) -> {
+                        throw new AssertionError("fatal child must not start target work");
+                    },
+                    RequestSenderOrchestrator.noSourceTerminationObligations(),
+                    ConnectionActor.Metrics.NOOP,
+                    TargetExchangeState.Metrics.NOOP,
+                    ResourceOwnership.Metrics.NOOP,
+                    fatalHandler
+                );
+                var requestContext = context.getTestConnectionRequestContext("live-event-loop-session", 0);
+                orchestrator.transactionRuntime(
+                    requestContext.getReplayerRequestKey(),
+                    requestContext.getChannelKeyContext()
+                );
+
+                connectionPool.shutdownNow().get(30, TimeUnit.SECONDS);
+                new CountDownLatch(1).await(10, TimeUnit.SECONDS);
+                throw new AssertionError("live event-loop termination did not exit the process");
+            }
         }
     }
 

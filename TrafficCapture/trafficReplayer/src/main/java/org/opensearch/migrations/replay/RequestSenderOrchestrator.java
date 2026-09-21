@@ -86,7 +86,7 @@ public class RequestSenderOrchestrator {
         return new ReplayProcessFatalHandler(
             ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
             fatalMetrics,
-            Runtime.getRuntime()::halt
+            new ProcessSupervisor()
         );
     }
 
@@ -368,7 +368,8 @@ public class RequestSenderOrchestrator {
                 key,
                 mailbox,
                 exchange,
-                actorMetrics
+                actorMetrics,
+                RequestSenderOrchestrator.this::signalFatal
             );
             actor.termination().whenComplete((outcome, failure) ->
                 mailbox.execute(() -> onActorTerminated(outcome, failure))

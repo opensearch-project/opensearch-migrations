@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import java.io.PrintStream;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
@@ -16,12 +17,12 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         EVENT_LOOP_TERMINATED(
             80,
             "event_loop_terminated",
-            "FATAL: a replayer event loop terminated while its session was live; halting the process"
+            "FATAL: a replayer event loop terminated while its session was live; terminating the process"
         ),
         UNEXPECTED_FATAL_ERROR(
             89,
             "unexpected_fatal_error",
-            "FATAL: the replayer encountered an unexpected process-fatal error; halting the process"
+            "FATAL: the replayer encountered an unexpected process-fatal error; terminating the process"
         );
 
         private final int exitCode;
@@ -62,6 +63,7 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
     private final ProcessTerminator processTerminator;
     private final Runnable log4jFlusher;
     private final PrintStream errorStream;
+    private final Consumer<Error> fatalShutdownSignaler;
     private final AtomicBoolean started = new AtomicBoolean();
 
     public ReplayProcessFatalHandler(
@@ -69,7 +71,7 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         Metrics metrics,
         ProcessTerminator processTerminator
     ) {
-        this(reason, metrics, processTerminator, LogManager::shutdown, System.err);
+        this(reason, metrics, processTerminator, LogManager::shutdown, System.err, ignored -> {});
     }
 
     ReplayProcessFatalHandler(
@@ -79,11 +81,23 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         Runnable log4jFlusher,
         PrintStream errorStream
     ) {
+        this(reason, metrics, processTerminator, log4jFlusher, errorStream, ignored -> {});
+    }
+
+    ReplayProcessFatalHandler(
+        Reason reason,
+        Metrics metrics,
+        ProcessTerminator processTerminator,
+        Runnable log4jFlusher,
+        PrintStream errorStream,
+        Consumer<Error> fatalShutdownSignaler
+    ) {
         this.reason = Objects.requireNonNull(reason);
         this.metrics = Objects.requireNonNull(metrics);
         this.processTerminator = Objects.requireNonNull(processTerminator);
         this.log4jFlusher = Objects.requireNonNull(log4jFlusher);
         this.errorStream = Objects.requireNonNull(errorStream);
+        this.fatalShutdownSignaler = Objects.requireNonNull(fatalShutdownSignaler);
     }
 
     @Override
@@ -129,8 +143,23 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
 
         try {
             errorStream.flush();
-        } finally {
-            processTerminator.terminate(reason.exitCode());
+        } catch (Throwable flushFailure) {
+            failure.addSuppressed(flushFailure);
         }
+
+        try {
+            fatalShutdownSignaler.accept(failure);
+        } catch (Throwable shutdownSignalFailure) {
+            failure.addSuppressed(shutdownSignalFailure);
+            try {
+                errorStream.println("Fatal shutdown signaling failed before process termination:");
+                shutdownSignalFailure.printStackTrace(errorStream);
+                errorStream.flush();
+            } catch (Throwable ignored) {
+                // Process termination must not depend on diagnostic output remaining functional.
+            }
+        }
+
+        processTerminator.terminate(reason.exitCode());
     }
 }

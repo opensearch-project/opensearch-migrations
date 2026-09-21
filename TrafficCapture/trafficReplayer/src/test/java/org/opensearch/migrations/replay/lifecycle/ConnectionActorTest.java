@@ -391,6 +391,59 @@ class ConnectionActorTest extends InstrumentationTest {
         return new ReplayRequestId(session(), index);
     }
 
+    /** Proves replayer LLD §4 and R19: a rejected required owner submission is process-fatal. */
+    @Test
+    void rejectedImmediateSubmissionReachesFatalHandler() {
+        var mailbox = new TestEventLoop();
+        var fatalFailures = new ArrayList<Error>();
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            new TestExchange(),
+            ConnectionActor.Metrics.NOOP,
+            fatalFailures::add
+        );
+        mailbox.rejectNewTasks();
+
+        actor.admitClose(Instant.EPOCH);
+
+        Assertions.assertEquals(1, fatalFailures.size());
+        Assertions.assertTrue(fatalFailures.get(0).getMessage().contains("ordered close admission"));
+        Assertions.assertInstanceOf(
+            java.util.concurrent.RejectedExecutionException.class,
+            fatalFailures.get(0).getCause()
+        );
+    }
+
+    /** Proves replayer LLD §4 and R19 for the actor's scheduled-head submission. */
+    @Test
+    void rejectedScheduledSubmissionReachesFatalHandler() {
+        var mailbox = new TestEventLoop();
+        var fatalFailures = new ArrayList<Error>();
+        var exchange = new TestExchange();
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            exchange,
+            ConnectionActor.Metrics.NOOP,
+            fatalFailures::add
+        );
+        actor.admitRequest(
+            request(0),
+            Instant.EPOCH.plusSeconds(10),
+            CompletableFuture.completedFuture(
+                new PreparationOutcome.Prepared<>(new TestPrepared("request"))
+            )
+        );
+        mailbox.rejectNewTasks();
+
+        mailbox.runUntilIdle();
+
+        Assertions.assertEquals(1, fatalFailures.size());
+        Assertions.assertTrue(fatalFailures.get(0).getMessage().contains("scheduled head start"));
+        Assertions.assertTrue(exchange.executed.isEmpty());
+    }
+
     @Test
     void settledRequestDoesNotDependOnASecondMailboxDelivery() {
         var mailbox = new TestEventLoop();

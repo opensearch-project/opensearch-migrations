@@ -107,3 +107,48 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   pending PR CI; this is an execution-environment blocker, not a changed design obligation.
 - Traceability: S1 restores the envelope boundary used by later obligations but does not claim any
   R1-R19 obligation complete. All remain open for their assigned implementation steps.
+
+## S2 — honest fatal failure
+
+### Start
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Confirmed the settled process-failure order from `replayerLowLevelDesign.md` §8 and
+  `replayerProcessingAndCommitArchitecture.md` §10.3: first fatal signal, high-severity diagnostics,
+  `System.exit`, a ten-minute watchdog for bounded shutdown hooks, thread dump, then
+  `Runtime.halt` with the same reason-specific code.
+- Confirmed that rejected required connection-owner submissions are fatal and may not transfer
+  mutation or cleanup authority to the submitting thread.
+- Planned evidence: immediate and scheduled connection-actor submission rejection reaches the fatal
+  handler; the supervisor arms its watchdog before `System.exit`; watchdog expiry dumps threads and
+  halts with the same code; fatal shutdown skips owner-confined orderly cleanup; runtime shutdown
+  hooks signal without joining; normal remaining-work waiting has one named bound.
+
+### End
+
+- Re-read the execution contract in §3.1 and traceability matrix in §6.5.
+- Required `ConnectionActor` mailbox and scheduled-head submissions now route
+  `RejectedExecutionException` to the process-fatal handler with the rejected operation and
+  connection identity. Added deterministic tests for both rejection points.
+- Added `ProcessSupervisor` behind the existing fatal-handler seam. It arms a non-daemon ten-minute
+  watchdog before initiating `System.exit`; watchdog expiry writes a full thread dump to stderr and
+  invokes `Runtime.halt` with the same reason-specific exit code.
+- Production fatal handlers now use the supervisor in both bootstrap paths. The fatal handler remains
+  one-shot, flushes diagnostics, signals fatal shutdown without waiting, and then initiates the
+  supervisor ladder.
+- Fatal shutdown skips `beginReplayShutdownAfterIntakeFence` and Netty/actor cleanup. Runtime shutdown
+  hooks signal shutdown without joining. Normal remaining-work waiting uses one named two-minute
+  bound instead of an unbounded doubling loop.
+- Added focused tests for watchdog ordering and exit-code preservation, fatal-shutdown cleanup
+  exclusion, non-joining shutdown hooks, the single remaining-work bound, and a subprocess whose
+  live target event loop terminates and must exit with code 80.
+- `git diff --check`: passed. Source search confirms the only production `Runtime.halt` reference is
+  the final watchdog stage in `ProcessSupervisor`; no shutdown hook joins and no exponential
+  remaining-work loop remains.
+- Gradle was redirected to a writable isolated user home and the installed Gradle distribution, but
+  startup requires a loopback datagram socket for its file-lock service. The sandbox denied that
+  socket, and the escalation service rejected the approval request with its own encrypted-summary
+  validation error. Compilation and focused tests remain pending CI.
+- Traceability: S2 proves R19 for immediate and scheduled connection-owner submission rejection and
+  adds the required live event-loop process test. R19 remains open for the replay-intake, request,
+  Kafka-source, and tuple-writer owners introduced by later steps.

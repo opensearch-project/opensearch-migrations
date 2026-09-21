@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.lang.reflect.Field;
 import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -18,23 +19,59 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.slf4j.event.Level;
 
 class TrafficReplayerTopLevelShutdownTest {
 
+    /** Proves rebuild plan S2: runtime shutdown hooks signal shutdown without joining owner work. */
     @Test
-    void runtimeShutdownHookWaitsForOwnedShutdownToFinish() throws Exception {
+    void runtimeShutdownHookSignalsWithoutWaitingForOwnedShutdown() {
         var replayer = Mockito.mock(TrafficReplayerTopLevel.class);
         var shutdown = new CompletableFuture<Void>();
         Mockito.when(replayer.shutdown(null)).thenReturn(shutdown);
 
-        var hookInvocation = CompletableFuture.runAsync(
-            () -> TrafficReplayer.awaitReplayerShutdown(replayer)
+        TrafficReplayer.awaitReplayerShutdown(replayer);
+
+        Mockito.verify(replayer).shutdown(null);
+        Assertions.assertFalse(shutdown.isDone());
+    }
+
+    /** Proves processing architecture §10.3: fatal shutdown never waits on a failed owner. */
+    @Test
+    void fatalShutdownSkipsActorAndNettyCleanup() throws Exception {
+        var connectionPool = Mockito.mock(ClientConnectionPool.class);
+        var replayEngine = Mockito.mock(ReplayEngine.class);
+        var replayer = new TrafficReplayerTopLevel(
+            Mockito.mock(IRootReplayerContext.class),
+            URI.create("http://localhost:9200"),
+            Mockito.mock(IAuthTransformerFactory.class),
+            () -> Mockito.mock(IJsonTransformer.class),
+            connectionPool,
+            1,
+            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
+        );
+        currentReplayEngine(replayer).set(replayEngine);
+        var fatalError = new Error("owner failed");
+
+        var shutdown = replayer.shutdown(fatalError);
+
+        Assertions.assertTrue(shutdown.isCompletedExceptionally());
+        Mockito.verifyNoInteractions(replayEngine);
+        Mockito.verifyNoInteractions(connectionPool);
+    }
+
+    /** Proves rebuild plan S2's single named bound for normal remaining-work waiting. */
+    @Test
+    void normalWrapUpWaitsOnlyOnce() throws Exception {
+        var replayer = new TimeoutRecordingReplayer();
+
+        replayer.wrapUpWorkAndEmitSummary(
+            Mockito.mock(ReplayEngine.class),
+            Mockito.mock(CapturedTrafficToHttpTransactionAccumulator.class)
         );
 
-        Mockito.verify(replayer, Mockito.timeout(5_000)).shutdown(null);
-        Assertions.assertFalse(hookInvocation.isDone());
-        shutdown.complete(null);
-        hookInvocation.get(5, TimeUnit.SECONDS);
+        Assertions.assertEquals(1, replayer.waitCalls);
+        Assertions.assertEquals(Duration.ofMinutes(2), replayer.lastWait);
     }
 
     @Test
@@ -180,6 +217,31 @@ class TrafficReplayerTopLevelShutdownTest {
         Field field = TrafficReplayerTopLevel.class.getDeclaredField("currentReplayEngine");
         field.setAccessible(true);
         return (AtomicReference<ReplayEngine>) field.get(replayer);
+    }
+
+    private static final class TimeoutRecordingReplayer extends TrafficReplayerTopLevel {
+        private int waitCalls;
+        private Duration lastWait;
+
+        private TimeoutRecordingReplayer() {
+            super(
+                Mockito.mock(IRootReplayerContext.class),
+                URI.create("http://localhost:9200"),
+                Mockito.mock(IAuthTransformerFactory.class),
+                () -> Mockito.mock(IJsonTransformer.class),
+                Mockito.mock(ClientConnectionPool.class),
+                1,
+                Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
+            );
+        }
+
+        @Override
+        protected void waitForRemainingWork(Level logLevel, Duration timeout)
+            throws java.util.concurrent.TimeoutException {
+            waitCalls++;
+            lastWait = timeout;
+            throw new java.util.concurrent.TimeoutException("test timeout");
+        }
     }
 
     private static final class TestRecordHandle implements RecordDispositionLedger.RecordHandle {

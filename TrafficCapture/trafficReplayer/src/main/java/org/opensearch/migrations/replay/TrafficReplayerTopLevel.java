@@ -57,6 +57,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
     private static final Duration SHUTDOWN_PROGRESS_REPORT_INTERVAL = Duration.ofSeconds(15);
     private static final Duration ACTOR_TERMINATION_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
+    private static final Duration REMAINING_WORK_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
     private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
@@ -168,7 +169,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             workTracker,
             errorClassifier,
             poisonAllowlist,
-            Runtime.getRuntime()::halt
+            new ProcessSupervisor()
         );
     }
 
@@ -329,7 +330,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             new ReplayProcessFatalHandler(
                 ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
                 topLevelContext.getReplayProcessFatalMetrics(),
-                fatalProcessTerminator
+                fatalProcessTerminator,
+                org.apache.logging.log4j.LogManager::shutdown,
+                System.err,
+                failure -> shutdown(failure)
             )
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
@@ -400,18 +404,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     ) throws ExecutionException, InterruptedException {
         final var primaryLogLevel = Level.INFO;
         final var secondaryLogLevel = Level.WARN;
-        var logLevel = primaryLogLevel;
-        for (var timeout = Duration.ofSeconds(60);; timeout = timeout.multipliedBy(2)) {
-            if (shutdownFutureRef.get() != null) {
-                log.warn("Not waiting for work because the TrafficReplayer is shutting down.");
-                break;
-            }
+        if (shutdownFutureRef.get() != null) {
+            log.warn("Not waiting for work because the TrafficReplayer is shutting down.");
+        } else {
             try {
-                waitForRemainingWork(logLevel, timeout);
-                break;
+                waitForRemainingWork(primaryLogLevel, REMAINING_WORK_SHUTDOWN_LIMIT);
             } catch (TimeoutException e) {
-                log.atLevel(logLevel).log("Timed out while waiting for the remaining requests to be finalized...");
-                logLevel = secondaryLogLevel;
+                log.atLevel(secondaryLogLevel)
+                    .log("Timed out while waiting for the remaining requests to be finalized...");
             }
         }
         if (!requestWorkTracker.isEmpty() || exceptionRequestCount.get() > 0) {
@@ -668,6 +668,15 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var permitPool = permitPoolRef.get();
         if (permitPool != null) {
             permitPool.close(cancellationCause);
+        }
+        if (error != null) {
+            signalRemainingWorkShutdown(error);
+            shutdownFutureRef.get().completeExceptionally(error);
+            log.atError()
+                .setCause(error)
+                .setMessage("Fatal shutdown was signaled without waiting for owner-confined work")
+                .log();
+            return shutdownFutureRef.get();
         }
 
         // Normal shutdown gives every actor a bounded opportunity to settle before releasing Netty's
