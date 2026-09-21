@@ -777,7 +777,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier,
                 poisonAllowlist,
-                Runtime.getRuntime()::halt
+                new ProcessSupervisor()
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
@@ -953,7 +953,7 @@ public class TrafficReplayer {
     }
 
     static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
-        trafficReplayer.shutdown(null).join();
+        trafficReplayer.shutdown(null);
     }
 
     /**

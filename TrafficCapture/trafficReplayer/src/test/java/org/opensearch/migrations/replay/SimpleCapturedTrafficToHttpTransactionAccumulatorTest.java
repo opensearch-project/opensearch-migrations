@@ -164,13 +164,12 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
      * @param requestsReceived
      * @return
      */
-    static SortedSet<Integer> accumulateTrafficStreamsWithNewAccumulator(
+    static void accumulateTrafficStreamsWithNewAccumulator(
         TestContext context,
         Stream<TrafficStream> trafficStreams,
         List<RequestResponsePacketPair> aggregations,
         AtomicInteger requestsReceived
     ) {
-        var tsIndicesReceived = new TreeSet<Integer>();
         CapturedTrafficToHttpTransactionAccumulator trafficAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(Duration.ofSeconds(30), null, new AccumulationCallbacks() {
                 @Override
@@ -185,9 +184,6 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                         if (fullPair.completionStatus == RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY) {
                             return;
                         }
-                        fullPair.getTrafficStreamsHeld()
-                            .stream()
-                            .forEach(tsk -> tsIndicesReceived.add(tsk.getTrafficStreamIndex()));
                         if (aggregations.size() > sourceIdx) {
                             var oldVal = aggregations.set(sourceIdx, fullPair);
                             if (oldVal != null) {
@@ -216,10 +212,6 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
                     @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
                 ) {}
 
-                @Override
-                public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
-                    tsIndicesReceived.add(ctx.getTrafficStreamKey().getTrafficStreamIndex());
-                }
             });
         var tsList = trafficStreams.collect(Collectors.toList());
         trafficStreams = tsList.stream();
@@ -233,7 +225,6 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
             )
         );
         trafficAccumulator.close();
-        return tsIndicesReceived;
     }
 
     static void assertReconstructedTransactionsMatchExpectations(

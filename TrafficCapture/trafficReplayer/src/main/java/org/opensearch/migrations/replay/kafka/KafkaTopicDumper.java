@@ -10,6 +10,8 @@ import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -81,12 +83,14 @@ public class KafkaTopicDumper {
                 try {
                     var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
                     for (var sourceInput : chunks) {
-                        if (!(sourceInput instanceof org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey
-                            tswk)) {
+                        if (!(sourceInput instanceof ITrafficStreamWithKey tswk)) {
                             continue;
                         }
-                        System.out.println(TrafficStreamDumper.format(
-                            tswk.getStream(), -1, -1, previewBytesRead, previewBytesWrite, getBaseEpoch(tswk.getStream())));
+                        System.out.println(formatSourceInput(
+                            tswk,
+                            previewBytesRead,
+                            previewBytesWrite
+                        ));
                     }
                 } catch (java.util.concurrent.ExecutionException e) {
                     if (e.getCause() instanceof java.io.EOFException) break;
@@ -108,11 +112,10 @@ public class KafkaTopicDumper {
                         var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
                         for (var sourceInput : chunks) {
                             if (emitRaw
-                                && sourceInput
-                                    instanceof org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey
-                                        tswk) {
-                                System.out.println("RAW " + TrafficStreamDumper.format(
-                                    tswk.getStream(), -1, -1, previewBytesRead, previewBytesWrite, getBaseEpoch(tswk.getStream())));
+                                && sourceInput instanceof ITrafficStreamWithKey tswk) {
+                                System.out.println(
+                                    "RAW " + formatSourceInput(tswk, previewBytesRead, previewBytesWrite)
+                                );
                             }
                             accumulator.accept(sourceInput);
                         }
@@ -159,11 +162,20 @@ public class KafkaTopicDumper {
             for (var rec : polled) {
                 if (pastEnd(rec, endOffset, endTime, endOffsets)) return;
                 try {
-                    var ts = TrafficStream.parseFrom(rec.value());
+                    var captureRecord = CaptureRecord.parseFrom(rec.value());
+                    if (captureRecord.hasTrafficStream()) {
+                        getBaseEpoch(captureRecord.getTrafficStream());
+                    }
                     System.out.println(TrafficStreamDumper.format(
-                        ts, rec.partition(), rec.offset(), previewBytesRead, previewBytesWrite, getBaseEpoch(ts)));
+                        captureRecord,
+                        rec.partition(),
+                        rec.offset(),
+                        previewBytesRead,
+                        previewBytesWrite,
+                        baseEpoch
+                    ));
                 } catch (InvalidProtocolBufferException e) {
-                    log.warn("Skipping unparseable record at p:{} o:{}", rec.partition(), rec.offset());
+                    throw protocolViolation(rec, e);
                 }
             }
         }
@@ -234,29 +246,106 @@ public class KafkaTopicDumper {
         for (var rec : records) {
             if (pastEnd(rec, endOffset, endTime, endOffsets)) return true;
             try {
-                var trafficStream = TrafficStream.parseFrom(rec.value());
-                getBaseEpoch(trafficStream);
-                dumper.setBaseEpochSeconds(baseEpoch);
-                if (emitRaw) {
-                    System.out.println("RAW " + TrafficStreamDumper.format(
-                        trafficStream, rec.partition(), rec.offset(), previewBytesRead, previewBytesWrite, baseEpoch));
+                var captureRecord = CaptureRecord.parseFrom(rec.value());
+                switch (captureRecord.getPayloadCase()) {
+                    case TRAFFICSTREAM -> {
+                        var trafficStream = captureRecord.getTrafficStream();
+                        getBaseEpoch(trafficStream);
+                        dumper.setBaseEpochSeconds(baseEpoch);
+                        if (emitRaw) {
+                            System.out.println("RAW " + TrafficStreamDumper.format(
+                                captureRecord,
+                                rec.partition(),
+                                rec.offset(),
+                                previewBytesRead,
+                                previewBytesWrite,
+                                baseEpoch
+                            ));
+                        }
+                        accumulator.accept(new PojoTrafficStreamAndKey(
+                            trafficStream,
+                            new TrafficStreamKeyWithKafkaRecordId(
+                                tsk -> {
+                                    var channelCtx = channelContextManager.retainOrCreateContext(tsk);
+                                    return topContext.createTrafficStreamContextForKafkaSource(
+                                        channelCtx,
+                                        rec.key(),
+                                        0
+                                    );
+                                },
+                                trafficStream,
+                                new PojoKafkaCommitOffsetData(0, rec.partition(), rec.offset())
+                            )
+                        ));
+                    }
+                    case WRITERPARTITIONHEARTBEAT, CAPTURECAPABILITYPROBE -> {
+                        if (emitRaw) {
+                            System.out.println("RAW " + TrafficStreamDumper.format(
+                                captureRecord,
+                                rec.partition(),
+                                rec.offset(),
+                                previewBytesRead,
+                                previewBytesWrite,
+                                baseEpoch
+                            ));
+                        }
+                    }
+                    case PAYLOAD_NOT_SET -> throw new CaptureRecordProtocolViolationException(
+                        "CaptureRecord.payload is not set at "
+                            + rec.topic()
+                            + "-"
+                            + rec.partition()
+                            + "@"
+                            + rec.offset()
+                    );
                 }
-                accumulator.accept(new PojoTrafficStreamAndKey(
-                    trafficStream,
-                    new TrafficStreamKeyWithKafkaRecordId(
-                        tsk -> {
-                            var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                            return topContext.createTrafficStreamContextForKafkaSource(channelCtx, rec.key(), 0);
-                        },
-                        trafficStream,
-                        new PojoKafkaCommitOffsetData(0, rec.partition(), rec.offset())
-                    )
-                ));
             } catch (InvalidProtocolBufferException e) {
-                log.warn("Skipping unparseable record at p:{} o:{}", rec.partition(), rec.offset());
+                throw protocolViolation(rec, e);
             }
         }
         return false;
+    }
+
+    private String formatSourceInput(
+        ITrafficStreamWithKey sourceInput,
+        int previewBytesRead,
+        int previewBytesWrite
+    ) {
+        if (sourceInput instanceof KafkaCaptureControlRecord controlRecord) {
+            return TrafficStreamDumper.format(
+                controlRecord.getCaptureRecord(),
+                -1,
+                -1,
+                previewBytesRead,
+                previewBytesWrite,
+                baseEpoch
+            );
+        }
+        var trafficStream = sourceInput.getStream();
+        return TrafficStreamDumper.format(
+            trafficStream,
+            -1,
+            -1,
+            previewBytesRead,
+            previewBytesWrite,
+            getBaseEpoch(trafficStream)
+        );
+    }
+
+    private static CaptureRecordProtocolViolationException protocolViolation(
+        ConsumerRecord<String, byte[]> record,
+        InvalidProtocolBufferException cause
+    ) {
+        return new CaptureRecordProtocolViolationException(
+            "Kafka record at "
+                + record.topic()
+                + "-"
+                + record.partition()
+                + "@"
+                + record.offset()
+                + " is not a CaptureRecord envelope",
+            cause
+        );
     }
 
     private static boolean pastEnd(ConsumerRecord<String, byte[]> rec,

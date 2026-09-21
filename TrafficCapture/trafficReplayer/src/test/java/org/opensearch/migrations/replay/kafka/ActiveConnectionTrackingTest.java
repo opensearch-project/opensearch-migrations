@@ -10,6 +10,7 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.IgnoringSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -61,7 +62,7 @@ class ActiveConnectionTrackingTest extends InstrumentationTest {
                             .build())
                         .build();
                     try (var baos = new ByteArrayOutputStream()) {
-                        ts.writeTo(baos);
+                        CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
                         mc.addRecord(new ConsumerRecord<>(TOPIC, 0, i, "k", baos.toByteArray()));
                     } catch (Exception e) {
                         throw new RuntimeException(e);
@@ -107,7 +108,7 @@ class ActiveConnectionTrackingTest extends InstrumentationTest {
                             .build())
                         .build();
                     try (var baos = new ByteArrayOutputStream()) {
-                        ts.writeTo(baos);
+                        CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
                         mc.addRecord(new ConsumerRecord<>(TOPIC, 0, i, "k", baos.toByteArray()));
                     } catch (Exception e) {
                         throw new RuntimeException(e);

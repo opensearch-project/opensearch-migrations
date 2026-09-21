@@ -38,24 +38,16 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
-import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
-import org.opensearch.migrations.replay.lifecycle.SourceCommitUnknownAfterRevocationException;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.lifecycle.UnconfiguredSourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
-import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.expiration.ScopedConnectionIdKey;
-import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ScanEvidence;
-import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
 import org.opensearch.migrations.replay.traffic.source.SourceInput;
-import org.opensearch.migrations.trafficcapture.protos.ProxyLivenessSnapshotChunk;
-import org.opensearch.migrations.trafficcapture.protos.ProxyNoMoreWrites;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -67,7 +59,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.errors.RetriableException;
 
 /**
  * Adapt a Kafka stream into a TrafficCaptureSource.
@@ -97,27 +88,7 @@ import org.apache.kafka.common.errors.RetriableException;
  */
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
-    private static final Duration LIVENESS_SCAN_INTERVAL = Duration.ofSeconds(1);
-    private static final Duration LIVENESS_SCAN_BUDGET = Duration.ofMillis(250);
-    private static final int MAX_LIVENESS_SCAN_RECORDS = 10_000;
-
-    private record ActiveConnectionScanState(
-        SourcePartitionKey partition,
-        String routingPlanId,
-        long lastReplayedOffset,
-        FollowUpRequirement requirement
-    ) {
-        ActiveConnectionScanState withRequirement(FollowUpRequirement newRequirement) {
-            return new ActiveConnectionScanState(
-                partition,
-                routingPlanId,
-                lastReplayedOffset,
-                newRequirement
-            );
-        }
-    }
-
-    private record WriterPartitionKey(String nodeId, int partition) {}
+    public record CaptureRecordCounters(long traffic, long heartbeats, long capabilityProbes) {}
 
     record SessionTerminationStateSnapshot(
         int pendingSessionTerminations,
@@ -155,30 +126,18 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     final TrackingKafkaConsumer trackingKafkaConsumer;
     private final ExecutorService kafkaExecutor;
     private final AtomicLong trafficStreamsRead;
-    private final KafkaBehavioralPolicy behavioralPolicy;
+    private final AtomicLong heartbeatRecordsRead;
+    private final AtomicLong capabilityProbeRecordsRead;
     private final ChannelContextManager channelContextManager;
-    private final KafkaConsumerContexts.LivenessScanContext livenessScanContext;
     private final AtomicBoolean isClosed;
-    private final Clock clock;
-    private final boolean livenessScanAheadEnabled;
-    private final KafkaLivenessScanner livenessScanner = new KafkaLivenessScanner();
-    private final AtomicBoolean retainedEvidenceNeedsEvaluation = new AtomicBoolean();
-    private final AtomicLong nextLivenessScanAtMillis = new AtomicLong();
-    private final ConcurrentHashMap<ITrafficStreamKey, CompletableFuture<Void>> pendingCommitAcknowledgements =
+    private final ConcurrentHashMap<KafkaRecordId, ITrafficStreamKey> observedRecordContexts =
         new ConcurrentHashMap<>();
     /** Active connections per Kafka partition. Entries removed when connections are closed */
     final ConcurrentHashMap<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections =
         new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ScopedConnectionIdKey, SourcePartitionKey> activeConnectionSourcePartitions =
         new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<ScopedConnectionIdKey, ActiveConnectionScanState> activeConnectionScanStates =
-        new ConcurrentHashMap<>();
-    private final Set<SourceConnectionPartitionGenerationKey> pendingConfirmedDead =
-        ConcurrentHashMap.newKeySet();
     private final Set<SourcePartitionKey> retiringSourcePartitions = ConcurrentHashMap.newKeySet();
-    private final Queue<SourceControlEvent.ConfirmedDead> sourceControlQueue = new ConcurrentLinkedQueue<>();
-    private final ConcurrentHashMap<WriterPartitionKey, Long> peerNoMoreWritesOffsets =
-        new ConcurrentHashMap<>();
     /** Batches of synthetic close events to drain before returning real Kafka records.
      *  Each entry is one batch from a single partition-revocation event. */
     private final Queue<List<TrafficSourceReaderInterruptedClose>> trafficSourceReaderInterruptedCloseQueue = new ConcurrentLinkedQueue<>();
@@ -218,7 +177,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         String topic,
         Duration keepAliveInterval
     ) {
-        this(globalContext, kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC(), new KafkaBehavioralPolicy());
+        this(globalContext, kafkaConsumer, topic, keepAliveInterval, Clock.systemUTC());
     }
 
     public KafkaTrafficCaptureSource(
@@ -226,8 +185,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         Consumer<String, byte[]> kafkaConsumer,
         @NonNull String topic,
         Duration keepAliveInterval,
-        Clock clock,
-        @NonNull KafkaBehavioralPolicy behavioralPolicy
+        Clock clock
     ) {
         this(
             globalContext,
@@ -235,10 +193,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             topic,
             keepAliveInterval,
             clock,
-            behavioralPolicy,
             TrackingKafkaConsumer.UNBOUNDED_OWNED_RECORDS,
-            TrackingKafkaConsumer.UNBOUNDED_OWNED_BYTES,
-            true
+            TrackingKafkaConsumer.UNBOUNDED_OWNED_BYTES
         );
     }
 
@@ -248,51 +204,23 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         @NonNull String topic,
         Duration keepAliveInterval,
         Clock clock,
-        @NonNull KafkaBehavioralPolicy behavioralPolicy,
         int maximumOwnedRecords,
         long maximumOwnedBytes
     ) {
-        this(
-            globalContext,
-            kafkaConsumer,
-            topic,
-            keepAliveInterval,
-            clock,
-            behavioralPolicy,
-            maximumOwnedRecords,
-            maximumOwnedBytes,
-            true
-        );
-    }
-
-    public KafkaTrafficCaptureSource(
-        @NonNull RootReplayerContext globalContext,
-        Consumer<String, byte[]> kafkaConsumer,
-        @NonNull String topic,
-        Duration keepAliveInterval,
-        Clock clock,
-        @NonNull KafkaBehavioralPolicy behavioralPolicy,
-        int maximumOwnedRecords,
-        long maximumOwnedBytes,
-        boolean livenessScanAheadEnabled
-    ) {
         this.channelContextManager = new ChannelContextManager(globalContext);
-        this.livenessScanContext = new KafkaConsumerContexts.LivenessScanContext(globalContext);
         trackingKafkaConsumer = new TrackingKafkaConsumer(
             globalContext,
             kafkaConsumer,
             topic,
             keepAliveInterval,
             clock,
-            this::onKeyFinishedCommitting,
             globalContext.getKafkaCommitStateMetrics(),
             maximumOwnedRecords,
             maximumOwnedBytes
         );
         trafficStreamsRead = new AtomicLong();
-        this.behavioralPolicy = behavioralPolicy;
-        this.clock = clock;
-        this.livenessScanAheadEnabled = livenessScanAheadEnabled;
+        heartbeatRecordsRead = new AtomicLong();
+        capabilityProbeRecordsRead = new AtomicLong();
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
         isClosed = new AtomicBoolean(false);
@@ -305,20 +233,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     ) {
         for (var lostPartition : lostPartitions) {
             retiringSourcePartitions.add(lostPartition);
-            failPendingCommitAcknowledgements(lostPartition);
+            releaseObservedRecordContexts(lostPartition);
             int partition = lostPartition.partition();
-            activeConnectionScanStates.entrySet().removeIf(entry ->
-                entry.getValue().partition().equals(lostPartition)
-            );
-            pendingConfirmedDead.removeIf(key ->
-                key.partition() == partition && key.sourceGeneration() == lostPartition.sourceGeneration()
-            );
-            // The scanner's proofs rest on offset ordering within one assignment of one partition, so a
-            // revoke invalidates its retained evidence rather than merely pausing it.
-            livenessScanner.forgetPartition(partition);
-            sourceControlQueue.removeIf(control ->
-                control.evidence().partition().equals(lostPartition)
-            );
             var active = partitionToActiveConnections.get(partition);
             if (active == null) {
                 retireSourcePartitionIfDrained(lostPartition);
@@ -363,16 +279,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
     }
 
-    private void failPendingCommitAcknowledgements(SourcePartitionKey lostPartition) {
-        var cause = new SourceCommitUnknownAfterRevocationException(lostPartition);
-        pendingCommitAcknowledgements.forEach((key, acknowledgement) -> {
-            if (!(key instanceof KafkaCommitOffsetData kafkaKey)
-                || kafkaKey.getPartition() != lostPartition.partition()
-                || kafkaKey.getGeneration() != lostPartition.sourceGeneration()
-                || !pendingCommitAcknowledgements.remove(key, acknowledgement)) {
+    private void releaseObservedRecordContexts(SourcePartitionKey lostPartition) {
+        observedRecordContexts.forEach((recordId, key) -> {
+            if (recordId.partition() != lostPartition.partition()
+                || recordId.sourceGeneration() != lostPartition.sourceGeneration()
+                || !observedRecordContexts.remove(recordId, key)) {
                 return;
             }
-            acknowledgement.completeExceptionally(cause);
+            releaseRecordContext(key);
         });
     }
 
@@ -476,27 +390,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         );
     }
 
-    private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
-        var acknowledgement = pendingCommitAcknowledgements.remove(trafficStreamKey);
-        try {
-            releaseRecordContext(trafficStreamKey);
-            if (acknowledgement != null) {
-                acknowledgement.complete(null);
-            }
-        } catch (Throwable t) {
-            if (acknowledgement != null) {
-                acknowledgement.completeExceptionally(t);
-            } else {
-                throw t;
-            }
-        }
-    }
-
-    @Override
-    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
-        releaseRecordContext(trafficStreamKey);
-    }
-
     private void releaseRecordContext(ITrafficStreamKey trafficStreamKey) {
         var looseParentScope = trafficStreamKey.getTrafficStreamsContext().getEnclosingScope();
         if (!(looseParentScope instanceof ReplayContexts.KafkaRecordContext)) {
@@ -548,28 +441,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     partitionToActiveConnections.remove(partition, set);
                 }
             }
-            activeConnectionScanStates.computeIfPresent(connKey, (ignored, existing) ->
-                existing.partition().equals(completedPartition) ? null : existing
-            );
-            pendingConfirmedDead.removeIf(key ->
-                key.connection().equals(connection)
-                    && key.partition() == completedPartition.partition()
-                    && key.sourceGeneration() == completedPartition.sourceGeneration()
-            );
-            sourceControlQueue.removeIf(control ->
-                control.evidence().connection().equals(connection)
-                    && control.evidence().partition().equals(completedPartition)
-            );
         } else {
             partitionToActiveConnections.values().forEach(set -> set.remove(connKey));
             activeConnectionSourcePartitions.remove(connKey);
-            activeConnectionScanStates.remove(connKey);
-            pendingConfirmedDead.removeIf(key -> key.connection().equals(connection));
-            // The scanner retains a last-seen offset per connection it has ever observed, not just per
-            // candidate, so a settled connection has to be released or that map grows for the life of the
-            // process.
-            livenessScanner.forget(connection);
-            sourceControlQueue.removeIf(control -> control.evidence().connection().equals(connection));
         }
     }
 
@@ -583,10 +457,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         String kafkaPassword,
         String propertyFilePath,
         @NonNull Clock clock,
-        @NonNull KafkaBehavioralPolicy behavioralPolicy,
         int maximumOwnedRecords,
         long maximumOwnedBytes,
-        boolean livenessScanAheadEnabled
+        boolean ignoredLivenessScanAheadEnabled
     ) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, authType, kafkaUserName, kafkaPassword, propertyFilePath);
         kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, defaultPollIntervalMs());
@@ -596,10 +469,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             topic,
             DEFAULT_KEEP_ALIVE_PERIOD,
             clock,
-            behavioralPolicy,
             maximumOwnedRecords,
-            maximumOwnedBytes,
-            livenessScanAheadEnabled
+            maximumOwnedBytes
         );
     }
 
@@ -613,7 +484,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         String kafkaPassword,
         String propertyFilePath,
         @NonNull Clock clock,
-        @NonNull KafkaBehavioralPolicy behavioralPolicy,
         int maximumOwnedRecords,
         long maximumOwnedBytes
     ) throws IOException {
@@ -627,7 +497,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             kafkaPassword,
             propertyFilePath,
             clock,
-            behavioralPolicy,
             maximumOwnedRecords,
             maximumOwnedBytes,
             true
@@ -667,13 +536,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     @SneakyThrows
     public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
-        CompletableFuture.runAsync(() -> {
-            trackingKafkaConsumer.touch(context);
-            evaluateRetainedLivenessEvidence();
-            if (sourceControlQueue.isEmpty()) {
-                runLivenessScanIfDue();
-            }
-        }, kafkaExecutor).get();
+        CompletableFuture.runAsync(() -> trackingKafkaConsumer.touch(context), kafkaExecutor).get();
     }
 
     /**
@@ -683,13 +546,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      */
     @Override
     public Optional<Instant> getNextRequiredTouch() {
-        var kafkaTouch = trackingKafkaConsumer.getNextRequiredTouch();
-        if (!livenessScanAheadEnabled || activeConnectionScanStates.isEmpty()) {
-            return kafkaTouch;
-        }
-        var scanAt = Instant.ofEpochMilli(nextLivenessScanAtMillis.get());
-        return kafkaTouch.map(existing -> existing.isBefore(scanAt) ? existing : scanAt)
-            .or(() -> Optional.of(scanAt));
+        return trackingKafkaConsumer.getNextRequiredTouch();
     }
 
     @Override
@@ -715,10 +572,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 .addArgument(closeBatch::size).log();
             return List.copyOf(closeBatch);
         }
-        var pendingControls = drainSourceControls();
-        if (!pendingControls.isEmpty()) {
-            return pendingControls;
-        }
         // Block real data until all synthetic closes have completed their full session lifecycle.
         if (!pendingSessionTerminationObligations.isEmpty()) {
             log.atDebug().setMessage("Returning empty batch: {} source termination obligations still outstanding")
@@ -729,211 +582,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
             return Collections.emptyList();
         }
-        evaluateRetainedLivenessEvidence();
-        pendingControls = drainSourceControls();
-        if (!pendingControls.isEmpty()) {
-            return pendingControls;
-        }
-        runLivenessScanIfDue();
-        pendingControls = drainSourceControls();
-        if (!pendingControls.isEmpty()) {
-            return pendingControls;
-        }
         if (!trackingKafkaConsumer.isReadCapacityAvailable()) {
             return Collections.emptyList();
         }
         try {
-            var sourceRecords = trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
-                try {
-                    var isLivenessRecord = KafkaLivenessScanner.isLivenessRecord(kafkaRecord);
-                    var isNoMoreWritesRecord = KafkaLivenessScanner.isNoMoreWritesRecord(kafkaRecord);
-                    livenessScanner.ingest(kafkaRecord);
-                    if (isLivenessRecord || isNoMoreWritesRecord) {
-                        retainedEvidenceNeedsEvaluation.set(true);
-                    }
-                    if (isLivenessRecord) {
-                        var chunk = ProxyLivenessSnapshotChunk.parseFrom(kafkaRecord.value());
-                        if (chunk.getPartition() != kafkaRecord.partition()
-                            || chunk.getRoutingPlanId().isBlank()) {
-                            throw new IllegalStateException(
-                                "Invalid liveness routing stamp at "
-                                    + kafkaRecord.topic()
-                                    + "-"
-                                    + kafkaRecord.partition()
-                                    + "@"
-                                    + kafkaRecord.offset()
-                            );
-                        }
-                        var syntheticStream = TrafficStream.newBuilder()
-                            .setNodeId(chunk.getNodeId())
-                            .setConnectionId(
-                                "__proxy_liveness__:"
-                                    + chunk.getPartition()
-                                    + ":"
-                                    + chunk.getSnapshotSequence()
-                                    + ":"
-                                    + chunk.getChunkIndex()
-                            )
-                            .setNumberOfThisLastChunk(0)
-                            .build();
-                        var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
-                        return (SourceInput) new KafkaLivenessSnapshotRecord(syntheticStream, key, chunk);
-                    }
-                    if (isNoMoreWritesRecord) {
-                        var declaration = ProxyNoMoreWrites.parseFrom(kafkaRecord.value());
-                        if (!declaration.getNodeId().equals(declaration.getDeclaredBy())) {
-                            peerNoMoreWritesOffsets.merge(
-                                new WriterPartitionKey(
-                                    declaration.getNodeId(),
-                                    declaration.getPartition()
-                                ),
-                                kafkaRecord.offset(),
-                                Math::min
-                            );
-                        }
-                        var syntheticStream = TrafficStream.newBuilder()
-                            .setNodeId(declaration.getNodeId())
-                            .setConnectionId(
-                                "__proxy_no_more_writes__:"
-                                    + declaration.getPartition()
-                                    + ":"
-                                    + declaration.getDeclaredBy()
-                                    + ":"
-                                    + kafkaRecord.offset()
-                            )
-                            .setNumberOfThisLastChunk(0)
-                            .build();
-                        var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
-                        return (SourceInput) new KafkaNoMoreWritesRecord(
-                            syntheticStream,
-                            key,
-                            declaration
-                        );
-                    }
-                    TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
-                    if (ts.hasPartition() != ts.hasRoutingPlanId()) {
-                        throw new IllegalStateException(
-                            "Traffic record has only part of its routing stamp at "
-                                + kafkaRecord.topic()
-                                + "-"
-                                + kafkaRecord.partition()
-                                + "@"
-                                + kafkaRecord.offset()
-                        );
-                    }
-                    if (ts.hasPartition()) {
-                        KafkaLivenessScanner.validateTrafficStamp(kafkaRecord, ts);
-                    }
-                    var peerDeclarationOffset = peerNoMoreWritesOffsets.get(
-                        new WriterPartitionKey(ts.getNodeId(), kafkaRecord.partition())
-                    );
-                    if (peerDeclarationOffset != null
-                        && kafkaRecord.offset() > peerDeclarationOffset) {
-                        livenessScanContext.recordSupersededTrafficDiscarded();
-                        log.atError()
-                            .setMessage(
-                                "Discarding traffic from {} on partition {} at offset {} "
-                                    + "after authoritative peer NoMoreWrites cutoff at offset {}"
-                            )
-                            .addArgument(ts::getNodeId)
-                            .addArgument(kafkaRecord::partition)
-                            .addArgument(kafkaRecord::offset)
-                            .addArgument(peerDeclarationOffset)
-                            .log();
-                        var syntheticStream = TrafficStream.newBuilder()
-                            .setNodeId(ts.getNodeId())
-                            .setConnectionId(
-                                "__superseded_traffic__:"
-                                    + kafkaRecord.partition()
-                                    + ":"
-                                    + kafkaRecord.offset()
-                            )
-                            .setNumberOfThisLastChunk(0)
-                            .build();
-                        var key = makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord);
-                        return (SourceInput) new KafkaSupersededTrafficRecord(
-                            syntheticStream,
-                            key,
-                            peerDeclarationOffset
-                        );
-                    }
-                    var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
-                    log.atTrace().setMessage("Parsed traffic stream #{}: {} {}")
-                        .addArgument(trafficStreamsSoFar)
-                        .addArgument(offsetData)
-                        .addArgument(ts)
-                        .log();
-                    var key = makeKafkaRecordKey(ts, offsetData, kafkaRecord);
-                    // Track active connections per partition for synthetic close injection
-                    var connKey = new ScopedConnectionIdKey(
-                        ts.getNodeId(), ts.getConnectionId());
-                    var sourcePartition = new SourcePartitionKey(
-                        trackingKafkaConsumer.topic,
-                        offsetData.getPartition(),
-                        offsetData.getGeneration()
-                    );
-                    var previousSourcePartition = activeConnectionSourcePartitions.put(connKey, sourcePartition);
-                    if (previousSourcePartition != null
-                        && previousSourcePartition.partition() != sourcePartition.partition()) {
-                        var previousActiveSet = partitionToActiveConnections.get(previousSourcePartition.partition());
-                        if (previousActiveSet != null) {
-                            previousActiveSet.remove(connKey);
-                            if (previousActiveSet.isEmpty()) {
-                                partitionToActiveConnections.remove(
-                                    previousSourcePartition.partition(),
-                                    previousActiveSet
-                                );
-                            }
-                        }
-                    }
-                    var activeSet = partitionToActiveConnections
-                        .computeIfAbsent(offsetData.getPartition(),
-                            p -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
-                    activeSet.add(connKey);
-                    boolean isNewConnection = previousSourcePartition == null
-                        || !previousSourcePartition.equals(sourcePartition);
-                    if (ts.hasPartition()) {
-                        activeConnectionScanStates.compute(connKey, (ignored, previous) -> {
-                            if (previous != null
-                                && previous.partition().equals(sourcePartition)
-                                && !previous.routingPlanId().equals(ts.getRoutingPlanId())) {
-                                throw new IllegalStateException(
-                                    "Routing plan changed within connection " + connKey
-                                );
-                            }
-                            var requirement = previous != null
-                                && previous.partition().equals(sourcePartition)
-                                    ? previous.requirement()
-                                    : FollowUpRequirement.CONNECTION_TERMINATION;
-                            return new ActiveConnectionScanState(
-                                sourcePartition,
-                                ts.getRoutingPlanId(),
-                                offsetData.getOffset(),
-                                requirement
-                            );
-                        });
-                    }
-                    // Handoff: first time we see this connection on this partition AND no READ observation
-                    // (another replayer was mid-connection). Continuation streams for known connections are not resumeds.
-                    boolean startsWithRead = ts.getSubStreamList().stream()
-                        .findFirst()
-                        .map(TrafficObservation::hasRead)
-                        .orElse(false);
-                    final boolean resumed = isNewConnection && !startsWithRead;
-                    return (SourceInput) new PojoTrafficStreamAndKey(ts, key) {
-                        @Override
-                        public boolean isResumedConnection() { return resumed; }
-                    };
-                } catch (InvalidProtocolBufferException e) {
-                    // Assume the behavioralPolicy instance does any logging that the host may be interested in
-                    RuntimeException recordError = behavioralPolicy.onInvalidKafkaRecord(kafkaRecord, e);
-                    if (recordError != null) {
-                        throw recordError;
-                    } else {
-                        return (SourceInput) null;
-                    }
-                }
-            }).filter(Objects::nonNull).collect(Collectors.toCollection(ArrayList<SourceInput>::new));
+            var sourceRecords = trackingKafkaConsumer.getNextBatchOfRecords(context, this::decodeKafkaRecord)
+                .collect(Collectors.toCollection(ArrayList<SourceInput>::new));
             return List.copyOf(sourceRecords);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
@@ -941,12 +595,162 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
     }
 
+    private SourceInput decodeKafkaRecord(
+        KafkaCommitOffsetData offsetData,
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> kafkaRecord
+    ) {
+        final CaptureRecord captureRecord;
+        try {
+            captureRecord = CaptureRecord.parseFrom(kafkaRecord.value());
+        } catch (InvalidProtocolBufferException e) {
+            throw protocolViolation(kafkaRecord, "value is not a CaptureRecord envelope", e);
+        }
+
+        return switch (captureRecord.getPayloadCase()) {
+            case TRAFFICSTREAM -> decodeTrafficStream(
+                captureRecord.getTrafficStream(),
+                offsetData,
+                kafkaRecord
+            );
+            case WRITERPARTITIONHEARTBEAT -> {
+                heartbeatRecordsRead.incrementAndGet();
+                yield makeControlRecord(
+                    captureRecord,
+                    captureRecord.getWriterPartitionHeartbeat().getWriterNodeId(),
+                    "heartbeat",
+                    offsetData,
+                    kafkaRecord
+                );
+            }
+            case CAPTURECAPABILITYPROBE -> {
+                capabilityProbeRecordsRead.incrementAndGet();
+                yield makeControlRecord(
+                    captureRecord,
+                    captureRecord.getCaptureCapabilityProbe().getWriterNodeId(),
+                    "probe:" + captureRecord.getCaptureCapabilityProbe().getProbeId(),
+                    offsetData,
+                    kafkaRecord
+                );
+            }
+            case PAYLOAD_NOT_SET ->
+                throw protocolViolation(kafkaRecord, "CaptureRecord.payload is not set", null);
+        };
+    }
+
+    private SourceInput decodeTrafficStream(
+        TrafficStream trafficStream,
+        KafkaCommitOffsetData offsetData,
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> kafkaRecord
+    ) {
+        var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
+        log.atTrace().setMessage("Parsed traffic stream #{}: {} {}")
+            .addArgument(trafficStreamsSoFar)
+            .addArgument(offsetData)
+            .addArgument(trafficStream)
+            .log();
+        var key = makeKafkaRecordKey(trafficStream, offsetData, kafkaRecord);
+        var connection = new ScopedConnectionIdKey(
+            trafficStream.getNodeId(),
+            trafficStream.getConnectionId()
+        );
+        var sourcePartition = new SourcePartitionKey(
+            trackingKafkaConsumer.topic,
+            offsetData.getPartition(),
+            offsetData.getGeneration()
+        );
+        var previousSourcePartition = activeConnectionSourcePartitions.put(connection, sourcePartition);
+        if (previousSourcePartition != null
+            && previousSourcePartition.partition() != sourcePartition.partition()) {
+            var previousActiveSet = partitionToActiveConnections.get(previousSourcePartition.partition());
+            if (previousActiveSet != null) {
+                previousActiveSet.remove(connection);
+                if (previousActiveSet.isEmpty()) {
+                    partitionToActiveConnections.remove(
+                        previousSourcePartition.partition(),
+                        previousActiveSet
+                    );
+                }
+            }
+        }
+        partitionToActiveConnections
+            .computeIfAbsent(
+                offsetData.getPartition(),
+                ignored -> Collections.newSetFromMap(new ConcurrentHashMap<>())
+            )
+            .add(connection);
+        boolean startsWithRead = trafficStream.getSubStreamList().stream()
+            .findFirst()
+            .map(TrafficObservation::hasRead)
+            .orElse(false);
+        boolean isNewConnection = previousSourcePartition == null
+            || !previousSourcePartition.equals(sourcePartition);
+        final boolean resumed = isNewConnection && !startsWithRead;
+        return new PojoTrafficStreamAndKey(trafficStream, key) {
+            @Override
+            public boolean isResumedConnection() {
+                return resumed;
+            }
+        };
+    }
+
+    private KafkaCaptureControlRecord makeControlRecord(
+        CaptureRecord captureRecord,
+        String writerNodeId,
+        String controlId,
+        KafkaCommitOffsetData offsetData,
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> kafkaRecord
+    ) {
+        var syntheticStream = TrafficStream.newBuilder()
+            .setNodeId(writerNodeId)
+            .setConnectionId(
+                "__capture_control__:"
+                    + controlId
+                    + ":"
+                    + kafkaRecord.partition()
+                    + ":"
+                    + kafkaRecord.offset()
+            )
+            .setNumberOfThisLastChunk(0)
+            .build();
+        return new KafkaCaptureControlRecord(
+            captureRecord,
+            syntheticStream,
+            makeKafkaRecordKey(syntheticStream, offsetData, kafkaRecord)
+        );
+    }
+
+    private static CaptureRecordProtocolViolationException protocolViolation(
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> kafkaRecord,
+        String reason,
+        Throwable cause
+    ) {
+        var message = "Capture protocol violation at "
+            + kafkaRecord.topic()
+            + "-"
+            + kafkaRecord.partition()
+            + "@"
+            + kafkaRecord.offset()
+            + ": "
+            + reason;
+        return cause == null
+            ? new CaptureRecordProtocolViolationException(message)
+            : new CaptureRecordProtocolViolationException(message, cause);
+    }
+
+    public CaptureRecordCounters captureRecordCounters() {
+        return new CaptureRecordCounters(
+            trafficStreamsRead.get(),
+            heartbeatRecordsRead.get(),
+            capabilityProbeRecordsRead.get()
+        );
+    }
+
     private TrafficStreamKeyWithKafkaRecordId makeKafkaRecordKey(
         TrafficStream stream,
         KafkaCommitOffsetData offsetData,
         org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> kafkaRecord
     ) {
-        return new TrafficStreamKeyWithKafkaRecordId(tsk -> {
+        var key = new TrafficStreamKeyWithKafkaRecordId(tsk -> {
             var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);
             return channelContextManager.getGlobalContext()
                 .createTrafficStreamContextForKafkaSource(
@@ -955,150 +759,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     kafkaRecord.serializedKeySize() + kafkaRecord.serializedValueSize()
                 );
         }, stream, offsetData);
-    }
-
-    private void runLivenessScanIfDue() {
-        if (!livenessScanAheadEnabled || activeConnectionScanStates.isEmpty()) {
-            return;
+        var recordId = kafkaRecordId(offsetData);
+        if (observedRecordContexts.putIfAbsent(recordId, key) != null) {
+            throw new IllegalStateException("Kafka record context was already registered: " + recordId);
         }
-        long now = clock.millis();
-        long next = nextLivenessScanAtMillis.get();
-        if (now < next || !nextLivenessScanAtMillis.compareAndSet(next, now + LIVENESS_SCAN_INTERVAL.toMillis())) {
-            return;
-        }
-        var candidates = activeLivenessCandidates();
-        TrackingKafkaConsumer.ScanCycle cycle;
-        List<ScanEvidence> evidenceResults;
-        long scanStartNanos = System.nanoTime();
-        try {
-            cycle = trackingKafkaConsumer.scanAhead(MAX_LIVENESS_SCAN_RECORDS, LIVENESS_SCAN_BUDGET);
-            evidenceResults = livenessScanner.evaluate(candidates, cycle);
-            livenessScanContext.recordCycle(
-                cycle.records().size(),
-                cycle.records().stream().mapToLong(KafkaTrafficCaptureSource::serializedRecordSize).sum(),
-                Duration.ofNanos(System.nanoTime() - scanStartNanos)
-            );
-        } catch (RetriableException e) {
-            livenessScanContext.addCaughtException(e);
-            evidenceResults = livenessScanner.evaluate(
-                candidates,
-                new TrackingKafkaConsumer.ScanCycle(List.of(), false, false)
-            );
-            livenessScanContext.recordCycle(
-                0,
-                0,
-                Duration.ofNanos(System.nanoTime() - scanStartNanos)
-            );
-            log.atWarn()
-                .setCause(e)
-                .setMessage("Kafka liveness scan was unavailable; leaving all candidates inconclusive")
-                .log();
-        } catch (RuntimeException e) {
-            livenessScanContext.addCaughtException(e);
-            throw e;
-        }
-        handleLivenessEvidence(evidenceResults, true);
-    }
-
-    private List<KafkaLivenessScanner.Candidate> activeLivenessCandidates() {
-        return activeConnectionScanStates.entrySet()
-            .stream()
-            .map(entry -> new KafkaLivenessScanner.Candidate(
-                entry.getValue().partition(),
-                new SourceConnectionKey(entry.getKey().nodeId, entry.getKey().connectionId),
-                entry.getValue().routingPlanId(),
-                entry.getValue().lastReplayedOffset(),
-                entry.getValue().requirement()
-            ))
-            .toList();
-    }
-
-    private void evaluateRetainedLivenessEvidence() {
-        if (!retainedEvidenceNeedsEvaluation.getAndSet(false)
-            || activeConnectionScanStates.isEmpty()) {
-            return;
-        }
-        handleLivenessEvidence(
-            livenessScanner.evaluateRetained(activeLivenessCandidates()),
-            false
-        );
-    }
-
-    private void handleLivenessEvidence(
-        List<ScanEvidence> evidenceResults,
-        boolean recordScanVerdicts
-    ) {
-        for (var evidence : evidenceResults) {
-            if (recordScanVerdicts) {
-                livenessScanContext.recordVerdict(switch (evidence) {
-                    case ScanEvidence.FollowUpPresent ignored ->
-                        IKafkaConsumerContexts.LivenessScanVerdict.FOLLOW_UP_FOUND;
-                    case ScanEvidence.ConfirmedAbsent ignored ->
-                        IKafkaConsumerContexts.LivenessScanVerdict.CONFIRMED_ABSENT;
-                    case ScanEvidence.Inconclusive ignored ->
-                        IKafkaConsumerContexts.LivenessScanVerdict.INCONCLUSIVE;
-                });
-            }
-            if (!(evidence instanceof ScanEvidence.ConfirmedAbsent confirmedAbsent)) {
-                continue;
-            }
-            var pendingKey = new SourceConnectionPartitionGenerationKey(
-                confirmedAbsent.connection(),
-                confirmedAbsent.partition().partition(),
-                confirmedAbsent.partition().sourceGeneration()
-            );
-            if (pendingConfirmedDead.add(pendingKey)) {
-                sourceControlQueue.add(new SourceControlEvent.ConfirmedDead(confirmedAbsent));
-                log.atInfo()
-                    .setMessage("Proxy liveness proved {} dead with {}")
-                    .addArgument(confirmedAbsent.connection())
-                    .addArgument(confirmedAbsent.proof())
-                    .log();
-            }
-        }
-    }
-
-    private static long serializedRecordSize(
-        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> record
-    ) {
-        int keySize = record.serializedKeySize();
-        if (keySize < 0 && record.key() != null) {
-            keySize = record.key().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
-        }
-        int valueSize = record.serializedValueSize();
-        if (valueSize < 0 && record.value() != null) {
-            valueSize = record.value().length;
-        }
-        return Math.max(0, keySize) + Math.max(0, valueSize);
-    }
-
-    private List<SourceInput> drainSourceControls() {
-        var controls = new ArrayList<SourceInput>();
-        SourceControlEvent.ConfirmedDead control;
-        while ((control = sourceControlQueue.poll()) != null) {
-            controls.add(control);
-        }
-        return List.copyOf(controls);
-    }
-
-    @Override
-    public void updateScanBlocker(
-        ITrafficStreamKey trafficStreamKey,
-        FollowUpRequirement followUpRequirement
-    ) {
-        if (!(trafficStreamKey instanceof KafkaCommitOffsetData kafkaKey)) {
-            return;
-        }
-        var connection = new ScopedConnectionIdKey(
-            trafficStreamKey.getNodeId(),
-            trafficStreamKey.getConnectionId()
-        );
-        activeConnectionScanStates.computeIfPresent(connection, (ignored, existing) ->
-            existing.partition().partition() == kafkaKey.getPartition()
-                && existing.partition().sourceGeneration() == kafkaKey.getGeneration()
-                    ? existing.withRequirement(followUpRequirement)
-                    : existing
-        );
+        return key;
     }
 
     @Override
@@ -1108,9 +773,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     public boolean hasPendingSourceControl() {
-        return retainedEvidenceNeedsEvaluation.get()
-            || !sourceControlQueue.isEmpty()
-            || !trafficSourceReaderInterruptedCloseQueue.isEmpty();
+        return !trafficSourceReaderInterruptedCloseQueue.isEmpty();
     }
 
     @Override
@@ -1124,82 +787,55 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        if (!(trafficStreamKey instanceof TrafficStreamKeyWithKafkaRecordId)) {
-            throw new IllegalArgumentException(
-                "Expected key of type "
-                    + TrafficStreamKeyWithKafkaRecordId.class
-                    + " but received "
-                    + trafficStreamKey
-                    + " (of type="
-                    + trafficStreamKey.getClass()
-                    + ")"
-            );
-        }
-        return trackingKafkaConsumer.commitKafkaKey(
-            trafficStreamKey,
-            (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey
-        );
-    }
-
-    @Override
-    public CompletableFuture<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
+    public CompletionStage<Void> recordProcessingFinished(KafkaRecordId recordId) {
         var acknowledgement = new CompletableFuture<Void>();
         try {
-            kafkaExecutor.execute(() -> acceptCommitOnSourceOwnerThread(trafficStreamKey, acknowledgement));
+            kafkaExecutor.execute(
+                () -> acceptRecordProcessingFinishedOnSourceOwnerThread(recordId, acknowledgement)
+            );
         } catch (Throwable t) {
             acknowledgement.completeExceptionally(t);
         }
-        return acknowledgement;
+        return acknowledgement.minimalCompletionStage();
     }
 
-    private void acceptCommitOnSourceOwnerThread(
-        ITrafficStreamKey trafficStreamKey,
+    private void acceptRecordProcessingFinishedOnSourceOwnerThread(
+        KafkaRecordId recordId,
         CompletableFuture<Void> acknowledgement
     ) {
         if (isClosed.get()) {
             acknowledgement.completeExceptionally(
-                new CancellationException("Kafka traffic source closed before commit acceptance")
+                new CancellationException(
+                    "Kafka traffic source closed before record-processing completion acceptance"
+                )
             );
             return;
         }
         try {
-            var previous = pendingCommitAcknowledgements.putIfAbsent(
-                trafficStreamKey,
-                acknowledgement
-            );
-            if (previous != null) {
+            var key = observedRecordContexts.remove(recordId);
+            if (key == null && trackingKafkaConsumer.isActiveGeneration(recordId)) {
                 throw new IllegalStateException(
-                    "commit acknowledgement already pending for " + trafficStreamKey
+                    "No source record context exists for active record completion " + recordId
                 );
             }
-            CommitResult result;
-            try {
-                result = commitTrafficStream(trafficStreamKey);
-                if (result == CommitResult.IGNORED || result == CommitResult.IMMEDIATE) {
-                    pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
-                }
-            } catch (Throwable t) {
-                pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
-                throw t;
+            if (key != null) {
+                releaseRecordContext(key);
             }
-            if (result == CommitResult.IGNORED) {
-                acknowledgement.completeExceptionally(
-                    new SourceCommitNotAcceptedException(sourcePartitionFor(trafficStreamKey))
-                );
-                return;
-            }
-            if (result == CommitResult.IMMEDIATE) {
-                acknowledgement.complete(null);
-                return;
-            }
-            // AFTER_NEXT_READ / BLOCKED_BY_OTHER_COMMITS: intake may end before another poll-driven
-            // flush. The source owner performs the flush directly after accepting the commit.
+            trackingKafkaConsumer.recordProcessingFinished(recordId);
             trackingKafkaConsumer.commitStagedOffsets();
+            acknowledgement.complete(null);
         } catch (Throwable t) {
-            pendingCommitAcknowledgements.remove(trafficStreamKey, acknowledgement);
             acknowledgement.completeExceptionally(t);
         }
+    }
+
+    private KafkaRecordId kafkaRecordId(KafkaCommitOffsetData offsetData) {
+        return new KafkaRecordId(
+            trackingKafkaConsumer.topic,
+            offsetData.getPartition(),
+            offsetData.getOffset(),
+            offsetData.getGeneration()
+        );
     }
 
     @Override
@@ -1214,12 +850,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 kafkaRecord.getGeneration()
             );
         }
-        return new KafkaRecordId(
-            trackingKafkaConsumer.topic,
-            kafkaRecord.getPartition(),
-            kafkaRecord.getOffset(),
-            kafkaRecord.getGeneration()
-        );
+        return kafkaRecordId(kafkaRecord);
     }
 
     @Override
@@ -1266,11 +897,11 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     trackingKafkaConsumer.close();
                 }).get();
             } finally {
-                var cause = new CancellationException("Kafka traffic source closed before commit acknowledgement");
-                pendingCommitAcknowledgements.forEach((key, acknowledgement) ->
-                    acknowledgement.completeExceptionally(cause)
+                var cause = new CancellationException(
+                    "Kafka traffic source closed before source cleanup completed"
                 );
-                pendingCommitAcknowledgements.clear();
+                observedRecordContexts.forEach((recordId, key) -> releaseRecordContext(key));
+                observedRecordContexts.clear();
                 pendingSessionTerminationObligations.forEach((key, obligation) -> obligation.fail(cause));
                 pendingSessionTerminationObligations.clear();
                 retiringSourcePartitions.clear();

@@ -126,9 +126,6 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
                             .collect(Collectors.toList()));
                     }
                     @Override
-                    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) { return null; }
-
-                    @Override
                     public CompletionStage<Void> acknowledgeSessionTermination(
                         ConnectionSessionKey sessionKey
                     ) {

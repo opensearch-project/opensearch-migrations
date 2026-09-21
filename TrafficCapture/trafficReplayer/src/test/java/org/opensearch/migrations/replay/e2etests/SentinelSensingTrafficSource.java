@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.e2etests;
 
 import java.io.EOFException;
-import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -52,11 +51,6 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
                 return v;
             }
         });
-    }
-
-    @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-        return underlyingSource.commitTrafficStream(trafficStreamKey);
     }
 
     @Override

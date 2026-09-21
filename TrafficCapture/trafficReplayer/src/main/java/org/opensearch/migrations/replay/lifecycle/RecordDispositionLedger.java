@@ -9,8 +9,10 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceControlRecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
@@ -23,6 +25,62 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public final class RecordDispositionLedger implements SourcePartitionLifecycleListener {
+    public sealed interface Input permits
+        PartitionsAssigned,
+        PartitionsRevoked,
+        PartitionsRetired,
+        RegistrationRequested,
+        RegistrationSealRequested,
+        TransferRequested,
+        DispositionRequested,
+        UnresolvedSnapshotRequested,
+        StateSnapshotRequested {}
+
+    private record PartitionsAssigned(
+        @NonNull java.util.List<PartitionGenerationId> partitions
+    ) implements Input {}
+
+    private record PartitionsRevoked(
+        @NonNull java.util.List<PartitionGenerationId> partitions
+    ) implements Input {}
+
+    private record PartitionsRetired(
+        @NonNull java.util.List<PartitionGenerationId> partitions
+    ) implements Input {}
+
+    private record RegistrationRequested(
+        @NonNull RecordHandle handle,
+        @NonNull PartitionGenerationId sourcePartition,
+        @NonNull String owner,
+        @NonNull CompletableFuture<Void> completion
+    ) implements Input {}
+
+    private record RegistrationSealRequested(
+        @NonNull CompletableFuture<Void> completion
+    ) implements Input {}
+
+    private record TransferRequested(
+        @NonNull RecordId id,
+        @NonNull String expectedOwner,
+        @NonNull String newOwner,
+        @NonNull CompletableFuture<Void> completion
+    ) implements Input {}
+
+    private record DispositionRequested(
+        @NonNull RecordId id,
+        @NonNull String owner,
+        @NonNull RecordDisposition disposition,
+        @NonNull CompletableFuture<DispositionResult> completion
+    ) implements Input {}
+
+    private record UnresolvedSnapshotRequested(
+        @NonNull CompletableFuture<Map<RecordId, String>> completion
+    ) implements Input {}
+
+    private record StateSnapshotRequested(
+        @NonNull CompletableFuture<StateSnapshot> completion
+    ) implements Input {}
+
     public interface RecordHandle {
         RecordId id();
 
@@ -56,18 +114,21 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         int retiredPartitionWatermarks;
     }
 
-    private record SourcePartitionIdentity(@NonNull String sourceId, int partition) {
-        private static SourcePartitionIdentity from(SourcePartitionKey partition) {
-            return new SourcePartitionIdentity(partition.sourceId(), partition.partition());
+    private record SourcePartitionIdentity(@NonNull String topic, int partition) {
+        private static SourcePartitionIdentity from(PartitionGenerationId partition) {
+            return new SourcePartitionIdentity(
+                partition.topicPartition().topic(),
+                partition.topicPartition().partition()
+            );
         }
     }
 
     private static final class Obligation {
         private final RecordHandle handle;
         private final String owner;
-        private final SourcePartitionKey sourcePartition;
+        private final PartitionGenerationId sourcePartition;
 
-        private Obligation(RecordHandle handle, String owner, SourcePartitionKey sourcePartition) {
+        private Obligation(RecordHandle handle, String owner, PartitionGenerationId sourcePartition) {
             this.handle = handle;
             this.owner = owner;
             this.sourcePartition = sourcePartition;
@@ -81,7 +142,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             return owner;
         }
 
-        private SourcePartitionKey sourcePartition() {
+        private PartitionGenerationId sourcePartition() {
             return sourcePartition;
         }
     }
@@ -98,7 +159,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         }
     }
 
-    private final Executor ownerExecutor;
+    private final Consumer<Input> ownerInputSink;
     private final OwnerThreadGuard ownerThreadGuard =
         new OwnerThreadGuard("record disposition ledger");
     private final Map<RecordId, Obligation> unresolved = new LinkedHashMap<>();
@@ -115,36 +176,41 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             this.failure = failure;
         }
     }
-    private final Map<SourcePartitionKey, Boolean> generationRunway = new LinkedHashMap<>();
-    private final Set<SourcePartitionKey> retiringGenerations = new java.util.LinkedHashSet<>();
-    private final Map<SourcePartitionIdentity, Integer> retiredGenerationWatermarks = new LinkedHashMap<>();
+    private final Map<PartitionGenerationId, Boolean> generationRunway = new LinkedHashMap<>();
+    private final Set<PartitionGenerationId> retiringGenerations = new java.util.LinkedHashSet<>();
+    private final Map<SourcePartitionIdentity, Long> retiredGenerationWatermarks = new LinkedHashMap<>();
     private final AtomicReference<CompletionGate<Void>> quiescenceGate =
         new AtomicReference<>(completedGate());
     private final AtomicBoolean registrationsSealed = new AtomicBoolean();
     private Throwable quiescenceIntervalFailure;
 
     public RecordDispositionLedger(@NonNull Executor ownerExecutor) {
-        this.ownerExecutor = ownerExecutor;
+        this.ownerInputSink = input -> ownerExecutor.execute(() -> apply(input));
+    }
+
+    public RecordDispositionLedger(@NonNull Consumer<Input> ownerInputSink) {
+        this.ownerInputSink = ownerInputSink;
     }
 
     @Override
     public void onAssigned(@NonNull Collection<SourcePartitionKey> partitions) {
-        executeOnOwner(() -> partitions.forEach(partition -> {
-            if (isRetired(partition)) {
-                throw new IllegalStateException("source assigned an already-retired generation: " + partition);
-            }
-            generationRunway.put(partition, true);
-        }));
+        ownerInputSink.accept(new PartitionsAssigned(
+            partitions.stream().map(SourcePartitionKey::partitionGenerationId).toList()
+        ));
     }
 
     @Override
     public void onRevoked(@NonNull Collection<SourcePartitionKey> partitions) {
-        executeOnOwner(() -> partitions.forEach(partition -> generationRunway.put(partition, false)));
+        ownerInputSink.accept(new PartitionsRevoked(
+            partitions.stream().map(SourcePartitionKey::partitionGenerationId).toList()
+        ));
     }
 
     @Override
     public void onRetired(@NonNull Collection<SourcePartitionKey> partitions) {
-        executeOnOwner(() -> partitions.forEach(this::retireGeneration));
+        ownerInputSink.accept(new PartitionsRetired(
+            partitions.stream().map(SourcePartitionKey::partitionGenerationId).toList()
+        ));
     }
 
     public CompletionStage<Void> register(@NonNull RecordHandle handle, @NonNull String owner) {
@@ -152,44 +218,12 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             return rejectedRegistration(handle.id());
         }
         var completion = new CompletableFuture<Void>();
-        executeOnOwner(() -> {
-            if (registrationsSealed.get()) {
-                completeRejectedRegistration(completion, handle.id());
-                return;
-            }
-            var sourcePartition = handle.sourcePartition();
-            var identityFailure = validateIdentity(handle.id(), sourcePartition);
-            if (identityFailure != null) {
-                completion.completeExceptionally(identityFailure);
-                return;
-            }
-            if (isRetired(sourcePartition)) {
-                var failure = retiredRegistrationException(handle.id(), sourcePartition);
-                log.atError()
-                    .setCause(failure)
-                    .setMessage("Rejected record registration after source generation retirement; state={}")
-                    .addArgument(this::snapshotOnOwner)
-                    .log();
-                completion.completeExceptionally(failure);
-                return;
-            }
-            if (unresolved.containsKey(handle.id())
-                || pending.containsKey(handle.id())
-                || resolved.contains(handle.id())
-                || failed.containsKey(handle.id())) {
-                completion.completeExceptionally(
-                    new IllegalStateException("record obligation already exists for " + handle.id())
-                );
-                return;
-            }
-            if (unresolved.isEmpty() && pending.isEmpty()) {
-                quiescenceGate.set(new CompletionGate<>());
-                quiescenceIntervalFailure = null;
-            }
-            generationRunway.putIfAbsent(sourcePartition, true);
-            unresolved.put(handle.id(), new Obligation(handle, owner, sourcePartition));
-            completion.complete(null);
-        });
+        ownerInputSink.accept(new RegistrationRequested(
+            handle,
+            handle.sourcePartition().partitionGenerationId(),
+            owner,
+            completion
+        ));
         return completion.minimalCompletionStage();
     }
 
@@ -198,10 +232,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
             return CompletableFuture.completedFuture(null);
         }
         var completion = new CompletableFuture<Void>();
-        executeOnOwner(() -> {
-            registrationsSealed.set(true);
-            completion.complete(null);
-        });
+        ownerInputSink.accept(new RegistrationSealRequested(completion));
         return completion.minimalCompletionStage();
     }
 
@@ -223,16 +254,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         @NonNull String newOwner
     ) {
         var completion = new CompletableFuture<Void>();
-        executeOnOwner(() -> {
-            var obligation = requireOwnedObligation(id, expectedOwner, completion);
-            if (obligation != null) {
-                unresolved.put(
-                    id,
-                    new Obligation(obligation.handle(), newOwner, obligation.sourcePartition())
-                );
-                completion.complete(null);
-            }
-        });
+        ownerInputSink.accept(new TransferRequested(id, expectedOwner, newOwner, completion));
         return completion.minimalCompletionStage();
     }
 
@@ -242,7 +264,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         @NonNull RecordDisposition disposition
     ) {
         var completion = new CompletableFuture<DispositionResult>();
-        executeOnOwner(() -> disposeOnOwner(id, owner, disposition, completion));
+        ownerInputSink.accept(new DispositionRequested(id, owner, disposition, completion));
         return completion.minimalCompletionStage();
     }
 
@@ -349,13 +371,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
 
     public CompletionStage<Map<RecordId, String>> unresolvedObligations() {
         var completion = new CompletableFuture<Map<RecordId, String>>();
-        executeOnOwner(() -> {
-            var snapshot = new LinkedHashMap<RecordId, String>();
-            unresolved.forEach((id, obligation) -> snapshot.put(id, obligation.owner()));
-            pending.forEach((id, disposition) -> snapshot.put(id, disposition.obligation().owner()));
-            failed.forEach((id, disposition) -> snapshot.put(id, disposition.obligation.owner()));
-            completion.complete(Map.copyOf(snapshot));
-        });
+        ownerInputSink.accept(new UnresolvedSnapshotRequested(completion));
         return completion.minimalCompletionStage();
     }
 
@@ -365,12 +381,118 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
 
     public CompletionStage<StateSnapshot> stateSnapshot() {
         var completion = new CompletableFuture<StateSnapshot>();
-        executeOnOwner(() -> completion.complete(snapshotOnOwner()));
+        ownerInputSink.accept(new StateSnapshotRequested(completion));
         return completion.minimalCompletionStage();
     }
 
-    private void executeOnOwner(Runnable command) {
-        ownerExecutor.execute(ownerThreadGuard.guard(command));
+    void apply(@NonNull Input input) {
+        ownerThreadGuard.guard(() -> {
+            switch (input) {
+                case PartitionsAssigned assigned -> applyAssigned(assigned);
+                case PartitionsRevoked revoked -> applyRevoked(revoked);
+                case PartitionsRetired retired -> applyRetired(retired);
+                case RegistrationRequested registration -> applyRegistration(registration);
+                case RegistrationSealRequested seal -> applyRegistrationSeal(seal);
+                case TransferRequested transfer -> applyTransfer(transfer);
+                case DispositionRequested disposition -> disposeOnOwner(
+                    disposition.id(),
+                    disposition.owner(),
+                    disposition.disposition(),
+                    disposition.completion()
+                );
+                case UnresolvedSnapshotRequested snapshot -> applyUnresolvedSnapshot(snapshot);
+                case StateSnapshotRequested snapshot -> snapshot.completion().complete(snapshotOnOwner());
+            }
+        }).run();
+    }
+
+    private void applyAssigned(PartitionsAssigned assigned) {
+        assigned.partitions().forEach(partition -> {
+            if (isRetired(partition)) {
+                throw new IllegalStateException("source assigned an already-retired generation: " + partition);
+            }
+            generationRunway.put(partition, true);
+        });
+    }
+
+    private void applyRevoked(PartitionsRevoked revoked) {
+        revoked.partitions().forEach(partition -> generationRunway.put(partition, false));
+    }
+
+    private void applyRetired(PartitionsRetired retired) {
+        retired.partitions().forEach(this::retireGeneration);
+    }
+
+    private void applyRegistration(RegistrationRequested registration) {
+        var handle = registration.handle();
+        var completion = registration.completion();
+        if (registrationsSealed.get()) {
+            completeRejectedRegistration(completion, handle.id());
+            return;
+        }
+        var sourcePartition = registration.sourcePartition();
+        var identityFailure = validateIdentity(handle.id(), sourcePartition);
+        if (identityFailure != null) {
+            completion.completeExceptionally(identityFailure);
+            return;
+        }
+        if (isRetired(sourcePartition)) {
+            var failure = retiredRegistrationException(handle.id(), sourcePartition);
+            log.atError()
+                .setCause(failure)
+                .setMessage("Rejected record registration after source generation retirement; state={}")
+                .addArgument(this::snapshotOnOwner)
+                .log();
+            completion.completeExceptionally(failure);
+            return;
+        }
+        if (unresolved.containsKey(handle.id())
+            || pending.containsKey(handle.id())
+            || resolved.contains(handle.id())
+            || failed.containsKey(handle.id())) {
+            completion.completeExceptionally(
+                new IllegalStateException("record obligation already exists for " + handle.id())
+            );
+            return;
+        }
+        if (unresolved.isEmpty() && pending.isEmpty()) {
+            quiescenceGate.set(new CompletionGate<>());
+            quiescenceIntervalFailure = null;
+        }
+        generationRunway.putIfAbsent(sourcePartition, true);
+        unresolved.put(
+            handle.id(),
+            new Obligation(handle, registration.owner(), sourcePartition)
+        );
+        completion.complete(null);
+    }
+
+    private void applyRegistrationSeal(RegistrationSealRequested seal) {
+        registrationsSealed.set(true);
+        seal.completion().complete(null);
+    }
+
+    private void applyTransfer(TransferRequested transfer) {
+        var obligation = requireOwnedObligation(
+            transfer.id(),
+            transfer.expectedOwner(),
+            transfer.completion()
+        );
+        if (obligation != null) {
+            unresolved.put(
+                transfer.id(),
+                new Obligation(obligation.handle(), transfer.newOwner(), obligation.sourcePartition())
+            );
+            transfer.completion().complete(null);
+        }
+    }
+
+    private void applyUnresolvedSnapshot(UnresolvedSnapshotRequested requested) {
+        var snapshot = new LinkedHashMap<RecordId, String>();
+        unresolved.forEach((id, obligation) -> snapshot.put(id, obligation.owner()));
+        pending.forEach((id, disposition) -> snapshot.put(id, disposition.obligation().owner()));
+        failed.forEach((id, disposition) -> snapshot.put(id, disposition.obligation.owner()));
+        requested.completion().complete(Map.copyOf(snapshot));
     }
 
     private <T> Obligation requireOwnedObligation(
@@ -447,11 +569,11 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         maybeCompleteQuiescence();
     }
 
-    private void retireGeneration(SourcePartitionKey partition) {
+    private void retireGeneration(PartitionGenerationId partition) {
         ownerThreadGuard.requireOwnerThread();
         retiredGenerationWatermarks.merge(
             SourcePartitionIdentity.from(partition),
-            partition.sourceGeneration(),
+            partition.localSequence(),
             Math::max
         );
         generationRunway.remove(partition);
@@ -459,7 +581,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         tryRetireGeneration(partition);
     }
 
-    private void tryRetireGeneration(SourcePartitionKey partition) {
+    private void tryRetireGeneration(PartitionGenerationId partition) {
         if (!retiringGenerations.contains(partition)
             || hasObligationFor(unresolved, partition)
             || hasPendingDispositionFor(partition)
@@ -478,29 +600,29 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
 
     private static boolean hasObligationFor(
         Map<RecordId, Obligation> obligations,
-        SourcePartitionKey partition
+        PartitionGenerationId partition
     ) {
         return obligations.values().stream().anyMatch(obligation ->
             obligation.sourcePartition().equals(partition)
         );
     }
 
-    private boolean hasPendingDispositionFor(SourcePartitionKey partition) {
+    private boolean hasPendingDispositionFor(PartitionGenerationId partition) {
         return pending.values().stream().anyMatch(disposition ->
             disposition.obligation().sourcePartition().equals(partition)
         );
     }
 
-    private boolean hasFailedDispositionFor(SourcePartitionKey partition) {
+    private boolean hasFailedDispositionFor(PartitionGenerationId partition) {
         return failed.values().stream().anyMatch(disposition ->
             disposition.obligation.sourcePartition().equals(partition)
         );
     }
 
-    private boolean isRetired(SourcePartitionKey partition) {
-        return partition.sourceGeneration() <= retiredGenerationWatermarks.getOrDefault(
+    private boolean isRetired(PartitionGenerationId partition) {
+        return partition.localSequence() <= retiredGenerationWatermarks.getOrDefault(
             SourcePartitionIdentity.from(partition),
-            -1
+            -1L
         );
     }
 
@@ -520,7 +642,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
 
     private IllegalStateException retiredRegistrationException(
         RecordId recordId,
-        SourcePartitionKey partition
+        PartitionGenerationId partition
     ) {
         return new IllegalStateException(
             "record registration arrived after source generation retirement: record="
@@ -534,12 +656,12 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
 
     private static IllegalArgumentException validateIdentity(
         RecordId recordId,
-        SourcePartitionKey partition
+        PartitionGenerationId partition
     ) {
         if (recordId instanceof KafkaRecordId kafka
-            && (!kafka.topic().equals(partition.sourceId())
-                || kafka.partition() != partition.partition()
-                || kafka.sourceGeneration() != partition.sourceGeneration())) {
+            && (!kafka.topic().equals(partition.topicPartition().topic())
+                || kafka.partition() != partition.topicPartition().partition()
+                || kafka.sourceGeneration() != partition.localSequence())) {
             return new IllegalArgumentException(
                 "Kafka record identity does not match its source partition: record="
                     + recordId
@@ -555,7 +677,7 @@ public final class RecordDispositionLedger implements SourcePartitionLifecycleLi
         } else {
             return null;
         }
-        if (recordGeneration != partition.sourceGeneration()) {
+        if (recordGeneration != partition.localSequence()) {
             return new IllegalArgumentException(
                 "record generation does not match its source partition: record="
                     + recordId

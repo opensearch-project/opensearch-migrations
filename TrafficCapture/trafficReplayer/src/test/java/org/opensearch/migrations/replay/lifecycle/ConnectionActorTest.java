@@ -4,14 +4,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.opensearch.migrations.replay.testing.TestEventLoop;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
@@ -34,7 +33,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void preparationMayFinishOutOfOrderButExecutionCannot() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
         var firstPreparation = new CompletableFuture<PreparationOutcome<TestPrepared>>();
@@ -62,7 +61,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void actorUsesOneHeadTimerAndNeverSendsEarly() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
         CompletableFuture<PreparationOutcome<TestPrepared>> prepared = CompletableFuture.completedFuture(
@@ -82,7 +81,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void abortCancelsQueuedWorkWithoutExecutingItAndWaitsForTargetAbort() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
         var first = actor.admitRequest(
@@ -120,7 +119,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void abortReportsActiveAndQueuedPreparedCleanupFailures() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
         var activeCleanupFailure = new AssertionError("active cleanup failed");
@@ -161,7 +160,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void orderedCloseRunsAfterRequestsAndCallerCannotCancelTermination() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
         actor.admitRequest(
@@ -186,7 +185,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void lateAdmissionCancelsPreparationWithoutExecutingIt() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
         actor.admitClose(Instant.EPOCH);
@@ -203,7 +202,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void abortRemainsAuthoritativeWhenOrderedCloseCompletesDuringDrain() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         exchange.closeCompletion = new CompletableFuture<>();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
@@ -228,7 +227,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void lateOrderedCloseCompletionCannotMutateTerminatedActor() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         exchange.closeCompletion = new CompletableFuture<>();
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
@@ -251,7 +250,7 @@ class ConnectionActorTest extends InstrumentationTest {
 
     @Test
     void recordsAuthoritativeQueueWaitActiveAndAbortState() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var nanoTime = new AtomicLong();
         var actor = new ConnectionActor<>(
@@ -392,9 +391,62 @@ class ConnectionActorTest extends InstrumentationTest {
         return new ReplayRequestId(session(), index);
     }
 
+    /** Proves replayer LLD §4 and R19: a rejected required owner submission is process-fatal. */
+    @Test
+    void rejectedImmediateSubmissionReachesFatalHandler() {
+        var mailbox = new TestEventLoop();
+        var fatalFailures = new ArrayList<Error>();
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            new TestExchange(),
+            ConnectionActor.Metrics.NOOP,
+            fatalFailures::add
+        );
+        mailbox.rejectNewTasks();
+
+        actor.admitClose(Instant.EPOCH);
+
+        Assertions.assertEquals(1, fatalFailures.size());
+        Assertions.assertTrue(fatalFailures.get(0).getMessage().contains("ordered close admission"));
+        Assertions.assertInstanceOf(
+            java.util.concurrent.RejectedExecutionException.class,
+            fatalFailures.get(0).getCause()
+        );
+    }
+
+    /** Proves replayer LLD §4 and R19 for the actor's scheduled-head submission. */
+    @Test
+    void rejectedScheduledSubmissionReachesFatalHandler() {
+        var mailbox = new TestEventLoop();
+        var fatalFailures = new ArrayList<Error>();
+        var exchange = new TestExchange();
+        var actor = new ConnectionActor<>(
+            session(),
+            mailbox,
+            exchange,
+            ConnectionActor.Metrics.NOOP,
+            fatalFailures::add
+        );
+        actor.admitRequest(
+            request(0),
+            Instant.EPOCH.plusSeconds(10),
+            CompletableFuture.completedFuture(
+                new PreparationOutcome.Prepared<>(new TestPrepared("request"))
+            )
+        );
+        mailbox.rejectNewTasks();
+
+        mailbox.runUntilIdle();
+
+        Assertions.assertEquals(1, fatalFailures.size());
+        Assertions.assertTrue(fatalFailures.get(0).getMessage().contains("scheduled head start"));
+        Assertions.assertTrue(exchange.executed.isEmpty());
+    }
+
     @Test
     void settledRequestDoesNotDependOnASecondMailboxDelivery() {
-        var mailbox = new DeterministicMailbox();
+        var mailbox = new TestEventLoop();
         var exchange = new TestExchange();
         var prepared = new TestPrepared("request");
         var actor = new ConnectionActor<>(session(), mailbox, exchange);
@@ -469,70 +521,4 @@ class ConnectionActorTest extends InstrumentationTest {
         }
     }
 
-    private static final class DeterministicMailbox implements ActorMailbox {
-        private record Timer(Instant due, long sequence, Runnable command) {}
-
-        private final Queue<Runnable> immediate = new ArrayDeque<>();
-        private final PriorityQueue<Timer> timers = new PriorityQueue<>(
-            Comparator.comparing(Timer::due).thenComparingLong(Timer::sequence)
-        );
-        private Instant now = Instant.EPOCH;
-        private long nextSequence;
-        private boolean running;
-
-        @Override
-        public void execute(Runnable command) {
-            immediate.add(command);
-        }
-
-        /** Mimics an event loop that accepted tasks before termination but never ran them. */
-        void dropAcceptedWork() {
-            immediate.clear();
-            timers.clear();
-        }
-
-        @Override
-        public boolean inMailbox() {
-            return running;
-        }
-
-        @Override
-        public Instant now() {
-            return now;
-        }
-
-        @Override
-        public ScheduledTask schedule(Runnable command, Duration delay) {
-            var timer = new Timer(now.plus(delay), nextSequence++, command);
-            timers.add(timer);
-            return () -> timers.remove(timer);
-        }
-
-        void runUntilIdle() {
-            while (!immediate.isEmpty()) {
-                runNext();
-            }
-        }
-
-        void runNext() {
-            running = true;
-            try {
-                immediate.remove().run();
-            } finally {
-                running = false;
-            }
-        }
-
-        void advance(Duration duration) {
-            now = now.plus(duration);
-            while (!timers.isEmpty() && !timers.peek().due().isAfter(now)) {
-                immediate.add(timers.remove().command());
-            }
-            runUntilIdle();
-        }
-
-        int pendingTimers() {
-            return timers.size();
-        }
-    }
 }

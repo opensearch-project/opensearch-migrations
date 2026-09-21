@@ -10,7 +10,7 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.io.PrintStream;
 import java.time.Instant;
-import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.AccumulationCallbacks;
@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TerminalSourceConnectionId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
@@ -66,9 +67,9 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     public void onTrafficStreamsExpired(
         RequestResponsePacketPair.ReconstructionStatus status,
         @NonNull IReplayContexts.IChannelKeyContext ctx,
-        @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        @NonNull ITrafficStreamKey connectionKey
     ) {
-        out.println(linePrefix + buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx)
+        out.println(linePrefix + buildPrefix(connectionKey, Instant.EPOCH, Instant.EPOCH)
             + " EXPIRED (" + status + ")");
     }
 
@@ -79,15 +80,11 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         int channelSessionNumber,
         RequestResponsePacketPair.ReconstructionStatus status,
         @NonNull Instant timestamp,
-        @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        @NonNull ITrafficStreamKey connectionKey,
+        @NonNull Optional<TerminalSourceConnectionId> terminalAssociation
     ) {
-        out.println(linePrefix + buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx, timestamp)
+        out.println(linePrefix + buildPrefix(connectionKey, timestamp, timestamp)
             + " CLOSED (" + channelInteractionNum + " requests completed)");
-    }
-
-    @Override
-    public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
-        // no-op
     }
 
     // Dynamic column widths — start with reasonable defaults, grow as needed
@@ -155,35 +152,6 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
 
     private static String dashPad(int width) {
         return " ".repeat(width);
-    }
-
-    private String buildPrefixFromKeysAndCtx(
-        List<ITrafficStreamKey> keys, IReplayContexts.IChannelKeyContext ctx
-    ) {
-        return buildPrefixFromKeysAndCtx(keys, ctx, null);
-    }
-
-    private String buildPrefixFromKeysAndCtx(
-        List<ITrafficStreamKey> keys, IReplayContexts.IChannelKeyContext ctx, Instant timestamp
-    ) {
-        if (!keys.isEmpty()) {
-            var tsk = keys.get(0);
-            Instant ts = timestamp != null ? timestamp : Instant.EPOCH;
-            return buildPrefix(tsk, ts, ts);
-        }
-        // Fallback when no keys are held — still emit consistent columns with space padding
-        var sb = new StringBuilder();
-        long epoch = timestamp != null ? timestamp.getEpochSecond() : 0;
-        var epochStr = String.valueOf(epoch);
-        tsWidth = Math.max(tsWidth, epochStr.length());
-        sb.append('[').append(pad(epochStr, tsWidth)).append('-').append(pad(epochStr, tsWidth)).append(']');
-        sb.append(' ').append(relativeTime(epoch, epoch));
-        sb.append(" p:").append(dashPad(pWidth));
-        sb.append(" o:").append(dashPad(oWidth));
-        sb.append(" s:").append(dashPad(sWidth));
-        sb.append(" nc:").append(TrafficChannelKeyFormatter.format(
-            ctx.getNodeId(), ctx.getConnectionId())).append(':');
-        return sb.toString();
     }
 
     private static long messageSize(HttpMessageAndTimestamp msg) {

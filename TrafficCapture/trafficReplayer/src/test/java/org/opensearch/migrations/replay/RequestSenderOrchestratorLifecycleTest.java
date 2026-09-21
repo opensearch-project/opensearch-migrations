@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -21,9 +23,6 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
-import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
-import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
-import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
@@ -52,10 +51,14 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     private final AtomicReference<Function<ConnectionSessionKey, java.util.concurrent.CompletionStage<Void>>>
         sessionAcknowledger = new AtomicReference<>(ignored -> CompletableFuture.completedFuture(null));
     private ClientConnectionPool connectionPool;
+    private ExecutorService permitOwnerExecutor;
     private RequestSenderOrchestrator orchestrator;
 
     @BeforeEach
     void createOrchestrator() {
+        permitOwnerExecutor = Executors.newSingleThreadExecutor(
+            runnable -> new Thread(runnable, "permit-owner-test")
+        );
         connectionPool = new ClientConnectionPool(
             (eventLoop, context) -> {
                 throw new AssertionError("The test packet consumer does not need a Netty channel");
@@ -76,11 +79,13 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     @AfterEach
     void closeOrchestrator() throws Exception {
         connectionPool.shutdownNow().get(5, TimeUnit.SECONDS);
+        permitOwnerExecutor.shutdownNow();
+        Assertions.assertTrue(permitOwnerExecutor.awaitTermination(5, TimeUnit.SECONDS));
     }
 
     @Test
     void preparationMayFinishOutOfOrderButTargetExecutionStaysInAdmissionOrder() throws Exception {
-        var permits = new AsyncPermitPool(2, Runnable::run);
+        var permits = permitPool(2);
         var firstContext = rootContext.getTestConnectionRequestContext("ordered", 0);
         var secondContext = rootContext.getTestConnectionRequestContext("ordered", 1);
         var firstPreparation =
@@ -105,7 +110,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
     @Test
     void abortCancelsPreparationAndQueuedPermitWithoutStartingTargetWork() throws Exception {
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var firstContext = rootContext.getTestConnectionRequestContext("abort", 0);
         var secondContext = rootContext.getTestConnectionRequestContext("abort", 1);
         var firstPreparation =
@@ -146,7 +151,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             RequestSenderOrchestrator.noSourceTerminationObligations(),
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("cancel-retry", 0);
         var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[] { 1 }));
         var request = orchestrator.scheduleRequestLifecycle(
@@ -237,7 +242,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ownershipMetrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("cancel-finalizer", 0);
         var request = schedule(
             context,
@@ -293,7 +298,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ownershipMetrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("abort-terminal-result", 0);
         var now = Instant.now();
         var request = orchestrator.scheduleRequestLifecycle(
@@ -338,7 +343,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var retryDecision =
             new CompletableFuture<RequestSenderOrchestrator.DeterminedTransformedResponse<String>>();
         var releasedResults = new AtomicInteger();
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("terminal-result-handoff", 0);
         var now = Instant.now();
         var request = orchestrator.scheduleRequestLifecycle(
@@ -403,7 +408,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             org.opensearch.migrations.replay.lifecycle.ResourceOwnership.Metrics.NOOP,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("phase-state", 0);
         var now = Instant.now();
         var request = orchestrator.scheduleRequestLifecycle(
@@ -468,7 +473,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             metrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("synchronous-phase-state", 0);
 
         var result = schedule(
@@ -507,7 +512,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ownershipMetrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("sender-factory-failure", 0);
 
         var request = schedule(
@@ -545,7 +550,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ownershipMetrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("visitor-factory-failure", 0);
         var transformed = transformedRequest();
         var producer = transformed.transformedOutput;
@@ -622,7 +627,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ownershipMetrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext(
             returnsNull ? "sender-returned-null" : "sender-threw",
             0
@@ -681,7 +686,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             ownershipMetrics,
             rootContext.getReplayProcessFatalMetrics()
         );
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("late-transformation", 0);
         var preparationStarted = new CompletableFuture<Void>();
         var transformation = new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>() {
@@ -732,7 +737,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
     @Test
     void filteredPreparationReleasesPermitWithoutOpeningTargetExchange() throws Exception {
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("filtered", 0);
         var result = schedule(
             context,
@@ -830,9 +835,6 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             (id, source, target) -> CompletableFuture.completedFuture(
                 new org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome.Durable("unused")
             ),
-            new ReplayDispositionPolicy(),
-            new RecordDispositionLedger(Runnable::run),
-            List.of(),
             List.of(),
             new ReplayTransaction.Metrics() {
                 @Override
@@ -848,9 +850,6 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
                 @Override
                 public void terminalOutcome(ReplayTransaction.TerminalOutcome outcome) {}
-
-                @Override
-                public void disposition(RecordDisposition disposition) {}
             }
         );
 
@@ -878,7 +877,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             acknowledgementStarted.complete(sessionKey);
             return sourceAcknowledgement;
         });
-        var permits = new AsyncPermitPool(1, Runnable::run);
+        var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("shutdown", 0);
         var preparation = new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
         var request = schedule(context, permits, preparation);
@@ -1036,6 +1035,10 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 ),
             status -> status.getClass().getSimpleName()
         );
+    }
+
+    private AsyncPermitPool permitPool(int capacity) {
+        return new AsyncPermitPool(capacity, permitOwnerExecutor);
     }
 
     private void closeActor(

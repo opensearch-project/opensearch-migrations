@@ -28,8 +28,8 @@ import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
-import org.opensearch.migrations.replay.lifecycle.RecordDispositionLedger;
-import org.opensearch.migrations.replay.lifecycle.ReplayIntakeMailbox;
+import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
+import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
@@ -57,6 +57,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
     private static final Duration SHUTDOWN_PROGRESS_REPORT_INTERVAL = Duration.ofSeconds(15);
     private static final Duration ACTOR_TERMINATION_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
+    private static final Duration REMAINING_WORK_SHUTDOWN_LIMIT = Duration.ofMinutes(2);
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
     private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
@@ -106,7 +107,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
     protected final ClientConnectionPool clientConnectionPool;
-    private final Object intakeLifecycleLock = new Object();
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
     private final ReplayProcessFatalHandler.ProcessTerminator fatalProcessTerminator;
@@ -168,7 +168,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             workTracker,
             errorClassifier,
             poisonAllowlist,
-            Runtime.getRuntime()::halt
+            new ProcessSupervisor()
         );
     }
 
@@ -311,14 +311,21 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
-        var intakeMailbox = new ReplayIntakeMailbox();
+        var fatalHandler = new ReplayProcessFatalHandler(
+            ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
+            topLevelContext.getReplayProcessFatalMetrics(),
+            fatalProcessTerminator,
+            org.apache.logging.log4j.LogManager::shutdown,
+            System.err,
+            failure -> shutdown(failure)
+        );
+        var replayIntakeOwner = new ReplayIntakeOwner(fatalHandler::onFatal);
         var permitPool = new AsyncPermitPool(
             maxConcurrentRequests,
-            intakeMailbox,
+            replayIntakeOwner::submitRequired,
             topLevelContext.getPermitPoolMetrics()
         );
-        intakeMailboxRef.set(intakeMailbox);
-        permitPoolRef.set(permitPool);
+        this.intakeOwner = replayIntakeOwner;
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout),
@@ -326,14 +333,10 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             topLevelContext.getConnectionActorMetrics(),
             topLevelContext.getTargetExchangeStateMetrics(),
             topLevelContext.getResourceOwnershipMetrics(),
-            new ReplayProcessFatalHandler(
-                ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
-                topLevelContext.getReplayProcessFatalMetrics(),
-                fatalProcessTerminator
-            )
+            fatalHandler
         );
         var readGate = new ReplayReadGate(trafficSource.getBufferTimeWindow(), trafficSource);
-        var progressController = new ReplayProgressController(intakeMailbox, readGate);
+        var progressController = new ReplayProgressController(replayIntakeOwner::submitRequired, readGate);
         var replayEngine = new ReplayEngine(
             senderOrchestrator,
             trafficSource,
@@ -341,6 +344,19 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             progressController
         );
         this.currentReplayEngine.set(replayEngine);
+        var recordWorkTracker = new RecordWorkTracker(
+            replayIntakeOwner::submitRequired,
+            replayIntakeOwner::isOwnerThread,
+            recordId -> trafficSource.recordProcessingFinished(recordId)
+                .whenComplete((ignored, failure) -> {
+                    if (failure != null) {
+                        fatalHandler.onFatal(new Error(
+                            "Kafka source rejected required record-processing completion " + recordId,
+                            failure
+                        ));
+                    }
+                })
+        );
         var accumulationCallbacks = new TrafficReplayerAccumulationCallbacks(
             replayEngine,
             tupleWriter,
@@ -348,7 +364,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             tupleObserver,
             trafficSource,
             quiescentDuration,
-            permitPool
+            permitPool,
+            recordWorkTracker
         );
         trafficSource.setSourcePartitionLifecycleListener(
             SourcePartitionLifecycleListener.combine(
@@ -362,11 +379,22 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
                 accumulationCallbacks,
                 trafficSource.usesStructuralExpiration(),
-                trafficSource::updateScanBlocker
+                recordWorkTracker,
+                trafficSource::recordIdFor
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
+        replayIntakeOwner.configureOwnedComponents(
+            permitPool,
+            progressController,
+            recordWorkTracker
+        );
+        replayIntakeOwner.start();
         try {
-            pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator, intakeMailbox);
+            replayIntakeOwner.startReading(
+                trafficSource,
+                trafficToHttpTransactionAccumulator,
+                topLevelContext::createReadChunkContext
+            ).toCompletableFuture().get();
         } catch (InterruptedException ex) {
             throw ex;
         } catch (Exception e) {
@@ -374,13 +402,12 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             throw e;
         } finally {
             try {
-                intakeMailbox.runUntilIdle();
-                trafficToHttpTransactionAccumulator.close();
+                replayIntakeOwner.closeAccumulator().toCompletableFuture().get();
                 wrapUpWorkAndEmitSummary(replayEngine, trafficToHttpTransactionAccumulator);
                 assert shutdownFutureRef.get() != null || requestWorkTracker.isEmpty()
                     : "expected to wait for all the in flight requests to fully flush and self destruct themselves";
             } finally {
-                finishIntakeLifecycle(intakeMailbox);
+                finishIntakeLifecycle(replayIntakeOwner);
             }
         }
     }
@@ -401,18 +428,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     ) throws ExecutionException, InterruptedException {
         final var primaryLogLevel = Level.INFO;
         final var secondaryLogLevel = Level.WARN;
-        var logLevel = primaryLogLevel;
-        for (var timeout = Duration.ofSeconds(60);; timeout = timeout.multipliedBy(2)) {
-            if (shutdownFutureRef.get() != null) {
-                log.warn("Not waiting for work because the TrafficReplayer is shutting down.");
-                break;
-            }
+        if (shutdownFutureRef.get() != null) {
+            log.warn("Not waiting for work because the TrafficReplayer is shutting down.");
+        } else {
             try {
-                waitForRemainingWork(logLevel, timeout);
-                break;
+                waitForRemainingWork(primaryLogLevel, REMAINING_WORK_SHUTDOWN_LIMIT);
             } catch (TimeoutException e) {
-                log.atLevel(logLevel).log("Timed out while waiting for the remaining requests to be finalized...");
-                logLevel = secondaryLogLevel;
+                log.atLevel(secondaryLogLevel)
+                    .log("Timed out while waiting for the remaining requests to be finalized...");
             }
         }
         if (!requestWorkTracker.isEmpty() || exceptionRequestCount.get() > 0) {
@@ -514,11 +537,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     protected void waitForRemainingWork(Level logLevel, @NonNull Duration timeout) throws ExecutionException,
         InterruptedException, TimeoutException {
 
-        var intakeMailbox = intakeMailboxRef.get();
-        if (intakeMailbox != null && intakeMailbox.isOwnerThread()) {
-            intakeMailbox.runUntilIdle();
-        }
-
         var workTracker = (IStreamableWorkTracker<Void>) requestWorkTracker;
         Map.Entry<
             UniqueReplayerRequestKey,
@@ -540,25 +558,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var replayQuiescenceFuture = replayEngine == null
             ? CompletableFuture.<Void>completedFuture(null)
             : replayEngine.whenQuiescent().toCompletableFuture();
-        var ledger = dispositionLedgerRef.get();
-        var recordDispositionFuture = ledger == null
-            ? CompletableFuture.<Void>completedFuture(null)
-            : ledger.whenQuiescent().toCompletableFuture();
         var allWorkFuture = new TextTrackedFuture<>(
             combineReplayDrainGates(
                 requestWorkFuture.future,
-                replayQuiescenceFuture,
-                recordDispositionFuture
+                replayQuiescenceFuture
             ),
             () -> "TrafficReplayer.AllWorkFinished"
         );
         try {
             if (allRemainingWorkFutureOrShutdownSignalRef.compareAndSet(null, allWorkFuture)) {
-                if (intakeMailbox != null && intakeMailbox.isOwnerThread()) {
-                    intakeMailbox.await(allWorkFuture.future, timeout);
-                } else {
-                    allWorkFuture.get(timeout);
-                }
+                allWorkFuture.get(timeout);
             } else {
                 handleAlreadySetFinishedSignal();
             }
@@ -577,13 +586,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     static CompletableFuture<Void> combineReplayDrainGates(
         CompletionStage<Void> requestWork,
-        CompletionStage<Void> replayQuiescence,
-        CompletionStage<Void> recordDisposition
+        CompletionStage<Void> replayQuiescence
     ) {
         return CompletableFuture.allOf(
             requestWork.toCompletableFuture(),
-            replayQuiescence.toCompletableFuture(),
-            recordDisposition.toCompletableFuture()
+            replayQuiescence.toCompletableFuture()
         );
     }
 
@@ -650,7 +657,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     @Override
     protected boolean shouldRetry() {
-        return !stopReadingRef.get();
+        return shutdownFutureRef.get() == null;
     }
 
     @SneakyThrows
@@ -662,13 +669,21 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         if (existingShutdown != null) {
             return existingShutdown;
         }
-        stopReadingRef.set(true);
-        Optional.ofNullable(this.nextChunkFutureRef.get()).ifPresent(f -> f.cancel(true));
         var cancellationCause = new CancellationException("replay is shutting down");
         var replayEngine = currentReplayEngine.get();
-        var permitPool = permitPoolRef.get();
-        if (permitPool != null) {
-            permitPool.close(cancellationCause);
+        var replayIntakeOwner = intakeOwner;
+        if (replayIntakeOwner != null) {
+            replayIntakeOwner.stopReading();
+            replayIntakeOwner.closePermits(cancellationCause);
+        }
+        if (error != null) {
+            signalRemainingWorkShutdown(error);
+            shutdownFutureRef.get().completeExceptionally(error);
+            log.atError()
+                .setCause(error)
+                .setMessage("Fatal shutdown was signaled without waiting for owner-confined work")
+                .log();
+            return shutdownFutureRef.get();
         }
 
         // Normal shutdown gives every actor a bounded opportunity to settle before releasing Netty's
@@ -745,27 +760,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         ReplayEngine replayEngine,
         CancellationException cause
     ) {
-        var dispositionLedger = dispositionLedgerRef.get();
         var completion = new CompletableFuture<Void>();
-        var stage = new AtomicReference<>(ShutdownStage.SEALING_RECORD_REGISTRATIONS);
+        var stage = new AtomicReference<>(ShutdownStage.TERMINATING_CONNECTION_ACTORS);
         Runnable beginShutdown = () -> {
             try {
-                var registrationFence = dispositionLedger == null
+                var actorShutdown = replayEngine == null
                     ? CompletableFuture.<Void>completedFuture(null)
-                    : dispositionLedger.sealRegistrations();
-                registrationFence
-                    .thenCompose(ignored -> {
-                        stage.set(ShutdownStage.TERMINATING_CONNECTION_ACTORS);
-                        return replayEngine == null
-                            ? CompletableFuture.<Void>completedFuture(null)
-                            : replayEngine.shutdownConnections(cause);
-                    })
-                    .thenCompose(ignored -> {
-                        stage.set(ShutdownStage.SETTLING_RECORD_DISPOSITIONS);
-                        return dispositionLedger == null
-                            ? CompletableFuture.<Void>completedFuture(null)
-                            : dispositionLedger.whenQuiescent();
-                    })
+                    : replayEngine.shutdownConnections(cause);
+                actorShutdown
                     .whenComplete((ignored, failure) -> {
                         stage.set(ShutdownStage.DONE);
                         if (failure == null) {
@@ -779,22 +781,13 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 completion.completeExceptionally(t);
             }
         };
-        reportShutdownProgressUntilComplete(stage, completion, replayEngine, dispositionLedger);
-        synchronized (intakeLifecycleLock) {
-            var intakeMailbox = intakeMailboxRef.get();
-            if (intakeMailbox != null) {
-                intakeMailbox.execute(beginShutdown);
-                return completion;
-            }
-        }
+        reportShutdownProgressUntilComplete(stage, completion, replayEngine);
         beginShutdown.run();
         return completion;
     }
 
     private enum ShutdownStage {
-        SEALING_RECORD_REGISTRATIONS,
         TERMINATING_CONNECTION_ACTORS,
-        SETTLING_RECORD_DISPOSITIONS,
         DONE
     }
 
@@ -805,8 +798,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     private void reportShutdownProgressUntilComplete(
         AtomicReference<ShutdownStage> stage,
         CompletableFuture<Void> completion,
-        ReplayEngine replayEngine,
-        RecordDispositionLedger dispositionLedger
+        ReplayEngine replayEngine
     ) {
         if (completion.isDone()) {
             return;
@@ -823,37 +815,21 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 .addArgument(stage::get)
                 .addArgument(unterminatedSessions)
                 .log();
-            if (dispositionLedger != null) {
-                dispositionLedger.unresolvedObligations().whenComplete((obligations, failure) ->
-                    log.atWarn()
-                        .setCause(failure)
-                        .setMessage("Record obligations that shutdown is still waiting on: {}")
-                        .addArgument(obligations)
-                        .log()
-                );
-            }
-            reportShutdownProgressUntilComplete(stage, completion, replayEngine, dispositionLedger);
+            reportShutdownProgressUntilComplete(stage, completion, replayEngine);
         }, CompletableFuture.delayedExecutor(SHUTDOWN_PROGRESS_REPORT_INTERVAL.toSeconds(), TimeUnit.SECONDS));
     }
 
     void finishIntakeLifecycle(
-        ReplayIntakeMailbox intakeMailbox
+        ReplayIntakeOwner replayIntakeOwner
     ) throws ExecutionException, InterruptedException {
-        while (true) {
-            CompletableFuture<Void> shutdown;
-            synchronized (intakeLifecycleLock) {
-                intakeMailbox.runUntilIdle();
-                var dispositionLedger = dispositionLedgerRef.get();
-                if (dispositionLedger != null) {
-                    intakeMailbox.await(dispositionLedger.sealRegistrations());
-                }
-                shutdown = shutdownFutureRef.get();
-                if (shutdown == null || shutdown.isDone()) {
-                    intakeMailboxRef.compareAndSet(intakeMailbox, null);
-                    return;
-                }
-            }
-            intakeMailbox.await(shutdown);
+        var shutdown = shutdownFutureRef.get();
+        if (shutdown != null && !shutdown.isDone()) {
+            shutdown.get();
+        }
+        replayIntakeOwner.stopOwner().toCompletableFuture().get();
+        replayIntakeOwner.termination().toCompletableFuture().get();
+        if (intakeOwner == replayIntakeOwner) {
+            intakeOwner = null;
         }
     }
 

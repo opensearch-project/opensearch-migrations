@@ -1,19 +1,15 @@
 package org.opensearch.migrations.replay.lifecycle;
 
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayDispositionPolicy.Decision;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
@@ -29,7 +25,7 @@ public final class ReplayTransaction<R> {
     public enum Phase {
         WAITING_FOR_JOIN("waiting_for_join"),
         WRITING_EVIDENCE("writing_evidence"),
-        DISPOSING("disposing");
+        FINALIZING("finalizing");
 
         private final String metricLabel;
 
@@ -73,8 +69,7 @@ public final class ReplayTransaction<R> {
     }
 
     public enum TerminalOutcome {
-        COMMITTED("committed"),
-        RETAINED("retained"),
+        COMPLETED("completed"),
         FAILED("failed");
 
         private final String metricLabel;
@@ -110,10 +105,6 @@ public final class ReplayTransaction<R> {
                 // Metrics are optional for non-production transactions.
             }
 
-            @Override
-            public void disposition(RecordDisposition disposition) {
-                // Metrics are optional for non-production transactions.
-            }
         };
 
         void phaseChanged(Phase phase, int delta);
@@ -124,7 +115,6 @@ public final class ReplayTransaction<R> {
 
         void terminalOutcome(TerminalOutcome outcome);
 
-        void disposition(RecordDisposition disposition);
     }
 
     public interface EvidenceWriter<R> {
@@ -142,8 +132,6 @@ public final class ReplayTransaction<R> {
         @NonNull SourceOutcome sourceOutcome;
         @NonNull TargetOutcome<?> targetOutcome;
         @NonNull EvidenceOutcome evidenceOutcome;
-        @NonNull RecordDisposition disposition;
-        boolean haltReplay;
     }
 
     private static final class PendingCommand {
@@ -162,36 +150,11 @@ public final class ReplayTransaction<R> {
         private boolean claimed;
     }
 
-    private static final class DispositionWork {
-        private final Decision decision;
-        private final RecordDisposition requestedDisposition;
-        private final List<CompletableFuture<RecordDispositionLedger.DispositionResult>> stages;
-        private final CompletableFuture<Void> aggregate;
-        private Throwable failure;
-        private boolean ready;
-        private boolean claimed;
-
-        private DispositionWork(
-            Decision decision,
-            RecordDisposition requestedDisposition,
-            List<CompletableFuture<RecordDispositionLedger.DispositionResult>> stages
-        ) {
-            this.decision = decision;
-            this.requestedDisposition = requestedDisposition;
-            this.stages = stages;
-            this.aggregate = CompletableFuture.allOf(stages.toArray(CompletableFuture[]::new));
-        }
-    }
-
     private final Object stateLock = new Object();
     private final ReplayRequestId requestId;
-    private final String ledgerOwner;
     private final ActorMailbox mailbox;
     private final OwnerThreadGuard ownerThreadGuard;
     private final EvidenceWriter<R> evidenceWriter;
-    private final ReplayDispositionPolicy dispositionPolicy;
-    private final RecordDispositionLedger dispositionLedger;
-    private final LinkedHashSet<RecordId> recordIds = new LinkedHashSet<>();
     private final Deque<AutoCloseable> ownedResources = new ArrayDeque<>();
     private final Set<AutoCloseable> ownedResourceIdentities =
         Collections.newSetFromMap(new IdentityHashMap<>());
@@ -203,7 +166,6 @@ public final class ReplayTransaction<R> {
     private TargetOutcome<R> targetOutcome;
     private EvidenceOutcome evidenceOutcome;
     private EvidenceHandoff evidenceHandoff;
-    private DispositionWork dispositionWork;
     private Phase phase = Phase.WAITING_FOR_JOIN;
     private RunwayState runwayState = RunwayState.AVAILABLE;
     private Throwable pendingFailure;
@@ -218,18 +180,12 @@ public final class ReplayTransaction<R> {
         @NonNull ReplayRequestId requestId,
         @NonNull ActorMailbox mailbox,
         @NonNull EvidenceWriter<R> evidenceWriter,
-        @NonNull ReplayDispositionPolicy dispositionPolicy,
-        @NonNull RecordDispositionLedger dispositionLedger,
-        @NonNull Collection<? extends RecordId> recordIds,
         @NonNull Collection<? extends AutoCloseable> resources
     ) {
         this(
             requestId,
             mailbox,
             evidenceWriter,
-            dispositionPolicy,
-            dispositionLedger,
-            recordIds,
             resources,
             Metrics.NOOP
         );
@@ -239,31 +195,18 @@ public final class ReplayTransaction<R> {
         @NonNull ReplayRequestId requestId,
         @NonNull ActorMailbox mailbox,
         @NonNull EvidenceWriter<R> evidenceWriter,
-        @NonNull ReplayDispositionPolicy dispositionPolicy,
-        @NonNull RecordDispositionLedger dispositionLedger,
-        @NonNull Collection<? extends RecordId> recordIds,
         @NonNull Collection<? extends AutoCloseable> resources,
         @NonNull Metrics metrics
     ) {
         this.requestId = requestId;
-        this.ledgerOwner = requestId.toString();
         this.mailbox = mailbox;
         this.ownerThreadGuard = new OwnerThreadGuard(
             "replay transaction " + requestId,
             mailbox::inMailbox
         );
         this.evidenceWriter = evidenceWriter;
-        this.dispositionPolicy = dispositionPolicy;
-        this.dispositionLedger = dispositionLedger;
         this.metrics = metrics;
         try {
-            for (var recordId : recordIds) {
-                if (!this.recordIds.add(recordId)) {
-                    throw new IllegalArgumentException(
-                        "duplicate transaction record for " + requestId + ": " + recordId
-                    );
-                }
-            }
             resources.forEach(this::adoptResourceLocked);
         } catch (RuntimeException | Error failure) {
             Throwable cleanupFailure;
@@ -278,18 +221,7 @@ public final class ReplayTransaction<R> {
         mailbox.execute(this::activateMetricsFromMailbox);
     }
 
-    public String ledgerOwner() {
-        return ledgerOwner;
-    }
-
     public CompletionStage<Void> settleSource(@NonNull SourceOutcome outcome) {
-        return settleSource(outcome, List.of());
-    }
-
-    public CompletionStage<Void> settleSource(
-        @NonNull SourceOutcome outcome,
-        @NonNull Collection<? extends RecordId> additionalRecordIds
-    ) {
         PendingCommand command;
         synchronized (stateLock) {
             var unavailable = unavailableFailureLocked();
@@ -301,17 +233,6 @@ public final class ReplayTransaction<R> {
                     new IllegalStateException("source outcome already settled for " + requestId)
                 );
             }
-            var stagedRecords = new LinkedHashSet<RecordId>();
-            for (var recordId : additionalRecordIds) {
-                if (!stagedRecords.add(recordId) || recordIds.contains(recordId)) {
-                    return failedAcknowledgement(
-                        new IllegalStateException(
-                            "record already belongs to " + requestId + ": " + recordId
-                        )
-                    );
-                }
-            }
-            recordIds.addAll(stagedRecords);
             sourceSettlementReserved = true;
             command = reserveCommandLocked(() -> {
                 sourceOutcome = outcome;
@@ -406,14 +327,7 @@ public final class ReplayTransaction<R> {
             failureReserved = true;
             pendingFailure = cause;
             command = reserveCommandLocked(() -> {
-                if (phase == Phase.DISPOSING) {
-                    return;
-                }
-                if (recordIds.isEmpty()) {
-                    completeFailureLocked(cause, null);
-                } else {
-                    beginFailureDispositionLocked();
-                }
+                completeFailureLocked(cause);
             });
         }
         return enqueueCommand(command);
@@ -466,9 +380,9 @@ public final class ReplayTransaction<R> {
         if (phase != Phase.WAITING_FOR_JOIN || sourceOutcome == null || targetOutcome == null) {
             return;
         }
-        if (!dispositionPolicy.requiresEvidence(sourceOutcome, targetOutcome)) {
+        if (!requiresEvidence(sourceOutcome, targetOutcome)) {
             evidenceOutcome = new EvidenceOutcome.NotRequired("teardown");
-            beginDispositionLocked();
+            finishSuccessfullyLocked();
             return;
         }
 
@@ -527,131 +441,35 @@ public final class ReplayTransaction<R> {
                     new NullPointerException("evidence writer completed without an outcome")
                 );
             }
-            beginDispositionLocked();
+            evidenceOutcome.visit(new EvidenceOutcome.Visitor<>() {
+                @Override
+                public Void onDurable(EvidenceOutcome.Durable durable) {
+                    finishSuccessfullyLocked();
+                    return null;
+                }
+
+                @Override
+                public Void onFailed(EvidenceOutcome.Failed failed) {
+                    completeFailureLocked(failed.cause());
+                    return null;
+                }
+
+                @Override
+                public Void onNotRequired(EvidenceOutcome.NotRequired notRequired) {
+                    finishSuccessfullyLocked();
+                    return null;
+                }
+            });
         }
     }
 
-    private void beginDispositionLocked() {
+    private void finishSuccessfullyLocked() {
         assertInMailbox();
-        transitionPhaseLocked(Phase.DISPOSING);
-        var decision = dispositionPolicy.decide(sourceOutcome, targetOutcome, evidenceOutcome);
-        startDispositionLocked(decision, decision.disposition());
-    }
-
-    /**
-     * A failing transaction still owes its record obligations a disposition. Failure never carries
-     * commit authority, so every record that has not already entered disposition retains.
-     */
-    private void beginFailureDispositionLocked() {
-        assertInMailbox();
-        transitionPhaseLocked(Phase.DISPOSING);
-        startDispositionLocked(
-            null,
-            new RecordDisposition.Retain("transaction-failed")
-        );
-    }
-
-    @SuppressWarnings("java:S1181") // Every record must receive a failed disposition stage, even on Error.
-    private void startDispositionLocked(
-        Decision decision,
-        RecordDisposition requestedDisposition
-    ) {
-        var stages = new ArrayList<CompletableFuture<RecordDispositionLedger.DispositionResult>>();
-        for (var recordId : recordIds) {
-            try {
-                stages.add(
-                    dispositionLedger.dispose(recordId, ledgerOwner, requestedDisposition)
-                        .toCompletableFuture()
-                );
-            } catch (RuntimeException | Error failure) {
-                stages.add(CompletableFuture.failedFuture(failure));
-            }
-        }
-        var work = new DispositionWork(
-            decision,
-            requestedDisposition,
-            stages
-        );
-        dispositionWork = work;
-        work.aggregate.whenComplete((ignored, failure) ->
-            stageDispositionCompletion(work, failure)
-        );
-    }
-
-    private void stageDispositionCompletion(DispositionWork work, Throwable failure) {
-        synchronized (stateLock) {
-            if (work != dispositionWork || work.claimed || terminated) {
-                return;
-            }
-            work.failure = failure == null ? null : unwrap(failure);
-            work.ready = true;
-        }
-        postCallback(() -> consumeDisposition(work));
-    }
-
-    private void consumeDisposition(DispositionWork work) {
-        synchronized (stateLock) {
-            if (work != dispositionWork || work.claimed || !work.ready || terminated) {
-                return;
-            }
-            assertInMailbox();
-            work.claimed = true;
-            finishDispositionLocked(work);
-        }
-    }
-
-    @SuppressWarnings("java:S1181") // Metrics failure is aggregated into the transaction result.
-    private void finishDispositionLocked(DispositionWork work) {
-        var acceptedDisposition = work.failure == null
-            ? acceptedDisposition(work.requestedDisposition, work.stages)
-            : work.requestedDisposition;
-        Throwable metricsFailure = null;
-        if (work.failure == null) {
-            try {
-                metrics.disposition(acceptedDisposition);
-            } catch (RuntimeException | Error failure) {
-                metricsFailure = failure;
-            }
-        }
-
-        if (pendingFailure != null) {
-            addSuppressed(pendingFailure, metricsFailure);
-            completeFailureLocked(pendingFailure, work.failure);
-            return;
-        }
-        if (work.failure != null) {
-            completeFailureLocked(work.failure, work.failure);
-            return;
-        }
-        if (metricsFailure != null) {
-            completeFailureLocked(metricsFailure, metricsFailure);
-            return;
-        }
-        finishSuccessfullyLocked(work.decision, acceptedDisposition);
-    }
-
-    private RecordDisposition acceptedDisposition(
-        RecordDisposition requestedDisposition,
-        List<CompletableFuture<RecordDispositionLedger.DispositionResult>> dispositionStages
-    ) {
-        var acceptedDispositions = dispositionStages.stream()
-            .map(CompletableFuture::join)
-            .map(RecordDispositionLedger.DispositionResult::disposition)
-            .toList();
-        for (var disposition : acceptedDispositions) {
-            if (disposition instanceof RecordDisposition.Retain) {
-                return disposition;
-            }
-        }
-        return requestedDisposition;
-    }
-
-    private void finishSuccessfullyLocked(
-        Decision decision,
-        RecordDisposition acceptedDisposition
-    ) {
+        transitionPhaseLocked(Phase.FINALIZING);
         var releaseFailure = releaseResourcesLocked();
-        var terminalOutcome = terminalOutcomeFor(acceptedDisposition, releaseFailure);
+        var terminalOutcome = releaseFailure == null
+            ? TerminalOutcome.COMPLETED
+            : TerminalOutcome.FAILED;
         var metricsFailure = recordTerminationLocked(terminalOutcome);
         addSuppressed(releaseFailure, metricsFailure);
         if (releaseFailure != null) {
@@ -667,32 +485,63 @@ public final class ReplayTransaction<R> {
                 requestId,
                 sourceOutcome,
                 targetOutcome,
-                evidenceOutcome,
-                acceptedDisposition,
-                decision.haltReplay()
+                evidenceOutcome
             )
         );
     }
 
-    private static TerminalOutcome terminalOutcomeFor(
-        RecordDisposition acceptedDisposition,
-        Throwable releaseFailure
-    ) {
-        if (releaseFailure != null) {
-            return TerminalOutcome.FAILED;
-        }
-        return acceptedDisposition.action() == RecordDisposition.Action.COMMIT
-            ? TerminalOutcome.COMMITTED
-            : TerminalOutcome.RETAINED;
-    }
-
-    private void completeFailureLocked(Throwable failure, Throwable dispositionFailure) {
-        addSuppressed(failure, dispositionFailure);
+    private void completeFailureLocked(Throwable failure) {
+        assertInMailbox();
+        transitionPhaseLocked(Phase.FINALIZING);
         var releaseFailure = releaseResourcesLocked();
         addSuppressed(failure, releaseFailure);
         var metricsFailure = recordTerminationLocked(TerminalOutcome.FAILED);
         addSuppressed(failure, metricsFailure);
         completion.completeExceptionally(failure);
+    }
+
+    private static <T> boolean requiresEvidence(
+        SourceOutcome source,
+        TargetOutcome<T> target
+    ) {
+        Boolean sourceRequiresEvidence = source.visit(new SourceOutcome.Visitor<Boolean>() {
+            @Override
+            public Boolean onComplete(SourceOutcome.Complete complete) {
+                return true;
+            }
+
+            @Override
+            public Boolean onConfirmedDead(SourceOutcome.ConfirmedDead confirmedDead) {
+                return true;
+            }
+
+            @Override
+            public Boolean onCapturedClose(SourceOutcome.CapturedClose capturedClose) {
+                return true;
+            }
+
+            @Override
+            public Boolean onLegacyExpired(SourceOutcome.LegacyExpired legacyExpired) {
+                return true;
+            }
+
+            @Override
+            public Boolean onInconclusive(SourceOutcome.Inconclusive inconclusive) {
+                return true;
+            }
+
+            @Override
+            public Boolean onInterrupted(SourceOutcome.Interrupted interrupted) {
+                return false;
+            }
+
+            @Override
+            public Boolean onShutdown(SourceOutcome.Shutdown shutdown) {
+                return false;
+            }
+        });
+        return Boolean.TRUE.equals(sourceRequiresEvidence)
+            && !(target instanceof TargetOutcome.Cancelled<?>);
     }
 
     @SuppressWarnings("java:S1181") // All terminal metrics are attempted and their failures aggregated.

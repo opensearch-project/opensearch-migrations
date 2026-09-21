@@ -23,6 +23,11 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import lombok.NonNull;
 
 public final class ConnectionActor<P extends AutoCloseable, R> {
+    @FunctionalInterface
+    public interface FatalHandler {
+        void onFatal(Error failure);
+    }
+
     public enum HeadWaitReason {
         SCHEDULED_START("scheduled_start"),
         PREPARATION("preparation"),
@@ -181,6 +186,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     private final TargetExchange<P, R> targetExchange;
     private final Metrics metrics;
     private final LongSupplier nanoTime;
+    private final FatalHandler fatalHandler;
     private final Object lifecycleLock = new Object();
     private final Deque<Command<P, R>> commands = new ArrayDeque<>();
     private final Set<Command<P, R>> obligations = new LinkedHashSet<>();
@@ -212,12 +218,35 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         this(sessionKey, mailbox, targetExchange, metrics, System::nanoTime);
     }
 
+    public ConnectionActor(
+        @NonNull ConnectionSessionKey sessionKey,
+        @NonNull ActorMailbox mailbox,
+        @NonNull TargetExchange<P, R> targetExchange,
+        @NonNull Metrics metrics,
+        @NonNull FatalHandler fatalHandler
+    ) {
+        this(sessionKey, mailbox, targetExchange, metrics, System::nanoTime, fatalHandler);
+    }
+
     ConnectionActor(
         @NonNull ConnectionSessionKey sessionKey,
         @NonNull ActorMailbox mailbox,
         @NonNull TargetExchange<P, R> targetExchange,
         @NonNull Metrics metrics,
         @NonNull LongSupplier nanoTime
+    ) {
+        this(sessionKey, mailbox, targetExchange, metrics, nanoTime, failure -> {
+            throw failure;
+        });
+    }
+
+    ConnectionActor(
+        @NonNull ConnectionSessionKey sessionKey,
+        @NonNull ActorMailbox mailbox,
+        @NonNull TargetExchange<P, R> targetExchange,
+        @NonNull Metrics metrics,
+        @NonNull LongSupplier nanoTime,
+        @NonNull FatalHandler fatalHandler
     ) {
         this.sessionKey = sessionKey;
         this.mailbox = mailbox;
@@ -228,19 +257,27 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         this.targetExchange = targetExchange;
         this.metrics = metrics;
         this.nanoTime = nanoTime;
+        this.fatalHandler = fatalHandler;
     }
 
-    private boolean post(Runnable command) {
+    private void post(String operation, Runnable command) {
         synchronized (lifecycleLock) {
             try {
                 mailbox.execute(() -> runMailboxTransition(command));
-                return true;
             } catch (RejectedExecutionException e) {
-                // The owning event-loop termination listener halts the process. Do not transfer
-                // actor mutation or cleanup authority to this calling thread.
-                return false;
+                reportRejectedSubmission(operation, e);
             }
         }
+    }
+
+    private void reportRejectedSubmission(String operation, RejectedExecutionException cause) {
+        fatalHandler.onFatal(new Error(
+            "Required connection-actor submission was rejected during "
+                + operation
+                + " for "
+                + sessionKey,
+            cause
+        ));
     }
 
     private void runMailboxTransition(Runnable command) {
@@ -265,7 +302,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             stagePreparation(command, outcome, failure)
         );
         if (accepted) {
-            post(() -> admit(command));
+            post("request admission " + requestId, () -> admit(command));
         }
         return command.completion.stage();
     }
@@ -273,7 +310,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
     public CompletionStage<SessionOutcome> admitClose(@NonNull Instant scheduledStart) {
         var command = new CloseCommand<P, R>(scheduledStart);
         if (trackObligation(command)) {
-            post(() -> admit(command));
+            post("ordered close admission", () -> admit(command));
         }
         return command.completion.stage();
     }
@@ -282,7 +319,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
         @NonNull AbortReason reason,
         @NonNull CancellationException cause
     ) {
-        post(() -> beginAbort(reason, cause));
+        post("connection abort " + reason, () -> beginAbort(reason, cause));
         return termination.stage();
     }
 
@@ -346,7 +383,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                 return;
             }
         }
-        post(() -> onPreparationSettled(command));
+        post("request preparation completion " + command.requestId, () -> onPreparationSettled(command));
     }
 
     private void onPreparationSettled(RequestCommand<P, R> command) {
@@ -387,8 +424,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
                     delay
                 );
             } catch (RejectedExecutionException e) {
-                // The owning event-loop termination listener halts the process. Do not mutate the
-                // actor from the scheduler's rejection path.
+                reportRejectedSubmission("scheduled head start", e);
             }
         }
     }
@@ -470,7 +506,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             return;
         }
         exchange.whenComplete((outcome, failure) ->
-            post(() -> {
+            post("target exchange completion " + request.requestId, () -> {
                 if (request.settled) {
                     releasePreparedQuietly(request);
                     return;
@@ -538,7 +574,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             closeStage = CompletableFuture.failedFuture(t);
         }
         closeStage.whenComplete((ignored, failure) ->
-            post(() -> {
+            post("ordered close completion", () -> {
                 if (state == State.ABORTING || state == State.TERMINATED) {
                     return;
                 }
@@ -585,7 +621,7 @@ public final class ConnectionActor<P extends AutoCloseable, R> {
             abortStage = CompletableFuture.failedFuture(t);
         }
         abortStage.whenComplete((ignored, failure) ->
-            post(() -> {
+            post("target abort completion", () -> {
                 if (targetAbortPending) {
                     targetAbortPending = false;
                     metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);

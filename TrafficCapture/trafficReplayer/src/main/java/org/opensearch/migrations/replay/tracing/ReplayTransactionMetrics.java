@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.tracing;
 
-import org.opensearch.migrations.replay.lifecycle.RecordDisposition;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 
 import io.opentelemetry.api.common.AttributeKey;
@@ -15,7 +14,6 @@ public final class ReplayTransactionMetrics implements ReplayTransaction.Metrics
     public static final AttributeKey<String> STATE_ATTRIBUTE = AttributeKey.stringKey("state");
     public static final AttributeKey<String> REASON_ATTRIBUTE = AttributeKey.stringKey("reason");
     public static final AttributeKey<String> OUTCOME_ATTRIBUTE = AttributeKey.stringKey("outcome");
-    public static final AttributeKey<String> ACTION_ATTRIBUTE = AttributeKey.stringKey("action");
     private static final String TRANSACTIONS_UNIT = "transactions";
 
     public static final class MetricNames {
@@ -25,14 +23,12 @@ public final class ReplayTransactionMetrics implements ReplayTransaction.Metrics
         public static final String RUNWAY_STATE = "replayTransactionRunwayState";
         public static final String RUNWAY_LOSS = "replayTransactionRunwayLoss";
         public static final String TERMINAL_OUTCOME = "replayTransactionTerminalOutcome";
-        public static final String DISPOSITION = "replayTransactionDisposition";
     }
 
     private final LongUpDownCounter activePhase;
     private final LongUpDownCounter runwayState;
     private final LongCounter runwayLoss;
     private final LongCounter terminalOutcome;
-    private final LongCounter disposition;
 
     public ReplayTransactionMetrics(@NonNull Meter meter) {
         activePhase = meter.upDownCounterBuilder(MetricNames.ACTIVE_PHASE)
@@ -45,9 +41,6 @@ public final class ReplayTransactionMetrics implements ReplayTransaction.Metrics
             .setUnit("events")
             .build();
         terminalOutcome = meter.counterBuilder(MetricNames.TERMINAL_OUTCOME)
-            .setUnit(TRANSACTIONS_UNIT)
-            .build();
-        disposition = meter.counterBuilder(MetricNames.DISPOSITION)
             .setUnit(TRANSACTIONS_UNIT)
             .build();
     }
@@ -70,18 +63,5 @@ public final class ReplayTransactionMetrics implements ReplayTransaction.Metrics
     @Override
     public void terminalOutcome(@NonNull ReplayTransaction.TerminalOutcome outcome) {
         terminalOutcome.add(1, Attributes.of(OUTCOME_ATTRIBUTE, outcome.metricLabel()));
-    }
-
-    @Override
-    public void disposition(@NonNull RecordDisposition disposition) {
-        this.disposition.add(
-            1,
-            Attributes.of(
-                ACTION_ATTRIBUTE,
-                disposition.action().metricLabel(),
-                REASON_ATTRIBUTE,
-                disposition.reasonCode()
-            )
-        );
     }
 }

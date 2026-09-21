@@ -3,24 +3,31 @@ package org.opensearch.migrations.replay;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.kafka.KafkaLivenessSnapshotRecord;
-import org.opensearch.migrations.replay.kafka.KafkaNoMoreWritesRecord;
-import org.opensearch.migrations.replay.kafka.KafkaSupersededTrafficRecord;
+import org.opensearch.migrations.replay.kafka.KafkaCaptureControlRecord;
 import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
+import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordAssociationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceRequestAssemblyId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TerminalSourceConnectionId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.expiration.BehavioralPolicy;
 import org.opensearch.migrations.replay.traffic.expiration.ExpiringTrafficStreamMap;
-import org.opensearch.migrations.replay.traffic.source.FollowUpRequirement;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
-import org.opensearch.migrations.replay.traffic.source.SourceControlEvent;
 import org.opensearch.migrations.replay.traffic.source.SourceInput;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -64,7 +71,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     private final SpanWrappingAccumulationCallbacks listener;
     private final Duration connectionTimeout;
     private final boolean structuralExpiration;
-    private final BiConsumer<ITrafficStreamKey, FollowUpRequirement> scanBlockerListener;
+    private final RecordWorkTracker recordWorkTracker;
+    private final Function<ITrafficStreamKey, RecordId> recordIdMapper;
 
     private final AtomicInteger requestCounter = new AtomicInteger();
     private final AtomicInteger reusedKeepAliveCounter = new AtomicInteger();
@@ -146,7 +154,23 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         String hintStringToConfigureTimeout,
         AccumulationCallbacks accumulationCallbacks
     ) {
-        this(minTimeout, hintStringToConfigureTimeout, accumulationCallbacks, false, (key, requirement) -> {});
+        this(minTimeout, hintStringToConfigureTimeout, accumulationCallbacks, false);
+    }
+
+    public CapturedTrafficToHttpTransactionAccumulator(
+        Duration minTimeout,
+        String hintStringToConfigureTimeout,
+        AccumulationCallbacks accumulationCallbacks,
+        boolean structuralExpiration
+    ) {
+        this(
+            minTimeout,
+            hintStringToConfigureTimeout,
+            accumulationCallbacks,
+            structuralExpiration,
+            null,
+            null
+        );
     }
 
     public CapturedTrafficToHttpTransactionAccumulator(
@@ -154,11 +178,18 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         String hintStringToConfigureTimeout,
         AccumulationCallbacks accumulationCallbacks,
         boolean structuralExpiration,
-        BiConsumer<ITrafficStreamKey, FollowUpRequirement> scanBlockerListener
+        RecordWorkTracker recordWorkTracker,
+        Function<ITrafficStreamKey, RecordId> recordIdMapper
     ) {
         this.connectionTimeout = minTimeout;
         this.structuralExpiration = structuralExpiration;
-        this.scanBlockerListener = scanBlockerListener;
+        if ((recordWorkTracker == null) != (recordIdMapper == null)) {
+            throw new IllegalArgumentException(
+                "recordWorkTracker and recordIdMapper must either both be set or both be absent"
+            );
+        }
+        this.recordWorkTracker = recordWorkTracker;
+        this.recordIdMapper = recordIdMapper;
         liveStreams = new ExpiringTrafficStreamMap(minTimeout, EXPIRATION_GRANULARITY, new BehavioralPolicy() {
             @Override
             public String appendageToDescribeHowToSetMinimumGuaranteedLifetime() {
@@ -202,7 +233,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             @NonNull Accumulation accum,
             RequestResponsePacketPair.ReconstructionStatus status,
             @NonNull Instant when,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+            @NonNull Optional<TerminalSourceConnectionId> terminalAssociation
         ) {
             var tsCtx = accum.trafficChannelKey.getTrafficStreamsContext();
             underlying.onConnectionClose(
@@ -211,20 +242,21 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 accum.startingSourceRequestIndex,
                 status,
                 when,
-                trafficStreamKeysBeingHeld
+                accum.trafficChannelKey,
+                terminalAssociation
             );
         }
 
         public void onTrafficStreamsExpired(
             RequestResponsePacketPair.ReconstructionStatus status,
             IReplayContexts.ITrafficStreamsLifecycleContext tsCtx,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+            ITrafficStreamKey connectionKey
         ) {
-            underlying.onTrafficStreamsExpired(status, tsCtx.getLogicalEnclosingScope(), trafficStreamKeysBeingHeld);
-        }
-
-        public void onTrafficStreamIgnored(@NonNull ITrafficStreamKey tsk) {
-            underlying.onTrafficStreamIgnored(tsk.getTrafficStreamsContext());
+            underlying.onTrafficStreamsExpired(
+                status,
+                tsCtx.getLogicalEnclosingScope(),
+                connectionKey
+            );
         }
     }
 
@@ -273,16 +305,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     public void accept(SourceInput sourceInput) {
-        if (sourceInput instanceof SourceControlEvent.ConfirmedDead confirmedDead) {
-            acceptConfirmedDead(confirmedDead);
-            return;
-        }
         var trafficStreamAndKey = (ITrafficStreamWithKey) sourceInput;
         var tsk = trafficStreamAndKey.getKey();
-        if (trafficStreamAndKey instanceof KafkaLivenessSnapshotRecord
-            || trafficStreamAndKey instanceof KafkaNoMoreWritesRecord
-            || trafficStreamAndKey instanceof KafkaSupersededTrafficRecord) {
-            listener.onTrafficStreamIgnored(tsk);
+        var kafkaRecordId = trackedKafkaRecordId(tsk);
+        if (kafkaRecordId != null) {
+            recordWorkTracker.register(kafkaRecordId);
+        }
+        if (trafficStreamAndKey instanceof KafkaCaptureControlRecord) {
+            closeTrackedRecord(kafkaRecordId);
             return;
         }
         // Synthetic close from partition reassignment
@@ -300,7 +330,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     0,
                     RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED,
                     Instant.now(),
-                    List.of(tsk)
+                    tsk,
+                    Optional.empty()
                 );
             }
             return;
@@ -351,7 +382,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     .addArgument(accum.state)
                     .addArgument(() -> o.getCaptureCase().name())
                     .log();
-                var connectionStatus = addObservationToAccumulation(accum, tsk, o);
+                var stateBeforeObservation = accum.state;
+                var sourceAssociation = sourceAssociationForObservation(accum, o);
+                var replayAssociation = replayAssociationForObservation(accum, o);
+                associate(kafkaRecordId, sourceAssociation);
+                associate(kafkaRecordId, replayAssociation);
+                var connectionStatus = addObservationToAccumulation(accum, tsk, o, kafkaRecordId);
+                updateAssociationsAfterObservation(
+                    kafkaRecordId,
+                    accum,
+                    o,
+                    stateBeforeObservation,
+                    sourceAssociation,
+                    replayAssociation
+                );
                 if (CONNECTION_STATUS.CLOSED == connectionStatus) {
                     log.atDebug().setMessage("Connection terminated: removing {}:{} from liveStreams map")
                         .addArgument(partitionId)
@@ -363,61 +407,128 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 }
             }
         } catch (RuntimeException | Error e) {
-            if (accum.hasRrPair()) {
-                accum.getRrPair().holdTrafficStream(tsk);
-            }
             throw e;
         }
-        if (accum.hasRrPair()) {
-            accum.getRrPair().holdTrafficStream(tsk);
-        } else if (!trafficStream.getSubStream(trafficStream.getSubStreamCount() - 1).hasClose()) {
-            assert accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK
-                || accum.state == Accumulation.State.IGNORING_LAST_REQUEST
-                || trafficStream.getSubStreamCount() == 0;
-            listener.onTrafficStreamIgnored(tsk);
+        closeTrackedRecord(kafkaRecordId);
+    }
+
+    private KafkaRecordId trackedKafkaRecordId(ITrafficStreamKey trafficStreamKey) {
+        if (recordWorkTracker == null) {
+            return null;
         }
-        if (!connectionClosed) {
-            scanBlockerListener.accept(tsk, followUpRequirementFor(accum));
+        var recordId = Objects.requireNonNull(
+            recordIdMapper.apply(trafficStreamKey),
+            "recordIdMapper returned null"
+        );
+        return recordId instanceof KafkaRecordId kafkaRecordId ? kafkaRecordId : null;
+    }
+
+    private void closeTrackedRecord(KafkaRecordId recordId) {
+        if (recordId != null) {
+            recordWorkTracker.closeToNewAssociations(recordId);
         }
     }
 
-    private void acceptConfirmedDead(SourceControlEvent.ConfirmedDead confirmedDead) {
-        var evidence = confirmedDead.evidence();
-        var connection = evidence.connection();
-        var accumulation = liveStreams.getIfPresent(connection.nodeId(), connection.connectionId());
-        if (accumulation == null
-            || accumulation.sourceGeneration != evidence.partition().sourceGeneration()) {
-            log.atDebug()
-                .setMessage("Ignoring stale confirmed-dead control for {} in generation {}")
-                .addArgument(connection)
-                .addArgument(evidence.partition()::sourceGeneration)
-                .log();
+    private void associate(KafkaRecordId recordId, RecordAssociationId association) {
+        if (recordId != null && association != null) {
+            recordWorkTracker.associate(recordId, association);
+        }
+    }
+
+    private SourceRequestAssemblyId sourceAssociationForObservation(
+        Accumulation accumulation,
+        TrafficObservation observation
+    ) {
+        var isRead = observation.hasRead() || observation.hasReadSegment();
+        if ((accumulation.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK && isRead)
+            || (accumulation.state == Accumulation.State.ACCUMULATING_READS
+                && (isRead
+                    || observation.hasSegmentEnd()
+                    || observation.hasEndOfMessageIndicator()
+                    || observation.hasRequestDropped()
+                    || observation.hasClose()
+                    || observation.hasConnectionException()))) {
+            return sourceRequestAssemblyId(accumulation);
+        }
+        return null;
+    }
+
+    private ReplayRequestId replayAssociationForObservation(
+        Accumulation accumulation,
+        TrafficObservation observation
+    ) {
+        if (accumulation.state != Accumulation.State.ACCUMULATING_WRITES) {
+            return null;
+        }
+        if (!(observation.hasWrite()
+            || observation.hasWriteSegment()
+            || observation.hasSegmentEnd()
+            || observation.hasRead()
+            || observation.hasReadSegment()
+            || observation.hasClose()
+            || observation.hasConnectionException())) {
+            return null;
+        }
+        return currentReplayRequestId(accumulation);
+    }
+
+    private void updateAssociationsAfterObservation(
+        KafkaRecordId recordId,
+        Accumulation accumulation,
+        TrafficObservation observation,
+        Accumulation.State stateBeforeObservation,
+        SourceRequestAssemblyId sourceAssociation,
+        ReplayRequestId replayAssociation
+    ) {
+        if (recordId == null) {
             return;
         }
-        var proof = evidence.proof();
-        if (accumulation.hasRrPair()) {
-            accumulation.getRrPair().structuralProofId = proof.proofId();
+        if (stateBeforeObservation == Accumulation.State.ACCUMULATING_READS
+            && observation.hasEndOfMessageIndicator()) {
+            recordWorkTracker.relabelAll(
+                Objects.requireNonNull(sourceAssociation, "request-completing source association"),
+                currentReplayRequestId(accumulation)
+            );
+        } else if (stateBeforeObservation == Accumulation.State.ACCUMULATING_WRITES
+            && (observation.hasRead() || observation.hasReadSegment())) {
+            Objects.requireNonNull(replayAssociation, "response association before keep-alive rotation");
+            recordWorkTracker.associate(recordId, sourceRequestAssemblyId(accumulation));
+        } else if (stateBeforeObservation == Accumulation.State.ACCUMULATING_READS
+            && observation.hasClose()) {
+            finishAssociationIfPresent(
+                Objects.requireNonNull(sourceAssociation, "source association closed before request completion")
+            );
         }
-        connectionsExpiredCounter.incrementAndGet();
-        log.atInfo()
-            .setMessage("Closing source accumulation for {} from structural proof {}")
-            .addArgument(connection)
-            .addArgument(proof::proofId)
-            .log();
-        fireAccumulationsCallbacksAndClose(
-            accumulation,
-            RequestResponsePacketPair.ReconstructionStatus.CONFIRMED_DEAD
-        );
-        liveStreams.remove(connection.nodeId(), connection.connectionId());
     }
 
-    private FollowUpRequirement followUpRequirementFor(Accumulation accumulation) {
-        return switch (accumulation.state) {
-            case ACCUMULATING_READS -> FollowUpRequirement.REQUEST_COMPLETION;
-            case ACCUMULATING_WRITES -> FollowUpRequirement.RESPONSE_COMPLETION;
-            case WAITING_FOR_NEXT_READ_CHUNK, IGNORING_LAST_REQUEST ->
-                FollowUpRequirement.CONNECTION_TERMINATION;
-        };
+    private SourceRequestAssemblyId sourceRequestAssemblyId(Accumulation accumulation) {
+        return new SourceRequestAssemblyId(
+            connectionSessionKey(accumulation),
+            accumulation.getIndexOfCurrentRequest()
+        );
+    }
+
+    private ConnectionSessionKey connectionSessionKey(Accumulation accumulation) {
+        return new ConnectionSessionKey(
+            new SourceConnectionKey(
+                accumulation.trafficChannelKey.getNodeId(),
+                accumulation.trafficChannelKey.getConnectionId()
+            ),
+            accumulation.startingSourceRequestIndex,
+            accumulation.sourceGeneration
+        );
+    }
+
+    private ReplayRequestId currentReplayRequestId(Accumulation accumulation) {
+        return ReplayIdentity.replayRequestId(
+            accumulation.getRrPair().getHttpTransactionContext().getReplayerRequestKey()
+        );
+    }
+
+    private void finishAssociationIfPresent(RecordAssociationId association) {
+        if (recordWorkTracker != null && !recordWorkTracker.recordsFor(association).isEmpty()) {
+            recordWorkTracker.associationFinished(association);
+        }
     }
 
     private Accumulation createInitialAccumulation(ITrafficStreamWithKey streamWithKey) {
@@ -451,6 +562,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         @NonNull ITrafficStreamKey trafficStreamKey,
         TrafficObservation observation
     ) {
+        return addObservationToAccumulation(accum, trafficStreamKey, observation, null);
+    }
+
+    private CONNECTION_STATUS addObservationToAccumulation(
+        @NonNull Accumulation accum,
+        @NonNull ITrafficStreamKey trafficStreamKey,
+        TrafficObservation observation,
+        KafkaRecordId kafkaRecordId
+    ) {
         log.atTrace().setMessage("Adding observation: {} with state={}")
             .addArgument(observation)
             .addArgument(accum.state)
@@ -462,7 +582,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
         }
 
-        return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp).or(
+        return handleCloseObservationThatAffectEveryState(
+            accum,
+            observation,
+            trafficStreamKey,
+            timestamp,
+            kafkaRecordId
+        ).or(
             () -> handleObservationForSkipState(accum, observation)
         )
             .or(() -> handleObservationForReadState(accum, observation, trafficStreamKey, timestamp))
@@ -500,41 +626,34 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         return Optional.empty();
     }
 
-    private static List<ITrafficStreamKey> getTrafficStreamsHeldByAccum(Accumulation accum) {
-        return accum.hasRrPair() ? accum.getRrPair().getTrafficStreamsHeld() : List.of();
-    }
-
     private Optional<CONNECTION_STATUS> handleCloseObservationThatAffectEveryState(
         Accumulation accum,
         TrafficObservation observation,
         @NonNull ITrafficStreamKey trafficStreamKey,
-        Instant timestamp
+        Instant timestamp,
+        KafkaRecordId kafkaRecordId
     ) {
         var originTimestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         if (observation.hasClose()) {
-            accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp).holdTrafficStream(trafficStreamKey);
-            var heldTrafficStreams = getTrafficStreamsHeldByAccum(accum);
-            if (rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum)) {
-                heldTrafficStreams = List.of();
-            }
+            rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
+            var terminalAssociation = kafkaRecordId == null
+                ? null
+                : new TerminalSourceConnectionId(
+                    connectionSessionKey(accum),
+                    accum.numberOfResets.get()
+                );
+            associate(kafkaRecordId, terminalAssociation);
             closedConnectionCounter.incrementAndGet();
             listener.onConnectionClose(
                 accum,
                 RequestResponsePacketPair.ReconstructionStatus.COMPLETE,
                 timestamp,
-                heldTrafficStreams
+                Optional.ofNullable(terminalAssociation)
             );
             return Optional.of(CONNECTION_STATUS.CLOSED);
         } else if (observation.hasConnectionException()) {
             rotateAccumulationIfNecessary(trafficStreamKey.getConnectionId(), accum);
             exceptionConnectionCounter.incrementAndGet();
-            // Commit all held TSKs before nulling the rrPair. Without this, offsets from
-            // prior TrafficStream records that contributed to the in-progress request are
-            // permanently orphaned in OffsetLifecycleTracker, pinning the partition's commit
-            // pointer forever (same pattern as handleDroppedRequestForAccumulation).
-            // Note: we do NOT holdTrafficStream(trafficStreamKey) first — that would cause
-            // the current record's TSK to be double-committed (once here, once by the
-            // end-of-accept() fallback). The current record is committed by the fallback.
             handleDroppedRequestForAccumulation(accum);
             log.atDebug()
                 .setMessage("Removing accumulated traffic pair due to recorded connection exception event for {}")
@@ -653,9 +772,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     private void handleDroppedRequestForAccumulation(Accumulation accum) {
-        if (accum.hasRrPair()) {
-            var rrPair = accum.getRrPair();
-            rrPair.getTrafficStreamsHeld().forEach(listener::onTrafficStreamIgnored);
+        var sourceAssociation = accum.state == Accumulation.State.ACCUMULATING_READS
+            ? sourceRequestAssemblyId(accum)
+            : null;
+        if (sourceAssociation != null) {
+            finishAssociationIfPresent(sourceAssociation);
         }
         log.atTrace().setMessage("resetting to forget {}").addArgument(accum.trafficChannelKey).log();
         accum.resetToIgnoreAndForgetCurrentRequest();
@@ -764,6 +885,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         try {
             switch (accumulation.state) {
                 case ACCUMULATING_READS:
+                    var sourceAssociation = sourceRequestAssemblyId(accumulation);
                     // This is a safer bet than sending a partial response. If we drop 1 in a million requests
                     // where the next TrafficStream had an EOM message and that TrafficStream was dropped, we'll
                     // NOT send many more requests that never would have made it to the source cluster because
@@ -782,16 +904,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                         listener.onTrafficStreamsExpired(
                             status,
                             accumulation.trafficChannelKey.getTrafficStreamsContext(),
-                            accumulation.getRrPair().getTrafficStreamsHeld()
+                            accumulation.trafficChannelKey
                         );
-                        // Null the rrPair so the finally-block's onConnectionClose (which
-                        // always runs despite the return) does not double-commit the same
-                        // TSKs — getTrafficStreamsHeldByAccum returns List.of() when
-                        // hasRrPair()==false. Without this, keep-alive connections expiring
-                        // mid-second-request hit IllegalStateException in
-                        // OffsetLifecycleTracker.removeAndReturnNewHead (double-remove).
                         accumulation.resetForNextRequest();
                     }
+                    finishAssociationIfPresent(sourceAssociation);
                     return;
                 case ACCUMULATING_WRITES:
                     handleEndOfResponse(accumulation, status);
@@ -808,7 +925,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     accumulation,
                     status,
                     accumulation.getLastTimestamp(),
-                    getTrafficStreamsHeldByAccum(accumulation)
+                    Optional.empty()
                 );
             }
         }

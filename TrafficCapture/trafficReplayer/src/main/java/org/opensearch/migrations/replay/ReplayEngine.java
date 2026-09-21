@@ -130,12 +130,12 @@ public class ReplayEngine {
         return progressController.whenQuiescent();
     }
 
-    public WorkToken admitWork(
+    public CompletionStage<WorkToken> admitWork(
         SourcePartitionKey partition,
         ReplayWorkId workId,
         Instant sourceTime
     ) {
-        return progressController.admit(partition, workId, sourceTime).toCompletableFuture().join();
+        return progressController.admit(partition, workId, sourceTime);
     }
 
     public <T> TrackedFuture<String, T> scheduleRequestLifecycle(

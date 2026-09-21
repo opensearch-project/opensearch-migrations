@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 
-import org.opensearch.migrations.replay.kafka.KafkaBehavioralPolicy;
 import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -58,7 +57,6 @@ public class TrafficCaptureSourceFactory {
                 appParams.kafkaTrafficPassword,
                 appParams.kafkaTrafficPropertyFile,
                 Clock.systemUTC(),
-                new KafkaBehavioralPolicy(),
                 appParams.maximumOwnedKafkaRecords,
                 appParams.maximumOwnedKafkaBytes,
                 !appParams.disableLivenessScanner

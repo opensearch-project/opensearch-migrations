@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -20,29 +19,13 @@ import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
 public interface ITrafficCaptureSource extends AutoCloseable {
 
-    enum CommitResult {
-        IMMEDIATE,
-        AFTER_NEXT_READ,
-        BLOCKED_BY_OTHER_COMMITS,
-        IGNORED
-    }
-
     CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     );
 
-    CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
-
-    default CompletionStage<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
-        try {
-            commitTrafficStream(trafficStreamKey);
-            return CompletableFuture.completedFuture(null);
-        } catch (IOException e) {
-            return CompletableFuture.failedFuture(e);
-        }
+    default CompletionStage<Void> recordProcessingFinished(KafkaRecordId recordId) {
+        return CompletableFuture.completedFuture(null);
     }
-
-    default void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {}
 
     default RecordId recordIdFor(ITrafficStreamKey trafficStreamKey) {
         return new TrafficStreamRecordId(
@@ -65,11 +48,6 @@ public interface ITrafficCaptureSource extends AutoCloseable {
     }
 
     default void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {}
-
-    default void updateScanBlocker(
-        ITrafficStreamKey trafficStreamKey,
-        FollowUpRequirement followUpRequirement
-    ) {}
 
     default boolean usesStructuralExpiration() {
         return false;

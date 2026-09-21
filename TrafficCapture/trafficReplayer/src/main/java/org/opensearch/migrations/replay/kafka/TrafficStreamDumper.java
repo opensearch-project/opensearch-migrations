@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
@@ -25,6 +26,56 @@ import com.google.protobuf.ByteString;
 public class TrafficStreamDumper {
 
     private TrafficStreamDumper() {}
+
+    public static String format(
+        CaptureRecord captureRecord,
+        int partition,
+        long offset,
+        int previewRead,
+        int previewWrite,
+        long baseEpochSeconds
+    ) {
+        return switch (captureRecord.getPayloadCase()) {
+            case TRAFFICSTREAM -> format(
+                captureRecord.getTrafficStream(),
+                partition,
+                offset,
+                previewRead,
+                previewWrite,
+                baseEpochSeconds
+            );
+            case WRITERPARTITIONHEARTBEAT -> {
+                var heartbeat = captureRecord.getWriterPartitionHeartbeat();
+                yield metadataPrefix(partition, offset)
+                    + "HEARTBEAT writer:"
+                    + heartbeat.getWriterNodeId()
+                    + " intervalMillis:"
+                    + heartbeat.getHeartbeatIntervalMillis()
+                    + (heartbeat.hasEmittedAtMillis()
+                        ? " emittedAtMillis:" + heartbeat.getEmittedAtMillis()
+                        : "");
+            }
+            case CAPTURECAPABILITYPROBE -> {
+                var probe = captureRecord.getCaptureCapabilityProbe();
+                yield metadataPrefix(partition, offset)
+                    + "PROBE writer:"
+                    + probe.getWriterNodeId()
+                    + " id:"
+                    + probe.getProbeId();
+            }
+            case PAYLOAD_NOT_SET -> throw new CaptureRecordProtocolViolationException(
+                "CaptureRecord.payload is not set at partition " + partition + " offset " + offset
+            );
+        };
+    }
+
+    private static String metadataPrefix(int partition, long offset) {
+        var sb = new StringBuilder("[?-?] ");
+        if (partition >= 0) {
+            sb.append(String.format("p:%d o:%6d ", partition, offset));
+        }
+        return sb.toString();
+    }
 
     /**
      * Format a TrafficStream record into a single summary line.

@@ -19,6 +19,7 @@ import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -284,7 +285,10 @@ public class ReplayerProcessExitTest {
                         .setClose(CloseObservation.getDefaultInstance()))
                     .build();
 
-                producer.send(new ProducerRecord<>(TOPIC, trafficStream.toByteArray()));
+                producer.send(new ProducerRecord<>(
+                    TOPIC,
+                    CaptureRecord.newBuilder().setTrafficStream(trafficStream).build().toByteArray()
+                ));
                 try {
                     Thread.sleep(PRODUCE_INTERVAL.toMillis());
                 } catch (InterruptedException e) {

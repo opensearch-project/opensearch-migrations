@@ -25,6 +25,7 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -259,7 +260,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
                             .build()).build())
                     .build();
                 try (var baos = new ByteArrayOutputStream()) {
-                    ts.writeTo(baos);
+                    CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
                     mc.addRecord(new org.apache.kafka.clients.consumer.ConsumerRecord<>(
                         "test", 0, 0, "k", baos.toByteArray()));
                 } catch (Exception e) { throw new RuntimeException(e); }

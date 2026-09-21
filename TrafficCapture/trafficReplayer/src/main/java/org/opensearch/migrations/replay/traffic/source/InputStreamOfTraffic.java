@@ -96,18 +96,6 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        // do nothing - this datasource isn't transactional
-        channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
-        return CommitResult.IMMEDIATE;
-    }
-
-    @Override
-    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
-        channelContextManager.releaseContextFor(trafficStreamKey.getTrafficStreamsContext().getLogicalEnclosingScope());
-    }
-
-    @Override
     public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
         return CompletableFuture.completedFuture(null);
     }

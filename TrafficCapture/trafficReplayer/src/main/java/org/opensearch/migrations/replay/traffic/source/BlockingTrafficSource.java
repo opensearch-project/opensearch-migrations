@@ -219,24 +219,12 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-        var commitResult = underlyingSource.commitTrafficStream(trafficStreamKey);
-        if (commitResult == CommitResult.AFTER_NEXT_READ) {
-            signalReader();
-        }
-        return commitResult;
-    }
-
-    @Override
-    public CompletionStage<Void> commitTrafficStreamAsync(ITrafficStreamKey trafficStreamKey) {
-        var completion = underlyingSource.commitTrafficStreamAsync(trafficStreamKey);
+    public CompletionStage<Void> recordProcessingFinished(
+        org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId recordId
+    ) {
+        var completion = underlyingSource.recordProcessingFinished(recordId);
         signalReader();
         return completion;
-    }
-
-    @Override
-    public void releaseTrafficStreamWithoutCommit(ITrafficStreamKey trafficStreamKey) {
-        underlyingSource.releaseTrafficStreamWithoutCommit(trafficStreamKey);
     }
 
     @Override
@@ -254,14 +242,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Override
     public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
         underlyingSource.setSourcePartitionLifecycleListener(listener);
-    }
-
-    @Override
-    public void updateScanBlocker(
-        ITrafficStreamKey trafficStreamKey,
-        FollowUpRequirement followUpRequirement
-    ) {
-        underlyingSource.updateScanBlocker(trafficStreamKey, followUpRequirement);
     }
 
     @Override
