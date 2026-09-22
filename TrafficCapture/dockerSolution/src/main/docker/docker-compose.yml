@@ -53,7 +53,7 @@ services:
       - "/usr/share/captureProxy/config/key.pem"
       - "--max-connection-duration-seconds"
       - "130"
-      - "--liveness-snapshot-interval-seconds"
+      - "--heartbeat-interval-seconds"
       - "2"
     depends_on:
       - kafka

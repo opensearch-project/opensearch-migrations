@@ -2,7 +2,7 @@
 
 > **Reference status:** This document describes the broader migration product and user journey. Its
 > capture-and-replay details are historical context, not the current protocol contract. See
-> [`captureAndReplayArchitecture.md`](./captureAndReplayArchitecture.md) and its linked companion
+> [`captureAndReplayArchitecture.md`](captureAndReplay/captureAndReplayArchitecture.md) and its linked companion
 > documents for the current capture and replay design.
 
 ## Background
