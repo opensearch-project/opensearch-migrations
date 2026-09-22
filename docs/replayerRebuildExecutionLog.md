@@ -677,3 +677,17 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   the final plan cleanup; this checkpoint's intended files were formatted before that decision.
 - S5 remains open. S5c3d must migrate the remaining callers and the complete module run must be green
   before adding the S5 End entry.
+
+### CI checkpoint — inherited branch housekeeping after S5c3c
+
+- Repaired the two non-authoritative reference documents that still linked to the top-level capture
+  and replay design at its old location. No authoritative design document changed.
+- Replaced the removed Docker Compose proxy option `--liveness-snapshot-interval-seconds` with its
+  direct seconds-based successor `--heartbeat-interval-seconds`, retaining the configured value of
+  2, and removed one unused `assertNull` import that blocked the capture-offloader Spotless check.
+- The required read-only Claude review verified the option's arity, units, constructor mapping,
+  positive-value validation, compatible default heartbeat expiration, and the absence of any
+  remaining assertion use. It returned `NO_ACTIONABLE_FINDINGS`.
+- `:TrafficCapture:captureKafkaOffloader:spotlessJavaCheck --parallel --max-workers=18 --rerun-tasks
+  --no-build-cache` passed. These fixes close the observed link-checker, Docker Compose startup, and
+  capture-offloader formatting failures; the workflows must confirm them after push.
