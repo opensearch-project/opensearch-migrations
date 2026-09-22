@@ -816,3 +816,40 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - Spotless remained excluded at the user's direction. S5 remains open for the atomic removal of
   `TargetOutcome`, the complete module test/long-test/isolated-test gates, and the final S5
   requirement matrix and End entry.
+
+### Progress checkpoint — S5c3e remove the legacy target-outcome taxonomy
+
+- Removed `TargetOutcome` and its success, failure, cancellation, filtering, and classified-skip
+  variants from production and tests. The attempt boundary retains only the authoritative
+  `TargetAttemptOutcome`; replay transactions now settle either a normal target result or an
+  explicit `CancellationException`.
+- Kept response comparison local to `TargetResponseClassifier` instead of carrying commit,
+  redelivery, or process-termination semantics in a target result. `TrafficReplayerCore` stores the
+  aggregate target exchange, comparison classification, and failure evidence needed for tuple
+  output and final request metrics.
+- Cancellation is recognized exactly once from the raw target-future failure. Transformation-status
+  and missing-result failures remain normal failed target results, so they still write tuple
+  evidence and cannot be laundered into cancellation cleanup.
+- `ReplayTransaction.TransactionOutcome` requires exactly one normal target result or target
+  cancellation. Construction failure now completes the transaction exceptionally through its
+  ordinary resource-release and terminal-metric path rather than leaving completion unresolved.
+- Migrated the four direct test callers without adding Mockito. The obsolete exhaustive
+  `TargetOutcome` visitor test was deleted; focused coverage checks normal result identity,
+  cancellation identity, evidence gating, and the mutual-exclusion invariant.
+
+- The first required read-only Claude review found three valid issues: raw cancellation had been
+  multiplexed with synthesized transformation/missing-result failures; `classifyHttpStatus` retained
+  a dead result parameter; and the new transaction result/exclusivity contract lacked direct
+  coverage while exceptional outcome construction could hang. Cancellation now has a distinct
+  captured field, the dead parameter is gone, result/exclusivity coverage is present, and
+  construction failure uses the transaction failure path.
+- The confirmation review returned `NO_ACTIONABLE_FINDINGS`.
+- `:TrafficCapture:trafficReplayer:compileTestJava -x spotlessJavaCheck -x spotlessJavaApply
+  --parallel --max-workers=18` passed in 6 seconds.
+- The serialized focused gate passed 42/42 tests in 54 seconds across transaction cancellation,
+  target-response classification, lifecycle orchestration, core progress, replay smoke tests, and
+  the remaining replay outcome vocabulary.
+- `rg -n '\bTargetOutcome\b' TrafficCapture/trafficReplayer/src` returned no matches, and
+  `git diff --check` passed.
+- Spotless remains deferred. S5 remains open only for the complete module `test`, `longTest`, and
+  `isolatedTest` gates plus the concise final requirement matrix and End entry.

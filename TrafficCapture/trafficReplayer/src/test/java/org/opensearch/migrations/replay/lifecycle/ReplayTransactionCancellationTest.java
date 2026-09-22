@@ -18,7 +18,6 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessi
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.testing.TestEventLoop;
 
 import org.junit.jupiter.api.Assertions;
@@ -79,7 +78,7 @@ class ReplayTransactionCancellationTest {
         var cancellation = new CancellationException("shutdown");
 
         transaction.settleSource(new SourceOutcome.Complete());
-        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        transaction.settleTargetResult("response");
         mailbox.runUntilIdle();
         Assertions.assertFalse(evidence.isDone());
 
@@ -126,9 +125,7 @@ class ReplayTransactionCancellationTest {
         var cancellation = new CancellationException("shutdown");
 
         var sourceAcknowledgement = transaction.settleSource(new SourceOutcome.Complete());
-        var targetAcknowledgement = transaction.settleTarget(
-            new TargetOutcome.Cancelled<>(cancellation)
-        );
+        var targetAcknowledgement = transaction.settleTargetCancellation(cancellation);
         var cancellationAcknowledgement = transaction.requestCancellation(cancellation);
 
         mailbox.runUntilIdle();
@@ -140,7 +137,8 @@ class ReplayTransactionCancellationTest {
             cancellationAcknowledgement.toCompletableFuture().get(5, TimeUnit.SECONDS)
         );
         var outcome = transaction.completion().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        Assertions.assertInstanceOf(TargetOutcome.Cancelled.class, outcome.targetOutcome());
+        Assertions.assertNull(outcome.targetResult());
+        Assertions.assertSame(cancellation, outcome.targetCancellation());
         Assertions.assertInstanceOf(
             ReplayOutcomes.EvidenceOutcome.NotRequired.class,
             outcome.evidenceOutcome()
@@ -158,20 +156,25 @@ class ReplayTransactionCancellationTest {
             ),
             0
         );
-        var transaction = new ReplayTransaction<String>(
+        var targetResult = new Object();
+        var transaction = new ReplayTransaction<Object>(
             requestId,
             mailbox,
-            (ignoredRequest, ignoredSource, ignoredTarget) ->
-                java.util.concurrent.CompletableFuture.completedFuture(
+            (ignoredRequest, ignoredSource, observedTarget) -> {
+                Assertions.assertSame(targetResult, observedTarget);
+                return java.util.concurrent.CompletableFuture.completedFuture(
                     new ReplayOutcomes.EvidenceOutcome.Durable("test tuple")
-                ),
+                );
+            },
             List.of()
         );
 
         transaction.settleSource(new SourceOutcome.Complete());
-        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        transaction.settleTargetResult(targetResult);
         mailbox.runUntilIdle();
         var outcome = transaction.completion().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        Assertions.assertSame(targetResult, outcome.targetResult());
+        Assertions.assertNull(outcome.targetCancellation());
         Assertions.assertInstanceOf(
             ReplayOutcomes.EvidenceOutcome.Durable.class,
             outcome.evidenceOutcome()
@@ -183,6 +186,42 @@ class ReplayTransactionCancellationTest {
         Assertions.assertInstanceOf(
             ReplayOutcomes.ProcessingCancellationResult.ProcessingCompletionWon.class,
             cancellation.toCompletableFuture().get(5, TimeUnit.SECONDS)
+        );
+    }
+
+    @Test
+    void transactionOutcomeRequiresExactlyOneTargetSettlement() {
+        var requestId = new ReplayRequestId(
+            new ConnectionSessionKey(
+                new SourceConnectionKey("node", "connection"),
+                0,
+                0
+            ),
+            0
+        );
+        var source = new SourceOutcome.Complete();
+        var evidence = new ReplayOutcomes.EvidenceOutcome.Durable("test tuple");
+        var cancellation = new CancellationException("shutdown");
+
+        Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> new ReplayTransaction.TransactionOutcome<String>(
+                requestId,
+                source,
+                null,
+                null,
+                evidence
+            )
+        );
+        Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> new ReplayTransaction.TransactionOutcome<>(
+                requestId,
+                source,
+                "response",
+                cancellation,
+                evidence
+            )
         );
     }
 
@@ -205,7 +244,7 @@ class ReplayTransactionCancellationTest {
         );
 
         transaction.settleSource(new SourceOutcome.Complete());
-        transaction.settleTarget(new TargetOutcome.Succeeded<>("response"));
+        transaction.settleTargetResult("response");
         mailbox.runUntilIdle();
 
         evidence.complete(new ReplayOutcomes.EvidenceOutcome.Durable("test tuple"));

@@ -10,7 +10,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
+import org.opensearch.migrations.replay.TargetResponseClassifier.TargetResponseClassification;
 
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,7 @@ class TargetResponseClassifierTest {
     @Test
     void successfulBulkResponseIsARealSuccess() {
         try (var fixture = fixture(ExceptionTypeAllowlist.empty(), bulkResponse(false))) {
-            assertInstanceOf(TargetOutcome.Succeeded.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Successful.class, fixture.classify());
         }
     }
 
@@ -36,7 +36,7 @@ class TargetResponseClassifierTest {
             ExceptionTypeAllowlist.empty(),
             bulkResponse(true, "version_conflict_engine_exception")
         )) {
-            assertInstanceOf(TargetOutcome.Failed.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Unsuccessful.class, fixture.classify());
         }
     }
 
@@ -47,7 +47,7 @@ class TargetResponseClassifierTest {
             allowlist,
             bulkResponse(true, "version_conflict_engine_exception")
         )) {
-            assertInstanceOf(TargetOutcome.ClassifiedSkip.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Allowlisted.class, fixture.classify());
         }
         try (var fixture = fixture(
             allowlist,
@@ -57,7 +57,7 @@ class TargetResponseClassifierTest {
                 "mapper_parsing_exception"
             )
         )) {
-            assertInstanceOf(TargetOutcome.Failed.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Unsuccessful.class, fixture.classify());
         }
     }
 
@@ -67,10 +67,10 @@ class TargetResponseClassifierTest {
             new ExceptionTypeAllowlist(Set.of("unavailable_shards_exception")),
             bulkResponse(true, "unavailable_shards_exception")
         )) {
-            assertInstanceOf(TargetOutcome.Failed.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Unsuccessful.class, fixture.classify());
         }
         try (var fixture = fixture(ExceptionTypeAllowlist.empty(), httpResponse(200, "not-json"))) {
-            assertInstanceOf(TargetOutcome.Failed.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Unsuccessful.class, fixture.classify());
         }
     }
 
@@ -82,7 +82,7 @@ class TargetResponseClassifierTest {
             httpResponse(405, "source rejected"),
             httpResponse(400, "target rejected")
         )) {
-            assertInstanceOf(TargetOutcome.Succeeded.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Successful.class, fixture.classify());
         }
     }
 
@@ -94,7 +94,7 @@ class TargetResponseClassifierTest {
             httpResponse(200, "source success"),
             httpResponse(404, "target missing")
         )) {
-            assertInstanceOf(TargetOutcome.Failed.class, fixture.classify());
+            assertInstanceOf(TargetResponseClassification.Unsuccessful.class, fixture.classify());
         }
     }
 
@@ -177,7 +177,7 @@ class TargetResponseClassifierTest {
         TransformedTargetRequestAndResponseList summary,
         IRequestResponsePacketPair source
     ) implements AutoCloseable {
-        TargetOutcome<TransformedTargetRequestAndResponseList> classify() {
+        TargetResponseClassification classify() {
             return classifier.classify(summary, source);
         }
 

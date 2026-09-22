@@ -7,54 +7,6 @@ import org.junit.jupiter.api.Test;
 
 class ReplayOutcomesTest {
     @Test
-    void targetVisitorMustAcknowledgeEveryOutcome() {
-        ReplayOutcomes.TargetOutcome.Visitor<String, String> visitor = new ReplayOutcomes.TargetOutcome.Visitor<>() {
-            @Override
-            public String onSucceeded(ReplayOutcomes.TargetOutcome.Succeeded<String> outcome) {
-                return "success:" + outcome.value();
-            }
-
-            @Override
-            public String onFailed(ReplayOutcomes.TargetOutcome.Failed<String> outcome) {
-                return "failure:" + outcome.cause().getMessage();
-            }
-
-            @Override
-            public String onCancelled(ReplayOutcomes.TargetOutcome.Cancelled<String> outcome) {
-                return "cancelled:" + outcome.cause().getMessage();
-            }
-
-            @Override
-            public String onFiltered(ReplayOutcomes.TargetOutcome.Filtered<String> outcome) {
-                return "filtered:" + outcome.reason();
-            }
-
-            @Override
-            public String onClassifiedSkip(ReplayOutcomes.TargetOutcome.ClassifiedSkip<String> outcome) {
-                return "classified:" + outcome.reason();
-            }
-        };
-
-        Assertions.assertEquals("success:value", new ReplayOutcomes.TargetOutcome.Succeeded<>("value").visit(visitor));
-        Assertions.assertEquals(
-            "failure:bad",
-            new ReplayOutcomes.TargetOutcome.Failed<String>(new IllegalStateException("bad")).visit(visitor)
-        );
-        Assertions.assertEquals(
-            "cancelled:stop",
-            new ReplayOutcomes.TargetOutcome.Cancelled<String>(new CancellationException("stop")).visit(visitor)
-        );
-        Assertions.assertEquals(
-            "filtered:policy",
-            new ReplayOutcomes.TargetOutcome.Filtered<String>("policy").visit(visitor)
-        );
-        Assertions.assertEquals(
-            "classified:allowlisted",
-            new ReplayOutcomes.TargetOutcome.ClassifiedSkip<String>("response", "allowlisted").visit(visitor)
-        );
-    }
-
-    @Test
     void sourceAndEvidenceOutcomesAreExhaustiveValues() {
         var sourceVisitor = new ReplayOutcomes.SourceOutcome.Visitor<String>() {
             @Override

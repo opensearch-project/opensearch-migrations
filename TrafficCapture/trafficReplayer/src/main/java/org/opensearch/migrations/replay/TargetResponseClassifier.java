@@ -7,7 +7,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 import io.netty.handler.codec.http.HttpResponse;
@@ -18,6 +17,18 @@ import lombok.NonNull;
  */
 public final class TargetResponseClassifier {
     private static final Pattern BULK_PATH = Pattern.compile("^(/[^/]*)?/_bulk(/.*)?$");
+
+    public sealed interface TargetResponseClassification
+        permits TargetResponseClassification.Successful,
+            TargetResponseClassification.Unsuccessful,
+            TargetResponseClassification.Allowlisted {
+
+        record Successful() implements TargetResponseClassification {}
+
+        record Unsuccessful(@NonNull Throwable cause) implements TargetResponseClassification {}
+
+        record Allowlisted(@NonNull String reason) implements TargetResponseClassification {}
+    }
 
     private final BulkItemErrorClassifier retryClassifier;
     private final ExceptionTypeAllowlist poisonAllowlist;
@@ -30,7 +41,7 @@ public final class TargetResponseClassifier {
         this.poisonAllowlist = poisonAllowlist;
     }
 
-    public TargetOutcome<TransformedTargetRequestAndResponseList> classify(
+    public TargetResponseClassification classify(
         @NonNull TransformedTargetRequestAndResponseList summary,
         @NonNull IRequestResponsePacketPair source
     ) {
@@ -39,7 +50,7 @@ public final class TargetResponseClassifier {
         }
         var response = summary.getResponseList().get(summary.getResponseList().size() - 1);
         if (response.getError() != null) {
-            return new TargetOutcome.Failed<>(response.getError());
+            return new TargetResponseClassification.Unsuccessful(response.getError());
         }
         if (response.getRawResponse() == null) {
             return failed("Target exchange completed without an HTTP response");
@@ -47,10 +58,10 @@ public final class TargetResponseClassifier {
 
         int status = response.getRawResponse().status().code();
         if (!isBulkRequest(summary)) {
-            return classifyHttpStatus(summary, source, status, "Target");
+            return classifyHttpStatus(source, status, "Target");
         }
         if (status != 200) {
-            return classifyHttpStatus(summary, source, status, "Bulk target");
+            return classifyHttpStatus(source, status, "Bulk target");
         }
 
         var inspection = OpenSearchDefaultRetry.inspectBulkResponse(
@@ -61,14 +72,13 @@ public final class TargetResponseClassifier {
             return failed("Bulk target response could not be classified");
         }
         return switch (inspection.analysis()) {
-            case NO_ERRORS -> new TargetOutcome.Succeeded<>(summary);
+            case NO_ERRORS -> new TargetResponseClassification.Successful();
             case HAS_RETRYABLE_ERRORS ->
                 failed("Bulk target response still contains retryable or unclassified failures");
             case ONLY_NON_RETRYABLE_ERRORS -> {
                 var errorTypes = inspection.errorTypes();
                 if (!errorTypes.isEmpty() && errorTypes.stream().allMatch(poisonAllowlist::isAllowed)) {
-                    yield new TargetOutcome.ClassifiedSkip<>(
-                        summary,
+                    yield new TargetResponseClassification.Allowlisted(
                         "operator allowlisted bulk failures " + errorTypes
                     );
                 }
@@ -77,18 +87,17 @@ public final class TargetResponseClassifier {
         };
     }
 
-    private TargetOutcome<TransformedTargetRequestAndResponseList> classifyHttpStatus(
-        TransformedTargetRequestAndResponseList summary,
+    private TargetResponseClassification classifyHttpStatus(
         IRequestResponsePacketPair source,
         int targetStatus,
         String targetDescription
     ) {
         if (targetStatus >= 200 && targetStatus < 300) {
-            return new TargetOutcome.Succeeded<>(summary);
+            return new TargetResponseClassification.Successful();
         }
         var sourceStatus = sourceStatus(source);
         if (sourceStatus.isPresent() && !isSuccessful(sourceStatus.getAsInt())) {
-            return new TargetOutcome.Succeeded<>(summary);
+            return new TargetResponseClassification.Successful();
         }
         var sourceDescription = sourceStatus.isPresent()
             ? Integer.toString(sourceStatus.getAsInt())
@@ -129,7 +138,7 @@ public final class TargetResponseClassifier {
         }
     }
 
-    private static TargetOutcome.Failed<TransformedTargetRequestAndResponseList> failed(String message) {
-        return new TargetOutcome.Failed<>(new IllegalStateException(message));
+    private static TargetResponseClassification.Unsuccessful failed(String message) {
+        return new TargetResponseClassification.Unsuccessful(new IllegalStateException(message));
     }
 }
