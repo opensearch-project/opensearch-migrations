@@ -113,7 +113,10 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
             makeTrafficStreamFor("B", 0, true, 1),
             makeTrafficStreamFor("A", 1, true, 2)
         );
-        var arraySource = new ArrayCursorTrafficCaptureSource(rc, new ArrayCursorTrafficSourceContext(trafficStreams));
+        var arraySource = new ArrayCursorTrafficCaptureSource(
+            rc,
+            new ArrayCursorTrafficSourceContext(trafficStreams, 0)
+        );
         var trafficSource = new BlockingTrafficSource(arraySource, Duration.ofSeconds(SPACING_SECONDS));
 
         try (
@@ -128,7 +131,8 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
                     true,
                     0,
                     "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest"
-                )
+                ),
+                code -> {}
             )
         ) {
             new Thread(

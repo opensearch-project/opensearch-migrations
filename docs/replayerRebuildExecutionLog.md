@@ -551,3 +551,39 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   fixture compatibility bridge will be introduced.
 - S5 remains open. S5c3 caller migration and the complete green module run are still required before
   adding the S5 End entry.
+
+### Progress checkpoint — S5c3a leaf caller contracts
+
+- Migrated five small leaf tests to explicit S5 ownership contracts: injected fatal and lifecycle
+  sinks, exact partition generations, caller-owned processing registrations, explicit deterministic
+  source generations, and injected process termination. No compatibility overload, inferred
+  generation, or mutable static state was added.
+- Kept the large connection-owner, orchestrator, Netty, shutdown, and generator changes out of this
+  checkpoint. The remaining caller migration is intentionally split so those files can be
+  decomposed and reviewed as bounded units.
+
+| S5c3a obligation | Evidence |
+|---|---|
+| Leaf owners receive explicit lifecycle and fatal dependencies | `ClientConnectionPoolCacheInvalidationTest`, `ReplayProcessFatalHandlerTest` |
+| Cancellation uses explicit generation and processing ownership | `ActorCancellationResourceTest` |
+| Deterministic sources declare their first generation | `FullReplayerWithTracingChecksTest`, `SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest` |
+
+- The integrated S5c3 working tree passed
+  `:TrafficCapture:trafficReplayer:compileTestJava --parallel --max-workers=18 --rerun-tasks
+  --no-build-cache` in 13 seconds.
+- The serialized focused leaf run passed 10/10 tests: five connection-cache cases, four fatal-handler
+  cases, and one cancellation-resource case.
+- The required read-only Claude review found no defect in these five leaf migrations. In the
+  remaining unstaged S5c3 integration it found three valid defects: an order-dependent negative
+  preparation assertion, a no-response fixture that escalated an expected timeout to process-fatal,
+  and an unrelated production scheduling change that made previously deferred channel acquisition
+  run inline. Those remaining changes were fixed locally: the assertion is race-tolerant without
+  accepting successful completion, no-response returns a diagnostic result without a fatal signal,
+  and the production scheduling change was removed. The full lifecycle class and both TLS/non-TLS
+  timeout variants passed after the fixes. Final Claude confirmation of the integrated working tree
+  returned `NO_ACTIONABLE_FINDINGS`; the owning changes remain for the next bounded commits.
+- The exact S5c3a checkpoint leaves 37 test-compilation errors in the immediately following bounded
+  owner, Netty, shutdown, and orchestrator migrations. This is an explicit broken-test boundary, not
+  a production compatibility bridge.
+- S5 remains open. The next slice decomposes and lands the connection-owner admission and
+  two-milestone evidence before the complete green module run.
