@@ -27,7 +27,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
-import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
 import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
@@ -153,7 +153,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         IAuthTransformerFactory authTransformerFactory,
         Supplier<IJsonTransformer> jsonTransformerSupplier,
         ClientConnectionPool clientConnectionPool,
-        int maxConcurrentRequests,
+        int maxConcurrentTargetAttempts,
         IStreamableWorkTracker<Void> workTracker,
         BulkItemErrorClassifier errorClassifier,
         ExceptionTypeAllowlist poisonAllowlist,
@@ -164,7 +164,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             serverUri,
             authTransformerFactory,
             jsonTransformerSupplier,
-            maxConcurrentRequests,
+            maxConcurrentTargetAttempts,
             workTracker,
             new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier)),
             new TargetResponseClassifier(errorClassifier, poisonAllowlist)
@@ -294,8 +294,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             failure -> shutdown(failure)
         );
         var replayIntakeOwner = new ReplayIntakeOwner(fatalHandler::onFatal);
-        var permitPool = new AsyncPermitPool(
-            maxConcurrentRequests,
+        var permitPool = new TargetAttemptPermitProvider(
+            maxConcurrentTargetAttempts,
             replayIntakeOwner::submitRequired,
             topLevelContext.getPermitPoolMetrics()
         );
@@ -305,6 +305,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         );
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
+            permitPool,
             (replaySession, ctx, firstTargetWriteSubmitted) -> new NettyPacketToHttpConsumer(
                 replaySession,
                 ctx,
@@ -347,7 +348,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             tupleObserver,
             trafficSource,
             quiescentDuration,
-            permitPool,
             recordWorkTracker
         );
         trafficSource.setSourcePartitionLifecycleListener(

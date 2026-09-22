@@ -13,7 +13,6 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
-import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayWorkId;
@@ -122,7 +121,6 @@ public class ReplayEngine {
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant originalStart,
         Instant originalEnd,
-        AsyncPermitPool permitPool,
         Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
         Function<
             TransformedOutputAndResult<ByteBufListProducer>,
@@ -149,7 +147,6 @@ public class ReplayEngine {
             start.minus(EXPECTED_TRANSFORMATION_DURATION),
             start,
             end,
-            permitPool,
             preparation,
             retryVisitorFactory,
             filteredResultFactory,

@@ -15,6 +15,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
@@ -132,12 +133,19 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     public interface TargetExchange<P, R> {
         CompletionStage<RequestTurnResult<R>> execute(
             ReplayRequestId requestId,
-            P preparedRequest
+            P preparedRequest,
+            TargetAttemptPermitProvider.Permit firstAttemptPermit,
+            AttemptPermitRequester retryPermitRequester
         );
 
         CompletionStage<Void> close();
 
         CompletionStage<Void> abort(CancellationException cause);
+    }
+
+    @FunctionalInterface
+    public interface AttemptPermitRequester {
+        CompletionStage<TargetAttemptPermitProvider.Permit> request();
     }
 
     public sealed interface RequestTurnResult<T>
@@ -154,8 +162,6 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
 
     public interface RequestPreparation<P> {
         CompletionStage<PreparationOutcome<P>> completion();
-
-        default void admitted() {}
 
         default void begin() {}
 
@@ -428,6 +434,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     private final ActorMailbox mailbox;
     private final OwnerTransitionRunner transitions;
     private final TargetExchange<P, R> targetExchange;
+    private final TargetAttemptPermitProvider permitProvider;
     private final Metrics metrics;
     private final LongSupplier nanoTime;
     private final RequestLifecycleSink lifecycleSink;
@@ -444,6 +451,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     private ActorMailbox.ScheduledTask admissionTimer;
     private ActorMailbox.ScheduledTask executionTimer;
     private RequestCommand<P, R> activeRequest;
+    private PendingAttemptPermit pendingAttemptPermit;
     private HeadWaitReason headWaitReason;
     private long activeStartedNanos;
     private long abortStartedNanos;
@@ -459,6 +467,19 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         RequestProcessingOutcome outcome,
         Throwable failure
     ) {}
+
+    private final class PendingAttemptPermit {
+        private final RequestCommand<P, R> request;
+        private final CompletableFuture<TargetAttemptPermitProvider.Permit> completion =
+            new CompletableFuture<>();
+        private final AtomicReference<TargetAttemptPermitProvider.Permit> undeliveredPermit =
+            new AtomicReference<>();
+
+        private PendingAttemptPermit(RequestCommand<P, R> request) {
+            this.request = request;
+        }
+    }
+
     private State state = State.OPEN;
 
     public TargetConnectionOwner(
@@ -466,6 +487,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ActorMailbox mailbox,
         @NonNull TargetExchange<P, R> targetExchange,
+        @NonNull TargetAttemptPermitProvider permitProvider,
         @NonNull Metrics metrics,
         @NonNull FatalHandler fatalHandler,
         @NonNull RequestLifecycleSink lifecycleSink
@@ -475,6 +497,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             partitionGenerationId,
             mailbox,
             targetExchange,
+            permitProvider,
             metrics,
             System::nanoTime,
             fatalHandler,
@@ -487,6 +510,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ActorMailbox mailbox,
         @NonNull TargetExchange<P, R> targetExchange,
+        @NonNull TargetAttemptPermitProvider permitProvider,
         @NonNull Metrics metrics,
         @NonNull LongSupplier nanoTime,
         @NonNull FatalHandler fatalHandler,
@@ -501,6 +525,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             fatalHandler::onFatal
         );
         this.targetExchange = targetExchange;
+        this.permitProvider = permitProvider;
         this.metrics = metrics;
         this.nanoTime = nanoTime;
         this.lifecycleSink = lifecycleSink;
@@ -785,7 +810,6 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             sourceCloseAdmitted = true;
         } else if (command instanceof RequestCommand<P, R> request) {
             installProcessingRegistration(request.owner, request.processingRegistration);
-            request.owner.preparationController.admitted();
             request.owner.preparationController.completion().whenComplete((outcome, failure) ->
                 stagePreparation(request, outcome, failure)
             );
@@ -1073,13 +1097,67 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         activeRequest = request;
         activeStartedNanos = nanoTime.getAsLong();
         setHeadWaitReason(HeadWaitReason.ACTIVE_EXCHANGE);
+        requestAttemptPermit(request).whenComplete((permit, failure) ->
+            transitions.applyNowOrPost(
+                "initial target-attempt permit " + request.owner.requestId,
+                () -> beginTargetExchange(request, preparedRequest, permit, failure)
+            )
+        );
+    }
+
+    private void beginTargetExchange(
+        RequestCommand<P, R> request,
+        P preparedRequest,
+        TargetAttemptPermitProvider.Permit permit,
+        Throwable permitFailure
+    ) {
+        assertInMailbox();
+        if (state == State.ABORTING || state == State.TERMINATED) {
+            closePermit(permit);
+            return;
+        }
+        if (activeRequest != request || request.owner.connectionTurnSettled()) {
+            var ownershipFailure = new IllegalStateException(
+                "target-attempt permit completed for a request that no longer owns the turn: "
+                    + request.owner.requestId
+            );
+            addCleanupFailure(ownershipFailure, closePermit(permit));
+            failRequestWithoutNormalMilestone(
+                request,
+                "initial target-attempt permit ownership " + request.owner.requestId,
+                ownershipFailure
+            );
+            return;
+        }
+        if (permitFailure != null) {
+            failRequestWithoutNormalMilestone(
+                request,
+                "initial target-attempt permit acquisition " + request.owner.requestId,
+                unwrap(permitFailure)
+            );
+            return;
+        }
+        if (permit == null) {
+            failRequestWithoutNormalMilestone(
+                request,
+                "initial target-attempt permit acquisition " + request.owner.requestId,
+                new NullPointerException("permit acquisition completed without a permit")
+            );
+            return;
+        }
         CompletionStage<RequestTurnResult<R>> exchange;
         try {
             exchange = java.util.Objects.requireNonNull(
-                targetExchange.execute(request.owner.requestId, preparedRequest),
+                targetExchange.execute(
+                    request.owner.requestId,
+                    preparedRequest,
+                    permit,
+                    () -> requestAttemptPermit(request)
+                ),
                 "target exchange returned no completion stage"
             );
         } catch (Throwable t) {
+            addCleanupFailure(t, closePermit(permit));
             failRequestWithoutNormalMilestone(
                 request,
                 "target exchange startup " + request.owner.requestId,
@@ -1124,6 +1202,130 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                 }
             })
         );
+    }
+
+    private CompletionStage<TargetAttemptPermitProvider.Permit> requestAttemptPermit(
+        RequestCommand<P, R> request
+    ) {
+        assertInMailbox();
+        if (activeRequest != request || state != State.ACTIVE) {
+            return CompletableFuture.failedFuture(new IllegalStateException(
+                "only the active connection-turn request may acquire a target-attempt permit"
+            ));
+        }
+        if (pendingAttemptPermit != null) {
+            return CompletableFuture.failedFuture(new IllegalStateException(
+                "a target-attempt permit acquisition is already pending for "
+                    + pendingAttemptPermit.request.owner.requestId
+            ));
+        }
+        var pending = new PendingAttemptPermit(request);
+        pendingAttemptPermit = pending;
+        final CompletionStage<TargetAttemptPermitProvider.Permit> acquisition;
+        try {
+            acquisition = java.util.Objects.requireNonNull(
+                permitProvider.acquire(request.owner.requestId, 1),
+                "target-attempt permit provider returned no completion stage"
+            );
+        } catch (Throwable failure) {
+            pendingAttemptPermit = null;
+            pending.completion.completeExceptionally(failure);
+            return pending.completion.minimalCompletionStage();
+        }
+        acquisition.whenComplete((permit, failure) ->
+            deliverAttemptPermit(pending, permit, failure)
+        );
+        return pending.completion.minimalCompletionStage();
+    }
+
+    private void deliverAttemptPermit(
+        PendingAttemptPermit pending,
+        TargetAttemptPermitProvider.Permit permit,
+        Throwable failure
+    ) {
+        if (permit != null) {
+            pending.undeliveredPermit.set(permit);
+        }
+        transitions.post(
+            "target-attempt permit delivery " + pending.request.owner.requestId,
+            () -> settleAttemptPermit(pending, permit, failure),
+            deliveryFailure -> {
+                var combined = combineFailures(
+                    deliveryFailure,
+                    releaseUndeliveredPermit(pending, permit)
+                );
+                pending.completion.completeExceptionally(combined);
+            }
+        );
+    }
+
+    private void settleAttemptPermit(
+        PendingAttemptPermit pending,
+        TargetAttemptPermitProvider.Permit permit,
+        Throwable failure
+    ) {
+        assertInMailbox();
+        if (pendingAttemptPermit != pending) {
+            var staleFailure = new IllegalStateException(
+                "target-attempt permit completed after its owner state was replaced"
+            );
+            addCleanupFailure(staleFailure, releaseUndeliveredPermit(pending, permit));
+            pending.completion.completeExceptionally(staleFailure);
+            return;
+        }
+        pendingAttemptPermit = null;
+        var deliveredPermit = permit == null
+            ? null
+            : pending.undeliveredPermit.compareAndSet(permit, null) ? permit : null;
+        if (failure != null) {
+            var cause = unwrap(failure);
+            addCleanupFailure(cause, closePermit(deliveredPermit));
+            pending.completion.completeExceptionally(cause);
+        } else if (deliveredPermit == null) {
+            pending.completion.completeExceptionally(
+                new NullPointerException("target-attempt permit delivery contained no permit")
+            );
+        } else if (state != State.ACTIVE || activeRequest != pending.request) {
+            var cancellation = abortCause != null
+                ? abortCause
+                : new CancellationException(
+                    "request no longer owns the connection turn: "
+                        + pending.request.owner.requestId
+                );
+            addCleanupFailure(cancellation, closePermit(deliveredPermit));
+            pending.completion.completeExceptionally(cancellation);
+        } else {
+            pending.completion.complete(deliveredPermit);
+        }
+        tryFinishTermination();
+    }
+
+    private Throwable releaseUndeliveredPermit(
+        PendingAttemptPermit pending,
+        TargetAttemptPermitProvider.Permit permit
+    ) {
+        if (permit == null || !pending.undeliveredPermit.compareAndSet(permit, null)) {
+            return null;
+        }
+        return closePermit(permit);
+    }
+
+    private Throwable closePermit(TargetAttemptPermitProvider.Permit permit) {
+        if (permit == null) {
+            return null;
+        }
+        try {
+            permit.close();
+            return null;
+        } catch (Throwable failure) {
+            return failure;
+        }
+    }
+
+    private void addCleanupFailure(Throwable failure, Throwable cleanupFailure) {
+        if (cleanupFailure != null && cleanupFailure != failure) {
+            failure.addSuppressed(cleanupFailure);
+        }
     }
 
     private void releaseConnectionTurnResourcesAndSettle(
@@ -1299,6 +1501,24 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         } catch (Throwable t) {
             abortStage = CompletableFuture.failedFuture(t);
         }
+        var activeRequestId = activeRequest == null
+            ? null
+            : activeRequest.owner.requestId;
+        var permitCancellation = cancelPendingAttemptPermit(activeRequestId, cause);
+        abortStage = abortStage.handle((ignored, failure) -> failure)
+            .thenCombine(
+                permitCancellation.handle((ignored, failure) -> failure),
+                (targetFailure, permitFailure) -> {
+                    var combined = targetFailure == null ? null : unwrap(targetFailure);
+                    if (permitFailure != null) {
+                        combined = combineFailures(combined, unwrap(permitFailure));
+                    }
+                    if (combined != null) {
+                        throw new CompletionException(combined);
+                    }
+                    return null;
+                }
+            );
         abortStage.whenComplete((ignored, failure) ->
             transitions.post("target abort completion", () -> {
                 if (targetAbortPending) {
@@ -1344,6 +1564,23 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                 tryFinishTermination();
             })
         );
+    }
+
+    private CompletionStage<Integer> cancelPendingAttemptPermit(
+        ReplayRequestId activeRequestId,
+        CancellationException cause
+    ) {
+        try {
+            return java.util.Objects.requireNonNull(
+                permitProvider.cancel(
+                    requestId -> activeRequestId != null && activeRequestId.equals(requestId),
+                    cause
+                ),
+                "target-attempt permit cancellation returned no completion stage"
+            );
+        } catch (Throwable failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
     }
 
     private void stageRequestProcessingCompletion(
@@ -1715,6 +1952,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             || !admissionCommands.isEmpty()
             || !executionCommands.isEmpty()
             || activeRequest != null
+            || pendingAttemptPermit != null
             || orderedCloseActive
             || targetAbortPending) {
             return;
