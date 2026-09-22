@@ -16,7 +16,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId
 
 import lombok.NonNull;
 
-public final class AsyncPermitPool {
+public final class TargetAttemptPermitProvider {
     public sealed interface Input extends ReplayIntakeInput permits
         AcquireRequested,
         CancelRequested,
@@ -116,15 +116,15 @@ public final class AsyncPermitPool {
     private boolean closed;
     private CancellationException closeCause;
 
-    public AsyncPermitPool(int capacity, @NonNull Executor ownerExecutor) {
+    public TargetAttemptPermitProvider(int capacity, @NonNull Executor ownerExecutor) {
         this(capacity, ownerExecutor, Metrics.NOOP);
     }
 
-    public AsyncPermitPool(int capacity, @NonNull Executor ownerExecutor, @NonNull Metrics metrics) {
+    public TargetAttemptPermitProvider(int capacity, @NonNull Executor ownerExecutor, @NonNull Metrics metrics) {
         this(capacity, ownerExecutor, metrics, System::nanoTime);
     }
 
-    public AsyncPermitPool(
+    public TargetAttemptPermitProvider(
         int capacity,
         @NonNull Consumer<Input> ownerInputSink,
         @NonNull Metrics metrics
@@ -132,7 +132,7 @@ public final class AsyncPermitPool {
         this(capacity, ownerInputSink, metrics, System::nanoTime);
     }
 
-    AsyncPermitPool(
+    TargetAttemptPermitProvider(
         int capacity,
         @NonNull Executor ownerExecutor,
         @NonNull Metrics metrics,
@@ -147,7 +147,7 @@ public final class AsyncPermitPool {
         metrics.availableChanged(capacity);
     }
 
-    AsyncPermitPool(
+    TargetAttemptPermitProvider(
         int capacity,
         @NonNull Consumer<Input> ownerInputSink,
         @NonNull Metrics metrics,

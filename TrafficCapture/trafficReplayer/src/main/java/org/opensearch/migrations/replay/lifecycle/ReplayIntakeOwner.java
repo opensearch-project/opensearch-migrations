@@ -86,7 +86,7 @@ public final class ReplayIntakeOwner {
     private final OwnerThreadGuard ownerThreadGuard;
     private final CompletableFuture<Void> termination = new CompletableFuture<>();
 
-    private AsyncPermitPool permitPool;
+    private TargetAttemptPermitProvider permitPool;
     private ReplayProgressController progressController;
     private RecordWorkTracker recordWorkTracker;
     private static final class RequestGenerationState {
@@ -129,7 +129,7 @@ public final class ReplayIntakeOwner {
     }
 
     public void configureOwnedComponents(
-        @NonNull AsyncPermitPool permitPool,
+        @NonNull TargetAttemptPermitProvider permitPool,
         @NonNull ReplayProgressController progressController
     ) {
         if (started) {
@@ -140,7 +140,7 @@ public final class ReplayIntakeOwner {
     }
 
     public void configureOwnedComponents(
-        @NonNull AsyncPermitPool permitPool,
+        @NonNull TargetAttemptPermitProvider permitPool,
         @NonNull ReplayProgressController progressController,
         @NonNull RecordWorkTracker recordWorkTracker
     ) {
@@ -273,7 +273,7 @@ public final class ReplayIntakeOwner {
         ownerThreadGuard.requireOwnerThread();
         switch (input) {
             case Input ownerInput -> applyOwnerInput(ownerInput);
-            case AsyncPermitPool.Input permitInput -> permitPool.apply(permitInput);
+            case TargetAttemptPermitProvider.Input permitInput -> permitPool.apply(permitInput);
             case ReplayProgressController.Input progressInput -> progressController.apply(progressInput);
             case RecordWorkTracker.Input trackerInput ->
                 Objects.requireNonNull(recordWorkTracker, "recordWorkTracker").apply(trackerInput);

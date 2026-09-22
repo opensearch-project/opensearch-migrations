@@ -13,7 +13,7 @@ package org.opensearch.migrations.replay.lifecycle;
  */
 public sealed interface ReplayIntakeInput permits
     ReplayIntakeOwner.Input,
-    AsyncPermitPool.Input,
+    TargetAttemptPermitProvider.Input,
     ReplayProgressController.Input,
     RecordWorkTracker.Input,
     RequestLifecycleInput {}

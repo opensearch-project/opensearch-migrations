@@ -251,10 +251,15 @@ public class TrafficReplayer {
         Integer lookaheadTimeSeconds;
         @Parameter(
             required = false,
-            names = { "--max-concurrent-requests", "--maxConcurrentRequests" },
+            names = {
+                "--max-concurrent-target-attempts",
+                "--maxConcurrentTargetAttempts",
+                "--max-concurrent-requests",
+                "--maxConcurrentRequests"
+            },
             arity = 1,
-            description = "Maximum number of requests at a time that can be outstanding")
-        int maxConcurrentRequests = 10000;
+            description = "Maximum number of target attempts that can be in flight")
+        int maxConcurrentTargetAttempts = 10000;
         @Parameter(
             required = false,
             names = { "--max-owned-kafka-records", "--maxOwnedKafkaRecords" },
@@ -773,7 +778,7 @@ public class TrafficReplayer {
                     null,
                     topContext.getTargetExchangeStateMetrics()
                 ),
-                params.maxConcurrentRequests,
+                params.maxConcurrentTargetAttempts,
                 orderedRequestTracker,
                 errorClassifier,
                 poisonAllowlist,
@@ -787,7 +792,7 @@ public class TrafficReplayer {
                     " targetUri={} numClientThreads={}")
                 .addArgument(params.getEffectiveLookaheadTimeSeconds())
                 .addArgument(params.speedupFactor)
-                .addArgument(params.maxConcurrentRequests)
+                .addArgument(params.maxConcurrentTargetAttempts)
                 .addArgument(params.maximumOwnedKafkaRecords)
                 .addArgument(params.maximumOwnedKafkaBytes)
                 .addArgument(!params.disableLivenessScanner)

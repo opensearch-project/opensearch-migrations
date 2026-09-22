@@ -11,7 +11,6 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
-import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
@@ -106,7 +105,6 @@ public class RequestTransformerAndSender<T> {
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier,
         Duration quiescentDurationForRequest,
-        @NonNull AsyncPermitPool permitPool,
         @NonNull TargetConnectionOwner.RequestProcessingRegistration processingRegistration
     ) {
         try {
@@ -115,7 +113,6 @@ public class RequestTransformerAndSender<T> {
                 ctx,
                 start,
                 end,
-                permitPool,
                 () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier),
                 transformedRequest -> getRetryCheckVisitor(
                     transformedRequest,

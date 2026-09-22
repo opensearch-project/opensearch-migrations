@@ -2,7 +2,7 @@ package org.opensearch.migrations.replay.tracing;
 
 import java.time.Duration;
 
-import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
 
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
@@ -10,7 +10,7 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
-public final class AsyncPermitPoolMetrics implements AsyncPermitPool.Metrics {
+public final class AsyncPermitPoolMetrics implements TargetAttemptPermitProvider.Metrics {
     public static final class MetricNames {
         private MetricNames() {}
 

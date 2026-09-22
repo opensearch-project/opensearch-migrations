@@ -36,7 +36,7 @@ import org.opensearch.migrations.replay.datatypes.OwnedPreparedRequest;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.lifecycle.ActorMailbox;
-import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
 import org.opensearch.migrations.replay.lifecycle.NettyEventLoopActorMailbox;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
@@ -115,6 +115,7 @@ public class RequestSenderOrchestrator {
     }
 
     private final ClientConnectionPool clientConnectionPool;
+    private final TargetAttemptPermitProvider permitProvider;
     private final Duration initialRetryDelay;
     private final Duration maxRetryDelay;
     private final PacketConsumerFactory packetConsumerFactory;
@@ -152,6 +153,7 @@ public class RequestSenderOrchestrator {
      */
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
+        TargetAttemptPermitProvider permitProvider,
         PacketConsumerFactory packetConsumerFactory,
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
         TargetConnectionOwner.RequestLifecycleSink requestLifecycleSink,
@@ -159,6 +161,7 @@ public class RequestSenderOrchestrator {
     ) {
         this(
             clientConnectionPool,
+            permitProvider,
             packetConsumerFactory,
             sessionTerminationAcknowledger,
             TargetConnectionOwner.Metrics.NOOP,
@@ -171,6 +174,7 @@ public class RequestSenderOrchestrator {
 
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
+        TargetAttemptPermitProvider permitProvider,
         PacketConsumerFactory packetConsumerFactory,
         Function<ConnectionSessionKey, CompletionStage<Void>> sessionTerminationAcknowledger,
         TargetConnectionOwner.Metrics actorMetrics,
@@ -181,6 +185,7 @@ public class RequestSenderOrchestrator {
     ) {
         this(
             clientConnectionPool,
+            permitProvider,
             Duration.ofMillis(100),
             Duration.ofSeconds(300),
             packetConsumerFactory,
@@ -195,6 +200,7 @@ public class RequestSenderOrchestrator {
 
     RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
+        TargetAttemptPermitProvider permitProvider,
         Duration initialRetryDelay,
         Duration maxRetryDelay,
         PacketConsumerFactory packetConsumerFactory,
@@ -204,6 +210,7 @@ public class RequestSenderOrchestrator {
     ) {
         this(
             clientConnectionPool,
+            permitProvider,
             initialRetryDelay,
             maxRetryDelay,
             packetConsumerFactory,
@@ -218,6 +225,7 @@ public class RequestSenderOrchestrator {
 
     RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
+        TargetAttemptPermitProvider permitProvider,
         Duration initialRetryDelay,
         Duration maxRetryDelay,
         PacketConsumerFactory packetConsumerFactory,
@@ -229,6 +237,7 @@ public class RequestSenderOrchestrator {
         FatalReplayHandler fatalReplayHandler
     ) {
         this.clientConnectionPool = clientConnectionPool;
+        this.permitProvider = Objects.requireNonNull(permitProvider);
         this.initialRetryDelay = initialRetryDelay;
         this.maxRetryDelay = maxRetryDelay;
         this.packetConsumerFactory = packetConsumerFactory;
@@ -261,7 +270,6 @@ public class RequestSenderOrchestrator {
         private final Duration interval;
         private final OwnedPreparedRequest packetProducer;
         private final RetryVisitor<Object> visitor;
-        private final AsyncPermitPool.Permit permit;
         private final IReplayContexts.IScheduledContext scheduledContext;
         private final AtomicBoolean closed = new AtomicBoolean();
         private final AtomicBoolean connectionTurnResourcesReleased = new AtomicBoolean();
@@ -273,7 +281,6 @@ public class RequestSenderOrchestrator {
             Duration interval,
             OwnedPreparedRequest packetProducer,
             RetryVisitor<Object> visitor,
-            AsyncPermitPool.Permit permit,
             IReplayContexts.IScheduledContext scheduledContext
         ) {
             this.context = context;
@@ -281,7 +288,6 @@ public class RequestSenderOrchestrator {
             this.interval = interval;
             this.packetProducer = packetProducer;
             this.visitor = visitor;
-            this.permit = permit;
             this.scheduledContext = scheduledContext;
         }
 
@@ -294,10 +300,7 @@ public class RequestSenderOrchestrator {
         @Override
         public void connectionTurnFinished() {
             if (connectionTurnResourcesReleased.compareAndSet(false, true)) {
-                Throwable failure = null;
-                failure = runCleanup(failure, this::beginExecution);
-                failure = runCleanup(failure, permit::close);
-                throwCleanupFailure(failure);
+                beginExecution();
             }
         }
 
@@ -373,6 +376,7 @@ public class RequestSenderOrchestrator {
                 partitionGenerationId,
                 mailbox,
                 exchange,
+                permitProvider,
                 actorMetrics,
                 RequestSenderOrchestrator.this::signalFatal,
                 requestLifecycleSink
@@ -559,6 +563,8 @@ public class RequestSenderOrchestrator {
         private final ActorRuntime runtime;
         private final Map<ScheduledFuture<?>, CompletableFuture<Void>> cancellableSchedules = new LinkedHashMap<>();
         private final AtomicReference<AttemptPayload> activeAttempt = new AtomicReference<>();
+        private final AtomicReference<TargetAttemptPermitProvider.Permit> activePermit =
+            new AtomicReference<>();
         private CompletableFuture<RequestTurnResult<Object>> activeExchange;
         private TargetPacketConsumer activePacketReceiver;
         private CancellationException cancellationCause;
@@ -572,15 +578,26 @@ public class RequestSenderOrchestrator {
         @SuppressWarnings("java:S1181") // Startup failure must reach the connection owner's fatal boundary.
         public CompletionStage<RequestTurnResult<Object>> execute(
             ReplayRequestId requestId,
-            PreparedActorRequest preparedRequest
+            PreparedActorRequest preparedRequest,
+            TargetAttemptPermitProvider.Permit firstAttemptPermit,
+            TargetConnectionOwner.AttemptPermitRequester retryPermitRequester
         ) {
             preparedRequest.beginExecution();
             if (cancellationCause != null) {
+                firstAttemptPermit.close();
                 return CompletableFuture.completedFuture(new RequestTurnResult.Cancelled<>(cancellationCause));
             }
             try {
-                return normalizeExchange(startExchange(requestId, preparedRequest));
+                return normalizeExchange(
+                    startExchange(
+                        requestId,
+                        preparedRequest,
+                        firstAttemptPermit,
+                        retryPermitRequester
+                    )
+                );
             } catch (Throwable t) {
+                addSuppressed(t, closeResource(firstAttemptPermit));
                 clearPhase();
                 return CompletableFuture.failedFuture(unwrap(t));
             }
@@ -589,7 +606,9 @@ public class RequestSenderOrchestrator {
         @SuppressWarnings("unchecked")
         private TrackedFuture<String, DeterminedTransformedResponse<Object>> startExchange(
             ReplayRequestId requestId,
-            PreparedActorRequest preparedRequest
+            PreparedActorRequest preparedRequest,
+            TargetAttemptPermitProvider.Permit firstAttemptPermit,
+            TargetConnectionOwner.AttemptPermitRequester retryPermitRequester
         ) {
             var firstWriteReported = new AtomicBoolean();
             Runnable firstTargetWriteSubmitted = () -> {
@@ -608,7 +627,9 @@ public class RequestSenderOrchestrator {
                 preparedRequest.packetProducer,
                 preparedRequest.start,
                 preparedRequest.interval,
-                preparedRequest.visitor
+                preparedRequest.visitor,
+                firstAttemptPermit,
+                retryPermitRequester
             );
         }
 
@@ -704,6 +725,7 @@ public class RequestSenderOrchestrator {
                 cleanupFailure,
                 cancelActivePacketReceiver(cancellationCause)
             );
+            cleanupFailure = combineCleanupFailures(cleanupFailure, releaseActivePermit());
             cleanupFailure = combineCleanupFailures(cleanupFailure, releaseActiveAttempt());
             var exchangeToJoin = activeExchange;
             if (exchangeToJoin != null) {
@@ -785,7 +807,9 @@ public class RequestSenderOrchestrator {
             OwnedPreparedRequest packetProducer,
             Instant referenceStartTime,
             Duration interval,
-            RetryVisitor<T> visitor
+            RetryVisitor<T> visitor,
+            TargetAttemptPermitProvider.Permit firstAttemptPermit,
+            TargetConnectionOwner.AttemptPermitRequester retryPermitRequester
         ) {
             return new RetrySequence<>(
                 senderSupplier,
@@ -793,7 +817,9 @@ public class RequestSenderOrchestrator {
                 packetProducer,
                 referenceStartTime,
                 interval,
-                visitor
+                visitor,
+                firstAttemptPermit,
+                retryPermitRequester
             ).start();
         }
 
@@ -803,19 +829,49 @@ public class RequestSenderOrchestrator {
             OwnedPreparedRequest packetProducer,
             Instant referenceStartTime,
             Duration interval,
-            RetryVisitor<T> visitor
+            RetryVisitor<T> visitor,
+            TargetAttemptPermitProvider.Permit permit
         ) {
             transitionPhase(TargetExchangeState.Phase.STARTING_ATTEMPT);
             TrackedFuture<String, DeterminedTransformedResponse<T>> startRejection =
                 rejectUnavailableAttemptStart(eventLoop);
             if (startRejection != null) {
+                var permitReleaseFailure = closeResource(permit);
+                if (permitReleaseFailure != null) {
+                    return TextTrackedFuture.failedFuture(
+                        permitReleaseFailure,
+                        () -> "target attempt could not release an unused permit"
+                    );
+                }
                 return startRejection;
             }
-            var attempt = packetProducer.newAttempt();
-            if (!activeAttempt.compareAndSet(null, attempt)) {
-                attempt.close();
+            if (!activePermit.compareAndSet(null, permit)) {
+                var overlappingPermitFailure = new IllegalStateException(
+                    "another target-attempt permit is still active"
+                );
+                addSuppressed(overlappingPermitFailure, closeResource(permit));
                 return TextTrackedFuture.failedFuture(
-                    new IllegalStateException("another target request attempt is still active"),
+                    overlappingPermitFailure,
+                    () -> "target attempt rejected an overlapping permit"
+                );
+            }
+            final AttemptPayload attempt;
+            try {
+                attempt = packetProducer.newAttempt();
+            } catch (Throwable failure) {
+                addSuppressed(failure, releasePermit(permit));
+                return TextTrackedFuture.failedFuture(
+                    failure,
+                    () -> "target attempt payload creation failed"
+                );
+            }
+            if (!activeAttempt.compareAndSet(null, attempt)) {
+                var overlapFailure =
+                    new IllegalStateException("another target request attempt is still active");
+                addSuppressed(overlapFailure, closeResource(attempt));
+                addSuppressed(overlapFailure, releasePermit(permit));
+                return TextTrackedFuture.failedFuture(
+                    overlapFailure,
                     () -> "sendRequestWithRetries rejected overlapping request attempts"
                 );
             }
@@ -823,6 +879,7 @@ public class RequestSenderOrchestrator {
             try {
                 packetReceiver = Objects.requireNonNull(senderSupplier.get(), "sender supplier returned null");
             } catch (Throwable t) {
+                addSuppressed(t, releasePermit(permit));
                 addSuppressed(t, releaseAttempt(attempt));
                 return TextTrackedFuture.failedFuture(
                     t,
@@ -849,15 +906,43 @@ public class RequestSenderOrchestrator {
                 if (activePacketReceiver == packetReceiver) {
                     activePacketReceiver = null;
                 }
+                addSuppressed(t, releasePermit(permit));
                 addSuppressed(t, releaseAttempt(attempt));
                 return TextTrackedFuture.failedFuture(
                     t,
                     () -> "sendRequestWithRetries failed while starting the packet send"
                 );
             }
-            var evaluated = continueOnEventLoop(
+            var permitReleased = continueOnEventLoop(
                 eventLoop,
                 sendFuture,
+                "releasing the target-attempt permit",
+                (outcome, failure) -> {
+                    var releaseFailure = releasePermit(permit);
+                    if (failure != null) {
+                        var cause = unwrap(failure);
+                        addSuppressed(cause, releaseFailure);
+                        return TextTrackedFuture.failedFuture(
+                            cause,
+                            () -> "target attempt failed before producing a typed outcome"
+                        );
+                    }
+                    if (releaseFailure != null) {
+                        return TextTrackedFuture.failedFuture(
+                            releaseFailure,
+                            () -> "target-attempt permit release failed"
+                        );
+                    }
+                    return TextTrackedFuture.completedFuture(
+                        outcome,
+                        () -> "target-attempt permit released after raw outcome"
+                    );
+                },
+                () -> releasePermitAfterRejectedContinuation(permit)
+            );
+            var evaluated = continueOnEventLoop(
+                eventLoop,
+                permitReleased,
                 "evaluating the target attempt response",
                 (outcome, failure) -> {
                     if (cancellationCause != null) {
@@ -931,21 +1016,43 @@ public class RequestSenderOrchestrator {
             String operation,
             BiFunction<? super I, Throwable, ? extends TrackedFuture<String, O>> continuation
         ) {
+            return continueOnEventLoop(
+                eventLoop,
+                source,
+                operation,
+                continuation,
+                () -> {}
+            );
+        }
+
+        private <I, O> TrackedFuture<String, O> continueOnEventLoop(
+            EventLoop eventLoop,
+            TrackedFuture<String, I> source,
+            String operation,
+            BiFunction<? super I, Throwable, ? extends TrackedFuture<String, O>> continuation,
+            Runnable rejectedSubmissionCleanup
+        ) {
             var completion = new CompletableFuture<O>();
             source.future.whenComplete((value, failure) ->
-                submitRequiredContinuation(eventLoop, operation, completion, () -> {
-                    var next = Objects.requireNonNull(
-                        continuation.apply(value, failure),
-                        operation + " returned no tracked future"
-                    );
-                    next.future.whenComplete((nextValue, nextFailure) -> {
-                        if (nextFailure == null) {
-                            completion.complete(nextValue);
-                        } else {
-                            completion.completeExceptionally(nextFailure);
-                        }
-                    });
-                })
+                submitRequiredContinuation(
+                    eventLoop,
+                    operation,
+                    completion,
+                    () -> {
+                        var next = Objects.requireNonNull(
+                            continuation.apply(value, failure),
+                            operation + " returned no tracked future"
+                        );
+                        next.future.whenComplete((nextValue, nextFailure) -> {
+                            if (nextFailure == null) {
+                                completion.complete(nextValue);
+                            } else {
+                                completion.completeExceptionally(nextFailure);
+                            }
+                        });
+                    },
+                    rejectedSubmissionCleanup
+                )
             );
             return new TextTrackedFuture<>(completion, () -> operation);
         }
@@ -955,6 +1062,22 @@ public class RequestSenderOrchestrator {
             String operation,
             CompletableFuture<T> completion,
             Runnable command
+        ) {
+            submitRequiredContinuation(
+                eventLoop,
+                operation,
+                completion,
+                command,
+                () -> {}
+            );
+        }
+
+        private <T> void submitRequiredContinuation(
+            EventLoop eventLoop,
+            String operation,
+            CompletableFuture<T> completion,
+            Runnable command,
+            Runnable rejectedSubmissionCleanup
         ) {
             Runnable guarded = () -> {
                 try {
@@ -970,6 +1093,11 @@ public class RequestSenderOrchestrator {
             try {
                 eventLoop.execute(guarded);
             } catch (RejectedExecutionException rejection) {
+                try {
+                    rejectedSubmissionCleanup.run();
+                } catch (Throwable cleanupFailure) {
+                    addSuppressed(rejection, cleanupFailure);
+                }
                 completion.completeExceptionally(rejection);
                 signalFatal(new Error(
                     "Required target-exchange continuation was rejected during " + operation,
@@ -1002,6 +1130,8 @@ public class RequestSenderOrchestrator {
             private final OwnedPreparedRequest packetProducer;
             private final Duration interval;
             private final RetryVisitor<T> visitor;
+            private final TargetAttemptPermitProvider.Permit firstAttemptPermit;
+            private final TargetConnectionOwner.AttemptPermitRequester retryPermitRequester;
             private final CompletableFuture<DeterminedTransformedResponse<T>> completion =
                 new CompletableFuture<>();
             private Instant referenceStartTime;
@@ -1013,7 +1143,9 @@ public class RequestSenderOrchestrator {
                 OwnedPreparedRequest packetProducer,
                 Instant referenceStartTime,
                 Duration interval,
-                RetryVisitor<T> visitor
+                RetryVisitor<T> visitor,
+                TargetAttemptPermitProvider.Permit firstAttemptPermit,
+                TargetConnectionOwner.AttemptPermitRequester retryPermitRequester
             ) {
                 this.senderSupplier = senderSupplier;
                 this.eventLoop = eventLoop;
@@ -1021,18 +1153,21 @@ public class RequestSenderOrchestrator {
                 this.referenceStartTime = referenceStartTime;
                 this.interval = interval;
                 this.visitor = visitor;
+                this.firstAttemptPermit = firstAttemptPermit;
+                this.retryPermitRequester = retryPermitRequester;
             }
 
             private TrackedFuture<String, DeterminedTransformedResponse<T>> start() {
-                startAttempt();
+                startAttempt(firstAttemptPermit);
                 return new TextTrackedFuture<>(
                     completion,
                     () -> "running the explicit target retry sequence"
                 );
             }
 
-            private void startAttempt() {
+            private void startAttempt(TargetAttemptPermitProvider.Permit permit) {
                 if (completion.isDone()) {
+                    closeResource(permit);
                     return;
                 }
                 var attempt = sendSingleRequestAttempt(
@@ -1041,7 +1176,8 @@ public class RequestSenderOrchestrator {
                     packetProducer,
                     referenceStartTime,
                     interval,
-                    visitor
+                    visitor,
+                    permit
                 );
                 attempt.future.whenComplete((result, failure) ->
                     submitRequiredContinuation(
@@ -1104,11 +1240,57 @@ public class RequestSenderOrchestrator {
                             if (scheduleFailure != null) {
                                 completion.completeExceptionally(unwrap(scheduleFailure));
                             } else {
-                                startAttempt();
+                                requestRetryPermit();
                             }
                         }
                     )
                 );
+            }
+
+            private void requestRetryPermit() {
+                final CompletionStage<TargetAttemptPermitProvider.Permit> permit;
+                try {
+                    permit = Objects.requireNonNull(
+                        retryPermitRequester.request(),
+                        "retry permit requester returned no completion stage"
+                    );
+                } catch (Throwable failure) {
+                    completion.completeExceptionally(failure);
+                    return;
+                }
+                permit.whenComplete((acquiredPermit, permitFailure) ->
+                    submitRequiredContinuation(
+                        eventLoop,
+                        "starting a permitted target retry",
+                        completion,
+                        () -> {
+                            if (permitFailure != null) {
+                                completion.completeExceptionally(unwrap(permitFailure));
+                            } else if (acquiredPermit == null) {
+                                completion.completeExceptionally(
+                                    new NullPointerException(
+                                        "retry permit acquisition completed without a permit"
+                                    )
+                                );
+                            } else {
+                                startAttempt(acquiredPermit);
+                            }
+                        },
+                        () -> releasePermitAfterRejectedContinuation(acquiredPermit)
+                    )
+                );
+            }
+        }
+
+        private void releasePermitAfterRejectedContinuation(
+            TargetAttemptPermitProvider.Permit permit
+        ) {
+            var failure = permit == null ? null : closeResource(permit);
+            if (failure != null) {
+                signalFatal(new Error(
+                    "Target-attempt permit cleanup failed after event-loop rejection",
+                    failure
+                ));
             }
         }
 
@@ -1197,6 +1379,15 @@ public class RequestSenderOrchestrator {
 
         private Duration doubleRetryDelayCapped(Duration delay) {
             return Duration.ofMillis(Math.min(delay.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
+        }
+
+        private Throwable releaseActivePermit() {
+            var permit = activePermit.getAndSet(null);
+            return permit == null ? null : closeResource(permit);
+        }
+
+        private Throwable releasePermit(TargetAttemptPermitProvider.Permit permit) {
+            return activePermit.compareAndSet(permit, null) ? closeResource(permit) : null;
         }
 
         private Throwable releaseActiveAttempt() {
@@ -1434,7 +1625,6 @@ public class RequestSenderOrchestrator {
         private final Instant preparationStart;
         private final Instant sendStart;
         private final Instant sendEnd;
-        private final AsyncPermitPool permitPool;
         private final Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation;
         private final Function<
             TransformedOutputAndResult<ByteBufListProducer>,
@@ -1446,15 +1636,11 @@ public class RequestSenderOrchestrator {
             new CompletableFuture<>();
         private final CompletableFuture<Void> cancellationCompletion = new CompletableFuture<>();
         private final AtomicBoolean cancellationStarted = new AtomicBoolean();
-        private final AtomicReference<AsyncPermitPool.Permit> pendingPermitDelivery =
-            new AtomicReference<>();
         private final AtomicReference<TransformedOutputAndResult<ByteBufListProducer>>
             pendingTransformationDelivery = new AtomicReference<>();
         private final IReplayContexts.IScheduledContext preparationScheduledContext;
         private final IReplayContexts.IScheduledContext sendScheduledContext;
         private CompletableFuture<?> transformationCompletion;
-        private final AtomicReference<AsyncPermitPool.Permit> permit = new AtomicReference<>();
-        private boolean permitReady;
         private boolean timerReady;
         private boolean preparationStarted;
         private final AtomicBoolean terminal = new AtomicBoolean();
@@ -1468,7 +1654,6 @@ public class RequestSenderOrchestrator {
             Instant preparationStart,
             Instant sendStart,
             Instant sendEnd,
-            AsyncPermitPool permitPool,
             Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
             Function<TransformedOutputAndResult<ByteBufListProducer>, RetryVisitor<T>> retryVisitorFactory,
             Function<HttpRequestTransformationStatus, T> filteredResultFactory,
@@ -1480,7 +1665,6 @@ public class RequestSenderOrchestrator {
             this.preparationStart = preparationStart;
             this.sendStart = sendStart;
             this.sendEnd = sendEnd;
-            this.permitPool = permitPool;
             this.preparation = preparation;
             this.retryVisitorFactory = retryVisitorFactory;
             this.filteredResultFactory = filteredResultFactory;
@@ -1495,41 +1679,6 @@ public class RequestSenderOrchestrator {
         }
 
         @Override
-        public void admitted() {
-            permitPool.acquire(requestId, 1).whenComplete(this::deliverPermitCompletion);
-        }
-
-        private void deliverPermitCompletion(
-            AsyncPermitPool.Permit acquiredPermit,
-            Throwable failure
-        ) {
-            if (acquiredPermit != null) {
-                pendingPermitDelivery.set(acquiredPermit);
-            }
-            if (terminal.get()) {
-                releasePendingPermitDelivery(acquiredPermit);
-                return;
-            }
-            executeRequired(
-                runtime.session.eventLoop,
-                "preparation permit completion for " + requestId,
-                () -> {
-                    if (acquiredPermit != null
-                        && !pendingPermitDelivery.compareAndSet(acquiredPermit, null)) {
-                        return;
-                    }
-                    onPermitSettled(acquiredPermit, failure);
-                },
-                rejection -> {
-                    emergencyFailDelivery(
-                        rejection,
-                        releasePendingPermitDelivery(acquiredPermit)
-                    );
-                }
-            );
-        }
-
-        @Override
         public void begin() {
             if (terminal.get()) {
                 return;
@@ -1539,51 +1688,8 @@ public class RequestSenderOrchestrator {
             tryStartPreparation();
         }
 
-        private void onPermitSettled(AsyncPermitPool.Permit acquiredPermit, Throwable failure) {
-            if (terminal.get()) {
-                if (acquiredPermit != null) {
-                    acquiredPermit.close();
-                }
-                return;
-            }
-            if (failure != null) {
-                var cause = unwrap(failure);
-                if (acquiredPermit != null) {
-                    try {
-                        acquiredPermit.close();
-                    } catch (Throwable closeFailure) {
-                        if (closeFailure != cause) {
-                            cause.addSuppressed(closeFailure);
-                        }
-                    }
-                }
-                failPreparation(cause);
-                return;
-            }
-            if (acquiredPermit == null) {
-                failPreparation(new NullPointerException(
-                    "permit acquisition completed without a permit"
-                ));
-                return;
-            }
-            if (!permit.compareAndSet(null, acquiredPermit)) {
-                var duplicatePermitFailure = new IllegalStateException(
-                    "preparation already owns a permit for " + requestId
-                );
-                try {
-                    acquiredPermit.close();
-                } catch (Throwable closeFailure) {
-                    duplicatePermitFailure.addSuppressed(closeFailure);
-                }
-                failPreparation(duplicatePermitFailure);
-                return;
-            }
-            permitReady = true;
-            tryStartPreparation();
-        }
-
         private void tryStartPreparation() {
-            if (terminal.get() || preparationStarted || !permitReady || !timerReady) {
+            if (terminal.get() || preparationStarted || !timerReady) {
                 return;
             }
             preparationStarted = true;
@@ -1689,9 +1795,7 @@ public class RequestSenderOrchestrator {
 
             @SuppressWarnings("unchecked")
             var actorVisitor = (RetryVisitor<Object>) (RetryVisitor<?>) typedVisitor;
-            var acquiredPermit = permit.getAndSet(null);
-            if (acquiredPermit == null
-                || !sendContextTransferred.compareAndSet(false, true)) {
+            if (!sendContextTransferred.compareAndSet(false, true)) {
                 Throwable transferFailure = new IllegalStateException(
                     "preparation resources were concurrently released for " + requestId
                 );
@@ -1699,13 +1803,6 @@ public class RequestSenderOrchestrator {
                     packetProducer.close();
                 } catch (Throwable closeFailure) {
                     transferFailure.addSuppressed(closeFailure);
-                }
-                if (acquiredPermit != null) {
-                    try {
-                        acquiredPermit.close();
-                    } catch (Throwable closeFailure) {
-                        transferFailure.addSuppressed(closeFailure);
-                    }
                 }
                 if (!terminal.get()) {
                     failPreparation(transferFailure);
@@ -1718,7 +1815,6 @@ public class RequestSenderOrchestrator {
                 interval,
                 packetProducer,
                 actorVisitor,
-                acquiredPermit,
                 sendScheduledContext
             );
             if (!terminal.compareAndSet(false, true)) {
@@ -1742,7 +1838,6 @@ public class RequestSenderOrchestrator {
             }
             closePreparationContext();
             closeSendContext();
-            releasePermit();
             completion.complete(outcome);
         }
 
@@ -1772,36 +1867,12 @@ public class RequestSenderOrchestrator {
                     pendingTransformationDelivery.get()
                 )
             );
-            cleanupFailure = combineCleanupFailures(
-                cleanupFailure,
-                releasePendingPermitDelivery(pendingPermitDelivery.get())
-            );
-            cleanupFailure = runCancellationCleanup(cleanupFailure, this::releasePermit);
-            CompletionStage<Integer> queuedPermitCancellation;
-            try {
-                queuedPermitCancellation = java.util.Objects.requireNonNull(
-                    permitPool.cancel(requestId::equals, cause),
-                    "permit cancellation returned no completion stage"
-                );
-            } catch (Throwable failure) {
-                cleanupFailure = combineCleanupFailures(cleanupFailure, failure);
-                completion.complete(new PreparationOutcome.Cancelled<>(cause));
+            completion.complete(new PreparationOutcome.Cancelled<>(cause));
+            if (cleanupFailure == null) {
+                cancellationCompletion.complete(null);
+            } else {
                 cancellationCompletion.completeExceptionally(cleanupFailure);
-                return cancellationCompletion.minimalCompletionStage();
             }
-            var synchronousCleanupFailure = cleanupFailure;
-            queuedPermitCancellation.whenComplete((ignored, failure) -> {
-                completion.complete(new PreparationOutcome.Cancelled<>(cause));
-                var finalFailure = synchronousCleanupFailure;
-                if (failure != null) {
-                    finalFailure = combineCleanupFailures(finalFailure, unwrap(failure));
-                }
-                if (finalFailure == null) {
-                    cancellationCompletion.complete(null);
-                } else {
-                    cancellationCompletion.completeExceptionally(finalFailure);
-                }
-            });
             return cancellationCompletion.minimalCompletionStage();
         }
 
@@ -1857,28 +1928,7 @@ public class RequestSenderOrchestrator {
             var failure = combineCleanupFailures(deliveryFailure, resourceFailure);
             failure = runCancellationCleanup(failure, this::closePreparationContext);
             failure = runCancellationCleanup(failure, this::closeSendContext);
-            failure = runCancellationCleanup(failure, this::releasePermit);
             completion.complete(new PreparationOutcome.Failed<>(failure));
-        }
-
-        private void releasePermit() {
-            var acquiredPermit = permit.getAndSet(null);
-            if (acquiredPermit != null) {
-                acquiredPermit.close();
-            }
-        }
-
-        private Throwable releasePendingPermitDelivery(AsyncPermitPool.Permit acquiredPermit) {
-            if (acquiredPermit == null
-                || !pendingPermitDelivery.compareAndSet(acquiredPermit, null)) {
-                return null;
-            }
-            try {
-                acquiredPermit.close();
-                return null;
-            } catch (Throwable failure) {
-                return failure;
-            }
         }
 
         private Throwable releasePendingTransformationDelivery(
@@ -2038,7 +2088,6 @@ public class RequestSenderOrchestrator {
         @NonNull Instant preparationStart,
         @NonNull Instant sendStart,
         @NonNull Instant sendEnd,
-        @NonNull AsyncPermitPool permitPool,
         @NonNull Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufListProducer>>> preparation,
         @NonNull Function<TransformedOutputAndResult<ByteBufListProducer>, RetryVisitor<T>> retryVisitorFactory,
         @NonNull Function<HttpRequestTransformationStatus, T> filteredResultFactory,
@@ -2058,7 +2107,6 @@ public class RequestSenderOrchestrator {
             preparationStart,
             sendStart,
             sendEnd,
-            permitPool,
             preparation,
             retryVisitorFactory,
             filteredResultFactory,

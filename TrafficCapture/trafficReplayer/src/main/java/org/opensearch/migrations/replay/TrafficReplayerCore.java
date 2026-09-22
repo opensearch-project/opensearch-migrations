@@ -21,7 +21,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
-import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
 import org.opensearch.migrations.replay.lifecycle.RecordWorkTracker;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
@@ -125,7 +125,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
-    protected final int maxConcurrentRequests;
+    protected final int maxConcurrentTargetAttempts;
     protected final AtomicInteger successfulRequestCount;
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
@@ -141,7 +141,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         URI serverUri,
         IAuthTransformerFactory authTransformer,
         Supplier<IJsonTransformer> jsonTransformerSupplier,
-        int maxConcurrentRequests,
+        int maxConcurrentTargetAttempts,
         IWorkTracker<Void> requestWorkTracker,
         IRetryVisitorFactory retryVisitorFactory
     ) {
@@ -150,7 +150,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             serverUri,
             authTransformer,
             jsonTransformerSupplier,
-            maxConcurrentRequests,
+            maxConcurrentTargetAttempts,
             requestWorkTracker,
             retryVisitorFactory,
             new TargetResponseClassifier(
@@ -165,7 +165,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         URI serverUri,
         IAuthTransformerFactory authTransformer,
         Supplier<IJsonTransformer> jsonTransformerSupplier,
-        int maxConcurrentRequests,
+        int maxConcurrentTargetAttempts,
         IWorkTracker<Void> requestWorkTracker,
         IRetryVisitorFactory retryVisitorFactory,
         TargetResponseClassifier targetResponseClassifier
@@ -182,10 +182,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         if (serverUri.getScheme() == null) {
             throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
         }
-        if (maxConcurrentRequests <= 0) {
-            throw new IllegalArgumentException("maxConcurrentRequests must be positive");
+        if (maxConcurrentTargetAttempts <= 0) {
+            throw new IllegalArgumentException("maxConcurrentTargetAttempts must be positive");
         }
-        this.maxConcurrentRequests = maxConcurrentRequests;
+        this.maxConcurrentTargetAttempts = maxConcurrentTargetAttempts;
         this.requestWorkTracker = requestWorkTracker;
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformerSupplier, authTransformer);
         successfulRequestCount = new AtomicInteger();
@@ -205,7 +205,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private ITrafficCaptureSource trafficCaptureSource;
         /** How long to delay the first request on a resumed connection. Configurable via CLI. */
         private final Duration quiescentDuration;
-        private final AsyncPermitPool permitPool;
         private final RecordWorkTracker recordWorkTracker;
         private final SourceReconstructionPolicy sourceReconstructionPolicy;
         private final Map<ConnectionSessionKey, SourcePartitionKey> sessionPartitions = new ConcurrentHashMap<>();
@@ -217,7 +216,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             Consumer<SourceTargetCaptureTuple> tupleObserver,
             ITrafficCaptureSource trafficCaptureSource,
             Duration quiescentDuration,
-            AsyncPermitPool permitPool,
             RecordWorkTracker recordWorkTracker
         ) {
             this.replayEngine = replayEngine;
@@ -226,7 +224,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             this.tupleObserver = tupleObserver;
             this.trafficCaptureSource = trafficCaptureSource;
             this.quiescentDuration = quiescentDuration;
-            this.permitPool = permitPool;
             this.sourceReconstructionPolicy = new SourceReconstructionPolicy(
                 trafficCaptureSource.usesStructuralExpiration()
             );
@@ -653,7 +650,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 request.getLastPacketTimestamp(),
                 request.packetBytes::stream,
                 quiescentDurationForRequest,
-                permitPool,
                 processingRegistration
             );
             httpSentRequestFuture.future.whenComplete(
@@ -892,7 +888,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         var owner = new ReplayIntakeOwner(failure -> {
             throw failure;
         });
-        var permits = new AsyncPermitPool(1, owner::submitRequired, AsyncPermitPool.Metrics.NOOP);
+        var permits = new TargetAttemptPermitProvider(
+            1,
+            owner::submitRequired,
+            TargetAttemptPermitProvider.Metrics.NOOP
+        );
         var noFlowControl = new BufferedFlowController() {
             @Override
             public void stopReadsPast(Instant pointInTime) {}

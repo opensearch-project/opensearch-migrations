@@ -908,3 +908,29 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   confinement. It returned `NO_ACTIONABLE_FINDINGS`.
 - Spotless remains deferred. No tests, mocks, compatibility APIs, or mutable static state were
   added.
+
+### Progress checkpoint — S6b target-attempt permit ownership
+
+- Renamed `AsyncPermitPool` to `TargetAttemptPermitProvider` and moved provider injection to the
+  replay orchestrator and each `TargetConnectionOwner`. The preferred CLI names are now
+  `--max-concurrent-target-attempts` and `--maxConcurrentTargetAttempts`; the established request-
+  named aliases remain as required by plan section 7.
+- Removed permit acquisition, cancellation, and ownership from `PreparationCoordinator`,
+  `PreparedActorRequest`, `ReplayEngine`, `RequestTransformerAndSender`, and the accumulation
+  callback path. Queued requests and transformation now hold no target-attempt permit.
+- The connection owner reserves the execution head before requesting its first permit. A retry
+  requests a new permit through that same owner, and the request exchange releases each permit at
+  raw target-attempt outcome or failure, before retry-policy evaluation, source-response waits,
+  backoff, tuple output, or request-processing completion.
+- Pending acquisition is withdrawable during abort. Delivered and active permits are released on
+  cancellation, startup failure, attempt failure, and rejected event-loop continuation.
+- `rg` finds the only production `permitProvider.acquire` call in `TargetConnectionOwner`.
+  `:TrafficCapture:trafficReplayer:compileJava -x spotlessJavaCheck -x spotlessJavaApply
+  --parallel --max-workers=18 --no-build-cache` passed in 8 seconds, and `git diff --check` passed.
+- `compileTestJava` currently stops at four stale test-fixture API errors:
+  `ActorRequestTestUtils` still names the old provider, and `ReplayEngineFactory` has not yet
+  supplied the provider constructor argument. These callers are assigned to the next bounded
+  outside-in test migration; no compatibility production API was added.
+- At the user's explicit direction, the in-agent Claude review was waived because an independent
+  Claude review will start from the committed series. Spotless and broad test-suite work remain
+  deferred.
