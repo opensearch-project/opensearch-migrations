@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -158,16 +160,18 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 response -> TestHttpServerContext.makeResponse(random, response))) {
 
             var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
-            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0);
             var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
 
             var serverUri = httpServer.localhostEndpoint();
+            var processExitCodes = new CopyOnWriteArrayList<Integer>();
             try (var tr = new RootReplayerConstructorExtensions(
                     rootContext, serverUri,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024);
+                    10 * 1024,
+                    processExitCodes::add);
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
@@ -215,6 +219,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
 
                 tr.shutdown(null).get();
             }
+            assertNoProcessTermination(processExitCodes);
         }
     }
 
@@ -239,16 +244,18 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 response -> TestHttpServerContext.makeResponse(random, response))) {
 
             var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
-            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0);
             var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
 
             var serverUri = httpServer.localhostEndpoint();
+            var processExitCodes = new CopyOnWriteArrayList<Integer>();
             try (var tr = new RootReplayerConstructorExtensions(
                     rootContext, serverUri,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024);
+                    10 * 1024,
+                    processExitCodes::add);
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
@@ -280,6 +287,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 replayDone.get(1, TimeUnit.MINUTES);
                 tr.shutdown(null).get();
             }
+            assertNoProcessTermination(processExitCodes);
         }
     }
 
@@ -311,52 +319,65 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 response -> TestHttpServerContext.makeResponse(random, response))) {
 
             var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
-            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0);
             var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
 
             var serverUri = httpServer.localhostEndpoint();
-            try (var tr = new RootReplayerConstructorExtensions(
-                    rootContext, serverUri,
-                    new StaticAuthTransformerFactory("TEST"),
-                    new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
-                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024);
-                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
-                 var tupleWriter = new ThreadLocalTupleWriter(i -> failingSink)) {
+            var processExitCodes = new CopyOnWriteArrayList<Integer>();
+            var expectedFatal = new AtomicReference<Error>();
+            var shutdownFailure = Assertions.assertThrows(ExecutionException.class, () -> {
+                try (var tr = new RootReplayerConstructorExtensions(
+                        rootContext, serverUri,
+                        new StaticAuthTransformerFactory("TEST"),
+                        new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
+                        RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
+                        10 * 1024,
+                        processExitCodes::add);
+                     var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
+                     var tupleWriter = new ThreadLocalTupleWriter(i -> failingSink)) {
 
-                var replayFailure = new AtomicReference<Throwable>();
-                var replayThread = new Thread(() -> {
-                    try {
-                        tr.setupRunAndWaitForReplayWithShutdownChecks(
-                            Duration.ofSeconds(70), Duration.ofSeconds(30),
-                            blockingTrafficSource, new TimeShifter(10 * 1000),
-                            tupleWriter, Duration.ofSeconds(5));
-                    } catch (Throwable t) {
-                        replayFailure.set(t);
-                        log.atError().setCause(t).setMessage("Replay thread exception").log();
-                    }
-                });
-                replayThread.start();
+                    var replayFailure = new AtomicReference<Throwable>();
+                    var replayThread = new Thread(() -> {
+                        try {
+                            tr.setupRunAndWaitForReplayWithShutdownChecks(
+                                Duration.ofSeconds(70), Duration.ofSeconds(30),
+                                blockingTrafficSource, new TimeShifter(10 * 1000),
+                                tupleWriter, Duration.ofSeconds(5));
+                        } catch (Throwable t) {
+                            replayFailure.set(t);
+                            log.atError().setCause(t).setMessage("Replay thread exception").log();
+                        }
+                    });
+                    replayThread.start();
 
-                Assertions.assertTrue(
-                    failingSink.failureInjected.await(30, TimeUnit.SECONDS),
-                    "Timed out waiting for the sink to inject its tuple write failure"
-                );
+                    Assertions.assertTrue(
+                        failingSink.failureInjected.await(30, TimeUnit.SECONDS),
+                        "Timed out waiting for the sink to inject its tuple write failure"
+                    );
 
-                replayThread.join(30_000);
-                Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
-                Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
-                    "Offsets should not be committed after tuple write failure");
-                Assertions.assertInstanceOf(TrafficReplayer.TerminationException.class, replayFailure.get());
-                var termination = (TrafficReplayer.TerminationException) replayFailure.get();
-                Assertions.assertInstanceOf(Error.class, termination.originalCause);
-                Assertions.assertTrue(
-                    termination.originalCause.getMessage().contains("Fatal tuple write failure"),
-                    "Fatal shutdown should explain that tuple output was not durably written"
-                );
-
-                tr.shutdown(null).get();
-            }
+                    replayThread.join(30_000);
+                    Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
+                    Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
+                        "Offsets should not be committed after tuple write failure");
+                    Assertions.assertInstanceOf(TrafficReplayer.TerminationException.class, replayFailure.get());
+                    var termination = (TrafficReplayer.TerminationException) replayFailure.get();
+                    Assertions.assertInstanceOf(Error.class, termination.originalCause);
+                    Assertions.assertTrue(
+                        termination.originalCause.getMessage().contains("Fatal tuple write failure"),
+                        "Fatal shutdown should explain that tuple output was not durably written"
+                    );
+                    expectedFatal.set((Error) termination.originalCause);
+                }
+            });
+            Assertions.assertSame(expectedFatal.get(), shutdownFailure.getCause());
+            assertNoProcessTermination(processExitCodes);
         }
+    }
+
+    private static void assertNoProcessTermination(List<Integer> processExitCodes) {
+        Assertions.assertTrue(
+            processExitCodes.isEmpty(),
+            () -> "Unexpected process termination with exit codes " + processExitCodes
+        );
     }
 }

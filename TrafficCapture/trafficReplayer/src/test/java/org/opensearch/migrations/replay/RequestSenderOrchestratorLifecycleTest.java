@@ -16,21 +16,28 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datahandlers.TargetPacketConsumer;
+import org.opensearch.migrations.replay.datahandlers.TargetPacketConsumer.PacketSendOutcome;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -38,6 +45,7 @@ import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +61,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     private ClientConnectionPool connectionPool;
     private ExecutorService permitOwnerExecutor;
     private RequestSenderOrchestrator orchestrator;
+    private AtomicReference<Error> unexpectedFatalFailure;
 
     @BeforeEach
     void createOrchestrator() {
@@ -66,14 +75,39 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             "actor-lifecycle-test",
             1
         );
+        unexpectedFatalFailure = new AtomicReference<>();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new ImmediatePacketConsumer(
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
             sessionKey -> sessionAcknowledger.get().apply(sessionKey),
-            rootContext.getReplayProcessFatalMetrics()
+            TargetConnectionOwner.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
+    }
+
+    private static TargetConnectionOwner.RequestLifecycleSink acceptingLifecycleSink() {
+        return new TargetConnectionOwner.RequestLifecycleSink() {
+            @Override
+            public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return CompletableFuture.completedFuture(null);
+            }
+        };
     }
 
     @AfterEach
@@ -81,6 +115,10 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         connectionPool.shutdownNow().get(5, TimeUnit.SECONDS);
         permitOwnerExecutor.shutdownNow();
         Assertions.assertTrue(permitOwnerExecutor.awaitTermination(5, TimeUnit.SECONDS));
+        Assertions.assertNull(
+            unexpectedFatalFailure.get(),
+            () -> "unexpected process-fatal transition: " + unexpectedFatalFailure.get()
+        );
     }
 
     @Test
@@ -92,16 +130,32 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
         var secondPreparation =
             new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
+        var firstProcessing = testProcessing();
+        var secondProcessing = testProcessing();
 
-        var first = schedule(firstContext, permits, firstPreparation);
-        var second = schedule(secondContext, permits, secondPreparation);
+        var first = scheduleUnregistered(
+            firstContext,
+            permits,
+            firstPreparation,
+            firstProcessing.registration()
+        );
+        var second = scheduleUnregistered(
+            secondContext,
+            permits,
+            secondPreparation,
+            secondProcessing.registration()
+        );
         secondPreparation.complete(transformedRequest());
         Thread.sleep(25);
         Assertions.assertTrue(targetExecutionOrder.isEmpty());
 
         firstPreparation.complete(transformedRequest());
         first.get(Duration.ofSeconds(5));
+        Assertions.assertTrue(firstProcessing.completeTupleDurable());
         second.get(Duration.ofSeconds(5));
+        Assertions.assertTrue(secondProcessing.completeTupleDurable());
+        firstProcessing.lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        secondProcessing.lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
         Assertions.assertEquals(List.of(0, 1), targetExecutionOrder);
         Assertions.assertEquals(2, targetExchanges.get());
@@ -117,9 +171,43 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
         var secondPreparation =
             new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
-        var first = schedule(firstContext, permits, firstPreparation);
-        var second = schedule(secondContext, permits, secondPreparation);
+        var firstPreparationStarted = new CompletableFuture<Void>();
+        var firstProcessing = testProcessing();
+        var now = Instant.now();
+        var first = orchestrator.scheduleRequestLifecycle(
+            firstContext.getReplayerRequestKey(),
+            testGeneration(firstContext),
+            firstContext,
+            now.minusSeconds(1),
+            now.minusMillis(1),
+            now,
+            permits,
+            () -> {
+                firstPreparationStarted.complete(null);
+                return new TextTrackedFuture<>(firstPreparation, "test preparation");
+            },
+            transformed -> (request, outcome) -> visitTargetAttemptOutcome(
+                outcome,
+                () -> TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.DONE,
+                        "sent"
+                    ),
+                    () -> "do not retry"
+                )
+            ),
+            status -> status.getClass().getSimpleName(),
+            firstProcessing.registration()
+        );
+        var secondProcessing = testProcessing();
+        var second = scheduleUnregistered(
+            secondContext,
+            permits,
+            secondPreparation,
+            secondProcessing.registration()
+        );
 
+        firstPreparationStarted.get(5, TimeUnit.SECONDS);
         orchestrator.abortActor(
             firstContext.getChannelKeyContext(),
             0,
@@ -145,17 +233,23 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             connectionPool,
             Duration.ofSeconds(30),
             Duration.ofSeconds(30),
-            (session, context) -> new ImmediatePacketConsumer(
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            rootContext.getReplayProcessFatalMetrics()
+            TargetConnectionOwner.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("cancel-retry", 0);
         var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[] { 1 }));
+        var processing = testProcessing();
         var request = orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             Instant.now().minusSeconds(1),
             Instant.now().minusMillis(1),
@@ -172,17 +266,18 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 @Override
                 public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<String>> visit(
                     ByteBuf requestBytes,
-                    AggregatedRawResponse response,
-                    Throwable failure
+                    TargetAttemptOutcome<AggregatedRawResponse> outcome
                 ) {
-                    retryStarted.complete(null);
-                    return TextTrackedFuture.completedFuture(
-                        new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                            RequestSenderOrchestrator.RetryDirective.RETRY,
-                            "retry"
-                        ),
-                        () -> "force a delayed retry"
-                    );
+                    return visitTargetAttemptOutcome(outcome, () -> {
+                        retryStarted.complete(null);
+                        return TextTrackedFuture.completedFuture(
+                            new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                                RequestSenderOrchestrator.RetryDirective.RETRY,
+                                "retry"
+                            ),
+                            () -> "force a delayed retry"
+                        );
+                    });
                 }
 
                 @Override
@@ -190,7 +285,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                     visitorClosed.complete(null);
                 }
             },
-            status -> status.getClass().getSimpleName()
+            status -> status.getClass().getSimpleName(),
+            processing.registration()
         );
 
         retryStarted.get(5, TimeUnit.SECONDS);
@@ -215,7 +311,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var ownershipMetrics = new RecordingOwnershipMetrics();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new IPacketFinalizingConsumer<>() {
+            (session, context, firstTargetWriteSubmitted) -> new TestTargetPacketConsumer() {
                 @Override
                 public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
                     nextRequestPacket.release();
@@ -237,17 +333,20 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 }
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
             ownershipMetrics,
-            rootContext.getReplayProcessFatalMetrics()
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("cancel-finalizer", 0);
-        var request = schedule(
+        var processing = testProcessing();
+        var request = scheduleUnregistered(
             context,
             permits,
-            CompletableFuture.completedFuture(transformedRequest())
+            CompletableFuture.completedFuture(transformedRequest()),
+            processing.registration()
         );
 
         finalizationStarted.get(5, TimeUnit.SECONDS);
@@ -277,7 +376,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var ownershipMetrics = new RecordingOwnershipMetrics();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new IPacketFinalizingConsumer<>() {
+            (session, context, firstTargetWriteSubmitted) -> new TestTargetPacketConsumer() {
                 @Override
                 public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
                     nextRequestPacket.release();
@@ -293,27 +392,31 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 }
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
             ownershipMetrics,
-            rootContext.getReplayProcessFatalMetrics()
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("abort-terminal-result", 0);
         var now = Instant.now();
+        var processing = testProcessing();
         var request = orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             now.minusSeconds(1),
             now.minusMillis(1),
             now,
             permits,
             () -> TextTrackedFuture.completedFuture(transformedRequest(), () -> "prepared request"),
-            transformed -> (requestBytes, response, failure) -> {
+            transformed -> (requestBytes, outcome) -> visitTargetAttemptOutcome(outcome, () -> {
                 retryStarted.complete(null);
                 return new TextTrackedFuture<>(retryDecision, "controlled terminal retry decision");
-            },
-            status -> status.getClass().getSimpleName()
+            }),
+            status -> status.getClass().getSimpleName(),
+            processing.registration()
         );
 
         retryStarted.get(5, TimeUnit.SECONDS);
@@ -346,19 +449,22 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("terminal-result-handoff", 0);
         var now = Instant.now();
+        var processing = testProcessing();
         var request = orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             now.minusSeconds(1),
             now.minusMillis(1),
             now,
             permits,
             () -> TextTrackedFuture.completedFuture(transformedRequest(), () -> "prepared request"),
-            transformed -> (requestBytes, response, failure) -> {
+            transformed -> (requestBytes, outcome) -> visitTargetAttemptOutcome(outcome, () -> {
                 retryStarted.complete(null);
                 return new TextTrackedFuture<>(retryDecision, "controlled terminal retry decision");
-            },
-            status -> status.getClass().getSimpleName()
+            }),
+            status -> status.getClass().getSimpleName(),
+            processing.registration()
         );
 
         retryStarted.get(5, TimeUnit.SECONDS);
@@ -376,6 +482,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             releasedResults.get(),
             "the producer must relinquish ownership before publishing the result"
         );
+        Assertions.assertTrue(processing.completeTupleDurable());
+        processing.lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
         closeActor(context);
     }
 
@@ -390,7 +498,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             connectionPool,
             Duration.ofSeconds(30),
             Duration.ofSeconds(30),
-            (session, context) -> new IPacketFinalizingConsumer<>() {
+            (session, context, firstTargetWriteSubmitted) -> new TestTargetPacketConsumer() {
                 @Override
                 public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
                     nextRequestPacket.release();
@@ -403,25 +511,31 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 }
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             metrics,
-            org.opensearch.migrations.replay.lifecycle.ResourceOwnership.Metrics.NOOP,
-            rootContext.getReplayProcessFatalMetrics()
+            ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("phase-state", 0);
         var now = Instant.now();
+        var processing = testProcessing();
         var request = orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             now.minusSeconds(1),
             now.minusMillis(1),
             now,
             permits,
             () -> TextTrackedFuture.completedFuture(transformedRequest(), () -> "prepared request"),
-            transformed -> (requestBytes, targetResponse, failure) ->
-                new TextTrackedFuture<>(retryDecision, "controlled retry decision"),
-            status -> status.getClass().getSimpleName()
+            transformed -> (requestBytes, outcome) -> visitTargetAttemptOutcome(
+                outcome,
+                () -> new TextTrackedFuture<>(retryDecision, "controlled retry decision")
+            ),
+            status -> status.getClass().getSimpleName(),
+            processing.registration()
         );
 
         metrics.awaitPhase(TargetExchangeState.Phase.SENDING_REQUEST);
@@ -465,22 +579,29 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var metrics = new RecordingTargetExchangeMetrics();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new ImmediatePacketConsumer(
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             metrics,
-            rootContext.getReplayProcessFatalMetrics()
+            ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("synchronous-phase-state", 0);
 
-        var result = schedule(
+        var processing = testProcessing();
+        var request = scheduleUnregistered(
             context,
             permits,
-            CompletableFuture.completedFuture(transformedRequest())
-        ).get(Duration.ofSeconds(5));
+            CompletableFuture.completedFuture(transformedRequest()),
+            processing.registration()
+        );
+        var result = request.get(Duration.ofSeconds(5));
+        Assertions.assertTrue(processing.completeTupleDurable());
+        processing.lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
         metrics.awaitEnteredPhaseCount(4);
         metrics.awaitNoActivePhase();
@@ -501,24 +622,28 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     @Test
     void synchronousPacketConsumerCreationFailureReleasesOwnedRequestResources() throws Exception {
         var ownershipMetrics = new RecordingOwnershipMetrics();
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> {
+            (session, context, firstTargetWriteSubmitted) -> {
                 throw new IllegalStateException("packet consumer creation failed");
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
             ownershipMetrics,
-            rootContext.getReplayProcessFatalMetrics()
+            acceptingLifecycleSink(),
+            fatalFailures::add
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("sender-factory-failure", 0);
 
-        var request = schedule(
+        var processing = testProcessing();
+        var request = scheduleUnregistered(
             context,
             permits,
-            CompletableFuture.completedFuture(transformedRequest())
+            CompletableFuture.completedFuture(transformedRequest()),
+            processing.registration()
         );
 
         var failure = Assertions.assertThrows(
@@ -526,6 +651,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             () -> request.get(Duration.ofSeconds(5))
         );
         Assertions.assertEquals("packet consumer creation failed", failure.getCause().getMessage());
+        await(() -> !fatalFailures.isEmpty());
+        Assertions.assertSame(failure.getCause(), fatalFailures.get(0).getCause());
         await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
         await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
         Assertions.assertEquals(1, ownershipMetrics.maxHandles(ResourceOwnership.Type.PREPARED_REQUEST));
@@ -533,22 +660,24 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
         probe.close();
-        closeActor(context);
+        Assertions.assertEquals(1, fatalFailures.size());
     }
 
     @Test
     void visitorCreationFailureSettlesPreparationWhenPreparedCleanupAlsoFails() throws Exception {
         var ownershipMetrics = new RecordingOwnershipMetrics();
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new ImmediatePacketConsumer(
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
             ownershipMetrics,
-            rootContext.getReplayProcessFatalMetrics()
+            acceptingLifecycleSink(),
+            fatalFailures::add
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("visitor-factory-failure", 0);
@@ -559,8 +688,10 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var now = Instant.now();
 
         try {
+            var processing = testProcessing();
             var request = orchestrator.scheduleRequestLifecycle(
                 context.getReplayerRequestKey(),
+                testGeneration(context),
                 context,
                 now.minusSeconds(1),
                 now.minusMillis(1),
@@ -570,7 +701,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 ignored -> {
                     throw visitorFailure;
                 },
-                status -> status.getClass().getSimpleName()
+                status -> status.getClass().getSimpleName(),
+                processing.registration()
             );
 
             var failure = Assertions.assertThrows(
@@ -578,6 +710,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 () -> request.get(Duration.ofSeconds(5))
             );
             Assertions.assertSame(visitorFailure, failure.getCause());
+            await(() -> !fatalFailures.isEmpty());
+            Assertions.assertSame(visitorFailure, fatalFailures.get(0).getCause());
             Assertions.assertEquals(1, visitorFailure.getSuppressed().length);
             Assertions.assertEquals(
                 "prepared request has shared ownership; refCnt=2",
@@ -598,20 +732,29 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         }
 
         Assertions.assertEquals(0, ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST));
-        closeActor(context);
+        Assertions.assertEquals(1, fatalFailures.size());
     }
 
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void synchronousPacketConsumerFailureReleasesOwnedRequestResources(boolean returnsNull) throws Exception {
         var ownershipMetrics = new RecordingOwnershipMetrics();
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new IPacketFinalizingConsumer<>() {
+            (session, context, firstTargetWriteSubmitted) -> new TestTargetPacketConsumer() {
+                @Override
+                public TrackedFuture<String, PacketSendOutcome> sendPacket(ByteBuf packet) {
+                    if (returnsNull) {
+                        return null;
+                    }
+                    return super.sendPacket(packet);
+                }
+
                 @Override
                 public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
                     if (returnsNull) {
-                        return null;
+                        throw new AssertionError("null sendPacket branch must bypass the test adapter");
                     }
                     throw new IllegalStateException("packet write rejected");
                 }
@@ -622,10 +765,11 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 }
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
             ownershipMetrics,
-            rootContext.getReplayProcessFatalMetrics()
+            acceptingLifecycleSink(),
+            fatalFailures::add
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext(
@@ -634,24 +778,21 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         );
         var transformed = transformedRequest();
         var now = Instant.now();
+        var processing = testProcessing();
         var request = orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             now.minusSeconds(1),
             now.minusMillis(1),
             now,
             permits,
             () -> TextTrackedFuture.completedFuture(transformed, () -> "prepared request"),
-            transformedResult -> (requestBytes, response, sendFailure) -> {
-                var failure = sendFailure == null
-                    ? new AssertionError("synchronous packet failure was not propagated")
-                    : sendFailure;
-                return TextTrackedFuture.failedFuture(
-                    failure,
-                    () -> "propagating the synchronous packet failure"
-                );
-            },
-            status -> status.getClass().getSimpleName()
+            transformedResult -> (requestBytes, outcome) -> visitTargetAttemptOutcome(outcome, () -> {
+                throw new AssertionError("unexpected retry evaluation after synchronous packet failure");
+            }),
+            status -> status.getClass().getSimpleName(),
+            processing.registration()
         );
 
         var failure = Assertions.assertThrows(
@@ -662,6 +803,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             returnsNull ? "packet consumer returned null" : "packet write rejected",
             failure.getCause().getMessage()
         );
+        await(() -> !fatalFailures.isEmpty());
+        Assertions.assertSame(failure.getCause(), fatalFailures.get(0).getCause());
         await(() -> ownershipMetrics.handles(ResourceOwnership.Type.PREPARED_REQUEST) == 0);
         await(() -> ownershipMetrics.handles(ResourceOwnership.Type.ATTEMPT_PAYLOAD) == 0);
         Assertions.assertEquals(0, transformed.transformedOutput.refCnt());
@@ -669,7 +812,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         var probe = permits.acquire(requestId("probe", 0), 1).toCompletableFuture().get(2, TimeUnit.SECONDS);
         probe.close();
-        closeActor(context);
+        Assertions.assertEquals(1, fatalFailures.size());
     }
 
     @Test
@@ -677,14 +820,15 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var ownershipMetrics = new RecordingOwnershipMetrics();
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, context) -> new ImmediatePacketConsumer(
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
                 context.getReplayerRequestKey().getReplayerRequestIndex()
             ),
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics.NOOP,
+            TargetConnectionOwner.Metrics.NOOP,
             TargetExchangeState.Metrics.NOOP,
             ownershipMetrics,
-            rootContext.getReplayProcessFatalMetrics()
+            acceptingLifecycleSink(),
+            failure -> unexpectedFatalFailure.compareAndSet(null, failure)
         );
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("late-transformation", 0);
@@ -696,8 +840,10 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             }
         };
         var now = Instant.now();
+        var processing = testProcessing();
         var request = orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             now.minusSeconds(1),
             now.minusMillis(1),
@@ -707,15 +853,18 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 preparationStarted.complete(null);
                 return new TextTrackedFuture<>(transformation, "non-cancellable transformation");
             },
-            transformed -> (requestBytes, response, failure) ->
-                TextTrackedFuture.completedFuture(
+            transformed -> (requestBytes, outcome) -> visitTargetAttemptOutcome(
+                outcome,
+                () -> TextTrackedFuture.completedFuture(
                     new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
                         RequestSenderOrchestrator.RetryDirective.DONE,
                         "unused"
                     ),
                     () -> "unused retry visitor"
-                ),
-            status -> status.getClass().getSimpleName()
+                )
+            ),
+            status -> status.getClass().getSimpleName(),
+            processing.registration()
         );
 
         preparationStarted.get(2, TimeUnit.SECONDS);
@@ -739,13 +888,18 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     void filteredPreparationReleasesPermitWithoutOpeningTargetExchange() throws Exception {
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("filtered", 0);
-        var result = schedule(
+        var processing = testProcessing();
+        var request = scheduleUnregistered(
             context,
             permits,
             CompletableFuture.completedFuture(
                 new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped())
-            )
-        ).get(Duration.ofSeconds(5));
+            ),
+            processing.registration()
+        );
+        var result = request.get(Duration.ofSeconds(5));
+        Assertions.assertTrue(processing.completeTupleDurable());
+        processing.lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
         Assertions.assertEquals("Skipped", result);
         Assertions.assertEquals(0, targetExchanges.get());
@@ -765,21 +919,46 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var context = rootContext.getTestConnectionRequestContext("termination", 0);
         var runtime = orchestrator.transactionRuntime(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context.getChannelKeyContext()
         );
-        var transaction = new CompletableFuture<Void>();
-        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        var tupleDurability = new CompletableFuture<EvidenceOutcome>();
+        var transaction = new ReplayTransaction<String>(
+            runtime.requestId(),
+            runtime.mailbox(),
+            (id, source, target) -> tupleDurability,
+            List.of()
+        );
+        var processingRegistration = runtime.processingRegistration(transaction);
+        var request = scheduleUnregistered(
+            context,
+            permitPool(1),
+            CompletableFuture.completedFuture(transformedRequest()),
+            processingRegistration
+        );
 
         var close = orchestrator.scheduleActorClose(
             context.getChannelKeyContext(),
             0,
+            testGeneration(context),
             Instant.now()
         );
 
+        request.get(Duration.ofSeconds(5));
         Assertions.assertFalse(close.future.isDone());
         Assertions.assertFalse(acknowledgementStarted.isDone());
 
-        transaction.complete(null);
+        transaction.settleSource(new SourceOutcome.Complete())
+            .toCompletableFuture()
+            .get(5, TimeUnit.SECONDS);
+        transaction.settleTarget(new TargetOutcome.Succeeded<>("sent"))
+            .toCompletableFuture()
+            .get(5, TimeUnit.SECONDS);
+        Assertions.assertFalse(close.future.isDone());
+        Assertions.assertFalse(acknowledgementStarted.isDone());
+        tupleDurability.complete(new EvidenceOutcome.Durable("delayed target tuple"));
+        processingRegistration.lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
+
         var acknowledgedSession = acknowledgementStarted.get(5, TimeUnit.SECONDS);
         Assertions.assertEquals(runtime.requestId().session(), acknowledgedSession);
         Assertions.assertFalse(close.future.isDone());
@@ -789,33 +968,63 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     }
 
     @Test
-    void failedTransactionPreventsSourceAcknowledgement() throws Exception {
+    void unexpectedProcessingFailureIsFatalAndPreventsSourceAcknowledgement() throws Exception {
         var acknowledgementStarted = new CompletableFuture<ConnectionSessionKey>();
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         sessionAcknowledger.set(sessionKey -> {
             acknowledgementStarted.complete(sessionKey);
             return CompletableFuture.completedFuture(null);
         });
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
+                context.getReplayerRequestKey().getReplayerRequestIndex()
+            ),
+            sessionKey -> sessionAcknowledger.get().apply(sessionKey),
+            TargetConnectionOwner.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
+            fatalFailures::add
+        );
         var context = rootContext.getTestConnectionRequestContext("failed-transaction", 0);
         var runtime = orchestrator.transactionRuntime(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context.getChannelKeyContext()
         );
-        var transaction = new CompletableFuture<Void>();
-        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        var transaction = new ReplayTransaction<String>(
+            runtime.requestId(),
+            runtime.mailbox(),
+            (id, source, target) -> CompletableFuture.completedFuture(
+                new EvidenceOutcome.Durable("unused")
+            ),
+            List.of()
+        );
+        var request = scheduleUnregistered(
+            context,
+            permitPool(1),
+            CompletableFuture.completedFuture(transformedRequest()),
+            runtime.processingRegistration(transaction)
+        );
         var close = orchestrator.scheduleActorClose(
             context.getChannelKeyContext(),
             0,
+            testGeneration(context),
             Instant.now()
         );
 
-        transaction.completeExceptionally(new IllegalStateException("disposition failed"));
+        request.get(Duration.ofSeconds(5));
+        transaction.fail(new IllegalStateException("disposition failed"))
+            .toCompletableFuture()
+            .get(5, TimeUnit.SECONDS);
 
-        var error = Assertions.assertThrows(
-            java.util.concurrent.ExecutionException.class,
-            () -> close.get(Duration.ofSeconds(5))
-        );
+        await(() -> !fatalFailures.isEmpty());
+        var error = fatalFailures.get(0);
         Assertions.assertEquals("disposition failed", error.getCause().getMessage());
         Assertions.assertFalse(acknowledgementStarted.isDone());
+        Assertions.assertFalse(close.future.isDone());
+        Assertions.assertEquals(1, fatalFailures.size());
     }
 
     @Test
@@ -826,6 +1035,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var context = rootContext.getTestConnectionRequestContext("late-shutdown-actor", 0);
         var runtime = orchestrator.transactionRuntime(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context.getChannelKeyContext()
         );
         var runwayObserved = new CompletableFuture<ReplayTransaction.RunwayLossReason>();
@@ -833,7 +1043,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             runtime.requestId(),
             runtime.mailbox(),
             (id, source, target) -> CompletableFuture.completedFuture(
-                new org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome.Durable("unused")
+                new EvidenceOutcome.Durable("unused")
             ),
             List.of(),
             new ReplayTransaction.Metrics() {
@@ -852,8 +1062,8 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
                 public void terminalOutcome(ReplayTransaction.TerminalOutcome outcome) {}
             }
         );
+        runtime.processingRegistration(transaction);
 
-        runtime.register(transaction).toCompletableFuture().get(5, TimeUnit.SECONDS);
         Assertions.assertEquals(
             ReplayTransaction.RunwayLossReason.SHUTDOWN,
             runwayObserved.get(5, TimeUnit.SECONDS)
@@ -880,7 +1090,13 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var permits = permitPool(1);
         var context = rootContext.getTestConnectionRequestContext("shutdown", 0);
         var preparation = new CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>>();
-        var request = schedule(context, permits, preparation);
+        var processing = testProcessing();
+        var request = scheduleUnregistered(
+            context,
+            permits,
+            preparation,
+            processing.registration()
+        );
         var cause = new CancellationException("shutdown");
 
         var firstShutdown = orchestrator.shutdownActors(cause).toCompletableFuture();
@@ -903,6 +1119,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             CancellationException.class,
             () -> orchestrator.transactionRuntime(
                 lateContext.getReplayerRequestKey(),
+                testGeneration(lateContext),
                 lateContext.getChannelKeyContext()
             )
         );
@@ -917,15 +1134,29 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
     }
 
     @Test
-    void failedSourceAcknowledgementFailsTheSessionGate() {
+    void failedSourceAcknowledgementIsProcessFatalAndFailsSessionGate() throws Exception {
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         sessionAcknowledger.set(sessionKey ->
             CompletableFuture.failedFuture(new IllegalStateException("source acknowledgement failed"))
+        );
+        orchestrator = new RequestSenderOrchestrator(
+            connectionPool,
+            (session, context, firstTargetWriteSubmitted) -> new ImmediatePacketConsumer(
+                context.getReplayerRequestKey().getReplayerRequestIndex()
+            ),
+            sessionKey -> sessionAcknowledger.get().apply(sessionKey),
+            TargetConnectionOwner.Metrics.NOOP,
+            TargetExchangeState.Metrics.NOOP,
+            ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
+            fatalFailures::add
         );
         var context = rootContext.getTestConnectionRequestContext("failed-acknowledgement", 0);
 
         var close = orchestrator.scheduleActorClose(
             context.getChannelKeyContext(),
             0,
+            testGeneration(context),
             Instant.now()
         );
 
@@ -934,6 +1165,9 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
             () -> close.get(Duration.ofSeconds(5))
         );
         Assertions.assertEquals("source acknowledgement failed", error.getCause().getMessage());
+        await(() -> !fatalFailures.isEmpty());
+        Assertions.assertSame(error.getCause(), fatalFailures.get(0).getCause());
+        Assertions.assertEquals(1, fatalFailures.size());
     }
 
     @Test
@@ -966,7 +1200,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         var terminationCalls = new AtomicInteger();
         var fatalMetricCalls = new AtomicInteger();
         var exitCode = new AtomicInteger(-1);
-        var actorMetrics = new RecordingConnectionActorMetrics();
+        var actorMetrics = new RecordingTargetConnectionOwnerMetrics();
         var fatalHandler = new ReplayProcessFatalHandler(
             ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
             reason -> {
@@ -982,20 +1216,29 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         );
         orchestrator = new RequestSenderOrchestrator(
             connectionPool,
-            (session, ctx) -> {
+            (session, ctx, firstTargetWriteSubmitted) -> {
                 throw new AssertionError("event-loop termination test must not start target work");
             },
             sessionKey -> sessionAcknowledger.get().apply(sessionKey),
             actorMetrics,
             TargetExchangeState.Metrics.NOOP,
             ResourceOwnership.Metrics.NOOP,
+            acceptingLifecycleSink(),
             fatalHandler
         );
 
         var firstContext = rootContext.getTestConnectionRequestContext("first-live-session", 0);
         var secondContext = rootContext.getTestConnectionRequestContext("second-live-session", 0);
-        orchestrator.transactionRuntime(firstContext.getReplayerRequestKey(), firstContext.getChannelKeyContext());
-        orchestrator.transactionRuntime(secondContext.getReplayerRequestKey(), secondContext.getChannelKeyContext());
+        orchestrator.transactionRuntime(
+            firstContext.getReplayerRequestKey(),
+            testGeneration(firstContext),
+            firstContext.getChannelKeyContext()
+        );
+        orchestrator.transactionRuntime(
+            secondContext.getReplayerRequestKey(),
+            testGeneration(secondContext),
+            secondContext.getChannelKeyContext()
+        );
 
         connectionPool.shutdownNow().get(30, TimeUnit.SECONDS);
         await(() -> terminationCalls.get() == 1);
@@ -1011,29 +1254,73 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         );
     }
 
-    private TrackedFuture<String, String> schedule(
+    private TrackedFuture<String, String> scheduleUnregistered(
         org.opensearch.migrations.replay.tracing.IReplayContexts.IReplayerHttpTransactionContext context,
         AsyncPermitPool permits,
-        CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>> preparation
+        CompletableFuture<TransformedOutputAndResult<ByteBufListProducer>> preparation,
+        TargetConnectionOwner.RequestProcessingRegistration processingRegistration
     ) {
         var now = Instant.now();
         return orchestrator.scheduleRequestLifecycle(
             context.getReplayerRequestKey(),
+            testGeneration(context),
             context,
             now.minusSeconds(1),
             now.minusMillis(1),
             now,
             permits,
             () -> new TextTrackedFuture<>(preparation, "test preparation"),
-            transformed -> (request, response, failure) ->
-                TextTrackedFuture.completedFuture(
+            transformed -> (request, outcome) -> visitTargetAttemptOutcome(
+                outcome,
+                () -> TextTrackedFuture.completedFuture(
                     new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
                         RequestSenderOrchestrator.RetryDirective.DONE,
                         "sent"
                     ),
                     () -> "do not retry"
-                ),
-            status -> status.getClass().getSimpleName()
+                )
+            ),
+            status -> status.getClass().getSimpleName(),
+            processingRegistration
+        );
+    }
+
+    private static <T> T visitTargetAttemptOutcome(
+        TargetAttemptOutcome<AggregatedRawResponse> outcome,
+        Supplier<T> resultSupplier
+    ) {
+        // Variant-indifferent retry behavior is test plumbing; dedicated S5 tests cover discrimination.
+        return outcome.visit(new TargetAttemptOutcome.Visitor<>() {
+            @Override
+            public T onTargetResponseObtained(
+                TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> ignored
+            ) {
+                return resultSupplier.get();
+            }
+
+            @Override
+            public T onNoTargetResponseObtained(
+                TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> ignored
+            ) {
+                return resultSupplier.get();
+            }
+        });
+    }
+
+    private static ActorRequestTestUtils.RequestProcessingFixture testProcessing() {
+        return new ActorRequestTestUtils.RequestProcessingFixture();
+    }
+
+    private static PartitionGenerationId testGeneration(
+        org.opensearch.migrations.replay.tracing.IReplayContexts.IReplayerHttpTransactionContext context
+    ) {
+        var requestId = ReplayIdentity.replayRequestId(context.getReplayerRequestKey());
+        return new PartitionGenerationId(
+            new TopicPartition(
+                "orchestrator-lifecycle-test-" + requestId.session().connection().nodeId(),
+                0
+            ),
+            requestId.session().sourceGeneration()
         );
     }
 
@@ -1047,6 +1334,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         orchestrator.scheduleActorClose(
             context.getChannelKeyContext(),
             0,
+            testGeneration(context),
             Instant.now()
         ).get(Duration.ofSeconds(5));
     }
@@ -1120,15 +1408,15 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         }
     }
 
-    private static final class RecordingConnectionActorMetrics
-        implements org.opensearch.migrations.replay.lifecycle.ConnectionActor.Metrics {
+    private static final class RecordingTargetConnectionOwnerMetrics
+        implements TargetConnectionOwner.Metrics {
 
         @Override
         public void queuedCommandsChanged(int delta) {}
 
         @Override
         public void headWaitChanged(
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.HeadWaitReason reason,
+            TargetConnectionOwner.HeadWaitReason reason,
             int delta
         ) {}
 
@@ -1140,7 +1428,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
 
         @Override
         public void pendingAbortChildChanged(
-            org.opensearch.migrations.replay.lifecycle.ConnectionActor.AbortChild child,
+            TargetConnectionOwner.AbortChild child,
             int delta
         ) {}
     }
@@ -1171,7 +1459,17 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         }
     }
 
-    private final class ImmediatePacketConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse> {
+    private abstract static class TestTargetPacketConsumer implements TargetPacketConsumer {
+        @Override
+        public TrackedFuture<String, PacketSendOutcome> sendPacket(ByteBuf packet) {
+            return consumeBytes(packet).thenApply(
+                ignored -> (PacketSendOutcome) new PacketSendOutcome.PacketSubmitted(),
+                () -> "test target packet submitted"
+            );
+        }
+    }
+
+    private final class ImmediatePacketConsumer extends TestTargetPacketConsumer {
         private final int requestIndex;
 
         private ImmediatePacketConsumer(int requestIndex) {

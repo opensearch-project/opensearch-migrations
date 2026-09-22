@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseKind;
 
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -17,14 +18,14 @@ import org.junit.jupiter.api.Test;
 class RequestSenderTargetAttemptOutcomeTest {
     @Test
     void responseReadTimeoutIsTypedNoResponse() {
-        var outcome = RequestSenderOrchestrator.classifyTargetAttemptOutcome(
-            response(null, ReadTimeoutException.INSTANCE)
-        );
+        var response = response(null, ReadTimeoutException.INSTANCE);
+        var outcome = RequestSenderOrchestrator.classifyTargetAttemptOutcome(response);
 
         var noResponse = Assertions.assertInstanceOf(
             TargetAttemptOutcome.NoTargetResponseObtained.class,
             outcome
         );
+        Assertions.assertEquals(NoTargetResponseKind.READ_TIMEOUT, noResponse.diagnostic().kind());
         Assertions.assertTrue(noResponse.reason().contains(ReadTimeoutException.class.getName()));
     }
 
@@ -32,14 +33,14 @@ class RequestSenderTargetAttemptOutcomeTest {
     void transportIoFailureIsTypedNoResponse() {
         var transportFailure = new IOException("connection reset");
 
-        var outcome = RequestSenderOrchestrator.classifyTargetAttemptOutcome(
-            response(null, transportFailure)
-        );
+        var response = response(null, transportFailure);
+        var outcome = RequestSenderOrchestrator.classifyTargetAttemptOutcome(response);
 
         var noResponse = Assertions.assertInstanceOf(
             TargetAttemptOutcome.NoTargetResponseObtained.class,
             outcome
         );
+        Assertions.assertEquals(NoTargetResponseKind.TRANSPORT_FAILURE, noResponse.diagnostic().kind());
         Assertions.assertTrue(noResponse.reason().contains(IOException.class.getName()));
         Assertions.assertTrue(noResponse.reason().contains("connection reset"));
     }
@@ -56,6 +57,7 @@ class RequestSenderTargetAttemptOutcomeTest {
             TargetAttemptOutcome.NoTargetResponseObtained.class,
             outcome
         );
+        Assertions.assertEquals(NoTargetResponseKind.TRANSPORT_FAILURE, noResponse.diagnostic().kind());
         Assertions.assertTrue(noResponse.reason().contains(IOException.class.getName()));
         Assertions.assertTrue(noResponse.reason().contains("connection reset"));
     }
@@ -99,14 +101,14 @@ class RequestSenderTargetAttemptOutcomeTest {
 
     @Test
     void completedAttemptWithoutHttpResponseIsTypedNoResponse() {
-        var outcome = RequestSenderOrchestrator.classifyTargetAttemptOutcome(
-            response(null, null)
-        );
+        var response = response(null, null);
+        var outcome = RequestSenderOrchestrator.classifyTargetAttemptOutcome(response);
 
         var noResponse = Assertions.assertInstanceOf(
             TargetAttemptOutcome.NoTargetResponseObtained.class,
             outcome
         );
+        Assertions.assertEquals(NoTargetResponseKind.MISSING_HTTP_RESPONSE, noResponse.diagnostic().kind());
         Assertions.assertEquals(
             "target attempt completed without an HTTP response",
             noResponse.reason()

@@ -91,7 +91,7 @@ class GlobalSerialReplayE2ETest {
                     )
                 );
             }
-            var trafficSource = new ArrayCursorTrafficSourceContext(trafficStreams);
+            var trafficSource = new ArrayCursorTrafficSourceContext(trafficStreams, 0);
 
             TrafficReplayerRunner.runReplayer(
                 REQUEST_COUNT,

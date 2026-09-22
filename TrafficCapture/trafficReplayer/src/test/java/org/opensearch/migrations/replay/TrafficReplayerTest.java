@@ -13,6 +13,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,9 +49,9 @@ import org.slf4j.event.Level;
 class TrafficReplayerTest extends InstrumentationTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
-    private static String TEST_TRAFFIC_STREAM_ID_STRING = "testId";
-    private static String FAKE_READ_PACKET_DATA = "Useless packet data for test";
-    private static String FAKE_EXCEPTION_DATA = "Mock Exception Message for testing";
+    private static final String TEST_TRAFFIC_STREAM_ID_STRING = "testId";
+    private static final String FAKE_READ_PACKET_DATA = "Useless packet data for test";
+    private static final String FAKE_EXCEPTION_DATA = "Mock Exception Message for testing";
 
     private static TrafficStream makeTrafficStream(Instant t, int trafficChunkNumber) {
         Timestamp fixedTimestamp = getProtobufTimestamp(t);
@@ -201,13 +202,15 @@ class TrafficReplayerTest extends InstrumentationTest {
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testReader() throws Exception {
         var uri = new URI("http://localhost:9200");
+        var processExitCodes = new CopyOnWriteArrayList<Integer>();
         try (
             var tr = new RootReplayerConstructorExtensions(
                 rootContext,
                 uri,
                 null,
                 null,
-                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri),
+                processExitCodes::add
             )
         ) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
@@ -269,6 +272,7 @@ class TrafficReplayerTest extends InstrumentationTest {
             Assertions.assertEquals(1, byteArrays.size());
             Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));
         }
+        assertNoProcessTermination(processExitCodes);
     }
 
     @Test
@@ -276,13 +280,15 @@ class TrafficReplayerTest extends InstrumentationTest {
     @WrapWithNettyLeakDetection(repetitions = 2)
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
         var uri = new URI("http://localhost:9200");
+        var processExitCodes = new CopyOnWriteArrayList<Integer>();
         try (
             var tr = new RootReplayerConstructorExtensions(
                 rootContext,
                 uri,
                 null,
                 new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
-                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri),
+                processExitCodes::add
             )
         ) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
@@ -360,6 +366,7 @@ class TrafficReplayerTest extends InstrumentationTest {
             Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));
             Assertions.assertEquals(0, remainingAccumulations.get());
         }
+        assertNoProcessTermination(processExitCodes);
     }
 
     @Test
@@ -374,5 +381,12 @@ class TrafficReplayerTest extends InstrumentationTest {
 
     private static String collectBytesToUtf8String(List<byte[]> bytesList) {
         return bytesList.stream().map(ba -> new String(ba, StandardCharsets.UTF_8)).collect(Collectors.joining());
+    }
+
+    private static void assertNoProcessTermination(List<Integer> processExitCodes) {
+        Assertions.assertTrue(
+            processExitCodes.isEmpty(),
+            () -> "Unexpected process termination with exit codes " + processExitCodes
+        );
     }
 }

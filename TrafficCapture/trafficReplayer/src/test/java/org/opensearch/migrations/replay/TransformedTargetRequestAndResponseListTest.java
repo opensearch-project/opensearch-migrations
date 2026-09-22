@@ -8,6 +8,8 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseDiagnostic;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseKind;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
@@ -24,7 +26,10 @@ class TransformedTargetRequestAndResponseListTest {
         var firstResponse = new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
         var secondResponse = new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
         var noResponse = new TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse>(
-            "target closed before responding"
+            new NoTargetResponseDiagnostic(
+                NoTargetResponseKind.TRANSPORT_FAILURE,
+                "target closed before responding"
+            )
         );
         var summary = new TransformedTargetRequestAndResponseList(
             null,

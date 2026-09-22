@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.kafka;
 import java.time.Duration;
 import java.time.Instant;
 
+import org.opensearch.migrations.replay.ActorRequestTestUtils.RequestProcessingFixture;
 import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
@@ -13,9 +14,14 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TextTrackedFuture;
+
+import org.apache.kafka.common.TopicPartition;
 
 import io.netty.buffer.Unpooled;
 import io.netty.util.concurrent.ScheduledFuture;
@@ -54,7 +60,18 @@ class ReplayEngineQuiescentTest {
             .thenReturn(mock(ScheduledFuture.class));
         var timeShifter = new TimeShifter();
         timeShifter.setFirstTimestamp(Instant.parse("2025-01-01T00:00:00Z"));
-        return new ReplayEngine(orchestrator, flowController, timeShifter);
+        var progressController = new ReplayProgressController(
+            Runnable::run,
+            new ReplayReadGate(Duration.ZERO, flowController)
+        );
+        return new ReplayEngine(orchestrator, flowController, timeShifter, progressController);
+    }
+
+    private PartitionGenerationId testGeneration() {
+        return new PartitionGenerationId(
+            new TopicPartition("replay-engine-quiescent-test", 3),
+            7
+        );
     }
 
     /**
@@ -68,7 +85,7 @@ class ReplayEngineQuiescentTest {
         var engine = buildEngine(orchestrator);
 
         when(orchestrator.scheduleRequestLifecycle(
-            any(), any(), any(), any(), any(), any(), any(), any(), any()
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         ))
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
@@ -79,7 +96,9 @@ class ReplayEngineQuiescentTest {
         var ctx = buildMockCtx();
         var packets = new ByteBufList(Unpooled.wrappedBuffer("test".getBytes()));
         var producer = ByteBufListProducer.of(packets);
+        var processing = new RequestProcessingFixture();
         engine.scheduleRequestLifecycle(
+            testGeneration(),
             ctx,
             sourceRequestTime,
             sourceRequestTime.plusMillis(50),
@@ -91,14 +110,15 @@ class ReplayEngineQuiescentTest {
                 ),
                 () -> "prepared"
             ),
-            ignored -> (reqBytes, arr, t) -> null,
+            ignored -> (reqBytes, outcome) -> null,
             ignored -> null,
-            quiescentDuration
+            quiescentDuration,
+            processing.registration()
         );
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(orchestrator).scheduleRequestLifecycle(
-            any(), any(), any(), startCaptor.capture(), any(), any(), any(), any(), any()
+            any(), any(), any(), any(), startCaptor.capture(), any(), any(), any(), any(), any(), any()
         );
 
         var effectiveStart = startCaptor.getValue();
@@ -120,7 +140,7 @@ class ReplayEngineQuiescentTest {
         var engine = buildEngine(orchestrator);
 
         when(orchestrator.scheduleRequestLifecycle(
-            any(), any(), any(), any(), any(), any(), any(), any(), any()
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         ))
             .thenReturn(TextTrackedFuture.completedFuture(null, () -> "mock"));
 
@@ -129,9 +149,11 @@ class ReplayEngineQuiescentTest {
         var ctx = buildMockCtx();
         var packets = new ByteBufList(Unpooled.wrappedBuffer("test".getBytes()));
         var producer = ByteBufListProducer.of(packets);
+        var processing = new RequestProcessingFixture();
 
         // No quiescentUntil — normal timing
         engine.scheduleRequestLifecycle(
+            testGeneration(),
             ctx,
             sourceRequestTime,
             sourceRequestTime.plusMillis(50),
@@ -143,14 +165,15 @@ class ReplayEngineQuiescentTest {
                 ),
                 () -> "prepared"
             ),
-            ignored -> (reqBytes, arr, t) -> null,
+            ignored -> (reqBytes, outcome) -> null,
             ignored -> null,
-            null
+            null,
+            processing.registration()
         );
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(orchestrator).scheduleRequestLifecycle(
-            any(), any(), any(), startCaptor.capture(), any(), any(), any(), any(), any()
+            any(), any(), any(), any(), startCaptor.capture(), any(), any(), any(), any(), any(), any()
         );
 
         var effectiveStart = startCaptor.getValue();

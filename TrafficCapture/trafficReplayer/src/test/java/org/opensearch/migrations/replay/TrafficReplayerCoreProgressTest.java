@@ -11,6 +11,8 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectio
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestProcessingOutcome;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestProcessingRegistration;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 
 import org.junit.jupiter.api.Assertions;
@@ -18,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 class TrafficReplayerCoreProgressTest {
     @Test
-    void targetCompletionDoesNotReleaseReadGateBeforeTransactionDisposition() {
+    void processingCompletionDoesNotReleaseReadGateBeforeLifecycleHandling() {
         var readGate = new ReplayReadGate(Duration.ofSeconds(30), new NoopFlowController());
         var progress = new ReplayProgressController(Runnable::run, readGate);
         var partition = new SourcePartitionKey("topic", 0, 1);
@@ -31,16 +33,26 @@ class TrafficReplayerCoreProgressTest {
             ),
             Instant.ofEpochSecond(10)
         ).toCompletableFuture().join();
-        var targetCompletion = new CompletableFuture<Void>();
-        var transactionCompletion = new CompletableFuture<Void>();
+        var processingCompletion = new CompletableFuture<RequestProcessingOutcome>();
+        var lifecycleHandled = new CompletableFuture<Void>();
+        var processingRegistration = new RequestProcessingRegistration(
+            processingCompletion,
+            cause -> CompletableFuture.failedFuture(
+                new AssertionError("cancellation is not expected", cause)
+            ),
+            lifecycleHandled
+        );
 
-        TrafficReplayerCore.settleProgressWhenTransactionCompletes(transactionCompletion, progressToken);
-        targetCompletion.complete(null);
+        TrafficReplayerCore.settleProgressAfterProcessingLifecycleIsHandled(
+            processingRegistration,
+            progressToken
+        );
+        processingCompletion.complete(new RequestProcessingOutcome.TupleDurable());
 
         Assertions.assertTrue(progress.isWorkOutstanding());
         Assertions.assertFalse(progressToken.settled().toCompletableFuture().isDone());
 
-        transactionCompletion.complete(null);
+        lifecycleHandled.complete(null);
         progressToken.settled().toCompletableFuture().join();
         Assertions.assertFalse(progress.isWorkOutstanding());
 
@@ -49,7 +61,7 @@ class TrafficReplayerCoreProgressTest {
     }
 
     @Test
-    void failedTransactionStillReleasesReadGate() {
+    void failedProcessingStillReleasesReadGate() {
         var readGate = new ReplayReadGate(Duration.ofSeconds(30), new NoopFlowController());
         var progress = new ReplayProgressController(Runnable::run, readGate);
         var partition = new SourcePartitionKey("topic", 0, 1);
@@ -62,10 +74,20 @@ class TrafficReplayerCoreProgressTest {
             ),
             Instant.ofEpochSecond(10)
         ).toCompletableFuture().join();
-        var transactionCompletion = new CompletableFuture<Void>();
+        var processingCompletion = new CompletableFuture<RequestProcessingOutcome>();
+        var processingRegistration = new RequestProcessingRegistration(
+            processingCompletion,
+            cause -> CompletableFuture.failedFuture(
+                new AssertionError("cancellation is not expected", cause)
+            ),
+            new CompletableFuture<>()
+        );
 
-        TrafficReplayerCore.settleProgressWhenTransactionCompletes(transactionCompletion, progressToken);
-        transactionCompletion.completeExceptionally(new IllegalStateException("disposition failed"));
+        TrafficReplayerCore.settleProgressAfterProcessingLifecycleIsHandled(
+            processingRegistration,
+            progressToken
+        );
+        processingCompletion.completeExceptionally(new IllegalStateException("processing failed"));
 
         progressToken.settled().toCompletableFuture().join();
         Assertions.assertFalse(progress.isWorkOutstanding());
