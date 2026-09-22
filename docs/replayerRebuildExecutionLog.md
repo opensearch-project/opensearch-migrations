@@ -587,3 +587,43 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   a production compatibility bridge.
 - S5 remains open. The next slice decomposes and lands the connection-owner admission and
   two-milestone evidence before the complete green module run.
+
+### Progress checkpoint — S5c3b focused connection-owner contracts
+
+- Deleted the obsolete 524-line `ConnectionActorTest` and replaced its S5 responsibilities with
+  focused admission, milestone, and cancellation-before-send suites plus one 187-line package-local
+  fixture. No test class exceeds 630 lines, every test owns its deterministic `TestEventLoop`, and
+  the fixture has no mutable static state.
+- Kept orchestrator, Netty, shutdown, generator, intake, retry, and broad E2E changes out of this
+  checkpoint. Graceful and generation-scoped cancellation, including the active-but-unwritten
+  distinction, remains assigned to S13; this checkpoint proves the current unsent queued-request
+  cleanup boundary without adding a temporary production bridge.
+
+| S5c3b requirement | Focused code/test evidence |
+|---|---|
+| Explicit admission and cleanup ownership | `RequestAdmissionResult`; wrong-generation, post-close, rejected-mailbox, regressing-ordinal, and throwing-`begin()` cases |
+| Separate captured-order admission/execution queues | out-of-order preparation cannot reorder execution; nonzero request/request/close ordinals preserve one captured order; regressing ordinals are fatal |
+| Registry survives `ConnectionRequestFinished` | the next target turn and ordered close advance before tuple durability while final owner termination remains blocked |
+| Removal follows accepted `RequestProcessingFinished` | tuple durability waits for connection-milestone acceptance; registry removal and termination wait for processing-milestone acceptance |
+| Cancellation before send | a queued request never executes, runs preparation and processing cancellation once, emits typed cleanup and no normal milestone, and retains registry ownership until cancellation acceptance |
+| Rejected required submission is fatal | rejected immediate request, scheduled preparation, and ordered-close submissions all reach the fatal handler |
+
+- The first required read-only Claude review reported five evidence defects: ambiguous duplicate-ID
+  behavior without cleanup handback; missing nonzero/invalid ordinal evidence; lost rejected-close
+  fatal coverage; fixture cancellation that could fabricate failure or always claim victory; and
+  missing close-call observability. The duplicate test was removed, the ordinal and close cases were
+  added, cancellation arbitration now reports the actual winner, preparation cancellation no longer
+  mutates the supplied completion, and close calls are counted.
+- Claude's confirmation found one remaining gap: the regressing-ordinal test asserted only that its
+  admission completed, not that typed cleanup ownership returned to the sender. The test now requires
+  `RequestAdmissionRejected`, drives preparation and processing cleanup with its cause exactly once,
+  and proves the prepared resource is released. The final read-only review returned
+  `NO_ACTIONABLE_FINDINGS`.
+- The integrated tree passed `compileTestJava` while running the focused suites. Both the integrated
+  and isolated exact-tree runs passed all 14 tests with `--no-parallel --max-workers=1`.
+- Full `compileTestJava` on the exact checkpoint intentionally remains red with 35 errors, all in the
+  deferred orchestrator, Netty, and shutdown caller migrations. The integrated working tree remains
+  compile-green; no compatibility overload was added to hide the exact checkpoint boundary.
+- S5 remains open. The next bounded slice separates first-write/target-attempt Netty evidence from
+  the remaining orchestrator and shutdown caller migrations before the required complete green
+  module run.
