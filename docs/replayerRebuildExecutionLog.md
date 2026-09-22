@@ -438,3 +438,116 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   immediate test-migration slice; no production bridge will be added for vocabulary deleted in S7.
 - S5 remains open. The focused test migration, owner/test decomposition, and complete green module
   run are required before adding the S5 End entry.
+
+### Progress checkpoint — S5b cancellation and request-owner contract evidence
+
+- Added focused `ReplayTransactionCancellationTest` and `RequestReplayOwnerTest` suites rather than
+  continuing to grow the connection-owner fixture. They pin typed cancellation arbitration,
+  in-flight evidence preemption, exact cancellation-cause identity, connection-before-processing
+  milestone order, request-owner confinement, one-shot first-write state, and cleanup release.
+- The request-owner evidence uses one independently constructed owner per test. Foreign-thread and
+  same-thread/outside-mailbox mutations are both rejected; no event loop or mutable state is shared
+  across tests.
+
+| S5b contract | Focused evidence |
+|---|---|
+| Cancellation can win a live transaction | cancellation completes with `CancellationWon`, preserves the exact `CancellationException`, and remains terminal when an in-flight durable evidence result arrives later |
+| Normal completion can win cancellation | already-durable and mailbox-queued durability paths both return `ProcessingCompletionWon` and assert `EvidenceOutcome.Durable` |
+| Connection milestone precedes processing milestone | `TupleDurable` cannot finish before connection-turn acceptance; the completion-won race drives both milestones in order |
+| Unresolved cancellation cannot masquerade as durability | `TupleDurable` is rejected while cancellation arbitration remains unresolved and accepted only after `ProcessingCompletionWon` |
+| Owner state is event-loop confined | first and later mutations fail from another thread, and the configured owner thread still fails outside a mailbox task |
+| Local first-write and cleanup states are one-shot | duplicate first-write, connection, processing, and cleanup transitions are rejected |
+
+- The required read-only Claude reviews found and drove closure of the following test defects:
+  cancellation was initially asserted only after another terminal path had already won; durable
+  evidence was not asserted for completion-won cases; unfinished processing-state tests were
+  non-discriminating; the live-cancellation evidence assertion was unreachable; and one typed race
+  fixture stopped with a queued connection turn. Each finding was valid and fixed. The final review
+  compiled and ran the two classes independently, passed 24/24 tests, and returned
+  `NO_ACTIONABLE_FINDINGS`.
+- The serialized Gradle run of both suites against the current migration tree passed 24/24:
+  `:TrafficCapture:trafficReplayer:test --tests '*ReplayTransactionCancellationTest' --tests
+  '*RequestReplayOwnerTest' --no-parallel --max-workers=1 --rerun-tasks`.
+- The exact test-only staged tree intentionally does not yet compile `compileTestFixturesJava`.
+  Existing fixture APIs still target pre-S5 constructors and lack the Kafka client test-fixture
+  dependency. This known broken intermediate is assigned to the immediately following bounded
+  fixture-compile closure; no production compatibility bridge will be introduced.
+- S5 remains open. Owner decomposition, fixture/test migration, and the complete green module run
+  are still required before adding the S5 End entry.
+
+### Progress checkpoint — S5c1 owner-transition runner extraction
+
+- Extracted mailbox dispatch, owner-thread enforcement, fatal-transition latching, rejected
+  submission handling, and process-fatal reporting from `TargetConnectionOwner` into the injected,
+  package-local `OwnerTransitionRunner`. The connection owner no longer carries its own thread
+  guard, fatal handler, or fatal-state field.
+- The runner keeps its fatal latch owner-confined. An owner-inline failed submission poisons the
+  owner; an off-mailbox failed submission reports process-fatal without mutating owner state.
+  Asynchronous cleanup reporting is valid both inline and off-mailbox and never infers latch state.
+- Transition failure handlers are terminal cleanup callbacks. Their own failures are suppressed onto
+  the primary failure and cannot prevent the original owner failure from reaching the process
+  supervisor. An original `Error` retains identity while gaining owner/operation context as a
+  suppressed diagnostic.
+- Added a dedicated eight-test `OwnerTransitionRunnerTest` instead of expanding the connection-owner
+  fixture. It covers posted confinement, rejected and unexpected synchronous submissions,
+  owner-inline poisoning, impossible transitions, `Error` identity plus context, callback-failure
+  suppression, and non-latching asynchronous cleanup reporting.
+- Parallel and required Claude reviews found valid defects during extraction: callback throws could
+  suppress fatal reporting; the fatal latch was read before confinement validation; unexpected
+  synchronous submission failures bypassed owner poisoning; owner-inline and off-owner submission
+  failures were classified inconsistently; the `Error` test did not prove poisoning; and two
+  diagnostic messages lost or misstated execution context. All findings were fixed. The final
+  bounded Claude review returned `NO_ACTIONABLE_FINDINGS`.
+- The exact staged production slice passed
+  `:TrafficCapture:trafficReplayer:compileJava --parallel --max-workers=18 --rerun-tasks` in an
+  isolated worktree in 21 seconds.
+- The serialized focused run passed all 56 tests: eight `OwnerTransitionRunnerTest` cases and 48
+  `TargetConnectionOwnerTest` cases, with `--no-parallel --max-workers=1`.
+- The next bounded S5 slice is the five-file fixture compile closure already identified by the S5b
+  exact-tree failure. It must align fixtures with typed lifecycle APIs without recognizing
+  `CancellationException` as a substitute for an explicit cleanup outcome.
+- S5 remains open. Fixture/test migration and the complete green module run are still required before
+  adding the S5 End entry.
+
+### Progress checkpoint — S5c2 explicit fixture lifecycle contracts
+
+- Removed fixture-generated lifecycle facts. `ActorRequestTestUtils` now requires the authoritative
+  `PartitionGenerationId` and `RequestProcessingRegistration`; its optional processing fixture keeps
+  target-turn completion independent from tuple durability, exposes typed cancellation arbitration
+  and processing failure, and does not expose a mutable completion future.
+- Replaced hidden replay-engine fixture policy with one explicit, one-shot dependency bundle:
+  source-session acknowledgement, request lifecycle intake, fatal handling, and the caller-owned
+  `ReplayProgressController`. The top-level fixture also requires an injected process terminator.
+- Made the deterministic array source participate explicitly in record-work tracking with a synthetic
+  Kafka identity, externally visible Kafka fixture API dependency, explicit source generations, and
+  observed-head cursor advancement only after context release succeeds.
+- Fenced source activation, reads, completions, retirement, and close. Supersession retires the old
+  source and releases its pending contexts before atomically claiming the next generation and
+  snapshotting the committed cursor; retired and closed sources cannot mint or commit work.
+
+| S5c2 requirement | Code boundary | Evidence |
+|---|---|---|
+| No fabricated generation or durability | `ActorRequestTestUtils.schedulePreparedRequest`; `RequestProcessingFixture` | caller supplies generation and registration; tuple durability, cleanup, and failure are independent explicit transitions |
+| No hidden owner or fatal policy | `ReplayEngineFactory.Dependencies`; `RootReplayerConstructorExtensions` | dependency bundle is non-null and single-use; progress controller and process terminator remain caller-owned |
+| Record completion is acknowledged asynchronously | `ArrayCursorTrafficCaptureSource.recordProcessingFinished` | invalid identity, release failure, and close return failed stages rather than throwing from the call |
+| Commit follows successful context release | array-source pending queue and cursor | release failure retains the pending key and leaves the committed cursor unchanged; retry then advances |
+| Generation and shutdown fencing | `ArrayCursorTrafficSourceContext` activation monitor; source queue monitor | stale completion is benign, superseded reads are rejected, restart increments generation while retaining cursor, and close releases pending contexts |
+
+- Required read-only Claude reviews were non-empty and found valid defects throughout the bounded
+  slice: target-turn completion was initially mistaken for tuple durability; cancellation always
+  claimed victory; lifecycle/fatal/progress dependencies were hidden; context release could race
+  retain and throw synchronously; cursor advancement preceded release; synthetic generation was
+  inert; stale completion was fatal; progress ownership was repeatable; processing failure was not
+  injectable; release-failure evidence did not prove queue integrity; superseded sources could keep
+  reading; completion raced retirement; close lacked a fence; activation snapshotted the cursor
+  outside the retirement fence; one lock order was inverted; and a write-only active-generation
+  field remained. Every finding was fixed. The final two-file confirmation returned
+  `NO_ACTIONABLE_FINDINGS`.
+- `:TrafficCapture:trafficReplayer:compileTestFixturesJava` passed. A serialized isolated Gradle test
+  task compiled and ran `ArrayCursorTrafficCaptureSourceTest`; all 7 cases passed.
+- Full `compileTestJava` intentionally remains red with 44 errors: 25 removed lifecycle/factory
+  bridge uses, 13 array-source callers that must now declare a generation, and 6 stale checked
+  `SSLException` catches. These caller migrations are the next bounded S5c3 slice; no production or
+  fixture compatibility bridge will be introduced.
+- S5 remains open. S5c3 caller migration and the complete green module run are still required before
+  adding the S5 End entry.

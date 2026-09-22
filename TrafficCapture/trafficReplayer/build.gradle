@@ -58,6 +58,7 @@ dependencies {
     testFixturesImplementation libs.slf4j.api
     testFixturesImplementation libs.jackson.databind
     testFixturesImplementation libs.netty.all
+    testFixturesApi libs.kafka.clients
     testFixturesImplementation libs.junit.jupiter.api
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))

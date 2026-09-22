@@ -5,6 +5,8 @@ import javax.net.ssl.SSLException;
 import java.net.URI;
 import java.time.Duration;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
@@ -17,9 +19,18 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
         URI uri,
         IAuthTransformerFactory authTransformerFactory,
         IJsonTransformer jsonTransformer,
-        ClientConnectionPool clientConnectionPool
+        ClientConnectionPool clientConnectionPool,
+        ReplayProcessFatalHandler.ProcessTerminator processTerminator
     ) {
-        this(topContext, uri, authTransformerFactory, jsonTransformer, clientConnectionPool, 1024);
+        this(
+            topContext,
+            uri,
+            authTransformerFactory,
+            jsonTransformer,
+            clientConnectionPool,
+            1024,
+            processTerminator
+        );
     }
 
     public RootReplayerConstructorExtensions(
@@ -28,7 +39,8 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
         IAuthTransformerFactory authTransformer,
         IJsonTransformer jsonTransformer,
         ClientConnectionPool clientConnectionPool,
-        int maxConcurrentRequests
+        int maxConcurrentRequests,
+        ReplayProcessFatalHandler.ProcessTerminator processTerminator
     ) {
         this(
             topContext,
@@ -37,7 +49,8 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
             jsonTransformer,
             clientConnectionPool,
             maxConcurrentRequests,
-            new TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker<>()
+            new TrafficReplayerTopLevel.ConcurrentHashMapWorkTracker<>(),
+            processTerminator
         );
     }
 
@@ -48,7 +61,8 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
         IJsonTransformer jsonTransformer,
         ClientConnectionPool clientConnectionPool,
         int maxConcurrentOutstandingRequests,
-        TrafficReplayerTopLevel.IStreamableWorkTracker<Void> workTracker
+        TrafficReplayerTopLevel.IStreamableWorkTracker<Void> workTracker,
+        ReplayProcessFatalHandler.ProcessTerminator processTerminator
     ) {
         super(
             context,
@@ -57,12 +71,23 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
             () -> jsonTransformer,
             clientConnectionPool,
             maxConcurrentOutstandingRequests,
-            workTracker
+            workTracker,
+            new BulkItemErrorClassifier(),
+            ExceptionTypeAllowlist.empty(),
+            processTerminator
         );
     }
 
-    public static ReplayEngineFactory makeReplayEngineFactory(BufferedFlowController flowController) {
-        return new ReplayEngineFactory(Duration.ofSeconds(70), flowController, new TimeShifter(10 * 1000));
+    public static ReplayEngineFactory makeReplayEngineFactory(
+        BufferedFlowController flowController,
+        ReplayEngineFactory.Dependencies dependencies
+    ) {
+        return new ReplayEngineFactory(
+            Duration.ofSeconds(70),
+            flowController,
+            new TimeShifter(10 * 1000),
+            dependencies
+        );
     }
 
     public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(URI serverUri) throws SSLException {

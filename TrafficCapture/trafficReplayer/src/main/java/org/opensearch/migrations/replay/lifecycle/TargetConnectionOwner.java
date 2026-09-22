@@ -15,7 +15,6 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
@@ -427,11 +426,10 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
 
     private final ConnectionSessionKey sessionKey;
     private final ActorMailbox mailbox;
-    private final OwnerThreadGuard ownerThreadGuard;
+    private final OwnerTransitionRunner transitions;
     private final TargetExchange<P, R> targetExchange;
     private final Metrics metrics;
     private final LongSupplier nanoTime;
-    private final FatalHandler fatalHandler;
     private final RequestLifecycleSink lifecycleSink;
     private final PartitionGenerationId partitionGenerationId;
     private final Deque<Command<P, R>> admissionCommands = new ArrayDeque<>();
@@ -455,7 +453,6 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     private Throwable abortCleanupFailure;
     private CancellationException abortCause;
     private SessionOutcome pendingTerminationOutcome;
-    private boolean processFatalTransition;
     private Long lastAdmittedCapturedOrdinal;
 
     private record PendingProcessingCompletion(
@@ -498,97 +495,15 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         this.sessionKey = sessionKey;
         this.partitionGenerationId = partitionGenerationId;
         this.mailbox = mailbox;
-        this.ownerThreadGuard = new OwnerThreadGuard(
-            "connection actor for " + sessionKey,
-            mailbox::inMailbox
+        this.transitions = new OwnerTransitionRunner(
+            mailbox,
+            sessionKey.toString(),
+            fatalHandler::onFatal
         );
         this.targetExchange = targetExchange;
         this.metrics = metrics;
         this.nanoTime = nanoTime;
-        this.fatalHandler = fatalHandler;
         this.lifecycleSink = lifecycleSink;
-    }
-
-    private void post(String operation, Runnable command) {
-        post(operation, command, ignored -> {});
-    }
-
-    private void post(
-        String operation,
-        Runnable command,
-        Consumer<Throwable> transitionFailureHandler
-    ) {
-        try {
-            mailbox.execute(() ->
-                runMailboxTransition(operation, command, transitionFailureHandler)
-            );
-        } catch (RejectedExecutionException e) {
-            reportRejectedSubmission(operation, e);
-            transitionFailureHandler.accept(e);
-        }
-    }
-
-    private void applyNowOrPost(String operation, Runnable command) {
-        if (mailbox.inMailbox()) {
-            runMailboxTransition(operation, command);
-        } else {
-            post(operation, command);
-        }
-    }
-
-    private void reportRejectedSubmission(String operation, RejectedExecutionException cause) {
-        if (mailbox.inMailbox()) {
-            if (processFatalTransition) {
-                return;
-            }
-            processFatalTransition = true;
-        }
-        fatalHandler.onFatal(new Error(
-            "Required connection-actor submission was rejected during "
-                + operation
-                + " for "
-                + sessionKey,
-            cause
-        ));
-    }
-
-    private void reportImpossibleTransition(String operation, Throwable cause) {
-        processFatalTransition = true;
-        fatalHandler.onFatal(new Error(
-            "Impossible connection-owner transition during "
-                + operation
-                + " for "
-                + sessionKey,
-            cause
-        ));
-    }
-
-    private void runMailboxTransition(String operation, Runnable command) {
-        runMailboxTransition(operation, command, ignored -> {});
-    }
-
-    private void runMailboxTransition(
-        String operation,
-        Runnable command,
-        Consumer<Throwable> transitionFailureHandler
-    ) {
-        if (processFatalTransition) {
-            transitionFailureHandler.accept(new IllegalStateException(
-                "connection owner is no longer accepting transitions for " + sessionKey
-            ));
-            return;
-        }
-        try {
-            ownerThreadGuard.requireOwnerThread();
-            command.run();
-        } catch (Error failure) {
-            transitionFailureHandler.accept(failure);
-            processFatalTransition = true;
-            fatalHandler.onFatal(failure);
-        } catch (Throwable failure) {
-            transitionFailureHandler.accept(failure);
-            reportImpossibleTransition(operation, failure);
-        }
     }
 
     public RequestAdmission<R> admitRequestWithAcceptance(
@@ -616,7 +531,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             processingRegistration,
             mailbox::inMailbox
         );
-        post(
+        transitions.post(
             "request admission " + requestId,
             () -> admit(command),
             failure -> handleRequestAdmissionTransitionFailure(command, failure)
@@ -702,11 +617,11 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                 );
                 acknowledgement.whenComplete((ignored, acknowledgementFailure) -> {
                     if (acknowledgementFailure != null) {
-                        fatalHandler.onFatal(new Error(
-                            "Rejected request preparation cleanup failed for "
+                        transitions.reportCleanupFailure(
+                            "rejected request preparation cleanup "
                                 + command.owner.requestId,
                             unwrap(acknowledgementFailure)
-                        ));
+                        );
                     }
                 });
             } catch (Throwable cancellationFailure) {
@@ -719,11 +634,11 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                 );
                 acknowledgement.whenComplete((ignored, acknowledgementFailure) -> {
                     if (acknowledgementFailure != null) {
-                        fatalHandler.onFatal(new Error(
-                            "Rejected request cleanup acknowledgement failed for "
+                        transitions.reportCleanupFailure(
+                            "rejected request processing cleanup "
                                 + command.owner.requestId,
                             unwrap(acknowledgementFailure)
-                        ));
+                        );
                     }
                 });
             } catch (Throwable cancellationFailure) {
@@ -777,7 +692,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             capturedOrdinal,
             scheduledStart
         );
-        post(
+        transitions.post(
             "ordered close admission",
             () -> admit(command),
             failure -> failCloseAdmission(command, failure)
@@ -814,7 +729,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         if (!requestId.session().equals(sessionKey)) {
             throw new IllegalArgumentException("request belongs to a different session");
         }
-        applyNowOrPost("first target write " + requestId, () -> {
+        transitions.applyNowOrPost("first target write " + requestId, () -> {
             var request = requestOwners.get(requestId);
             if (request == null) {
                 throw new IllegalStateException(
@@ -835,7 +750,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         @NonNull AbortReason reason,
         @NonNull CancellationException cause
     ) {
-        post("connection abort " + reason, () -> beginAbort(reason, cause));
+        transitions.post("connection abort " + reason, () -> beginAbort(reason, cause));
         return termination.stage();
     }
 
@@ -930,8 +845,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             close.admissionAccepted.completeExceptionally(failure);
             close.completion.complete(new SessionOutcome.Failed(failure));
             untrackObligation(command);
-            processFatalTransition = true;
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "partition-generation admission " + command,
                 failure
             );
@@ -964,7 +878,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             );
         }
         var settledPreparation = normalized;
-        post(
+        transitions.post(
             "request preparation completion " + command.owner.requestId,
             () -> onPreparationSettled(command, settledPreparation),
             deliveryFailure -> failRequestSubmission(
@@ -995,7 +909,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     private void startAdmissionHead() {
         assertInMailbox();
         cancelAdmissionTimer();
-        if (processFatalTransition) {
+        if (transitions.fatalTransitionActive()) {
             setHeadWaitReason(null);
             return;
         }
@@ -1012,7 +926,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             }
             try {
                 admissionTimer = mailbox.schedule(
-                    () -> runMailboxTransition("scheduled preparation start", () -> {
+                    () -> transitions.runTransition("scheduled preparation start", () -> {
                         assertInMailbox();
                         if (admissionCommands.peekFirst() == head) {
                             admissionTimer = null;
@@ -1022,7 +936,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                     delay
                 );
             } catch (RejectedExecutionException e) {
-                reportRejectedSubmission("scheduled preparation start", e);
+                transitions.reportRejectedSubmission("scheduled preparation start", e);
             }
         }
     }
@@ -1045,7 +959,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     private void startExecutionHead() {
         assertInMailbox();
         cancelExecutionTimer();
-        if (processFatalTransition) {
+        if (transitions.fatalTransitionActive()) {
             setHeadWaitReason(null);
             return;
         }
@@ -1062,7 +976,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             setHeadWaitReason(HeadWaitReason.SCHEDULED_START);
             try {
                 executionTimer = mailbox.schedule(
-                    () -> runMailboxTransition("scheduled execution start", () -> {
+                    () -> transitions.runTransition("scheduled execution start", () -> {
                         assertInMailbox();
                         if (executionCommands.peekFirst() == head) {
                             head.markDue();
@@ -1073,14 +987,16 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                     delay
                 );
             } catch (RejectedExecutionException e) {
-                reportRejectedSubmission("scheduled execution start", e);
+                transitions.reportRejectedSubmission("scheduled execution start", e);
             }
         }
     }
 
     private void tryRunExecutionHead() {
         assertInMailbox();
-        if (processFatalTransition || state == State.ABORTING || state == State.TERMINATED) {
+        if (transitions.fatalTransitionActive()
+            || state == State.ABORTING
+            || state == State.TERMINATED) {
             setHeadWaitReason(null);
             return;
         }
@@ -1132,7 +1048,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             @Override
             public Void onFailed(PreparationOutcome.Failed<P> outcome) {
                 request.owner.completion.completeExceptionally(outcome.cause());
-                reportImpossibleTransition(
+                transitions.reportImpossibleTransition(
                     "request preparation " + request.owner.requestId,
                     outcome.cause()
                 );
@@ -1172,7 +1088,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             return;
         }
         exchange.whenComplete((outcome, failure) ->
-            post("target exchange completion " + request.owner.requestId, () -> {
+            transitions.post("target exchange completion " + request.owner.requestId, () -> {
                 if (state == State.ABORTING || state == State.TERMINATED) {
                     return;
                 }
@@ -1234,13 +1150,13 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     ) {
         var failure = combineFailures(cause, releasePreparedFailure(request));
         request.owner.completion.completeExceptionally(failure);
-        reportImpossibleTransition(operation, failure);
+        transitions.reportImpossibleTransition(operation, failure);
     }
 
     private void settleRequest(RequestCommand<P, R> request, RequestTurnResult<R> outcome) {
         assertInMailbox();
         if (request.owner.connectionTurnSettled()) {
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "duplicate connection-turn completion " + request.owner.requestId,
                 new IllegalStateException("request connection turn was already settled")
             );
@@ -1270,7 +1186,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             );
         } catch (Throwable t) {
             request.owner.processingRegistration().failLifecycleHandling(t);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "connection-turn completion " + request.owner.requestId,
                 t
             );
@@ -1279,10 +1195,10 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         }
         startExecutionHead();
         acceptance.whenComplete((ignored, failure) ->
-            applyNowOrPost("connection-turn milestone acceptance " + request.owner.requestId, () -> {
+            transitions.applyNowOrPost("connection-turn milestone acceptance " + request.owner.requestId, () -> {
                 if (failure != null) {
                     request.owner.processingRegistration().failLifecycleHandling(unwrap(failure));
-                    reportImpossibleTransition(
+                    transitions.reportImpossibleTransition(
                         "connection-turn milestone acceptance " + request.owner.requestId,
                         unwrap(failure)
                     );
@@ -1316,7 +1232,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             closeStage = CompletableFuture.failedFuture(t);
         }
         closeStage.whenComplete((ignored, failure) ->
-            post("ordered close completion", () -> {
+            transitions.post("ordered close completion", () -> {
                 if (state == State.ABORTING || state == State.TERMINATED) {
                     return;
                 }
@@ -1330,8 +1246,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                 untrackObligation(close);
                 pendingTerminationOutcome = outcome;
                 if (closeFailure != null) {
-                    processFatalTransition = true;
-                    reportImpossibleTransition("ordered close completion", closeFailure);
+                    transitions.reportImpossibleTransition("ordered close completion", closeFailure);
                     return;
                 }
                 tryFinishTermination();
@@ -1385,7 +1300,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             abortStage = CompletableFuture.failedFuture(t);
         }
         abortStage.whenComplete((ignored, failure) ->
-            post("target abort completion", () -> {
+            transitions.post("target abort completion", () -> {
                 if (targetAbortPending) {
                     targetAbortPending = false;
                     metrics.pendingAbortChildChanged(AbortChild.TARGET_EXCHANGE, -1);
@@ -1438,7 +1353,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     ) {
         var settledOutcome = outcome;
         var settledFailure = failure == null ? null : unwrap(failure);
-        applyNowOrPost(
+        transitions.applyNowOrPost(
             "request-processing completion " + request.requestId,
             () -> {
                 if (requestOwners.get(request.requestId) != request) {
@@ -1460,7 +1375,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                         new PendingProcessingCompletion(settledOutcome, settledFailure)
                     );
                     if (previous != null) {
-                        reportImpossibleTransition(
+                        transitions.reportImpossibleTransition(
                             "duplicate request-processing completion " + request.requestId,
                             new IllegalStateException(
                                 "request-processing completion arrived twice while cancellation "
@@ -1487,14 +1402,14 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         var processingCompletionWon =
             cancellationResult instanceof ProcessingCancellationResult.ProcessingCompletionWon;
         if (request.processingCompletionReceived()) {
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "duplicate request-processing completion " + request.requestId,
                 new IllegalStateException("request-processing completion arrived twice")
             );
             return;
         }
         if (tupleDurablePendingConnectionAcceptance.contains(request)) {
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "duplicate request-processing completion " + request.requestId,
                 new IllegalStateException(
                     "request-processing completion arrived while tuple durability "
@@ -1507,7 +1422,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             request.markProcessingFailed(settledFailure);
             request.processingRegistration().failLifecycleHandling(settledFailure);
             pendingTerminationOutcome = new SessionOutcome.Failed(settledFailure);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "request-processing failure " + request.requestId,
                 settledFailure
             );
@@ -1520,7 +1435,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             request.markProcessingFailed(missingOutcome);
             request.processingRegistration().failLifecycleHandling(missingOutcome);
             pendingTerminationOutcome = new SessionOutcome.Failed(missingOutcome);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "request-processing completion " + request.requestId,
                 missingOutcome
             );
@@ -1531,7 +1446,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             request.markProcessingFailed(cleanup.cause());
             request.processingRegistration().failLifecycleHandling(cleanup.cause());
             pendingTerminationOutcome = new SessionOutcome.Failed(cleanup.cause());
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 processingCompletionWon
                     ? "request processing reported cancellation after processing won "
                         + request.requestId
@@ -1555,7 +1470,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             pendingTerminationOutcome = new SessionOutcome.Failed(
                 contradictoryCompletion
             );
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "request-processing completion after cancellation "
                     + request.requestId,
                 contradictoryCompletion
@@ -1599,7 +1514,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             );
             request.markProcessingFailed(orderingFailure);
             request.processingRegistration().failLifecycleHandling(orderingFailure);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "request-processing completion before connection turn " + request.requestId,
                 orderingFailure
             );
@@ -1612,7 +1527,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             request.markProcessingFailed(releaseFailure);
             request.processingRegistration().failLifecycleHandling(releaseFailure);
             pendingTerminationOutcome = new SessionOutcome.Failed(releaseFailure);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "final prepared-request release " + request.requestId,
                 releaseFailure
             );
@@ -1630,17 +1545,17 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             );
         } catch (Throwable t) {
             request.processingRegistration().failLifecycleHandling(t);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "request-processing milestone submission " + request.requestId,
                 t
             );
             return;
         }
         acceptance.whenComplete((ignored, failure) ->
-            applyNowOrPost("request-processing milestone acceptance " + request.requestId, () -> {
+            transitions.applyNowOrPost("request-processing milestone acceptance " + request.requestId, () -> {
                 if (failure != null) {
                     request.processingRegistration().failLifecycleHandling(unwrap(failure));
-                    reportImpossibleTransition(
+                    transitions.reportImpossibleTransition(
                         "request-processing milestone acceptance " + request.requestId,
                         unwrap(failure)
                     );
@@ -1668,7 +1583,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             request.markProcessingFailed(releaseFailure);
             request.processingRegistration().failLifecycleHandling(releaseFailure);
             pendingTerminationOutcome = new SessionOutcome.Failed(releaseFailure);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 outcomeDescription + " prepared-request release " + request.requestId,
                 releaseFailure
             );
@@ -1717,7 +1632,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             request.failProcessingCancellationAcknowledgement();
             registration.failLifecycleHandling(t);
             recordAbortCleanupFailure(t);
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "request-processing cancellation " + request.requestId,
                 t
             );
@@ -1729,7 +1644,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         CompletionStage<ProcessingCancellationResult> acknowledgement
     ) {
         acknowledgement.whenComplete((result, failure) -> {
-            applyNowOrPost("request-processing cancellation acceptance " + request.requestId, () -> {
+            transitions.applyNowOrPost("request-processing cancellation acceptance " + request.requestId, () -> {
                 if (requestOwners.get(request.requestId) != request) {
                     throw new IllegalStateException(
                         "request-processing cancellation acceptance arrived for an unowned request: "
@@ -1761,7 +1676,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                 request.failProcessingCancellationAcknowledgement();
                 request.processingRegistration().failLifecycleHandling(cause);
                 recordAbortCleanupFailure(cause);
-                reportImpossibleTransition(
+                transitions.reportImpossibleTransition(
                     "request-processing cancellation acceptance " + request.requestId,
                     cause
                 );
@@ -1794,7 +1709,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
 
     private void tryFinishTermination() {
         assertInMailbox();
-        if (processFatalTransition
+        if (transitions.fatalTransitionActive()
             || pendingTerminationOutcome == null
             || !requestOwners.isEmpty()
             || !admissionCommands.isEmpty()
@@ -1846,7 +1761,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
         CompletionStage<Void> acknowledgement
     ) {
         acknowledgement.whenComplete((ignored, failure) ->
-            applyNowOrPost("preparation cancellation acceptance " + request.requestId, () -> {
+            transitions.applyNowOrPost("preparation cancellation acceptance " + request.requestId, () -> {
                 if (failure != null) {
                     var cause = unwrap(failure);
                     request.failPreparationCancellationAcknowledgement(cause);
@@ -1854,7 +1769,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
                         request.processingRegistration().failLifecycleHandling(cause);
                     }
                     recordAbortCleanupFailure(cause);
-                    reportImpossibleTransition(
+                    transitions.reportImpossibleTransition(
                         "preparation cancellation acceptance " + request.requestId,
                         cause
                     );
@@ -1891,7 +1806,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     private void releasePreparedAfterSettledTurn(RequestCommand<P, R> request) {
         var failure = releasePreparedFailure(request);
         if (failure != null) {
-            reportImpossibleTransition(
+            transitions.reportImpossibleTransition(
                 "settled target-exchange prepared-request release " + request.owner.requestId,
                 failure
             );
@@ -1912,7 +1827,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
             try {
                 prepared.value().close();
             } catch (Throwable failure) {
-                reportImpossibleTransition("late prepared-request release", failure);
+                transitions.reportImpossibleTransition("late prepared-request release", failure);
             }
         }
     }
@@ -1965,7 +1880,7 @@ public final class TargetConnectionOwner<P extends TargetConnectionOwner.Prepare
     }
 
     private void assertInMailbox() {
-        ownerThreadGuard.requireOwnerThread();
+        transitions.requireOwnerThread();
     }
 
     private static Throwable unwrap(Throwable throwable) {

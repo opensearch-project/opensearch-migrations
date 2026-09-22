@@ -19,15 +19,27 @@ public class TrafficStreamCursorKey implements ITrafficStreamKey, Comparable<Tra
     public final String connectionId;
     public final String nodeId;
     public final int trafficStreamIndex;
+    public final int sourceGeneration;
     @Getter
     public final IReplayContexts.ITrafficStreamsLifecycleContext trafficStreamsContext;
 
-    public TrafficStreamCursorKey(TestContext context, TrafficStream stream, int arrayIndex) {
+    public TrafficStreamCursorKey(
+        TestContext context,
+        TrafficStream stream,
+        int arrayIndex,
+        int sourceGeneration
+    ) {
         connectionId = stream.getConnectionId();
         nodeId = stream.getNodeId();
         trafficStreamIndex = TrafficStreamUtils.getTrafficStreamIndex(stream);
         this.arrayIndex = arrayIndex;
+        this.sourceGeneration = sourceGeneration;
         trafficStreamsContext = context.createTrafficStreamContextForTest(this);
+    }
+
+    @Override
+    public int getSourceGeneration() {
+        return sourceGeneration;
     }
 
     @Override
