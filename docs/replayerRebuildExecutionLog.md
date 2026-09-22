@@ -508,3 +508,46 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   `CancellationException` as a substitute for an explicit cleanup outcome.
 - S5 remains open. Fixture/test migration and the complete green module run are still required before
   adding the S5 End entry.
+
+### Progress checkpoint — S5c2 explicit fixture lifecycle contracts
+
+- Removed fixture-generated lifecycle facts. `ActorRequestTestUtils` now requires the authoritative
+  `PartitionGenerationId` and `RequestProcessingRegistration`; its optional processing fixture keeps
+  target-turn completion independent from tuple durability, exposes typed cancellation arbitration
+  and processing failure, and does not expose a mutable completion future.
+- Replaced hidden replay-engine fixture policy with one explicit, one-shot dependency bundle:
+  source-session acknowledgement, request lifecycle intake, fatal handling, and the caller-owned
+  `ReplayProgressController`. The top-level fixture also requires an injected process terminator.
+- Made the deterministic array source participate explicitly in record-work tracking with a synthetic
+  Kafka identity, externally visible Kafka fixture API dependency, explicit source generations, and
+  observed-head cursor advancement only after context release succeeds.
+- Fenced source activation, reads, completions, retirement, and close. Supersession retires the old
+  source and releases its pending contexts before atomically claiming the next generation and
+  snapshotting the committed cursor; retired and closed sources cannot mint or commit work.
+
+| S5c2 requirement | Code boundary | Evidence |
+|---|---|---|
+| No fabricated generation or durability | `ActorRequestTestUtils.schedulePreparedRequest`; `RequestProcessingFixture` | caller supplies generation and registration; tuple durability, cleanup, and failure are independent explicit transitions |
+| No hidden owner or fatal policy | `ReplayEngineFactory.Dependencies`; `RootReplayerConstructorExtensions` | dependency bundle is non-null and single-use; progress controller and process terminator remain caller-owned |
+| Record completion is acknowledged asynchronously | `ArrayCursorTrafficCaptureSource.recordProcessingFinished` | invalid identity, release failure, and close return failed stages rather than throwing from the call |
+| Commit follows successful context release | array-source pending queue and cursor | release failure retains the pending key and leaves the committed cursor unchanged; retry then advances |
+| Generation and shutdown fencing | `ArrayCursorTrafficSourceContext` activation monitor; source queue monitor | stale completion is benign, superseded reads are rejected, restart increments generation while retaining cursor, and close releases pending contexts |
+
+- Required read-only Claude reviews were non-empty and found valid defects throughout the bounded
+  slice: target-turn completion was initially mistaken for tuple durability; cancellation always
+  claimed victory; lifecycle/fatal/progress dependencies were hidden; context release could race
+  retain and throw synchronously; cursor advancement preceded release; synthetic generation was
+  inert; stale completion was fatal; progress ownership was repeatable; processing failure was not
+  injectable; release-failure evidence did not prove queue integrity; superseded sources could keep
+  reading; completion raced retirement; close lacked a fence; activation snapshotted the cursor
+  outside the retirement fence; one lock order was inverted; and a write-only active-generation
+  field remained. Every finding was fixed. The final two-file confirmation returned
+  `NO_ACTIONABLE_FINDINGS`.
+- `:TrafficCapture:trafficReplayer:compileTestFixturesJava` passed. A serialized isolated Gradle test
+  task compiled and ran `ArrayCursorTrafficCaptureSourceTest`; all 7 cases passed.
+- Full `compileTestJava` intentionally remains red with 44 errors: 25 removed lifecycle/factory
+  bridge uses, 13 array-source callers that must now declare a generation, and 6 stale checked
+  `SSLException` catches. These caller migrations are the next bounded S5c3 slice; no production or
+  fixture compatibility bridge will be introduced.
+- S5 remains open. S5c3 caller migration and the complete green module run are still required before
+  adding the S5 End entry.

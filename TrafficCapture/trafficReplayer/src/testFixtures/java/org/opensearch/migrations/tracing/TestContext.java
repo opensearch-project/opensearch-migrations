@@ -40,6 +40,14 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
         }
     }
 
+    public IReplayContexts.IChannelKeyContext releaseChannelContextForTest(
+        IReplayContexts.IChannelKeyContext context
+    ) {
+        synchronized (channelContextManagerLock) {
+            return channelContextManager.releaseContextFor(context);
+        }
+    }
+
     public BacktracingContextTracker getBacktracingContextTracker() {
         return (BacktracingContextTracker) getContextTracker();
     }
