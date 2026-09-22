@@ -740,3 +740,28 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   and already-migrated shutdown baseline files; neither S5c3d2 source appears in the diagnostics.
 - Spotless remained excluded at the user's direction. S5 remains open for the lifecycle and Netty
   caller commits, complete green module gate, and removal of the obsolete `TargetOutcome` taxonomy.
+
+### Progress checkpoint — S5c3d3 lifecycle orchestrator callers
+
+- Migrated the existing 21-test lifecycle suite to explicit `TargetConnectionOwner`, typed
+  `TargetAttemptOutcome`, non-default partition generation, processing registration, lifecycle/fatal
+  injection, and generation-aware close APIs. No production bridge, Mockito addition, mutable static
+  state, or test-paradigm rewrite was introduced.
+- Preserved the suite's admission ordering, cancellation, retry, ownership, phase, termination, and
+  event-loop fatal assertions while making request-processing durability explicit rather than
+  inferred from target-turn completion.
+- The first required read-only Claude review found two vacuous cancellation disjunctions, a
+  self-referential null-send guard in the test adapter, lost late-runway transaction-completion
+  coverage, an automatic durability helper that hid ordering and ignored settlement results, local
+  fatal futures that could swallow duplicates, and an undocumented variant-indifferent retry helper.
+- Started preparation is now gated and strictly cancelled; shutdown restores its strict cancellation
+  wait; the null case returns `null` directly to production; late-runway settlement and close
+  coverage are restored; each successful path explicitly asserts `TupleDurable` after request
+  completion and waits for lifecycle handling; cancellation paths do not fabricate durability; all
+  intended fatal transitions record and assert exactly one event; and the helper's limited plumbing
+  role is documented.
+- Isolated source compilation passed in 6 seconds, and all 21 tests passed serialized with
+  `--no-parallel --max-workers=1`. `git diff --check` passed. The final read-only Claude confirmation
+  returned `NO_ACTIONABLE_FINDINGS`.
+- Spotless remained excluded. S5 remains open for the Netty caller commit, full compile/test gates,
+  and the atomic removal of the obsolete `TargetOutcome` taxonomy.
