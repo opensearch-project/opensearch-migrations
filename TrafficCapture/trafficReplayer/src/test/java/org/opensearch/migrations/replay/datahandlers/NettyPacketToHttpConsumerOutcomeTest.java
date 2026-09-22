@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 
 import org.opensearch.migrations.replay.datahandlers.TargetPacketConsumer.PacketSendOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseKind;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
@@ -28,11 +29,17 @@ class NettyPacketToHttpConsumerOutcomeTest extends InstrumentationTest {
             var packet = Unpooled.wrappedBuffer(new byte[] { 1 });
             var send = fixture.sendPacket(packet);
 
-            write.setFailure(new IOException("connection reset"));
+            var transportFailure = new IOException("connection reset");
+            write.setFailure(transportFailure);
 
             var outcome = Assertions.assertInstanceOf(
                 PacketSendOutcome.NoTargetResponseObtained.class,
                 send.get(NettyPacketToHttpConsumerTestFixture.RESPONSE_TIMEOUT)
+            );
+            Assertions.assertSame(transportFailure, outcome.cause());
+            Assertions.assertEquals(
+                NoTargetResponseKind.TRANSPORT_FAILURE,
+                outcome.diagnostic().kind()
             );
             Assertions.assertTrue(outcome.reason().contains(IOException.class.getName()));
             Assertions.assertTrue(outcome.reason().contains("connection reset"));

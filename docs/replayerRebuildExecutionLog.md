@@ -765,3 +765,54 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   returned `NO_ACTIONABLE_FINDINGS`.
 - Spotless remained excluded. S5 remains open for the Netty caller commit, full compile/test gates,
   and the atomic removal of the obsolete `TargetOutcome` taxonomy.
+
+### Progress checkpoint — S5c3d4 remaining callers and compact no-response diagnostics
+
+- Completed the remaining ReplayEngine, Netty, retry, top-level, progress, and tuple-write caller
+  migration to explicit partition generations, request-processing registrations, lifecycle sinks,
+  fatal handlers, and generation-aware connection close. No production compatibility constructor
+  or mutable static state was added.
+- Kept `NoTargetResponseObtained` as an ordinary typed value while replacing retained full
+  `AggregatedRawResponse` envelopes with a compact diagnostic category and description. Transport
+  failures remain typed as `IOException` at the packet boundary; read timeout, transport failure,
+  and missing-response outcomes remain distinguishable without retaining response buffers or
+  throwable stacks across indefinite retries.
+- Finalizer futures and their completed values are both checked explicitly. Unexpected invariant
+  failures remain exceptional; an expected no-response remains in the retry-value lane.
+- Migrated Netty fixtures now assert nonzero generation identity, exact connection-turn then
+  processing milestone order, tuple durability before processing acceptance, and absence of fatal
+  reports. Their ReplayEngine and connection-pool cleanup is bounded and implemented as an
+  `AutoCloseable`, so cleanup and fatal diagnostics are suppressed onto a primary test failure.
+- Replaced process-terminator lambdas that threw on handler threads with per-test recording
+  terminators whose exit codes are asserted on the JUnit thread. The expected tuple-write fatal
+  still surfaces through the shutdown future with its exact cause and does not invoke process
+  termination.
+
+| S5c3d4 requirement | Code/test evidence |
+|---|---|
+| Remaining caller migration | Full `compileTestJava`; explicit generation and processing registration in ReplayEngine, Netty, retry, top-level, progress, and tuple-write callers |
+| Compact typed no-response | `TargetAttemptOutcome.NoTargetResponseDiagnostic`; response-timeout, transport-failure, and missing-response classification tests |
+| No-response is a value | `RequestSenderTargetAttemptOutcomeTest`, `NettyPacketToHttpConsumerOutcomeTest`, and no-retry timeout coverage |
+| Two ordered request milestones | `NettyPacketToHttpConsumerTest` records exact `CONNECTION_TURN`, `PROCESSING` order after `TupleDurable` |
+| Fatal diagnostics remain observable | recording process terminators and complete fatal-error histories asserted on test threads |
+| Tuple failure remains fatal without commit | `TupleWriteBlockingBehaviorTest.tupleWriteFailureStopsReplayWithoutCommittingOffset` |
+
+- The first read-only Claude review found that the initial diagnostic-envelope approach retained a
+  full response object for every indefinitely retried no-response attempt, left null-value handling
+  implicit, did not directly verify the new diagnostic path, and could skip newly introduced Netty
+  cleanup. The response envelope was replaced with a compact diagnostic, null handling and
+  classification evidence were made explicit, and cleanup became unconditional and bounded.
+- The confirmation review found that fail-fast terminator lambdas were swallowed by fatal-handler
+  callers, fatal histories could disappear behind primary Netty failures, pool shutdown was
+  unbounded, missing HTTP responses could look successful in the no-retry fixture, and the packet
+  type admitted causes broader than its implementation. Terminators now record for assertion on
+  the test thread; cleanup uses suppressed diagnostics and bounded waits; missing responses carry a
+  distinct error; and the packet outcome accepts only `IOException`.
+- The final read-only Claude confirmation returned `NO_ACTIONABLE_FINDINGS`.
+- `:TrafficCapture:trafficReplayer:compileTestJava --no-parallel --max-workers=1` passed in 6
+  seconds. The serialized focused gate passed 45/45 tests in 1 minute 10 seconds, including target
+  attempt classification, Netty packet behavior, retries, request progress, tuple-write durability,
+  and quiescence.
+- Spotless remained excluded at the user's direction. S5 remains open for the atomic removal of
+  `TargetOutcome`, the complete module test/long-test/isolated-test gates, and the final S5
+  requirement matrix and End entry.

@@ -782,16 +782,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         Throwable failure
     ) {
         var cause = TrackedFuture.unwindPossibleCompletionException(failure);
-        if (!(cause instanceof IOException)) {
+        if (!(cause instanceof IOException ioFailure)) {
             return TextTrackedFuture.failedFuture(
                 cause,
                 () -> "unexpected target packet failure"
             );
         }
-        var reason = cause.getClass().getName()
-            + (cause.getMessage() == null ? "" : ": " + cause.getMessage());
         return TextTrackedFuture.completedFuture(
-            new PacketSendOutcome.NoTargetResponseObtained(reason),
+            new PacketSendOutcome.NoTargetResponseObtained(ioFailure),
             () -> "target transport produced no response"
         );
     }

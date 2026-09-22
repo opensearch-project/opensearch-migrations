@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.http.retries;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 
@@ -13,6 +14,7 @@ import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.handler.timeout.ReadTimeoutException;
 
 public class NoRetryEvaluatorFactory implements IRetryVisitorFactory<AggregatedRawResponse> {
 
@@ -33,17 +35,22 @@ public class NoRetryEvaluatorFactory implements IRetryVisitorFactory<AggregatedR
                 @Override
                 public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<
                     AggregatedRawResponse>> onNoTargetResponseObtained(
-                    TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> ignored
+                    TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> notObtained
                 ) {
-                    return completed(
-                        new AggregatedRawResponse(
-                            null,
-                            0,
-                            Duration.ZERO,
-                            List.of(),
-                            null
-                        )
-                    );
+                    var failure = switch (notObtained.diagnostic().kind()) {
+                        case READ_TIMEOUT -> ReadTimeoutException.INSTANCE;
+                        case TRANSPORT_FAILURE -> new IOException(notObtained.reason());
+                        case MISSING_HTTP_RESPONSE -> new IllegalStateException(
+                            notObtained.reason()
+                        );
+                    };
+                    return completed(new AggregatedRawResponse(
+                        null,
+                        0,
+                        Duration.ZERO,
+                        List.of(),
+                        failure
+                    ));
                 }
             });
         }

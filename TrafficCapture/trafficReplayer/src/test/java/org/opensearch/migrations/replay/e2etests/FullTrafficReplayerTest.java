@@ -10,14 +10,17 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
 import org.opensearch.migrations.replay.ReplayEngine;
+import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
@@ -25,6 +28,7 @@ import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -72,9 +76,35 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     public static final String TEST_CONNECTION_ID = "testConnectionId";
     public static final String DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED = "http://localhost:9999/";
 
+    private static final class RecordingProcessTerminator
+        implements ReplayProcessFatalHandler.ProcessTerminator {
+        private final List<Integer> exitCodes = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void terminate(int exitCode) {
+            exitCodes.add(exitCode);
+        }
+
+        private void assertNotTerminated() {
+            Assertions.assertTrue(
+                exitCodes.isEmpty(),
+                () -> "Unexpected process termination with exit codes " + exitCodes
+            );
+        }
+
+        private void attachFailure(Throwable failure) {
+            if (!exitCodes.isEmpty()) {
+                failure.addSuppressed(new AssertionError(
+                    "Unexpected process termination with exit codes " + exitCodes
+                ));
+            }
+        }
+    }
+
     protected static class TrafficReplayerWithWaitOnClose extends TrafficReplayerTopLevel {
 
         private final Duration maxWaitTime;
+        private final RecordingProcessTerminator processTerminator;
 
         public TrafficReplayerWithWaitOnClose(
             Duration maxWaitTime,
@@ -86,6 +116,32 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             int maxConcurrentOutstandingRequests,
             IJsonTransformer jsonTransformer,
             String targetConnectionPoolName
+        ) throws SSLException {
+            this(
+                maxWaitTime,
+                context,
+                serverUri,
+                authTransformerFactory,
+                allowInsecureConnections,
+                numSendingThreads,
+                maxConcurrentOutstandingRequests,
+                jsonTransformer,
+                targetConnectionPoolName,
+                new RecordingProcessTerminator()
+            );
+        }
+
+        private TrafficReplayerWithWaitOnClose(
+            Duration maxWaitTime,
+            IRootReplayerContext context,
+            URI serverUri,
+            IAuthTransformerFactory authTransformerFactory,
+            boolean allowInsecureConnections,
+            int numSendingThreads,
+            int maxConcurrentOutstandingRequests,
+            IJsonTransformer jsonTransformer,
+            String targetConnectionPoolName,
+            RecordingProcessTerminator processTerminator
         ) throws SSLException {
             super(
                 context,
@@ -99,9 +155,13 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     targetConnectionPoolName
                 ),
                 maxConcurrentOutstandingRequests,
-                new OrderedWorkerTracker<>()
+                new OrderedWorkerTracker<>(),
+                new BulkItemErrorClassifier(),
+                ExceptionTypeAllowlist.empty(),
+                processTerminator
             );
             this.maxWaitTime = maxWaitTime;
+            this.processTerminator = processTerminator;
         }
 
         @Override
@@ -119,6 +179,17 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
 
         public void setResponsePostProcessor(IJsonTransformer postProcessor) {
             this.responsePostProcessor = postProcessor;
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                super.close();
+            } catch (Exception | Error failure) {
+                processTerminator.attachFailure(failure);
+                throw failure;
+            }
+            processTerminator.assertNotTerminated();
         }
     }
 
@@ -158,7 +229,10 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 .setConnectionId(TEST_CONNECTION_ID)
                 .addSubStream(TrafficObservation.newBuilder().setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(trafficStreamWithJustClose));
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(
+                List.of(trafficStreamWithJustClose),
+                0
+            );
             TrafficReplayerRunner.runReplayer(0, (rc, threadPrefix) -> {
                 try {
                     return new TrafficReplayerWithWaitOnClose(
@@ -202,7 +276,10 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 .setConnectionId(TEST_CONNECTION_ID)
                 .addSubStream(TrafficObservation.newBuilder().setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(trafficStreamWithJustClose));
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(
+                List.of(trafficStreamWithJustClose),
+                0
+            );
 
             TrafficReplayerRunner.runReplayer(0, (rc, threadPrefix) -> {
                 try {
@@ -338,7 +415,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         new URI(DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED),
                         new IndexWatchingListenerFactory(),
                         () -> TestContext.noOtelTracking(),
-                        new ArrayCursorTrafficSourceContext(List.of())
+                        new ArrayCursorTrafficSourceContext(List.of(), 0)
                     );
                 } catch (Throwable e) {
                     throw Lombok.sneakyThrow(e);
@@ -383,7 +460,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         .collect(Collectors.joining("\n"))
                 )
                 .log();
-            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(trafficStreams);
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(trafficStreams, 0);
             TrafficReplayerRunner.runReplayer(
                 numExpectedRequests,
                 httpServer.localhostEndpoint(),

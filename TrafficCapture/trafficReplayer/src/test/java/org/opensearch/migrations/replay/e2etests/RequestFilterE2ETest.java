@@ -72,7 +72,8 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
                 return TestHttpServerContext.makeResponse(new Random(1), response); })) {
 
             var trafficSource = new ArrayCursorTrafficSourceContext(
-                List.of(buildTrafficStream(HTTP_GET)));
+                List.of(buildTrafficStream(HTTP_GET)),
+                0);
 
             IJsonTransformer rejectAll = input -> {
                 throw new RequestFilteredException("reject all");
@@ -168,7 +169,8 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
 
             // Only POST traffic — should be filtered
             var trafficSource = new ArrayCursorTrafficSourceContext(
-                List.of(buildTrafficStream(HTTP_POST)));
+                List.of(buildTrafficStream(HTTP_POST)),
+                0);
 
             // Filter that only accepts GET requests
             IJsonTransformer getOnlyFilter = input -> {
@@ -208,7 +210,8 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
             response -> TestHttpServerContext.makeResponse(new Random(1), response))) {
 
             var trafficSource = new ArrayCursorTrafficSourceContext(
-                List.of(buildTrafficStream(HTTP_GET)));
+                List.of(buildTrafficStream(HTTP_GET)),
+                0);
 
             IJsonTransformer throwsRuntimeException = input -> {
                 throw new RuntimeException("Unexpected transformer error");

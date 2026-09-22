@@ -58,6 +58,28 @@ public final class ReplayOutcomes {
         permits TargetAttemptOutcome.TargetResponseObtained,
             TargetAttemptOutcome.NoTargetResponseObtained {
 
+        enum NoTargetResponseKind {
+            READ_TIMEOUT,
+            TRANSPORT_FAILURE,
+            MISSING_HTTP_RESPONSE
+        }
+
+        record NoTargetResponseDiagnostic(
+            @NonNull NoTargetResponseKind kind,
+            @NonNull String description
+        ) {
+            public static NoTargetResponseDiagnostic fromCause(
+                NoTargetResponseKind kind,
+                Throwable cause
+            ) {
+                return new NoTargetResponseDiagnostic(
+                    kind,
+                    cause.getClass().getName()
+                        + (cause.getMessage() == null ? "" : ": " + cause.getMessage())
+                );
+            }
+        }
+
         <R> R visit(Visitor<T, R> visitor);
 
         interface Visitor<T, R> {
@@ -74,8 +96,12 @@ public final class ReplayOutcomes {
         }
 
         record NoTargetResponseObtained<T>(
-            @NonNull String reason
+            @NonNull NoTargetResponseDiagnostic diagnostic
         ) implements TargetAttemptOutcome<T> {
+            public String reason() {
+                return diagnostic.description();
+            }
+
             @Override
             public <R> R visit(Visitor<T, R> visitor) {
                 return visitor.onNoTargetResponseObtained(this);

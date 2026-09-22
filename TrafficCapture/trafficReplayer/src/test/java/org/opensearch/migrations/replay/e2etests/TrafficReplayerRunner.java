@@ -9,6 +9,7 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -73,6 +74,7 @@ public class TrafficReplayerRunner {
         Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
         TimeShifter timeShifter
     ) throws Throwable {
+        var processExitCodes = new CopyOnWriteArrayList<Integer>();
         runReplayer(numExpectedRequests, (rootContext, targetConnectionPoolPrefix) -> {
             try {
                 return new RootReplayerConstructorExtensions(
@@ -80,12 +82,20 @@ public class TrafficReplayerRunner {
                     endpoint,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(endpoint.getHost()),
-                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(endpoint, targetConnectionPoolPrefix)
+                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(
+                        endpoint,
+                        targetConnectionPoolPrefix
+                    ),
+                    processExitCodes::add
                 );
             } catch (SSLException e) {
                 throw new RuntimeException(e);
             }
         }, tupleListenerSupplier, rootContextSupplier, trafficSourceFactory, timeShifter);
+        Assertions.assertTrue(
+            processExitCodes.isEmpty(),
+            () -> "Unexpected process termination with exit codes " + processExitCodes
+        );
     }
 
     public static void runReplayer(

@@ -50,6 +50,8 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseDiagnostic;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseKind;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransactionRegistry;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
@@ -1305,9 +1307,15 @@ public class RequestSenderOrchestrator {
                     packetReceiver.finalizeRequest(),
                     "packet finalizer returned null after no-response outcome"
                 ).thenApply(
-                    ignored -> new TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse>(
-                        noResponse.reason()
-                    ),
+                    finalizedResponse -> {
+                        Objects.requireNonNull(
+                            finalizedResponse,
+                            "packet finalizer completed with null after no-response outcome"
+                        );
+                        return new TargetAttemptOutcome.NoTargetResponseObtained<>(
+                            noResponse.diagnostic()
+                        );
+                    },
                     () -> "finalizing target transport state after no-response outcome"
                 );
             } catch (Throwable finalizationFailure) {
@@ -1871,23 +1879,26 @@ public class RequestSenderOrchestrator {
                 }
                 throw new CompletionException(cause);
             }
-            return new TargetAttemptOutcome.NoTargetResponseObtained<>(describeFailure(cause));
+            var kind = cause instanceof ReadTimeoutException
+                ? NoTargetResponseKind.READ_TIMEOUT
+                : NoTargetResponseKind.TRANSPORT_FAILURE;
+            return new TargetAttemptOutcome.NoTargetResponseObtained<>(
+                NoTargetResponseDiagnostic.fromCause(kind, cause)
+            );
         }
         if (response.getRawResponse() != null) {
             return new TargetAttemptOutcome.TargetResponseObtained<>(response);
         }
         return new TargetAttemptOutcome.NoTargetResponseObtained<>(
-            "target attempt completed without an HTTP response"
+            new NoTargetResponseDiagnostic(
+                NoTargetResponseKind.MISSING_HTTP_RESPONSE,
+                "target attempt completed without an HTTP response"
+            )
         );
     }
 
     private static boolean isExpectedNoResponseFailure(Throwable failure) {
         return failure instanceof IOException || failure instanceof ReadTimeoutException;
-    }
-
-    private static String describeFailure(Throwable failure) {
-        return failure.getClass().getName()
-            + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
     }
 
     public static class DeterminedTransformedResponse<T> implements AutoCloseable {
