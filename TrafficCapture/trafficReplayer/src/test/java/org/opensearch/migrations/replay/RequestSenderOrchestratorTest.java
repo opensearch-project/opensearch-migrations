@@ -224,7 +224,11 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 Assertions.assertTrue(processingFixtures.get(i).completeTupleDurable());
                 processingFixtures.get(i).lifecycleHandled().toCompletableFuture().get(5, TimeUnit.SECONDS);
                 log.info("Finalized cf=" + getParentsDiagnosticString(cf, ""));
-                Assertions.assertNull(arr.error);
+                Assertions.assertInstanceOf(IllegalStateException.class, arr.error);
+                Assertions.assertEquals(
+                    "target attempt completed without an HTTP response",
+                    arr.error.getMessage()
+                );
             }
             Assertions.assertInstanceOf(SessionOutcome.Closed.class, closeFuture.get());
             lifecycleSink.assertCompleted(generation, expectedRequestIds);

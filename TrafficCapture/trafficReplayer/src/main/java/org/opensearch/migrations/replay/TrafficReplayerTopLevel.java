@@ -284,7 +284,9 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var fatalHandler = new ReplayProcessFatalHandler(
-            ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED,
+            failure -> failure instanceof RequestSenderOrchestrator.EventLoopTerminatedError
+                ? ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED
+                : ReplayProcessFatalHandler.Reason.UNEXPECTED_FATAL_ERROR,
             topLevelContext.getReplayProcessFatalMetrics(),
             fatalProcessTerminator,
             org.apache.logging.log4j.LogManager::shutdown,

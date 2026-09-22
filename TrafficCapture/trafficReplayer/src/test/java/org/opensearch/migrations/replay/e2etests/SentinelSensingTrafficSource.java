@@ -1,7 +1,9 @@
 package org.opensearch.migrations.replay.e2etests;
 
 import java.io.EOFException;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -10,6 +12,10 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
@@ -61,6 +67,61 @@ class SentinelSensingTrafficSource implements ISimpleTrafficCaptureSource {
     @Override
     public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
         underlyingSource.onConnectionAccumulationComplete(trafficStreamKey);
+    }
+
+    @Override
+    public CompletionStage<Void> recordProcessingFinished(KafkaRecordId recordId) {
+        return underlyingSource.recordProcessingFinished(recordId);
+    }
+
+    @Override
+    public RecordId recordIdFor(ITrafficStreamKey trafficStreamKey) {
+        return underlyingSource.recordIdFor(trafficStreamKey);
+    }
+
+    @Override
+    public SourcePartitionKey sourcePartitionFor(ITrafficStreamKey trafficStreamKey) {
+        return underlyingSource.sourcePartitionFor(trafficStreamKey);
+    }
+
+    @Override
+    public void setSourcePartitionLifecycleListener(SourcePartitionLifecycleListener listener) {
+        underlyingSource.setSourcePartitionLifecycleListener(listener);
+    }
+
+    @Override
+    public boolean usesStructuralExpiration() {
+        return underlyingSource.usesStructuralExpiration();
+    }
+
+    @Override
+    public boolean hasPendingSourceControl() {
+        return underlyingSource.hasPendingSourceControl();
+    }
+
+    @Override
+    public boolean isReadCapacityAvailable() {
+        return underlyingSource.isReadCapacityAvailable();
+    }
+
+    @Override
+    public void setReadCapacityAvailableListener(Runnable listener) {
+        underlyingSource.setReadCapacityAvailableListener(listener);
+    }
+
+    @Override
+    public void touch(ITrafficSourceContexts.IBackPressureBlockContext context) {
+        underlyingSource.touch(context);
+    }
+
+    @Override
+    public Optional<Instant> getNextRequiredTouch() {
+        return underlyingSource.getNextRequiredTouch();
+    }
+
+    @Override
+    public void logHeartbeat() {
+        underlyingSource.logHeartbeat();
     }
 
     @Override

@@ -58,7 +58,12 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         void terminate(int exitCode);
     }
 
-    private final Reason reason;
+    @FunctionalInterface
+    public interface ReasonClassifier {
+        Reason classify(Error failure);
+    }
+
+    private final ReasonClassifier reasonClassifier;
     private final Metrics metrics;
     private final ProcessTerminator processTerminator;
     private final Runnable log4jFlusher;
@@ -71,7 +76,7 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         Metrics metrics,
         ProcessTerminator processTerminator
     ) {
-        this(reason, metrics, processTerminator, LogManager::shutdown, System.err, ignored -> {});
+        this(ignored -> reason, metrics, processTerminator, LogManager::shutdown, System.err, ignored -> {});
     }
 
     ReplayProcessFatalHandler(
@@ -81,7 +86,7 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         Runnable log4jFlusher,
         PrintStream errorStream
     ) {
-        this(reason, metrics, processTerminator, log4jFlusher, errorStream, ignored -> {});
+        this(ignored -> reason, metrics, processTerminator, log4jFlusher, errorStream, ignored -> {});
     }
 
     ReplayProcessFatalHandler(
@@ -92,7 +97,18 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         PrintStream errorStream,
         Consumer<Error> fatalShutdownSignaler
     ) {
-        this.reason = Objects.requireNonNull(reason);
+        this(ignored -> reason, metrics, processTerminator, log4jFlusher, errorStream, fatalShutdownSignaler);
+    }
+
+    ReplayProcessFatalHandler(
+        ReasonClassifier reasonClassifier,
+        Metrics metrics,
+        ProcessTerminator processTerminator,
+        Runnable log4jFlusher,
+        PrintStream errorStream,
+        Consumer<Error> fatalShutdownSignaler
+    ) {
+        this.reasonClassifier = Objects.requireNonNull(reasonClassifier);
         this.metrics = Objects.requireNonNull(metrics);
         this.processTerminator = Objects.requireNonNull(processTerminator);
         this.log4jFlusher = Objects.requireNonNull(log4jFlusher);
@@ -105,6 +121,17 @@ public final class ReplayProcessFatalHandler implements RequestSenderOrchestrato
         Objects.requireNonNull(failure);
         if (!started.compareAndSet(false, true)) {
             return;
+        }
+
+        Reason reason;
+        try {
+            reason = Objects.requireNonNull(
+                reasonClassifier.classify(failure),
+                "fatal reason classifier returned null"
+            );
+        } catch (Throwable classifierFailure) {
+            failure.addSuppressed(classifierFailure);
+            reason = Reason.UNEXPECTED_FATAL_ERROR;
         }
 
         try {
