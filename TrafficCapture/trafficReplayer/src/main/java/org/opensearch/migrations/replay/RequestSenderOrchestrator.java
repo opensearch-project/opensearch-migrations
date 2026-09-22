@@ -598,7 +598,7 @@ public class RequestSenderOrchestrator {
                 }
             };
             return (TrackedFuture<String, DeterminedTransformedResponse<Object>>)
-                (TrackedFuture<?, ?>) sendRequestWithRetries(
+                (TrackedFuture<?, ?>) runRetrySequence(
                 () -> packetConsumerFactory.create(
                     runtime.session,
                     preparedRequest.context,
@@ -607,7 +607,6 @@ public class RequestSenderOrchestrator {
                 runtime.session.eventLoop,
                 preparedRequest.packetProducer,
                 preparedRequest.start,
-                initialRetryDelay,
                 preparedRequest.interval,
                 preparedRequest.visitor
             );
@@ -780,12 +779,29 @@ public class RequestSenderOrchestrator {
             });
         }
 
-        private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> sendRequestWithRetries(
+        private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> runRetrySequence(
             Supplier<TargetPacketConsumer> senderSupplier,
             EventLoop eventLoop,
             OwnedPreparedRequest packetProducer,
             Instant referenceStartTime,
-            Duration nextRetryDelay,
+            Duration interval,
+            RetryVisitor<T> visitor
+        ) {
+            return new RetrySequence<>(
+                senderSupplier,
+                eventLoop,
+                packetProducer,
+                referenceStartTime,
+                interval,
+                visitor
+            ).start();
+        }
+
+        private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> sendSingleRequestAttempt(
+            Supplier<TargetPacketConsumer> senderSupplier,
+            EventLoop eventLoop,
+            OwnedPreparedRequest packetProducer,
+            Instant referenceStartTime,
             Duration interval,
             RetryVisitor<T> visitor
         ) {
@@ -876,22 +892,7 @@ public class RequestSenderOrchestrator {
                     failure
                 )
             );
-            return continueOnEventLoop(
-                eventLoop,
-                released,
-                "determining whether the target request must be retried",
-                (dtr, failure) -> retryIfNeeded(
-                    dtr,
-                    failure,
-                    senderSupplier,
-                    eventLoop,
-                    packetProducer,
-                    referenceStartTime,
-                    nextRetryDelay,
-                    interval,
-                    visitor
-                )
-            );
+            return released;
         }
 
         private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> releaseAttemptAfterEvaluation(
@@ -995,64 +996,120 @@ public class RequestSenderOrchestrator {
             return null;
         }
 
-        private <T> TrackedFuture<String, DeterminedTransformedResponse<T>> retryIfNeeded(
-            DeterminedTransformedResponse<T> result,
-            Throwable failure,
-            Supplier<TargetPacketConsumer> senderSupplier,
-            EventLoop eventLoop,
-            OwnedPreparedRequest packetProducer,
-            Instant referenceStartTime,
-            Duration nextRetryDelay,
-            Duration interval,
-            RetryVisitor<T> visitor
-        ) {
-            if (cancellationCause != null) {
-                addSuppressed(cancellationCause, closeResult(result));
-                return TextTrackedFuture.failedFuture(
-                    cancellationCause,
-                    () -> "request exchange was cancelled while evaluating a retry"
-                );
+        private final class RetrySequence<T> {
+            private final Supplier<TargetPacketConsumer> senderSupplier;
+            private final EventLoop eventLoop;
+            private final OwnedPreparedRequest packetProducer;
+            private final Duration interval;
+            private final RetryVisitor<T> visitor;
+            private final CompletableFuture<DeterminedTransformedResponse<T>> completion =
+                new CompletableFuture<>();
+            private Instant referenceStartTime;
+            private Duration nextRetryDelay = initialRetryDelay;
+
+            private RetrySequence(
+                Supplier<TargetPacketConsumer> senderSupplier,
+                EventLoop eventLoop,
+                OwnedPreparedRequest packetProducer,
+                Instant referenceStartTime,
+                Duration interval,
+                RetryVisitor<T> visitor
+            ) {
+                this.senderSupplier = senderSupplier;
+                this.eventLoop = eventLoop;
+                this.packetProducer = packetProducer;
+                this.referenceStartTime = referenceStartTime;
+                this.interval = interval;
+                this.visitor = visitor;
             }
-            if (failure != null) {
-                var cause = unwrap(failure);
-                addSuppressed(cause, closeResult(result));
-                return TextTrackedFuture.failedFuture(cause, () -> "failed future");
-            }
-            if (result.directive != RetryDirective.RETRY) {
-                return TextTrackedFuture.completedFuture(
-                    result,
-                    () -> "done retrying and returning received response"
-                );
-            }
-            var releaseFailure = closeResult(result);
-            if (releaseFailure != null) {
-                return TextTrackedFuture.failedFuture(
-                    releaseFailure,
-                    () -> "failed to release a completed retry decision"
+
+            private TrackedFuture<String, DeterminedTransformedResponse<T>> start() {
+                startAttempt();
+                return new TextTrackedFuture<>(
+                    completion,
+                    () -> "running the explicit target retry sequence"
                 );
             }
 
-            var computedStartTime = referenceStartTime.plus(nextRetryDelay);
-            var currentTime = Instant.now();
-            var newStartTime = computedStartTime.isBefore(currentTime)
-                ? currentTime.plus(nextRetryDelay)
-                : computedStartTime;
-            log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
-            var schedulingDelay = Duration.between(Instant.now(), newStartTime);
-            transitionPhase(TargetExchangeState.Phase.RETRY_DELAY);
-            return scheduleCancellable(eventLoop, schedulingDelay, "retry")
-                .thenCompose(
-                    ignored -> sendRequestWithRetries(
-                        senderSupplier,
-                        eventLoop,
-                        packetProducer,
-                        newStartTime,
-                        doubleRetryDelayCapped(nextRetryDelay),
-                        interval,
-                        visitor
-                    ),
-                    () -> "retrying request with delay of " + schedulingDelay
+            private void startAttempt() {
+                if (completion.isDone()) {
+                    return;
+                }
+                var attempt = sendSingleRequestAttempt(
+                    senderSupplier,
+                    eventLoop,
+                    packetProducer,
+                    referenceStartTime,
+                    interval,
+                    visitor
                 );
+                attempt.future.whenComplete((result, failure) ->
+                    submitRequiredContinuation(
+                        eventLoop,
+                        "determining whether the target request must be retried",
+                        completion,
+                        () -> onAttemptDecision(result, failure)
+                    )
+                );
+            }
+
+            private void onAttemptDecision(
+                DeterminedTransformedResponse<T> result,
+                Throwable failure
+            ) {
+                if (cancellationCause != null) {
+                    addSuppressed(cancellationCause, closeResult(result));
+                    completion.completeExceptionally(cancellationCause);
+                    return;
+                }
+                if (failure != null) {
+                    var cause = unwrap(failure);
+                    addSuppressed(cause, closeResult(result));
+                    completion.completeExceptionally(cause);
+                    return;
+                }
+                if (result == null) {
+                    completion.completeExceptionally(
+                        new IllegalStateException("target attempt completed without a retry decision")
+                    );
+                    return;
+                }
+                if (result.directive != RetryDirective.RETRY) {
+                    completion.complete(result);
+                    return;
+                }
+                var releaseFailure = closeResult(result);
+                if (releaseFailure != null) {
+                    completion.completeExceptionally(releaseFailure);
+                    return;
+                }
+
+                var computedStartTime = referenceStartTime.plus(nextRetryDelay);
+                var currentTime = Instant.now();
+                var newStartTime = computedStartTime.isBefore(currentTime)
+                    ? currentTime.plus(nextRetryDelay)
+                    : computedStartTime;
+                log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
+                var schedulingDelay = Duration.between(Instant.now(), newStartTime);
+                referenceStartTime = newStartTime;
+                nextRetryDelay = doubleRetryDelayCapped(nextRetryDelay);
+                transitionPhase(TargetExchangeState.Phase.RETRY_DELAY);
+                var schedule = scheduleCancellable(eventLoop, schedulingDelay, "retry");
+                schedule.future.whenComplete((ignored, scheduleFailure) ->
+                    submitRequiredContinuation(
+                        eventLoop,
+                        "starting a scheduled target retry",
+                        completion,
+                        () -> {
+                            if (scheduleFailure != null) {
+                                completion.completeExceptionally(unwrap(scheduleFailure));
+                            } else {
+                                startAttempt();
+                            }
+                        }
+                    )
+                );
+            }
         }
 
         private TrackedFuture<String, Void> scheduleCancellable(
