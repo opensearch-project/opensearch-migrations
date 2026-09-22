@@ -34,7 +34,6 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
@@ -951,7 +950,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         transaction.settleSource(new SourceOutcome.Complete())
             .toCompletableFuture()
             .get(5, TimeUnit.SECONDS);
-        transaction.settleTarget(new TargetOutcome.Succeeded<>("sent"))
+        transaction.settleTargetResult("sent")
             .toCompletableFuture()
             .get(5, TimeUnit.SECONDS);
         Assertions.assertFalse(close.future.isDone());
@@ -1072,7 +1071,7 @@ class RequestSenderOrchestratorLifecycleTest extends InstrumentationTest {
         transaction.settleSource(new SourceOutcome.Interrupted("shutdown"))
             .toCompletableFuture()
             .get(5, TimeUnit.SECONDS);
-        transaction.settleTarget(new TargetOutcome.Cancelled<>(new CancellationException("shutdown")))
+        transaction.settleTargetCancellation(new CancellationException("shutdown"))
             .toCompletableFuture()
             .get(5, TimeUnit.SECONDS);
         transaction.completion().toCompletableFuture().get(5, TimeUnit.SECONDS);

@@ -54,7 +54,6 @@ import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOu
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseKind;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransactionRegistry;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner.RequestTurnResult;
@@ -2150,9 +2149,9 @@ public class RequestSenderOrchestrator {
                             public TargetConnectionOwner.RequestProcessingOutcome onNotRequired(
                                 EvidenceOutcome.NotRequired notRequired
                             ) {
-                                if (outcome.targetOutcome() instanceof TargetOutcome.Cancelled<?> cancelled) {
+                                if (outcome.targetCancellation() != null) {
                                     return new TargetConnectionOwner.RequestProcessingOutcome
-                                        .RequestCleanupFinished(cancelled.cause());
+                                        .RequestCleanupFinished(outcome.targetCancellation());
                                 }
                                 throw new CompletionException(new IllegalStateException(
                                     "evidence was not required without typed target cancellation"

@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.IdentityHashMap;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
@@ -13,11 +14,8 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.EvidenceOutcome;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.ProcessingCancellationResult;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SourceOutcome;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 
 import lombok.NonNull;
-import lombok.Value;
-import lombok.experimental.Accessors;
 
 public final class ReplayTransaction<R> {
     private static final String ALREADY_TERMINATED = "transaction already terminated for ";
@@ -121,17 +119,24 @@ public final class ReplayTransaction<R> {
         CompletionStage<EvidenceOutcome> write(
             ReplayRequestId requestId,
             SourceOutcome sourceOutcome,
-            TargetOutcome<R> targetOutcome
+            R targetResult
         );
     }
 
-    @Value
-    @Accessors(fluent = true)
-    public static class TransactionOutcome {
-        @NonNull ReplayRequestId requestId;
-        @NonNull SourceOutcome sourceOutcome;
-        @NonNull TargetOutcome<?> targetOutcome;
-        @NonNull EvidenceOutcome evidenceOutcome;
+    public record TransactionOutcome<R>(
+        @NonNull ReplayRequestId requestId,
+        @NonNull SourceOutcome sourceOutcome,
+        R targetResult,
+        CancellationException targetCancellation,
+        @NonNull EvidenceOutcome evidenceOutcome
+    ) {
+        public TransactionOutcome {
+            if ((targetResult == null) == (targetCancellation == null)) {
+                throw new IllegalArgumentException(
+                    "exactly one target result or target cancellation is required"
+                );
+            }
+        }
     }
 
     private static final class PendingCommand {
@@ -162,10 +167,11 @@ public final class ReplayTransaction<R> {
         Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<PendingCommand> pendingCommands =
         Collections.newSetFromMap(new IdentityHashMap<>());
-    private final CompletionGate<TransactionOutcome> completion = new CompletionGate<>();
+    private final CompletionGate<TransactionOutcome<R>> completion = new CompletionGate<>();
     private final Metrics metrics;
     private SourceOutcome sourceOutcome;
-    private TargetOutcome<R> targetOutcome;
+    private R targetResult;
+    private CancellationException targetCancellation;
     private EvidenceOutcome evidenceOutcome;
     private EvidenceHandoff evidenceHandoff;
     private Phase phase = Phase.WAITING_FOR_JOIN;
@@ -173,6 +179,7 @@ public final class ReplayTransaction<R> {
     private Throwable pendingFailure;
     private boolean sourceSettlementReserved;
     private boolean targetSettlementReserved;
+    private boolean targetSettlementApplied;
     private boolean failureReserved;
     private boolean cancellationReserved;
     private boolean metricsActive;
@@ -246,7 +253,20 @@ public final class ReplayTransaction<R> {
         return enqueueCommand(command);
     }
 
-    public CompletionStage<Void> settleTarget(@NonNull TargetOutcome<R> outcome) {
+    public CompletionStage<Void> settleTargetResult(@NonNull R result) {
+        return settleTarget(result, null);
+    }
+
+    public CompletionStage<Void> settleTargetCancellation(
+        @NonNull CancellationException cancellation
+    ) {
+        return settleTarget(null, cancellation);
+    }
+
+    private CompletionStage<Void> settleTarget(
+        R result,
+        CancellationException cancellation
+    ) {
         PendingCommand command;
         synchronized (stateLock) {
             var unavailable = unavailableFailureLocked();
@@ -260,7 +280,9 @@ public final class ReplayTransaction<R> {
             }
             targetSettlementReserved = true;
             command = reserveCommandLocked(() -> {
-                targetOutcome = outcome;
+                targetResult = result;
+                targetCancellation = cancellation;
+                targetSettlementApplied = true;
                 tryAdvanceLocked();
             });
         }
@@ -289,7 +311,7 @@ public final class ReplayTransaction<R> {
         return enqueueCommand(command);
     }
 
-    public CompletionStage<TransactionOutcome> completion() {
+    public CompletionStage<TransactionOutcome<R>> completion() {
         return completion.stage();
     }
 
@@ -426,7 +448,7 @@ public final class ReplayTransaction<R> {
     }
 
     private boolean cancellationWonLocked() {
-        return cancellationTerminal || targetOutcome instanceof TargetOutcome.Cancelled<?>;
+        return cancellationTerminal || targetCancellation != null;
     }
 
     private void activateMetricsFromMailbox() {
@@ -443,10 +465,10 @@ public final class ReplayTransaction<R> {
 
     private void tryAdvanceLocked() {
         assertInMailbox();
-        if (phase != Phase.WAITING_FOR_JOIN || sourceOutcome == null || targetOutcome == null) {
+        if (phase != Phase.WAITING_FOR_JOIN || sourceOutcome == null || !targetSettlementApplied) {
             return;
         }
-        if (!requiresEvidence(sourceOutcome, targetOutcome)) {
+        if (!requiresEvidence(sourceOutcome, targetCancellation)) {
             evidenceOutcome = new EvidenceOutcome.NotRequired("teardown");
             finishSuccessfullyLocked();
             return;
@@ -457,7 +479,7 @@ public final class ReplayTransaction<R> {
         evidenceHandoff = handoff;
         CompletionStage<EvidenceOutcome> evidenceStage;
         try {
-            evidenceStage = evidenceWriter.write(requestId, sourceOutcome, targetOutcome);
+            evidenceStage = evidenceWriter.write(requestId, sourceOutcome, targetResult);
             if (evidenceStage == null) {
                 evidenceStage = CompletableFuture.completedFuture(
                     new EvidenceOutcome.Failed(
@@ -531,6 +553,19 @@ public final class ReplayTransaction<R> {
 
     private void finishSuccessfullyLocked() {
         assertInMailbox();
+        TransactionOutcome<R> outcome;
+        try {
+            outcome = new TransactionOutcome<>(
+                requestId,
+                sourceOutcome,
+                targetResult,
+                targetCancellation,
+                evidenceOutcome
+            );
+        } catch (RuntimeException | Error failure) {
+            completeFailureLocked(failure);
+            return;
+        }
         transitionPhaseLocked(Phase.FINALIZING);
         var releaseFailure = releaseResourcesLocked();
         var terminalOutcome = releaseFailure == null
@@ -546,14 +581,7 @@ public final class ReplayTransaction<R> {
             completion.completeExceptionally(metricsFailure);
             return;
         }
-        completion.complete(
-            new TransactionOutcome(
-                requestId,
-                sourceOutcome,
-                targetOutcome,
-                evidenceOutcome
-            )
-        );
+        completion.complete(outcome);
     }
 
     private void completeFailureLocked(Throwable failure) {
@@ -566,9 +594,9 @@ public final class ReplayTransaction<R> {
         completion.completeExceptionally(failure);
     }
 
-    private static <T> boolean requiresEvidence(
+    private static boolean requiresEvidence(
         SourceOutcome source,
-        TargetOutcome<T> target
+        CancellationException targetCancellation
     ) {
         Boolean sourceRequiresEvidence = source.visit(new SourceOutcome.Visitor<Boolean>() {
             @Override
@@ -607,7 +635,7 @@ public final class ReplayTransaction<R> {
             }
         });
         return Boolean.TRUE.equals(sourceRequiresEvidence)
-            && !(target instanceof TargetOutcome.Cancelled<?>);
+            && targetCancellation == null;
     }
 
     @SuppressWarnings("java:S1181") // All terminal metrics are attempted and their failures aggregated.

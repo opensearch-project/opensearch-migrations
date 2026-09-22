@@ -109,67 +109,6 @@ public final class ReplayOutcomes {
         }
     }
 
-    /**
-     * Legacy transaction-settlement vocabulary retained at the pre-S7 transaction boundary.
-     * New connection/request owners use {@link TargetAttemptOutcome} instead.
-     */
-    public sealed interface TargetOutcome<T>
-        permits TargetOutcome.Succeeded,
-            TargetOutcome.Failed,
-            TargetOutcome.Cancelled,
-            TargetOutcome.Filtered,
-            TargetOutcome.ClassifiedSkip {
-
-        <R> R visit(Visitor<T, R> visitor);
-
-        interface Visitor<T, R> {
-            R onSucceeded(Succeeded<T> outcome);
-
-            R onFailed(Failed<T> outcome);
-
-            R onCancelled(Cancelled<T> outcome);
-
-            R onFiltered(Filtered<T> outcome);
-
-            R onClassifiedSkip(ClassifiedSkip<T> outcome);
-        }
-
-        record Succeeded<T>(T value) implements TargetOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onSucceeded(this);
-            }
-        }
-
-        record Failed<T>(@NonNull Throwable cause) implements TargetOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onFailed(this);
-            }
-        }
-
-        record Cancelled<T>(@NonNull CancellationException cause) implements TargetOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onCancelled(this);
-            }
-        }
-
-        record Filtered<T>(@NonNull String reason) implements TargetOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onFiltered(this);
-            }
-        }
-
-        record ClassifiedSkip<T>(T value, @NonNull String reason) implements TargetOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onClassifiedSkip(this);
-            }
-        }
-    }
-
     public sealed interface ProcessingCancellationResult
         permits ProcessingCancellationResult.CancellationWon,
             ProcessingCancellationResult.ProcessingCompletionWon {

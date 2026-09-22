@@ -39,7 +39,6 @@ import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController.WorkToken;
 import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
 import org.opensearch.migrations.replay.lifecycle.ReplayTransaction;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetOutcome;
 import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -71,10 +70,19 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     private static final class TargetExchangeResult {
         private final TransformedTargetRequestAndResponseList summary;
         private final Throwable failure;
+        private final CancellationException cancellation;
+        private final TargetResponseClassifier.TargetResponseClassification classification;
 
-        private TargetExchangeResult(TransformedTargetRequestAndResponseList summary, Throwable failure) {
+        private TargetExchangeResult(
+            TransformedTargetRequestAndResponseList summary,
+            Throwable failure,
+            CancellationException cancellation,
+            TargetResponseClassifier.TargetResponseClassification classification
+        ) {
             this.summary = summary;
             this.failure = failure;
+            this.cancellation = cancellation;
+            this.classification = classification;
         }
     }
 
@@ -333,10 +341,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 ctx,
                 recordId instanceof KafkaRecordId ? ReplayIdentity.replayRequestId(requestKey) : null
             );
-            var transaction = new ReplayTransaction<TransformedTargetRequestAndResponseList>(
+            var transaction = new ReplayTransaction<TargetExchangeResult>(
                 runtime.requestId(),
                 runtime.mailbox(),
-                (requestId, sourceOutcome, targetOutcome) ->
+                (requestId, sourceOutcome, targetResult) ->
                     writeTransactionEvidence(evidenceState),
                 List.of(ctx),
                 topLevelContext.getReplayTransactionMetrics()
@@ -427,7 +435,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
 
         private void settleTransactionTarget(
-            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
+            ReplayTransaction<TargetExchangeResult> transaction,
             TrackedFuture<String, TransformedTargetRequestAndResponseList> targetFuture,
             TextTrackedFuture<RequestResponsePacketPair> sourceFuture,
             TransactionEvidenceState evidenceState
@@ -440,17 +448,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             capturedTarget
                 .thenCombine(
                     sourceFuture.future,
-                    (targetResult, source) -> toTargetOutcome(
-                        targetResult.summary,
-                        targetResult.failure,
-                        source
-                    )
+                    this::classifyTargetResult
                 )
-                .whenComplete((outcome, failure) -> settleTargetOrFail(transaction, outcome, failure));
+                .whenComplete((result, failure) -> settleTargetOrFail(transaction, result, failure));
         }
 
         private CompletionStage<TargetExchangeResult> captureTargetResult(
-            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
+            ReplayTransaction<TargetExchangeResult> transaction,
             TransactionEvidenceState evidenceState,
             TransformedTargetRequestAndResponseList summary,
             Throwable failure
@@ -458,22 +462,31 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var cause = failure == null ? null : unwrap(failure);
             evidenceState.target = summary;
             evidenceState.targetFailure = cause;
-            var result = new TargetExchangeResult(summary, cause);
+            var cancellation = cause instanceof CancellationException c ? c : null;
+            var result = new TargetExchangeResult(
+                summary,
+                cancellation == null ? cause : null,
+                cancellation,
+                null
+            );
             return summary == null
                 ? CompletableFuture.completedFuture(result)
                 : transaction.ownResource(summary).thenApply(ignored -> result);
         }
 
         private void settleTargetOrFail(
-            ReplayTransaction<TransformedTargetRequestAndResponseList> transaction,
-            TargetOutcome<TransformedTargetRequestAndResponseList> outcome,
+            ReplayTransaction<TargetExchangeResult> transaction,
+            TargetExchangeResult result,
             Throwable failure
         ) {
             if (failure != null) {
                 transaction.fail(unwrap(failure));
                 return;
             }
-            transaction.settleTarget(outcome).whenComplete((ignored, settlementFailure) -> {
+            CompletionStage<Void> settlement = result.cancellation != null
+                ? transaction.settleTargetCancellation(result.cancellation)
+                : transaction.settleTargetResult(result);
+            settlement.whenComplete((ignored, settlementFailure) -> {
                 if (settlementFailure != null) {
                     transaction.fail(unwrap(settlementFailure));
                 }
@@ -540,36 +553,50 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
         private CompletionStage<Void> handleTransactionOutcome(
             TransactionEvidenceState state,
-            ReplayTransaction.TransactionOutcome outcome
+            ReplayTransaction.TransactionOutcome<TargetExchangeResult> outcome
         ) {
-            countFinalOutcome(state.target, state.targetFailure, outcome.targetOutcome());
+            var targetResult = outcome.targetResult();
+            countFinalOutcome(
+                state.target,
+                targetResult == null ? state.targetFailure : targetResult.failure,
+                targetResult == null ? null : targetResult.classification
+            );
             recordTargetResponseCodes(state.target);
             return CompletableFuture.completedFuture(null);
         }
 
-        private TargetOutcome<TransformedTargetRequestAndResponseList> toTargetOutcome(
-            TransformedTargetRequestAndResponseList summary,
-            Throwable failure,
+        private TargetExchangeResult classifyTargetResult(
+            TargetExchangeResult result,
             RequestResponsePacketPair source
         ) {
-            if (failure != null) {
-                if (failure instanceof CancellationException cancellation) {
-                    return new TargetOutcome.Cancelled<>(cancellation);
-                }
-                return new TargetOutcome.Failed<>(failure);
+            if (result.failure != null || result.cancellation != null) {
+                return result;
             }
-            if (summary != null && summary.getTransformationStatus().isSkipped()) {
-                return new TargetOutcome.Filtered<>("request transformation filter");
+            if (result.summary != null && result.summary.getTransformationStatus().isSkipped()) {
+                return result;
             }
-            if (summary != null && summary.getTransformationStatus().isError()) {
-                return new TargetOutcome.Failed<>(summary.getTransformationStatus().getException());
-            }
-            if (summary == null) {
-                return new TargetOutcome.Failed<>(
-                    new IllegalStateException("Target exchange completed without a result")
+            if (result.summary != null && result.summary.getTransformationStatus().isError()) {
+                return new TargetExchangeResult(
+                    result.summary,
+                    result.summary.getTransformationStatus().getException(),
+                    null,
+                    null
                 );
             }
-            return targetResponseClassifier.classify(summary, source);
+            if (result.summary == null) {
+                return new TargetExchangeResult(
+                    null,
+                    new IllegalStateException("Target exchange completed without a result"),
+                    null,
+                    null
+                );
+            }
+            return new TargetExchangeResult(
+                result.summary,
+                null,
+                null,
+                targetResponseClassifier.classify(result.summary, source)
+            );
         }
 
         private void failReplayForTransaction(
@@ -640,12 +667,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         private void countFinalOutcome(
             TransformedTargetRequestAndResponseList summary,
             Throwable t,
-            TargetOutcome<?> targetOutcome
+            TargetResponseClassifier.TargetResponseClassification classification
         ) {
             if (t != null) {
                 exceptionRequestCount.incrementAndGet();
-            } else if (targetOutcome instanceof TargetOutcome.Failed<?>
-                || targetOutcome instanceof TargetOutcome.ClassifiedSkip<?>) {
+            } else if (classification instanceof TargetResponseClassifier.TargetResponseClassification.Unsuccessful
+                || classification instanceof TargetResponseClassifier.TargetResponseClassification.Allowlisted) {
                 exceptionRequestCount.incrementAndGet();
             } else if (summary == null || summary.getResponseList().isEmpty()) {
                 // no response to count
