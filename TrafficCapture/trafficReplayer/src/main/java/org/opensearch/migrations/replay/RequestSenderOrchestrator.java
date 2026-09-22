@@ -99,6 +99,12 @@ public class RequestSenderOrchestrator {
         void onFatal(Error failure);
     }
 
+    public static final class EventLoopTerminatedError extends Error {
+        public EventLoopTerminatedError(String message) {
+            super(message);
+        }
+    }
+
     @FunctionalInterface
     public interface PacketConsumerFactory {
         TargetPacketConsumer create(
@@ -388,7 +394,7 @@ public class RequestSenderOrchestrator {
             if (terminationOwner.isDone()) {
                 return;
             }
-            var fatalError = new Error(
+            var fatalError = new EventLoopTerminatedError(
                 "the event loop for " + key + " terminated before the session finished"
             );
             signalFatal(fatalError);

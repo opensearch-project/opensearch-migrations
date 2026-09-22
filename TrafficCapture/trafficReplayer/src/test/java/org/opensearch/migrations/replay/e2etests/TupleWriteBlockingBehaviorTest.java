@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
+import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
@@ -370,8 +371,24 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 }
             });
             Assertions.assertSame(expectedFatal.get(), shutdownFailure.getCause());
-            assertNoProcessTermination(processExitCodes);
+            awaitProcessTermination(
+                processExitCodes,
+                ReplayProcessFatalHandler.Reason.UNEXPECTED_FATAL_ERROR.exitCode(),
+                Duration.ofSeconds(5)
+            );
         }
+    }
+
+    private static void awaitProcessTermination(
+        List<Integer> processExitCodes,
+        int expectedExitCode,
+        Duration deadline
+    ) throws InterruptedException {
+        var endNanos = System.nanoTime() + deadline.toNanos();
+        while (processExitCodes.isEmpty() && System.nanoTime() < endNanos) {
+            Thread.sleep(10);
+        }
+        Assertions.assertEquals(List.of(expectedExitCode), processExitCodes);
     }
 
     private static void assertNoProcessTermination(List<Integer> processExitCodes) {

@@ -468,8 +468,8 @@ public final class ReplayTransaction<R> {
         if (phase != Phase.WAITING_FOR_JOIN || sourceOutcome == null || !targetSettlementApplied) {
             return;
         }
-        if (!requiresEvidence(sourceOutcome, targetCancellation)) {
-            evidenceOutcome = new EvidenceOutcome.NotRequired("teardown");
+        if (!requiresEvidence(targetCancellation)) {
+            evidenceOutcome = new EvidenceOutcome.NotRequired("target cancellation");
             finishSuccessfullyLocked();
             return;
         }
@@ -594,48 +594,8 @@ public final class ReplayTransaction<R> {
         completion.completeExceptionally(failure);
     }
 
-    private static boolean requiresEvidence(
-        SourceOutcome source,
-        CancellationException targetCancellation
-    ) {
-        Boolean sourceRequiresEvidence = source.visit(new SourceOutcome.Visitor<Boolean>() {
-            @Override
-            public Boolean onComplete(SourceOutcome.Complete complete) {
-                return true;
-            }
-
-            @Override
-            public Boolean onConfirmedDead(SourceOutcome.ConfirmedDead confirmedDead) {
-                return true;
-            }
-
-            @Override
-            public Boolean onCapturedClose(SourceOutcome.CapturedClose capturedClose) {
-                return true;
-            }
-
-            @Override
-            public Boolean onLegacyExpired(SourceOutcome.LegacyExpired legacyExpired) {
-                return true;
-            }
-
-            @Override
-            public Boolean onInconclusive(SourceOutcome.Inconclusive inconclusive) {
-                return true;
-            }
-
-            @Override
-            public Boolean onInterrupted(SourceOutcome.Interrupted interrupted) {
-                return false;
-            }
-
-            @Override
-            public Boolean onShutdown(SourceOutcome.Shutdown shutdown) {
-                return false;
-            }
-        });
-        return Boolean.TRUE.equals(sourceRequiresEvidence)
-            && targetCancellation == null;
+    private static boolean requiresEvidence(CancellationException targetCancellation) {
+        return targetCancellation == null;
     }
 
     @SuppressWarnings("java:S1181") // All terminal metrics are attempted and their failures aggregated.

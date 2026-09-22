@@ -853,3 +853,39 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   `git diff --check` passed.
 - Spotless remains deferred. S5 remains open only for the complete module `test`, `longTest`, and
   `isolatedTest` gates plus the concise final requirement matrix and End entry.
+
+### Progress checkpoint — S5c3f closure defects and fatal-reason routing
+
+- Removed the remaining source-outcome-based tuple skip: every reconstituted request now writes
+  tuple evidence unless its target attempt ended with the explicit typed cancellation. This fixes
+  incomplete and shutdown source outcomes being stranded after an otherwise normal target result.
+- Made Netty channel deactivation idempotent when channel teardown has already emptied, or
+  concurrently empties, the pipeline. The cleanup remains local to the existing finalization path
+  and does not add a compatibility state machine.
+- Reserved process exit code 80 for the typed event-loop-termination failure emitted at the exact
+  event-loop termination callback. Other owner, invariant, and required-submission fatal failures
+  now select the distinct unexpected-fatal code 89 through the same one-shot fatal handler.
+- Updated the two directly affected assertions: the orchestrator fixture now expects the typed
+  missing-response diagnostic, and the tuple-write failure waits for the asynchronous fatal
+  process signal before asserting code 89.
+- Made the test-only `SentinelSensingTrafficSource` a transparent source decorator by forwarding
+  lifecycle, record identity/completion, structural expiration, read capacity, keep-alive, and
+  heartbeat capabilities. This removed a stale wrapper failure without changing production.
+
+- The first read-only Claude review found a concurrent pipeline-emptying race and a stale
+  cancellation diagnostic; both were fixed. Its confirmation then found that the top-level fatal
+  handler mislabeled every process-fatal path as event-loop termination. The production handler now
+  classifies the typed event-loop failure as 80 and every other fatal as 89.
+- The final read-only Claude confirmation returned `NO_ACTIONABLE_FINDINGS`.
+- `:TrafficCapture:trafficReplayer:compileTestJava -x spotlessJavaCheck -x spotlessJavaApply
+  --parallel --max-workers=8 --no-build-cache` passed in 7 seconds.
+- The serialized focused fatal/lifecycle/shutdown/tuple gate passed 32/32 tests in 1 minute 3
+  seconds. The directly affected request/Netty/tuple gate passed 8/8 in 27 seconds, and
+  `SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest` passed 1/1 in 11 seconds.
+- The complete `KafkaRestartingTrafficReplayerTest` remains intentionally deferred. After its stale
+  source-decorator failure was removed, its 2 ms target read-timeout case correctly remained in the
+  indefinite no-target-response retry lane. S10 installs the authoritative broker-time retry
+  boundary that makes this scenario finite; stopping at S5 would either restore the forbidden
+  retry cap (D9) or add temporary production behavior. The run was stopped after recording this
+  disposition.
+- Spotless remains deferred. No broad test-preservation work or new Mockito surface was added.

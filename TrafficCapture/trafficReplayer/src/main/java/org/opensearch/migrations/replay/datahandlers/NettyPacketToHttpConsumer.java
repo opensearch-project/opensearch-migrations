@@ -658,10 +658,16 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
             }
             while (true) {
                 var lastHandler = pipeline.last();
-                if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
+                if (lastHandler == null
+                    || lastHandler instanceof SslHandler
+                    || lastHandler instanceof ConnectionClosedListenerHandler) {
                     break;
                 }
-                pipeline.removeLast();
+                try {
+                    pipeline.removeLast();
+                } catch (NoSuchElementException e) {
+                    break;
+                }
             }
             channel.config().setAutoRead(false);
             log.atDebug().setMessage("[{}] Reset the pipeline for channel {} back to: {}")
