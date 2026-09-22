@@ -708,3 +708,35 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - Claude noted an existing `TrafficReplayerCore` constructor that still supplies default classifiers
   internally. It was not introduced or used by this slice; after the remaining caller migration, its
   usage will be inventoried and the constructor removed if it is only a legacy bridge.
+
+### Progress checkpoint — S5c3d2 direct orchestrator callers
+
+- Migrated `RequestSenderOrchestratorTest` and its test-only `NoRetryEvaluatorFactory` collaborator
+  to the typed target-attempt visitor, explicit non-default partition generation, lifecycle sink,
+  fatal handler, request-processing registration, and generation-aware close APIs. No production
+  compatibility bridge, Mockito usage, or mutable static state was added.
+- Preserved the existing scheduling, response, and protocol assertions. A typed no-response remains
+  a value in the test visitor and is not converted back into an exception.
+
+| S5c3d2 requirement | Focused evidence |
+|---|---|
+| Connection and processing milestones | a recording lifecycle sink requires exactly one ordered connection-turn then processing event per request |
+| Processing follows durability | every successful request explicitly completes `TupleDurable`, asserts it won settlement, and waits for `lifecycleHandled` |
+| Exact generation identity | lifecycle events carry the same nonzero partition and local generation supplied to request admission and actor close |
+| Target packet ownership | the blocking consumer releases each accepted retained packet while preserving its existing scheduling gates |
+| Fatal and close outcomes | every fatal report is retained and asserted absent; both actor closes require typed `SessionOutcome.Closed` |
+
+- The first required read-only Claude review reported eight concrete defects: a stale compiled
+  `NoRetryVisitor` had hidden an uncompilable source collaborator; no-response was rewrapped as
+  `IOException`; processing completion and lifecycle-sink calls were unobserved; generation values
+  were indistinguishable from defaults; retained packet buffers leaked; fatal handling could lose
+  duplicates and hang without a timeout; and close outcomes were discarded.
+- The collaborator is now part of the slice and compiles from source; no-response stays non-
+  exceptional; processing lifecycle acceptance, exact ordered events, non-default generation,
+  packet release, complete fatal history, bounded timeouts, and typed close outcomes are all
+  asserted. The final read-only Claude confirmation returned `NO_ACTIONABLE_FINDINGS`.
+- The independent focused source/test task passed 2/2 in 52 seconds. Full exact-checkpoint
+  `compileTestJava` now reports 28 errors, all confined to the separately owned lifecycle, Netty,
+  and already-migrated shutdown baseline files; neither S5c3d2 source appears in the diagnostics.
+- Spotless remained excluded at the user's direction. S5 remains open for the lifecycle and Netty
+  caller commits, complete green module gate, and removal of the obsolete `TargetOutcome` taxonomy.
