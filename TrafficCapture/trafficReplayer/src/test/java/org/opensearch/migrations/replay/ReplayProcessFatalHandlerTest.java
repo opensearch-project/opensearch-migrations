@@ -11,8 +11,9 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.opensearch.migrations.replay.lifecycle.ConnectionActor;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.lifecycle.TargetExchangeState;
 import org.opensearch.migrations.tracing.TestContext;
 
@@ -185,18 +186,39 @@ class ReplayProcessFatalHandlerTest {
                 );
                 var orchestrator = new RequestSenderOrchestrator(
                     connectionPool,
-                    (session, requestContext) -> {
+                    (session, requestContext, firstTargetWriteSubmitted) -> {
                         throw new AssertionError("fatal child must not start target work");
                     },
                     RequestSenderOrchestrator.noSourceTerminationObligations(),
-                    ConnectionActor.Metrics.NOOP,
+                    TargetConnectionOwner.Metrics.NOOP,
                     TargetExchangeState.Metrics.NOOP,
                     ResourceOwnership.Metrics.NOOP,
+                    new TargetConnectionOwner.RequestLifecycleSink() {
+                        @Override
+                        public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                            ReplayIdentity.PartitionGenerationId partitionGenerationId,
+                            ReplayIdentity.ReplayRequestId requestId
+                        ) {
+                            throw new AssertionError("fatal child must not finish a request turn");
+                        }
+
+                        @Override
+                        public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                            ReplayIdentity.PartitionGenerationId partitionGenerationId,
+                            ReplayIdentity.ReplayRequestId requestId
+                        ) {
+                            throw new AssertionError("fatal child must not finish request processing");
+                        }
+                    },
                     fatalHandler
                 );
                 var requestContext = context.getTestConnectionRequestContext("live-event-loop-session", 0);
                 orchestrator.transactionRuntime(
                     requestContext.getReplayerRequestKey(),
+                    new ReplayIdentity.PartitionGenerationId(
+                        new org.apache.kafka.common.TopicPartition("traffic", 0),
+                        1
+                    ),
                     requestContext.getChannelKeyContext()
                 );
 

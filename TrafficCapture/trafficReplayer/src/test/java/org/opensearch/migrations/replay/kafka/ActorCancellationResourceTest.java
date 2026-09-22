@@ -9,7 +9,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.ActorRequestTestUtils;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
@@ -18,13 +20,16 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.Unpooled;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +42,7 @@ class ActorCancellationResourceTest extends InstrumentationTest {
     private static final int PERMIT_COUNT = 5;
 
     private final AtomicBoolean targetStarted = new AtomicBoolean();
+    private final AtomicReference<Error> fatalFailure = new AtomicReference<>();
     private ClientConnectionPool pool;
     private ExecutorService permitOwnerExecutor;
     private RequestSenderOrchestrator orchestrator;
@@ -55,20 +61,44 @@ class ActorCancellationResourceTest extends InstrumentationTest {
         );
         orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, context) -> {
+            (session, context, firstTargetWriteSubmitted) -> {
                 targetStarted.set(true);
                 return null;
             },
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            rootContext.getReplayProcessFatalMetrics()
+            new TargetConnectionOwner.RequestLifecycleSink() {
+                @Override
+                public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                    PartitionGenerationId partitionGenerationId,
+                    ReplayRequestId requestId
+                ) {
+                    return java.util.concurrent.CompletableFuture.completedFuture(null);
+                }
+
+                @Override
+                public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                    PartitionGenerationId partitionGenerationId,
+                    ReplayRequestId requestId
+                ) {
+                    return java.util.concurrent.CompletableFuture.completedFuture(null);
+                }
+            },
+            fatalFailure::set
         );
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        pool.shutdownNow().get(5, TimeUnit.SECONDS);
-        permitOwnerExecutor.shutdownNow();
-        Assertions.assertTrue(permitOwnerExecutor.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+            pool.shutdownNow().get(5, TimeUnit.SECONDS);
+        } finally {
+            try {
+                permitOwnerExecutor.shutdownNow();
+            } finally {
+                Assertions.assertTrue(permitOwnerExecutor.awaitTermination(5, TimeUnit.SECONDS));
+            }
+        }
+        Assertions.assertNull(fatalFailure.get(), "unexpected process-fatal replay failure");
     }
 
     @Test
@@ -76,22 +106,31 @@ class ActorCancellationResourceTest extends InstrumentationTest {
     void abortReleasesEveryPermitHeldByFarFuturePreparation() throws Exception {
         var permits = new AsyncPermitPool(PERMIT_COUNT, permitOwnerExecutor);
         List<TrackedFuture<String, AggregatedRawResponse>> requests = new ArrayList<>();
+        List<ActorRequestTestUtils.RequestProcessingFixture> processingFixtures = new ArrayList<>();
         var sendTime = Instant.now().plusSeconds(60);
+        var generation = new PartitionGenerationId(
+            new TopicPartition("actor-cancellation-resource-test", 0),
+            0
+        );
 
         for (int i = 0; i < PERMIT_COUNT; i++) {
             var context = rootContext.getTestConnectionRequestContext("cancelled", i);
             var packets = new ByteBufList(Unpooled.wrappedBuffer(new byte[] { 1 }));
+            var processing = new ActorRequestTestUtils.RequestProcessingFixture();
             requests.add(
                 schedulePreparedRequest(
                     orchestrator,
+                    generation,
                     context,
                     sendTime,
                     Duration.ZERO,
                     ByteBufListProducer.of(packets),
                     new NoRetryEvaluatorFactory.NoRetryVisitor(),
-                    permits
+                    permits,
+                    processing.registration()
                 )
             );
+            processingFixtures.add(processing);
         }
 
         var channelContext = rootContext.getTestConnectionRequestContext("cancelled", 0)
@@ -107,6 +146,11 @@ class ActorCancellationResourceTest extends InstrumentationTest {
 
         Assertions.assertFalse(targetStarted.get());
         requests.forEach(request -> Assertions.assertTrue(request.future.isCompletedExceptionally()));
+        processingFixtures.forEach(processing ->
+            Assertions.assertDoesNotThrow(
+                () -> processing.lifecycleHandled().toCompletableFuture().get(2, TimeUnit.SECONDS)
+            )
+        );
 
         var probes = new ArrayList<AsyncPermitPool.Permit>();
         for (int i = 0; i < PERMIT_COUNT; i++) {

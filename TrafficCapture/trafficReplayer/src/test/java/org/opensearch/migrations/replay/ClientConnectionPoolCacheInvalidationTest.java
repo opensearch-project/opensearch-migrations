@@ -3,13 +3,18 @@ package org.opensearch.migrations.replay;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 
 import com.google.common.cache.LoadingCache;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -38,21 +43,32 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             "test-pool",
             1
         );
+        var fatalFailure = new AtomicReference<Error>();
         var orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, ctx) -> null,
+            (session, ctx, firstTargetWriteSubmitted) -> null,
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            rootContext.getReplayProcessFatalMetrics()
+            rejectingLifecycleSink(),
+            fatalFailure::set
         );
 
         try {
-            var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0)
-                .getChannelKeyContext();
+            var requestContext = rootContext.getTestConnectionRequestContext("conn-A", 0);
+            var channelKeyCtx = requestContext.getChannelKeyContext();
+            var generation = new PartitionGenerationId(
+                new TopicPartition("client-connection-pool-cache-test", 0),
+                0
+            );
 
             pool.getCachedSession(channelKeyCtx, 0);
             Assertions.assertEquals(1, getCache(pool).size());
 
-            var closeFuture = orchestrator.scheduleActorClose(channelKeyCtx, 0, Instant.now());
+            var closeFuture = orchestrator.scheduleActorClose(
+                channelKeyCtx,
+                0,
+                generation,
+                Instant.now()
+            );
             closeFuture.get(Duration.ofSeconds(5));
 
             // After close completes, cache must be evicted
@@ -60,6 +76,7 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
                 "cache must be evicted after close completes");
         } finally {
             pool.shutdownNow().get();
+            Assertions.assertNull(fatalFailure.get(), "unexpected process-fatal replay failure");
         }
     }
 
@@ -70,11 +87,13 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
         );
+        var fatalFailure = new AtomicReference<Error>();
         var orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, ctx) -> null,
+            (session, ctx, firstTargetWriteSubmitted) -> null,
             RequestSenderOrchestrator.noSourceTerminationObligations(),
-            rootContext.getReplayProcessFatalMetrics()
+            rejectingLifecycleSink(),
+            fatalFailure::set
         );
 
         try {
@@ -92,6 +111,7 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             Assertions.assertEquals(2, getCache(pool).size());
         } finally {
             pool.shutdownNow().get();
+            Assertions.assertNull(fatalFailure.get(), "unexpected process-fatal replay failure");
         }
     }
 
@@ -125,6 +145,26 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         } finally {
             pool.shutdownNow().get();
         }
+    }
+
+    private static TargetConnectionOwner.RequestLifecycleSink rejectingLifecycleSink() {
+        return new TargetConnectionOwner.RequestLifecycleSink() {
+            @Override
+            public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                throw new AssertionError("cache tests do not schedule replay requests");
+            }
+
+            @Override
+            public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                throw new AssertionError("cache tests do not schedule replay requests");
+            }
+        };
     }
 
     @Test

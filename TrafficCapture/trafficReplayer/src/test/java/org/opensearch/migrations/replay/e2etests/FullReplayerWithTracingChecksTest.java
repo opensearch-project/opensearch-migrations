@@ -54,7 +54,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     @ValueSource(ints = { 1, 2 })
     @ResourceLock("TrafficReplayerRunner")
     // run in isolation to reduce the chance that there's a broken connection, upsetting the tcpConnection count check
-    @Tag("longTest")
+    @Tag("isolatedTest")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);
         try (
@@ -118,7 +118,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
             ).build();
             var trafficSource = new ArrayCursorTrafficCaptureSource(
                 rootContext,
-                new ArrayCursorTrafficSourceContext(List.of(trafficStream))
+                new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0)
             );
 
             var tuplesReceived = new HashSet<String>();
@@ -130,7 +130,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024
+                    10 * 1024,
+                    code -> {}
                 );
                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                 var tupleWriter = new ThreadLocalTupleWriter(i -> new CallbackTupleSink(m -> {}))
