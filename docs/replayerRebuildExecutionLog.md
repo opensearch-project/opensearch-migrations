@@ -474,3 +474,37 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   fixture-compile closure; no production compatibility bridge will be introduced.
 - S5 remains open. Owner decomposition, fixture/test migration, and the complete green module run
   are still required before adding the S5 End entry.
+
+### Progress checkpoint — S5c1 owner-transition runner extraction
+
+- Extracted mailbox dispatch, owner-thread enforcement, fatal-transition latching, rejected
+  submission handling, and process-fatal reporting from `TargetConnectionOwner` into the injected,
+  package-local `OwnerTransitionRunner`. The connection owner no longer carries its own thread
+  guard, fatal handler, or fatal-state field.
+- The runner keeps its fatal latch owner-confined. An owner-inline failed submission poisons the
+  owner; an off-mailbox failed submission reports process-fatal without mutating owner state.
+  Asynchronous cleanup reporting is valid both inline and off-mailbox and never infers latch state.
+- Transition failure handlers are terminal cleanup callbacks. Their own failures are suppressed onto
+  the primary failure and cannot prevent the original owner failure from reaching the process
+  supervisor. An original `Error` retains identity while gaining owner/operation context as a
+  suppressed diagnostic.
+- Added a dedicated eight-test `OwnerTransitionRunnerTest` instead of expanding the connection-owner
+  fixture. It covers posted confinement, rejected and unexpected synchronous submissions,
+  owner-inline poisoning, impossible transitions, `Error` identity plus context, callback-failure
+  suppression, and non-latching asynchronous cleanup reporting.
+- Parallel and required Claude reviews found valid defects during extraction: callback throws could
+  suppress fatal reporting; the fatal latch was read before confinement validation; unexpected
+  synchronous submission failures bypassed owner poisoning; owner-inline and off-owner submission
+  failures were classified inconsistently; the `Error` test did not prove poisoning; and two
+  diagnostic messages lost or misstated execution context. All findings were fixed. The final
+  bounded Claude review returned `NO_ACTIONABLE_FINDINGS`.
+- The exact staged production slice passed
+  `:TrafficCapture:trafficReplayer:compileJava --parallel --max-workers=18 --rerun-tasks` in an
+  isolated worktree in 21 seconds.
+- The serialized focused run passed all 56 tests: eight `OwnerTransitionRunnerTest` cases and 48
+  `TargetConnectionOwnerTest` cases, with `--no-parallel --max-workers=1`.
+- The next bounded S5 slice is the five-file fixture compile closure already identified by the S5b
+  exact-tree failure. It must align fixtures with typed lifecycle APIs without recognizing
+  `CancellationException` as a substitute for an explicit cleanup outcome.
+- S5 remains open. Fixture/test migration and the complete green module run are still required before
+  adding the S5 End entry.
