@@ -12,6 +12,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.lifecycle.ResourceOwnership;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -33,7 +34,10 @@ class RetryCollectingVisitorFactoryTest {
         var requestBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
 
         try {
-            var result = fixture.visitor.visit(requestBytes, response(), null);
+            var result = fixture.visitor.visit(
+                requestBytes,
+                new TargetAttemptOutcome.TargetResponseObtained<>(response())
+            );
             fixture.visitor.close();
 
             Assertions.assertEquals(
@@ -69,7 +73,10 @@ class RetryCollectingVisitorFactoryTest {
         var requestBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
 
         try {
-            var result = fixture.visitor.visit(requestBytes, response(), null).future.join();
+            var result = fixture.visitor.visit(
+                requestBytes,
+                new TargetAttemptOutcome.TargetResponseObtained<>(response())
+            ).future.join();
             fixture.visitor.close();
 
             Assertions.assertEquals(
@@ -82,6 +89,58 @@ class RetryCollectingVisitorFactoryTest {
                 0,
                 fixture.metrics.handles(ResourceOwnership.Type.DIAGNOSTIC_PAYLOAD)
             );
+        } finally {
+            requestBytes.release();
+            fixture.close();
+        }
+
+        fixture.metrics.assertNoOwnedResources();
+    }
+
+    @Test
+    void synchronousRetryPolicyFailurePropagatesWithoutBecomingRetry() {
+        var policyFailure = new IllegalStateException("retry policy invariant failed");
+        var fixture = new Fixture((request, responses, current, source) -> {
+            throw policyFailure;
+        });
+        var requestBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
+
+        try {
+            var failure = Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> fixture.visitor.visit(
+                    requestBytes,
+                    new TargetAttemptOutcome.TargetResponseObtained<>(response())
+                )
+            );
+            Assertions.assertSame(policyFailure, failure);
+        } finally {
+            requestBytes.release();
+            fixture.close();
+        }
+
+        fixture.metrics.assertNoOwnedResources();
+    }
+
+    @Test
+    void asynchronousRetryPolicyFailurePropagatesWithoutBecomingRetry() {
+        var policyFailure = new IllegalStateException("asynchronous retry policy invariant failed");
+        var fixture = new Fixture(
+            (request, responses, current, source) ->
+                TextTrackedFuture.failedFuture(policyFailure, () -> "failed retry policy")
+        );
+        var requestBytes = Unpooled.wrappedBuffer(new byte[] { 1 });
+
+        try {
+            var result = fixture.visitor.visit(
+                requestBytes,
+                new TargetAttemptOutcome.TargetResponseObtained<>(response())
+            );
+            var failure = Assertions.assertThrows(
+                CompletionException.class,
+                result.future::join
+            );
+            Assertions.assertSame(policyFailure, failure.getCause());
         } finally {
             requestBytes.release();
             fixture.close();

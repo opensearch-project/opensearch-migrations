@@ -8,6 +8,7 @@ import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
@@ -156,6 +157,7 @@ final class TargetConnectionOwnerTestSupport {
             new ArrayDeque<>();
         final CompletableFuture<Void> abortCompletion = new CompletableFuture<>();
         CompletableFuture<Void> closeCompletion = CompletableFuture.completedFuture(null);
+        Consumer<ReplayRequestId> onExecute = ignored -> {};
         int closeCalls;
 
         @Override
@@ -164,6 +166,7 @@ final class TargetConnectionOwnerTestSupport {
             TestPrepared preparedRequest
         ) {
             executed.add(preparedRequest.name);
+            onExecute.accept(requestId);
             var completion = new CompletableFuture<RequestTurnResult<String>>();
             active.add(completion);
             return completion;

@@ -59,7 +59,12 @@ public class DoubleCloseContextSpansTest extends InstrumentationTest {
                 eventLoop, channelContext,
                 NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint())
             );
-            var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext, Duration.ofSeconds(10));
+            var nphc = new NettyPacketToHttpConsumer(
+                replaySession,
+                httpContext,
+                Duration.ofSeconds(10),
+                () -> {}
+            );
             nphc.consumeBytes(REQUEST.getBytes(StandardCharsets.UTF_8));
             var response = nphc.finalizeRequest().get(Duration.ofSeconds(10));
             Assertions.assertNotNull(response, "Should get a response");

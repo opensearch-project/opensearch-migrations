@@ -24,8 +24,7 @@ public class TransformedTargetRequestAndResponseList implements AutoCloseable {
     @Getter
     private final HttpRequestTransformationStatus transformationStatus;
 
-    @Getter
-    protected final List<AggregatedRawResponse> responseList;
+    private final List<AggregatedRawResponse> responseList;
 
     private final List<TargetAttemptOutcome<AggregatedRawResponse>> attemptHistory;
 
@@ -74,6 +73,10 @@ public class TransformedTargetRequestAndResponseList implements AutoCloseable {
 
     public List<AggregatedRawResponse> responses() {
         return Collections.unmodifiableList(responseList);
+    }
+
+    public List<AggregatedRawResponse> getResponseList() {
+        return responses();
     }
 
     public List<TargetAttemptOutcome<AggregatedRawResponse>> attemptHistory() {

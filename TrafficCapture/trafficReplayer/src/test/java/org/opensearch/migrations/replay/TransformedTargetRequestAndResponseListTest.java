@@ -2,10 +2,12 @@ package org.opensearch.migrations.replay;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
@@ -17,6 +19,42 @@ import static org.mockito.Mockito.mock;
 
 @WrapWithNettyLeakDetection
 class TransformedTargetRequestAndResponseListTest {
+    @Test
+    void retainsOrderedTypedAttemptHistoryAndProjectsOnlyObtainedResponses() {
+        var firstResponse = new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
+        var secondResponse = new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
+        var noResponse = new TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse>(
+            "target closed before responding"
+        );
+        var summary = new TransformedTargetRequestAndResponseList(
+            null,
+            HttpRequestTransformationStatus.completed(),
+            firstResponse
+        );
+
+        summary.addAttemptOutcome(noResponse);
+        summary.addResponse(secondResponse);
+
+        Assertions.assertEquals(
+            List.of(
+                new TargetAttemptOutcome.TargetResponseObtained<>(firstResponse),
+                noResponse,
+                new TargetAttemptOutcome.TargetResponseObtained<>(secondResponse)
+            ),
+            summary.attemptHistory()
+        );
+        Assertions.assertEquals(List.of(firstResponse, secondResponse), summary.responses());
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () -> summary.attemptHistory().clear()
+        );
+        Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () -> summary.responses().clear()
+        );
+        summary.close();
+    }
+
     @Test
     void diagnosticPayloadCanBeClaimedExactlyOnce() {
         var source = Unpooled.wrappedBuffer("request".getBytes(StandardCharsets.UTF_8));

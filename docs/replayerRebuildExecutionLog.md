@@ -627,3 +627,53 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - S5 remains open. The next bounded slice separates first-write/target-attempt Netty evidence from
   the remaining orchestrator and shutdown caller migrations before the required complete green
   module run.
+
+### Progress checkpoint — S5c3c target-write and attempt boundaries
+
+- Extracted focused Netty write-boundary, outcome, and cancellation suites with one event loop per
+  fixture. Consumer entry, abort, finalization, promises, and fixture cleanup all run on that exact
+  event loop; no mutable static state was introduced.
+- Proved that `FirstTargetWriteSubmitted` occurs only after `writeAndFlush` accepts the write, before
+  its promise settles, once across request packets, and once across retry-created consumers. The
+  connection owner handles it inline and locally without emitting a replay-intake lifecycle event.
+- Added direct classification evidence for obtained responses, read timeouts, transport failures,
+  wrapped transport failures, no-response completion, null-result invariant failure, and unexpected
+  failures. Retry-policy throws and failed futures remain failures rather than becoming retries.
+- Made both response projections unmodifiable while retaining the existing `getResponseList`
+  compatibility name allowed by plan section 5.4.
+
+| S5c3c requirement | Focused code/test evidence |
+|---|---|
+| Accepted Netty write boundary | `NettyPacketToHttpConsumerWriteBoundaryTest` records callback state inside `writeAndFlush`, then observes one callback before the unresolved write promise settles; synchronous rejection reports none and releases the packet |
+| Once across packets and retries | the write-boundary suite rechecks after both packet futures settle; `RequestSenderFirstWriteRetryTest` composes two attempt-local callbacks with the request-scoped guard and the owner exactly-once suite |
+| Connection-local owner state | `TargetConnectionOwnerFirstWriteTest` proves no intake event, immediate owner-thread application, a successful first transition, and the exact duplicate invariant |
+| Typed target-attempt result | `RequestSenderTargetAttemptOutcomeTest` and `NettyPacketToHttpConsumerOutcomeTest` distinguish ordinary no-response evidence from invariant failures |
+| Abort produces a value | `NettyPacketToHttpConsumerCancellationTest` returns an `AggregatedRawResponse` carrying the exact cancellation cause after pre-acquisition abort |
+| Retry failures remain failures | `RetryCollectingVisitorFactoryTest` covers synchronous throws and asynchronous failed futures |
+| Ordered attempt history | `TransformedTargetRequestAndResponseListTest` proves ordered typed history, obtained-response projection, and unmodifiable access |
+
+- The required read-only Claude reviews were non-empty and produced actionable findings. The first
+  review found a missed direct-constructor caller, no retry-wide first-write evidence, unused imports,
+  event-loop misuse in the fixture, two missing classification branches, and a mutable raw response
+  getter. The missed caller and imports were fixed; focused retry, classification, and event-loop
+  tests were added; and the getter now delegates to the unmodifiable projection. Broad
+  ReplayEngine/orchestrator/shutdown callers stayed explicitly deferred.
+- A second review found a racy post-write assertion, off-event-loop cancellation/finalization calls,
+  swallowed assertions inside production callbacks, a non-discriminating inline-owner assertion,
+  and unclosed fixture consumer spans. Each was fixed with post-completion observations, exact-loop
+  dispatch, recorded callback state, exact duplicate-cause evidence, and event-loop fixture abort.
+  Its two tolerated observations remain deliberate: first-write forwarding and retry deduplication
+  are proved compositionally without reflection or a production test hook, and the unmodifiable
+  compatibility getter remains under plan section 5.4.
+- The final read-only Claude confirmation returned `NO_ACTIONABLE_FINDINGS`.
+- The serialized focused run passed 24/24 tests. The integrated S5 migration tree passed
+  `:TrafficCapture:trafficReplayer:compileTestJava --parallel --max-workers=18 --rerun-tasks
+  --no-build-cache`.
+- Exact-checkpoint `compileTestJava` intentionally remains red with 30 caller-migration errors:
+  16 in `RequestSenderOrchestratorLifecycleTest`, 6 in `NettyPacketToHttpConsumerTest`, 6 in
+  `TrafficReplayerTopLevelShutdownTest`, and 2 in `RequestSenderOrchestratorTest`. Those four files
+  are the immediately following S5c3d scope; no production compatibility bridge was added.
+- At the user's direction, Spotless is no longer a per-slice gate. Formatting cleanup is deferred to
+  the final plan cleanup; this checkpoint's intended files were formatted before that decision.
+- S5 remains open. S5c3d must migrate the remaining callers and the complete module run must be green
+  before adding the S5 End entry.
