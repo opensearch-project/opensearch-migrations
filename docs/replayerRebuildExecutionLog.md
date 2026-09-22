@@ -691,3 +691,20 @@ S0-S15, PA1-PA3, and final acceptance are complete.
 - `:TrafficCapture:captureKafkaOffloader:spotlessJavaCheck --parallel --max-workers=18 --rerun-tasks
   --no-build-cache` passed. These fixes close the observed link-checker, Docker Compose startup, and
   capture-offloader formatting failures; the workflows must confirm them after push.
+
+### Progress checkpoint — S5c3d1 top-level shutdown callers
+
+- Migrated `TrafficReplayerTopLevelShutdownTest` to the explicit top-level constructor dependencies:
+  production-default bulk-item classification, an empty exception allowlist, and an injected
+  fail-fast process terminator. No compatibility constructor or mutable static state was added.
+- The existing four tests retain their shutdown ordering and exceptional-completion assertions; the
+  injected terminator is a negative guard that fails if these non-process-entry tests unexpectedly
+  terminate the process.
+- The required read-only Claude review verified that the added classifiers do not participate in
+  shutdown ordering, the terminator cannot suppress a required fatal path, and the values match
+  production defaults. It returned `NO_ACTIONABLE_FINDINGS`.
+- The isolated source compilation and serialized test class passed 4/4. Exact full test compilation
+  remains blocked only by the other three S5c3d caller groups.
+- Claude noted an existing `TrafficReplayerCore` constructor that still supplies default classifiers
+  internally. It was not introduced or used by this slice; after the remaining caller migration, its
+  usage will be inventoried and the constructor removed if it is only a legacy bridge.

@@ -7,6 +7,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeOwner;
 import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
@@ -48,7 +50,10 @@ class TrafficReplayerTopLevelShutdownTest {
             () -> Mockito.mock(IJsonTransformer.class),
             connectionPool,
             1,
-            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
+            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class),
+            new BulkItemErrorClassifier(),
+            ExceptionTypeAllowlist.empty(),
+            unexpectedProcessTerminator()
         );
         currentReplayEngine(replayer).set(replayEngine);
         var fatalError = new Error("owner failed");
@@ -89,7 +94,10 @@ class TrafficReplayerTopLevelShutdownTest {
             () -> Mockito.mock(IJsonTransformer.class),
             connectionPool,
             1,
-            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
+            Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class),
+            new BulkItemErrorClassifier(),
+            ExceptionTypeAllowlist.empty(),
+            unexpectedProcessTerminator()
         );
         var intake = installIntakeOwner(replayer);
         currentReplayEngine(replayer).set(replayEngine);
@@ -152,7 +160,10 @@ class TrafficReplayerTopLevelShutdownTest {
                 () -> Mockito.mock(IJsonTransformer.class),
                 Mockito.mock(ClientConnectionPool.class),
                 1,
-                Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class)
+                Mockito.mock(TrafficReplayerTopLevel.IStreamableWorkTracker.class),
+                new BulkItemErrorClassifier(),
+                ExceptionTypeAllowlist.empty(),
+                unexpectedProcessTerminator()
             );
         }
 
@@ -163,6 +174,10 @@ class TrafficReplayerTopLevelShutdownTest {
             lastWait = timeout;
             throw new java.util.concurrent.TimeoutException("test timeout");
         }
+    }
+
+    private static ReplayProcessFatalHandler.ProcessTerminator unexpectedProcessTerminator() {
+        return exitCode -> Assertions.fail("Unexpected process termination with exit code " + exitCode);
     }
 
 }
