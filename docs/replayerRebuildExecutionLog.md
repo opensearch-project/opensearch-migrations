@@ -438,3 +438,39 @@ S0-S15, PA1-PA3, and final acceptance are complete.
   immediate test-migration slice; no production bridge will be added for vocabulary deleted in S7.
 - S5 remains open. The focused test migration, owner/test decomposition, and complete green module
   run are required before adding the S5 End entry.
+
+### Progress checkpoint — S5b cancellation and request-owner contract evidence
+
+- Added focused `ReplayTransactionCancellationTest` and `RequestReplayOwnerTest` suites rather than
+  continuing to grow the connection-owner fixture. They pin typed cancellation arbitration,
+  in-flight evidence preemption, exact cancellation-cause identity, connection-before-processing
+  milestone order, request-owner confinement, one-shot first-write state, and cleanup release.
+- The request-owner evidence uses one independently constructed owner per test. Foreign-thread and
+  same-thread/outside-mailbox mutations are both rejected; no event loop or mutable state is shared
+  across tests.
+
+| S5b contract | Focused evidence |
+|---|---|
+| Cancellation can win a live transaction | cancellation completes with `CancellationWon`, preserves the exact `CancellationException`, and remains terminal when an in-flight durable evidence result arrives later |
+| Normal completion can win cancellation | already-durable and mailbox-queued durability paths both return `ProcessingCompletionWon` and assert `EvidenceOutcome.Durable` |
+| Connection milestone precedes processing milestone | `TupleDurable` cannot finish before connection-turn acceptance; the completion-won race drives both milestones in order |
+| Unresolved cancellation cannot masquerade as durability | `TupleDurable` is rejected while cancellation arbitration remains unresolved and accepted only after `ProcessingCompletionWon` |
+| Owner state is event-loop confined | first and later mutations fail from another thread, and the configured owner thread still fails outside a mailbox task |
+| Local first-write and cleanup states are one-shot | duplicate first-write, connection, processing, and cleanup transitions are rejected |
+
+- The required read-only Claude reviews found and drove closure of the following test defects:
+  cancellation was initially asserted only after another terminal path had already won; durable
+  evidence was not asserted for completion-won cases; unfinished processing-state tests were
+  non-discriminating; the live-cancellation evidence assertion was unreachable; and one typed race
+  fixture stopped with a queued connection turn. Each finding was valid and fixed. The final review
+  compiled and ran the two classes independently, passed 24/24 tests, and returned
+  `NO_ACTIONABLE_FINDINGS`.
+- The serialized Gradle run of both suites against the current migration tree passed 24/24:
+  `:TrafficCapture:trafficReplayer:test --tests '*ReplayTransactionCancellationTest' --tests
+  '*RequestReplayOwnerTest' --no-parallel --max-workers=1 --rerun-tasks`.
+- The exact test-only staged tree intentionally does not yet compile `compileTestFixturesJava`.
+  Existing fixture APIs still target pre-S5 constructors and lack the Kafka client test-fixture
+  dependency. This known broken intermediate is assigned to the immediately following bounded
+  fixture-compile closure; no production compatibility bridge will be introduced.
+- S5 remains open. Owner decomposition, fixture/test migration, and the complete green module run
+  are still required before adding the S5 End entry.
