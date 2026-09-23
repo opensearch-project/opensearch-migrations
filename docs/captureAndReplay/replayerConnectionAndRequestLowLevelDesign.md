@@ -350,13 +350,26 @@ tuple output, regardless of whether its HTTP or bulk-item result is successful.
 `NoTargetResponseObtained` means no target response was obtained. It is not an unsuccessful HTTP
 response.
 
-When Netty accepts the request's first target write, the request owner reports
-`FirstTargetWriteSubmitted` to the connection owner on their shared event loop. The connection
-owner uses this fact to distinguish unsent work from work that has begun sending when it handles
-cancellation. Retries do not repeat this transition.
+Two write milestones are reported to the connection owner on their shared event loop, and they answer
+different questions. Neither is forwarded to replay intake, and neither affects Kafka input demand.
+Retries do not repeat either transition.
 
-`FirstTargetWriteSubmitted` is local to the target connection. It is not forwarded to replay
-intake and does not affect Kafka input demand.
+**`FirstTargetWriteSubmitted`** — Netty accepted the request's first target write. This decides
+**channel disposition**: once any byte of a request has reached the target, that request cannot be
+abandoned and the channel reused, because the target has received a partial HTTP request and the
+stream's framing is undefined from that point. A request cancelled after this milestone and before
+the next requires its channel to be closed rather than returned for reuse.
+
+**`FinalTargetWriteSubmitted`** — Netty accepted the request's *final* target write, so the complete
+request is on the wire. This decides **whether cancellation waits**: only a request that has reached
+this milestone has an outcome worth waiting for, because only it can still receive a response
+(§17.1). A request that has begun sending but not finished cannot complete no matter how long the
+grace interval is — the remaining writes would be new external work, which graceful cancellation does
+not start.
+
+The distinction matters because the two milestones bracket a state that has both properties: the
+request is unfinishable *and* its channel is unusable. That work is cancelled immediately and its
+channel closed.
 
 ## 9. Retry decisions
 
@@ -665,12 +678,25 @@ and request owners compare it only with the same monotonic clock.
 On `GracefulConnectionCancellation(deadline)`, the connection owner:
 
 - rejects new admissions;
-- cancels every queued request that has not submitted a target write;
+- cancels every request that has not reached `FinalTargetWriteSubmitted`, which includes both a
+  request that has not begun sending and one that is **partway through** sending;
+- closes rather than reuses the channel of any cancelled request that had reached
+  `FirstTargetWriteSubmitted`, because a partial request leaves the target's stream framing undefined
+  (§8);
 - cancels pending preparation and permit acquisition for those requests;
 - prevents the execution queue from beginning another unsent request;
-- allows a request that already submitted a target write to continue its target and required tuple
+- allows a request that reached `FinalTargetWriteSubmitted` to continue its target and required tuple
   chain until the deadline; and
 - allows a tuple already required by such a request to begin and finish during the grace interval.
+
+The boundary is the **final** request write, not the first. A request only partly written cannot
+complete however long the interval is, since finishing it means issuing further target writes, and
+graceful cancellation starts no new external work. Waiting on it would spend the interval — during
+which every partition this consumer holds is stalled — on work that cannot finish.
+
+The grace interval relaxes none of the conditions for commit. A record still commits only when its
+response was obtained, no retry remains outstanding, and its tuple is durable. Work that reaches the
+deadline short of all three is force-cancelled and redelivered, exactly as if it had never started.
 
 An admitted request cancelled before it begins sending returns cancellation cleanup and emits no
 `ConnectionRequestFinished`.
@@ -774,7 +800,11 @@ Long-running activity reporting observes these registrations but cannot complete
 ### 19.5 Cancellation and resources
 
 - Graceful cancellation immediately cleans every unsent request.
-- A sent request may finish target and tuple work before the deadline.
+- Graceful cancellation immediately cleans a request that is **partway through** sending, rather than
+  waiting on it, and closes that request's channel rather than reusing it.
+- A request whose final bytes are on the wire may finish target and tuple work before the deadline.
+- A request that reaches the deadline with a response obtained but its tuple not yet durable is
+  force-cancelled and commits nothing.
 - Force cancellation produces cleanup results rather than normal processing completion.
 - No permit, timer, target buffer, transformed request, response, tuple, or registry entry leaks.
 - Every per-attempt signed buffer list is released exactly once.
