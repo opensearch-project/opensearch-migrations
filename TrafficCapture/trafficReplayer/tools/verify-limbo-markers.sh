@@ -98,9 +98,16 @@ for file in $marked; do
         marking_commit=$(git log --format=%H -S'nothing in this file is live yet' --max-count=1 -- "$file" 2>/dev/null)
         if [ -n "$marking_commit" ] && git cat-file -e "$marking_commit^:$file" 2>/dev/null; then
             whole_file_checked=$((whole_file_checked + 1))
-            if ! diff -B -q <(git show "$marking_commit^:$file") <(awk -f "$AWK" "$file") >/dev/null; then
+            # Both sides go through the reconstruction. If the parent was unmarked source the awk is a
+            # no-op on it; if the file was already partially marked before being marked whole, the parent
+            # carries its own markers and notes, which reconstruction strips from both sides alike. Without
+            # this, re-marking an already-marked file reports the old scaffolding as lost code.
+            if ! diff -B -q \
+                <(git show "$marking_commit^:$file" | awk -f "$AWK") \
+                <(awk -f "$AWK" "$file") >/dev/null; then
                 echo "DRIFTED: $file loses or alters a code line versus $marking_commit^"
-                diff -B <(git show "$marking_commit^:$file") <(awk -f "$AWK" "$file") | head -12 | sed 's/^/  /'
+                diff -B <(git show "$marking_commit^:$file" | awk -f "$AWK") <(awk -f "$AWK" "$file") \
+                    | head -12 | sed 's/^/  /'
                 drifted=$((drifted + 1))
             fi
         fi

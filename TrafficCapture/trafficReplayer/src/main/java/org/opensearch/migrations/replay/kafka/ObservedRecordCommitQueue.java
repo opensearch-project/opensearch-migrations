@@ -17,9 +17,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
 
 import lombok.NonNull;
 
@@ -160,9 +160,7 @@ final class ObservedRecordCommitQueue {
     }
 
     private void requireGeneration(KafkaRecordId recordId) {
-        if (!recordId.topic().equals(generation.topicPartition().topic())
-            || recordId.partition() != generation.topicPartition().partition()
-            || recordId.sourceGeneration() != generation.localSequence()) {
+        if (!recordId.generation().equals(generation)) {
             throw new IllegalArgumentException(
                 "Kafka record "
                     + recordId

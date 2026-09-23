@@ -11,8 +11,8 @@ package org.opensearch.migrations.replay.kafka;
 import java.util.List;
 import java.util.OptionalLong;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
@@ -75,13 +75,15 @@ class ObservedRecordCommitQueueTest {
             IllegalStateException.class,
             () -> queue.recordProcessingFinished(record(11))
         );
+        var laterGenerationOfTheSamePartition =
+            new PartitionGenerationId(GENERATION.topicPartition(), GENERATION.localSequence() + 1);
         Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> queue.register(new KafkaRecordId("traffic", 2, 12, 5))
+            () -> queue.register(new KafkaRecordId(laterGenerationOfTheSamePartition, 12))
         );
     }
 
     private static KafkaRecordId record(long offset) {
-        return new KafkaRecordId("traffic", 2, offset, 4);
+        return new KafkaRecordId(GENERATION, offset);
     }
 }

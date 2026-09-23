@@ -342,18 +342,28 @@ What actually guards the removal is the comment block left at the deletion site 
 each removed option and why `kafkaLLD §5.1` forbids it. Re-adding one means editing past that comment, which
 is a tripwire in the path rather than a check somewhere else that has to be remembered.
 
-### `ObservedRecordCommitQueue` is live on the wrong identity model
+### The two live identity models are now one — resolved
 
-The one design-named G2 component that already exists is built on the **legacy** identities: it imports
-`ReplayIdentity.KafkaRecordId` and `ReplayIdentity.PartitionGenerationId`, and its `requireGeneration`
-compares `recordId.topic()`, `.partition()` and `.sourceGeneration()` separately because that record is a
-flat shape rather than the design's `KafkaRecordId(generation, offset)`.
+`ObservedRecordCommitQueue`, the only design-named G2 component that already existed, was live on the
+**legacy** identities: `ReplayIdentity.KafkaRecordId` and `ReplayIdentity.PartitionGenerationId`, with a
+`requireGeneration` that compared topic, partition and generation as three separate fields because that
+record was flat rather than the design's `KafkaRecordId(generation, offset)`. Two live correctness models
+is what `AGENTS.md` §6 forbids outright.
 
-Two live correctness models is what `AGENTS.md` §6 forbids outright. The bound is the useful part:
-**`ObservedRecordCommitQueue` is the only live consumer of the legacy identities** — everything else live
-(`KafkaSourceInput`, `ApplicationKafkaRecord`, `ReplayIntakeInput`, the eight identity records, both source
-fixtures) already uses `replay/identity/`. So G2 refactoring this one file collapses the split rather than
-extending it, and `requireGeneration` reduces to a single `equals`.
+It and its test are refactored onto `replay/identity/`. `requireGeneration` is now one `equals`, and the
+test's assertions are unchanged in substance — observed-order commit advance with physical offset gaps,
+duplicate registration and completion as invariant failures, unknown record and wrong generation rejected —
+with only the identity construction changed. Wrong-generation is now expressed as a later generation of the
+same partition, which is the case that actually occurs after a rebalance.
+
+**`ReplayIdentity` consequently has zero live consumers and is now marked whole** (`G3`). Leaving it live
+would have left 199 lines of superseded records compiling with nothing using them, which is the state §4
+names as the `RecordDispositionLedger` failure. Its remaining references are all inside marked regions, so
+G3 deletes it along with the callers it refactors — the same call made for `ActorMailbox`, for the same
+reason: deleting it now would make those regions harder to read during the refactor that resolves them.
+
+**No live file references the legacy identity model any more.** That is checkable:
+`grep -rln 'ReplayIdentity\.' src` returns only marked files.
 
 ## Deferral ledger — work moved between milestones
 
