@@ -509,15 +509,29 @@ G2 does not close until the first three land. G3 waits on them, because findings
 **G2→G3 interface** — what `PartitionRecordBatch` and `PartitionGenerationAssigned` carry, and how cleanup
 completion is identified. Building intake against that interface first means reworking both sides.
 
-| Stage | Contents | Blocked on |
-|---|---|---|
-| **G2R-a — the revocation path** | Findings 15 (phase guard), 5 (clock domain), 4 (cleanup gate), 16 (mid-revocation ownership), 3 (bounded commit). One commit: they share the grace-wait code and their tests interlock — the clock fix is what makes an in-grace commit testable at all, and the phase fix is what makes finding 16 reachable | Owner rulings on the `§5.7` boundary and the timeout outcome |
-| **G2R-b — the poll and wakeup boundary** | Findings 2 (`WakeupException` escape), 6 (`RUNNING`-window submission), `§17.4` case 18 plus the `PumpedKafkaSource` split-rebalance and wakeup expressiveness it needs | nothing |
-| **G2R-c — submission and admission** | Findings 1 (`submitRequired` at all five sites), 10 (`§5.3` ended-intake guard) | nothing |
-| **G1R — multi-partition dump** | Finding 13, plus the `readRecordValues(1)` durability gate in both real-proxy tests, plus a two-partition topic so the truncation is detectable | nothing |
+**Nine items, not four.** An earlier version of this table had four and collapsed real work into phrases —
+the owner caught that it looked too small for twenty-four findings. Two items were genuinely lost in the
+collapse and are marked below.
 
-G2R-b, G2R-c and G1R are disjoint from each other and from G2R-a by package, so they can proceed while the
-rulings are outstanding. G1R touches only `replay/kafka/` and the proxy fixtures.
+| Item | Findings it discharges | Blocked on |
+|---|---|---|
+| **§5.7** | 17 — the outcome list becomes `ACKNOWLEDGED` / `GENERATION_STALE` / `OUTCOME_UNKNOWN` plus a throw for the structural four, and `LATE_CALLBACK` goes. Design transcription of what the mechanism already settled | nothing |
+| **G2R-a — the revocation path** | 15 (phase guard), 5 (clock domain), 4 + 4b (cleanup gate, and a stale cleanup clearing a newer gate), 16 (mid-revocation ownership), 3 (bounded commit + floor), `§15.4`'s two retirement metrics, tests T2 and T3 | `§5.7` |
+| **G2R-b — the poll and wakeup boundary** | 2 (`WakeupException` escape), 6 (`RUNNING`-window submission), `§17.4` case 18, tests T1, T4, T7, plus the `PumpedKafkaSource` split-rebalance and `WakeupException` expressiveness they need | nothing |
+| **G2R-c — submission and admission** | 1 (`submitRequired` at all five sites — the review found three and missed `onPartitionsLost`), 10 (`§5.3` ended-intake guard), 11 (drop `initialOffset`) | nothing |
+| **G2R-d — one generation authority** ← *lost in the collapse* | 8. `KafkaConsumerSourcePort` takes a `Map<TopicPartition, PartitionGenerationId>` nothing populates. The fix is **not** to populate it: a second mutable generation model is what `AGENTS.md` §6 forbids. `poll()` returns raw records and the **owner** stamps them, since the owner is the sole generation authority — which moves `ApplicationKafkaRecord` construction out of the adapter | nothing |
+| **G1R — the dump path** | 13 (multi-partition truncation), T6 (`readRecordValues(1)` gate), T6b (all three payload types plus a malformed envelope against real Kafka), T6c (rendered partition/offset metadata compared against consumed metadata), T6d (`dump-http`/`dump-both`/file names still accepted and failing with a message naming G3). Four items, not one | nothing |
+| **Marking** | 14b — the four undesigned outcome families, plus a sweep for anything else live-declared with no design basis and no live caller. `ReplayOutcomes` suggests the G0 walk classified what it *carried* and left the un-carried half live and unmarked; if that happened once it may have happened elsewhere | nothing |
+| **Verifier** ← *lost in the collapse* | `verify-limbo-markers.sh` compares reconstruction against history only for whole-file-marked files — 220 of 224. The four partial ones get marker validation only, so `TrafficReplayer`, `ReplayIdentity` and now `ReplayOutcomes` are precisely the files where recovery is least mechanical **and** least checked. The marking system's trust claim is unverified exactly where it matters most | nothing |
+| **Register** | The `## G1 — complete` heading and the `G0 exit evidence` section are now optimistic: G0's shells clause was six-sevenths unmet and G1's real-proxy evidence had a false gate. Both are deferred properly, but a future reader takes a heading at face value — the same failure mode as the stale line citations | nothing |
+
+Everything except G2R-a is unblocked. G2R-b, -c, -d and G1R are disjoint by package, so ordering among them
+is convenience rather than dependency.
+
+**Findings that produce no code**, recorded so they are not re-raised: 7 (the review's rule would introduce
+the very defect `589bda5df` fixed), 9 (not real; design silent on close-versus-drain ordering), 12 (`§5.5`
+qualifies key and headers "as required for diagnostics", the one normative table calls headers diagnostic-only
+and never mentions the key, and the proxy emits no headers at all).
 
 Finding 14's `PreparationOutcome` strip is **not** staged here: `connLLD §6` assigns preparation to G5, the
 consumers are all in G5 limbo, and the strip is already an approved G0 verdict. It lands with G5, now
