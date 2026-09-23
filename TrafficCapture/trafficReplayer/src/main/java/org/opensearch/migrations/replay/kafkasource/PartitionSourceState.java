@@ -39,6 +39,10 @@ public final class PartitionSourceState {
     private boolean lifecycleAllowsIntake = true;
     private boolean kafkaPaused = true;
     private boolean pendingCommit;
+    private long recordsRead;
+    private long recordsCommitted;
+    /** Finished records whose commit has not yet been acknowledged; credited when one is. */
+    private long recordsAwaitingCommit;
 
     public PartitionSourceState(PartitionGenerationId generation) {
         this.generation = Objects.requireNonNull(generation, "generation");
@@ -153,6 +157,47 @@ public final class PartitionSourceState {
 
     public void setPendingCommit(boolean pending) {
         pendingCommit = pending;
+    }
+
+    /** Counts a delivered record, for the retirement measurement {@code kafkaLLD §15.4} requires. */
+    public void countRecordsRead(long count) {
+        recordsRead += count;
+    }
+
+    public long recordsRead() {
+        return recordsRead;
+    }
+
+    /**
+     * Counts records whose contiguous prefix advanced, which is what a later commit will cover.
+     *
+     * <p>Counted as records rather than as an offset delta because they are not the same number: physical
+     * offset gaps exist and {@code kafkaLLD §17.1} requires that they not block advancement, so offset
+     * arithmetic would over-count by every gap.
+     */
+    public void countRecordsAwaitingCommit(long count) {
+        recordsAwaitingCommit += count;
+    }
+
+    /**
+     * Credits the records awaiting commit as committed, once an operation covering them was acknowledged.
+     *
+     * <p>Counted from acknowledgement rather than staging, because a staged position that never commits is
+     * exactly the case the retirement measurement exists to reveal ({@code procCommit §9.5}).
+     *
+     * <p>The magnitude is approximate and the zero is exact — which is the way round that matters. A record
+     * finishing between submission and acknowledgement is credited to the acknowledgement it did not strictly
+     * belong to, so the total can run slightly ahead within a generation. But nothing is credited without an
+     * acknowledgement, so a generation that committed nothing reports exactly zero, and that is the signal
+     * {@code §9.5} tells operators to watch.
+     */
+    public void recordCommitAcknowledged() {
+        recordsCommitted += recordsAwaitingCommit;
+        recordsAwaitingCommit = 0;
+    }
+
+    public long recordsCommitted() {
+        return recordsCommitted;
     }
 
     @Override

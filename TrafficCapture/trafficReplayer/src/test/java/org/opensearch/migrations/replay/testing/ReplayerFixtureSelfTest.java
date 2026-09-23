@@ -317,7 +317,10 @@ class ReplayerFixtureSelfTest {
             var port = new PumpedKafkaSource(List.of(topicPartition));
             // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
             var rootContext = new KafkaSourceRootContext(telemetry.openTelemetrySdk);
-            var wakeupController = new WakeupController(() -> {}, rootContext);
+            // A counting action, not a no-op: with a no-op this test cannot distinguish zero wakeups from
+            // several, which is exactly the observability G0 claims.
+            var wakeupsIssued = new java.util.concurrent.atomic.AtomicInteger();
+            var wakeupController = new WakeupController(wakeupsIssued::incrementAndGet, rootContext);
             var sourceInputs = new KafkaSourceInputQueue(wakeupController);
             var intakeInputs = new ReplayIntakeInputQueue();
             var owner = new KafkaSourceOwner(
@@ -373,9 +376,36 @@ class ReplayerFixtureSelfTest {
             owner.runOnce();
 
             Assertions.assertEquals(
-                List.of("commit{traffic-4=103}"),
+                List.of("commitAsync{traffic-4=103}"),
                 port.history().stream().filter(call -> call.startsWith("commit")).toList(),
-                () -> "one contiguous commit expected; history: " + port.history()
+                () -> "one contiguous commit expected, submitted asynchronously because the ordinary loop must"
+                    + " not block on it; history: " + port.history()
+            );
+            // G0 asks for observable wakeup, which the milestone previously claimed with a no-op action that
+            // could not tell zero wakeups from several. Counting them is what makes the claim checkable — and
+            // the count here is zero on purpose: every submission above happened between iterations, with the
+            // Kafka thread not in poll(), and kafkaLLD §5.4 issues no wakeup then because the loop reaches the
+            // queue by itself. Asserting zero is only worth anything alongside the case below, which proves
+            // the same counter does reach one.
+            Assertions.assertEquals(
+                0,
+                wakeupsIssued.get(),
+                () -> "a submission made between loop iterations needs no wakeup, but " + wakeupsIssued.get()
+                    + " were issued"
+            );
+
+            // Submitted from inside poll(), which is the only phase where a wakeup is the sole way to shorten
+            // the wait. One submission, one wakeup.
+            port.scriptRebalanceDuringNextPoll(() ->
+                sourceInputs.submit(new RecordProcessingFinished(
+                    new org.opensearch.migrations.replay.identity.KafkaRecordId(generation, 999)))
+            );
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                1,
+                wakeupsIssued.get(),
+                "a submission while the Kafka thread may be waiting in poll() must issue exactly one wakeup"
             );
         } finally {
             telemetry.close();

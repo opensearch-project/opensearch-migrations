@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -23,9 +24,14 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.FencedInstanceIdException;
+import org.apache.kafka.common.errors.RebalanceInProgressException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.WakeupException;
 
 /**
@@ -120,30 +126,85 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         return committed == null ? Optional.empty() : Optional.of(committed.offset());
     }
 
+    @Override
+    public void commitAsync(
+        Map<TopicPartition, Long> nextPositions,
+        BiConsumer<Map<TopicPartition, Long>, CommitOutcome> onResolved
+    ) {
+        var submitted = Map.copyOf(nextPositions);
+        consumer.commitAsync(toOffsets(submitted), (offsets, failure) ->
+            onResolved.accept(submitted, classifyAsync(failure))
+        );
+    }
+
     /**
-     * The catch wraps the single Kafka call because there is one operation and therefore one failure. It is
+     * Unlike {@code commitSync}, {@code commitAsync} does not exhaust retriable errors itself — it wraps them
+     * in {@code RetriableCommitFailedException} whose own message is "You should retry committing the latest
+     * consumed offsets". So the retriable case reaches us here and only here.
+     */
+    private static CommitOutcome classifyAsync(Exception failure) {
+        if (failure == null) {
+            return CommitOutcome.ACKNOWLEDGED;
+        }
+        if (failure instanceof RetriableCommitFailedException) {
+            return CommitOutcome.RETRIABLE;
+        }
+        if (isGenerationStale(failure)) {
+            return CommitOutcome.GENERATION_STALE;
+        }
+        throw structurallyInvalid(failure);
+    }
+
+    /**
+     * Bounded so the call cannot outlive the grace deadline the caller derived {@code bound} from.
+     *
+     * <p>The catch wraps the single Kafka call because there is one operation and therefore one failure. It is
      * deliberately not a loop with a catch per partition: the client offers no per-partition result to catch,
      * and classifying partitions by anything available here — the current assignment, say — would be a guess
      * dressed as a distinction.
      */
     @Override
-    public CommitOutcome commit(Map<TopicPartition, Long> nextPositions) {
-        var offsets = nextPositions.entrySet()
+    public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
+        try {
+            consumer.commitSync(toOffsets(nextPositions), bound);
+            return CommitOutcome.ACKNOWLEDGED;
+        } catch (WakeupException | TimeoutException mayHaveReachedTheBroker) {
+            return CommitOutcome.OUTCOME_UNKNOWN;
+        } catch (RuntimeException failure) {
+            if (isGenerationStale(failure)) {
+                return CommitOutcome.GENERATION_STALE;
+            }
+            throw structurallyInvalid(failure);
+        }
+    }
+
+    /**
+     * The three the client uses to say this member's generation or membership is gone.
+     * {@code CommitFailedException}'s own javadoc is explicit that "the commit cannot generally be retried",
+     * which is what separates these from {@code RetriableCommitFailedException}.
+     */
+    private static boolean isGenerationStale(Throwable failure) {
+        return failure instanceof CommitFailedException
+            || failure instanceof RebalanceInProgressException
+            || failure instanceof FencedInstanceIdException;
+    }
+
+    /**
+     * Everything left is unfixable by retrying — authorization, oversized offset metadata, an invalid offset
+     * size, or something unrecognised. Every genuinely transient error is absorbed by the client before it
+     * reaches here, so a failure arriving at this point is structural.
+     */
+    private static IllegalStateException structurallyInvalid(Throwable failure) {
+        return new IllegalStateException(
+            "commit failed for a reason retrying cannot fix; continuing to read without committing"
+                + " would lose this progress at the next restart",
+            failure
+        );
+    }
+
+    private static Map<TopicPartition, OffsetAndMetadata> toOffsets(Map<TopicPartition, Long> nextPositions) {
+        return nextPositions.entrySet()
             .stream()
             .collect(Collectors.toMap(Map.Entry::getKey, e -> new OffsetAndMetadata(e.getValue())));
-        try {
-            consumer.commitSync(offsets);
-            return CommitOutcome.ACKNOWLEDGED;
-        } catch (WakeupException wokenDuringCommit) {
-            // Reported as unknown rather than rejected: the request may already have reached the broker.
-            return CommitOutcome.OWNERSHIP_ENDED_OUTCOME_UNKNOWN;
-        } catch (org.apache.kafka.common.errors.RebalanceInProgressException
-            | org.apache.kafka.clients.consumer.CommitFailedException ownershipEnded) {
-            // These two name the generation being gone, which is what distinguishes them from a plain
-            // rejection. Some positions in the batch may still have been recorded before it went.
-            return CommitOutcome.OWNERSHIP_ENDED_BEFORE_SUBMISSION;
-        } catch (org.apache.kafka.common.KafkaException rejected) {
-            return CommitOutcome.REJECTED;
-        }
     }
 }

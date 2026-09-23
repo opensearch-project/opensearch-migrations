@@ -48,7 +48,9 @@ malformed=0
 unbalanced=0
 residue=0
 drifted=0
+unrecovered=0
 whole_file_checked=0
+body_checked=0
 
 for file in $marked; do
     starts=$(grep -c '^[[:space:]]*// REBUILD-LIMBO-START(' "$file")
@@ -92,6 +94,34 @@ for file in $marked; do
         residue=$((residue + 1))
     fi
 
+    # Property 2c: every marked code line comes back, checked without history and therefore for EVERY file
+    # rather than only whole-file-marked ones. The region bodies are already present verbatim in the file --
+    # un-marking only deletes marker and delimiter lines -- so any body line missing from the reconstruction
+    # is a line the awk lost. This is what the history comparison below cannot do for a partially marked
+    # file, whose regions were added across several commits with no single "before" to diff against. Those
+    # are precisely the files where recovery is least mechanical, so leaving them unchecked left the
+    # marking system's own trust claim unverified exactly where it mattered most.
+    #
+    # Escaped lines are excluded: the awk rewrites them by design, so they are not expected to appear
+    # unchanged. Blank lines are excluded for the same reason as below.
+    bodies=$(awk '
+        /^[[:space:]]*\/\/ REBUILD-LIMBO-START\(/ { inregion = 1; next }
+        /^[[:space:]]*\/\/ REBUILD-LIMBO-END\(/ { inregion = 0; inbody = 0; next }
+        inregion && !inbody && $0 ~ /^[[:space:]]*\/\*[[:space:]]*$/ { inbody = 1; next }
+        inregion && inbody && $0 ~ /^[[:space:]]*\*\/[[:space:]]*$/ { inbody = 0; next }
+        inregion && inbody && $0 ~ /REBUILD-LIMBO-ESCAPED-LINE/ { next }
+        inregion && inbody && $0 !~ /^[[:space:]]*$/ { print }
+    ' "$file" | sort)
+    if [ -n "$bodies" ]; then
+        lost=$(comm -23 <(printf '%s\n' "$bodies") <(awk -f "$AWK" "$file" | grep -v '^[[:space:]]*$' | sort))
+        if [ -n "$lost" ]; then
+            echo "UNRECOVERED: $file has marked code line(s) missing from its reconstruction"
+            printf '%s\n' "$lost" | head -8 | sed 's/^/  /'
+            unrecovered=$((unrecovered + 1))
+        fi
+        body_checked=$((body_checked + 1))
+    fi
+
     # Property 2b: for a whole-file-marked file, reconstruction must reproduce exactly what was marked.
     # The commit that added the whole-file header is the marking commit, so its parent holds the original.
     if grep -q 'nothing in this file is live yet' "$file"; then
@@ -116,10 +146,12 @@ done
 
 echo
 echo "Checked $marked_count marked file(s) under $SRC."
-echo "  every code line recovered, verified against history for $whole_file_checked whole-file-marked file(s)"
-failures=$((malformed + unbalanced + residue + drifted))
+echo "  every marked code line recovered, checked directly for $body_checked file(s) with region bodies"
+echo "  reconstruction additionally compared against history for $whole_file_checked whole-file-marked file(s)"
+failures=$((malformed + unbalanced + residue + drifted + unrecovered))
 if [ "$failures" -ne 0 ]; then
-    echo "FAIL: $unbalanced unbalanced, $malformed malformed, $residue with residue, $drifted drifted"
+    echo "FAIL: $unbalanced unbalanced, $malformed malformed, $residue with residue, $drifted drifted," \
+         "$unrecovered with unrecovered lines"
     exit 1
 fi
 echo "PASS: markers well-formed, reconstruction clean, no drift."

@@ -327,7 +327,7 @@ class WakeupAgainstRealKafkaTest {
             queue.submit(generationCleanupFinished(topicPartition));
             assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED, 1);
             assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 0);
-            outcome = port.commit(Map.of(topicPartition, 0L));
+            outcome = port.commitSync(Map.of(topicPartition, 0L), LONG_POLL);
         } finally {
             controller.leaveProtectedOperation();
         }

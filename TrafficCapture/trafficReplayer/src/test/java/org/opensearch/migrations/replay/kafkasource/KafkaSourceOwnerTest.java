@@ -64,6 +64,15 @@ class KafkaSourceOwnerTest {
         );
     }
 
+    /**
+     * The fixture shares the owner's clock, so a scripted commit duration moves the owner's deadline. That is
+     * what lets a grace-interval test reach its deadline without sleeping: time passes because a commit was
+     * modelled as taking time, not because the test waited.
+     */
+    private PumpedKafkaSource pumpedSource(List<TopicPartition> partitions) {
+        return new PumpedKafkaSource(partitions, clockNanos::addAndGet);
+    }
+
     private static ApplicationKafkaRecord record(PartitionGenerationId generation, long offset) {
         var envelope = CaptureRecord.newBuilder()
             .setTrafficStream(TrafficStream.newBuilder().setConnectionId("c").setNumber(0).build())
@@ -111,7 +120,7 @@ class KafkaSourceOwnerTest {
     /** §17.4: {@code onPartitionsAssigned} pauses the complete resulting assignment before Kafka may fetch. */
     @Test
     void assignmentPausesEveryPartitionInTheResultingAssignmentNotJustTheNewOnes() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0, PARTITION_1));
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
         var owner = ownerFor(port);
 
         // Only partition 0 is newly assigned, but Kafka does not preserve pause state across the change, so
@@ -129,7 +138,7 @@ class KafkaSourceOwnerTest {
     /** §17.4: a partition is paused before its returned batch is submitted to replay intake. */
     @Test
     void aPartitionIsPausedBeforeItsBatchReachesIntake() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0));
+        var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -161,7 +170,7 @@ class KafkaSourceOwnerTest {
     /** §17.4: an empty poll leaves the outstanding batch request in place, and the partition resumed. */
     @Test
     void anEmptyPollCompletesNoRequestAndLeavesThePartitionReadable() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0));
+        var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         var requestId = new PartitionBatchRequestId(generation, 1);
@@ -183,7 +192,7 @@ class KafkaSourceOwnerTest {
     /** §17.4: one poll can satisfy requests for several partitions, with no order defined between them. */
     @Test
     void onePollSatisfiesSeveralPartitionsIndependently() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0, PARTITION_1));
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
         var owner = ownerFor(port);
         assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
         var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
@@ -218,13 +227,27 @@ class KafkaSourceOwnerTest {
      */
     @Test
     void aPartitionAwaitingCleanupDoesNotStallAnUnrelatedPartition() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0, PARTITION_1));
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
         var owner = ownerFor(port);
         assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
-        var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        var revokedGeneration0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
         var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
-        // Partition 0 is blocked on cleanup; partition 1 is not.
-        owner.partitionState(PARTITION_0).orElseThrow().setPriorGenerationCleanupPending(true);
+
+        // Reached through the real revoke-then-reassign path rather than by setting the flag. Setting it
+        // directly is what previously hid the gate being inert in production: beginGeneration derived
+        // "was there a prior generation" from map membership, which is always false by the time it asks.
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+        drainIntake();
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        Assertions.assertNotEquals(revokedGeneration0, generation0, "reassignment must be a new generation");
+        Assertions.assertTrue(
+            owner.partitionState(PARTITION_0).orElseThrow().isPriorGenerationCleanupPending(),
+            "a successor assigned while its predecessor's cleanup is outstanding must be gated"
+        );
+        drainIntake();
+        port.clearHistory();
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation0, 1)));
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -248,8 +271,10 @@ class KafkaSourceOwnerTest {
             "the unrelated partition must be delivered while the blocked one waits"
         );
 
-        // Cleanup finishing clears only that reason, and then partition 0 reads.
-        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation0));
+        // The cleanup message names the generation that finished cleaning up -- the revoked one -- while the
+        // gate lives on its successor. Matching them is the point: clearing by topic-partition alone would let
+        // any generation's cleanup release any successor.
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(revokedGeneration0));
         port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation0, 10))));
         owner.runOnce();
 
@@ -260,10 +285,74 @@ class KafkaSourceOwnerTest {
         );
     }
 
+    /**
+     * A cleanup completion for a generation the successor is not waiting on must not release its gate.
+     *
+     * <p>The gate was previously a boolean cleared by topic-partition, so any generation's cleanup released any
+     * successor. That is unobservable while the gate is never set, which is why this case and the one above
+     * have to be separate: the first proves the gate engages, this proves it discriminates.
+     */
+    @Test
+    void aCleanupCompletionForADifferentGenerationDoesNotReleaseTheGate() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var firstGeneration = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var successor = owner.partitionState(PARTITION_0).orElseThrow();
+        drainIntake();
+
+        // A generation that never existed on this partition, standing in for a stale or duplicated message.
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(
+            new PartitionGenerationId(PARTITION_0, 999)));
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            successor.isPriorGenerationCleanupPending(),
+            "an unmatched cleanup completion must leave the gate closed"
+        );
+
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(firstGeneration));
+        owner.runOnce();
+
+        Assertions.assertFalse(
+            successor.isPriorGenerationCleanupPending(),
+            "the matching cleanup completion must release it"
+        );
+    }
+
+    /**
+     * Cleanup can finish before the successor is assigned, because cleanup is fast and reassignment waits for a
+     * poll. The successor must then not be gated at all.
+     *
+     * <p>Without this the obvious repair deadlocks: a gate set at assignment time on "was cleanup outstanding"
+     * has nothing left to clear it, and the partition stays paused forever.
+     */
+    @Test
+    void cleanupFinishingBeforeReassignmentLeavesTheSuccessorUngated() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var firstGeneration = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(firstGeneration));
+        owner.runOnce();
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+
+        Assertions.assertFalse(
+            owner.partitionState(PARTITION_0).orElseThrow().isPriorGenerationCleanupPending(),
+            "a successor assigned after cleanup already finished must not be gated"
+        );
+    }
+
     /** Plan A G2 exit: a poll failure is fatal, never an empty success. */
     @Test
     void aPollFailurePropagatesRatherThanBecomingAnEmptyPoll() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0));
+        var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -289,7 +378,7 @@ class KafkaSourceOwnerTest {
      */
     @Test
     void revocationDeliversCancellationBeforeCommittingAndReturnsAtTheDeadline() throws Exception {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0));
+        var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -305,15 +394,15 @@ class KafkaSourceOwnerTest {
             new KafkaRecordId(generation, 10)));
         owner.runOnce();
         Assertions.assertTrue(
-            port.history().contains("commit{traffic-0=11}"),
+            port.history().contains("commitAsync{traffic-0=11}"),
             () -> "expected the ordinary loop commit before revocation; history: " + port.history()
         );
         drainIntake();
         port.clearHistory();
 
-        // The deadline has already passed on the injected clock, so the callback takes its shortest path and
-        // the test cannot hang however the ordering is wrong.
-        clockNanos.set(GRACE.toNanos() * 2);
+        // Nothing is staged and nothing is queued, so the callback waits out the interval and commits nothing.
+        // That wait is the production mechanism rather than a sleep-and-hope: the assertion below fails if a
+        // commit happens, so the interval passing is what is being measured, not assumed.
         port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
         owner.runOnce();
 
@@ -336,10 +425,74 @@ class KafkaSourceOwnerTest {
         );
     }
 
-    /** A commit staged before revocation is submitted as part of the wait, not before cancellation. */
+    /**
+     * Plan A G2 exit, the half nothing reached before: a commit staged while the grace interval is running is
+     * submitted from inside the wait, synchronously, under a bound no larger than the interval that is left.
+     *
+     * <p>The assertion is on the <em>bound the owner passed</em>, not on elapsed time. An unbounded commit
+     * would be a 60-second stall of every partition this consumer holds plus the whole group's rebalance, and
+     * the deadline handed to the call is the only thing preventing it — so asserting the value makes a missing
+     * bound a failure, where asserting wall-clock duration would pass against a fast broker with no bound at
+     * all.
+     *
+     * <p>The test this replaced carried this name and never called {@code onPartitionsRevoked}; it asserted an
+     * ordinary loop commit instead.
+     */
     @Test
-    void aCommitStagedDuringTheGraceIntervalIsSubmittedFromInsideTheWait() throws Exception {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0));
+    void aCommitStagedDuringTheGraceIntervalIsSubmittedFromInsideTheWaitUnderABound() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation, 10))));
+        owner.runOnce();
+        drainIntake();
+        port.clearHistory();
+
+        // The completion is submitted from inside the callback, so the position stages during the grace wait
+        // rather than before it. Submitting it earlier would let the ordinary loop commit it and prove nothing.
+        // The scripted duration is what ends the wait: the commit "takes" the whole interval, so the deadline
+        // passes because modelled work consumed it, not because the test slept.
+        port.scriptCommitDuration(GRACE);
+        port.scriptRebalanceDuringNextPoll(() -> {
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation, 10)));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+
+        owner.runOnce();
+
+        var boundedCommits = port.observations().stream()
+            .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
+            .map(PumpedKafkaSource.CommitAttempted.class::cast)
+            .toList();
+        Assertions.assertEquals(
+            1,
+            boundedCommits.size(),
+            () -> "the position staged during the wait should be committed exactly once from inside it;"
+                + " history: " + port.history()
+        );
+        Assertions.assertEquals(Map.of(PARTITION_0, 11L), boundedCommits.get(0).nextPositions());
+        Assertions.assertTrue(
+            boundedCommits.get(0).bound().compareTo(GRACE) <= 0,
+            () -> "the commit must be bounded by the grace remaining, was " + boundedCommits.get(0).bound()
+        );
+        Assertions.assertTrue(
+            port.history().stream().noneMatch(call -> call.startsWith("commitAsync")),
+            () -> "a commit inside a rebalance callback must be synchronous, since an async callback needs a"
+                + " later poll this generation never sees; history: " + port.history()
+        );
+        Assertions.assertTrue(
+            owner.partitionState(PARTITION_0).isEmpty(),
+            "the callback must still return and retire the generation"
+        );
+    }
+
+    /** A commit staged before revocation is submitted by the ordinary loop, asynchronously. */
+    @Test
+    void aCommitStagedBeforeRevocationIsSubmittedByTheOrdinaryLoop() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -355,7 +508,7 @@ class KafkaSourceOwnerTest {
         owner.runOnce();
 
         Assertions.assertTrue(
-            port.history().contains("commit{traffic-0=11}"),
+            port.history().contains("commitAsync{traffic-0=11}"),
             () -> "the contiguous prefix should commit at offset+1; history: " + port.history()
         );
     }
@@ -372,7 +525,7 @@ class KafkaSourceOwnerTest {
      */
     @Test
     void aRejectedCommitTellsIntakeNothingAndIsReissuedOncePerIteration() {
-        var port = new PumpedKafkaSource(List.of(PARTITION_0));
+        var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
@@ -381,7 +534,7 @@ class KafkaSourceOwnerTest {
         owner.runOnce();
         sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
             new KafkaRecordId(generation, 10)));
-        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.REJECTED);
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
         drainIntake();
         port.clearHistory();
 
@@ -390,7 +543,7 @@ class KafkaSourceOwnerTest {
 
         var commits = port.history().stream().filter(c -> c.startsWith("commit")).toList();
         Assertions.assertEquals(
-            List.of("commit{traffic-0=11}", "commit{traffic-0=11}"),
+            List.of("commitAsync{traffic-0=11}", "commitAsync{traffic-0=11}"),
             commits,
             () -> "expected one attempt per iteration, not a spin and not abandonment: " + port.history()
         );
@@ -413,7 +566,7 @@ class KafkaSourceOwnerTest {
     @Test
     void aFailedBatchRetainsStillOwnedPositionsAndDropsUnownedOnes() {
         var partition2 = new TopicPartition("traffic", 2);
-        var port = new PumpedKafkaSource(List.of(PARTITION_0, PARTITION_1, partition2));
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1, partition2));
         var owner = ownerFor(port);
         assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1, partition2));
 
@@ -436,7 +589,7 @@ class KafkaSourceOwnerTest {
         // the owner can tell it apart from the two it still holds.
         clockNanos.set(GRACE.toNanos() * 2);
         port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
-        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OWNERSHIP_ENDED_BEFORE_SUBMISSION);
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.GENERATION_STALE);
         port.clearHistory();
         owner.runOnce();
 

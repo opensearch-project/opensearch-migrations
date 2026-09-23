@@ -33,6 +33,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * "queue submission signals the callback's wait directly; it does not call {@code KafkaConsumer.wakeup()}
  * while callback handling is protected from wakeup". The signal and the wakeup are therefore two separate
  * mechanisms, and only the signal reaches a callback.
+ *
+ * <p>{@link #awaitInput(long)} takes a <em>duration</em> rather than a deadline, which is the only shape that
+ * can be right. {@code kafkaLLD §15.1} requires one monotonic source per deadline, and this class is not that
+ * source — the owner is. Accepting an absolute instant would mean comparing the owner's clock against
+ * whatever clock the wait itself measures, and two unrelated origins make the wait arbitrary rather than
+ * merely mis-sized.
  */
 public final class KafkaSourceInputQueue {
 
@@ -65,20 +71,25 @@ public final class KafkaSourceInputQueue {
     }
 
     /**
-     * Waits until an input is queued or the monotonic deadline passes, whichever happens first. Used by
-     * {@code onPartitionsRevoked} to process commit and lifecycle inputs while it waits out the grace
-     * interval, without polling and without a Kafka wakeup it is not allowed to receive.
+     * Waits up to {@code maxWaitNanos} for an input to be queued. Used by {@code onPartitionsRevoked} to
+     * process commit and lifecycle inputs while it waits out the grace interval, without polling and without
+     * a Kafka wakeup it is not allowed to receive.
      *
-     * <p>The deadline is {@code System.nanoTime()}-based to match {@code CancellationDeadline}: a wall-clock
-     * change must not be able to shorten or extend the configured grace interval
-     * ({@code kafkaLLD §15.1}).
-     *
-     * @return true if an input is available, false if the deadline passed first
+     * @param maxWaitNanos how long to wait at most, derived by the caller from its own monotonic clock. Zero
+     *                     or negative means do not wait, which is how a caller whose deadline has already
+     *                     passed still gets an honest answer about what is queued
+     * @return true if an input is available, false if the wait elapsed first
      */
-    public boolean awaitInput(long monotonicDeadlineNanos) throws InterruptedException {
+    public boolean awaitInput(long maxWaitNanos) throws InterruptedException {
+        if (maxWaitNanos <= 0) {
+            return !inputs.isEmpty();
+        }
+        // Elapsed real time, measured locally. Object.wait cannot be driven by an injected clock, so the
+        // caller's clock decides how long to wait and this decides only when that much has passed.
+        var waitUntilNanos = System.nanoTime() + maxWaitNanos;
         synchronized (signal) {
             while (inputs.isEmpty()) {
-                var remainingNanos = monotonicDeadlineNanos - System.nanoTime();
+                var remainingNanos = waitUntilNanos - System.nanoTime();
                 if (remainingNanos <= 0) {
                     return false;
                 }

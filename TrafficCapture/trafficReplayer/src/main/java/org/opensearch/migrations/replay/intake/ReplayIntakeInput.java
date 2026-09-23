@@ -49,13 +49,9 @@ public sealed interface ReplayIntakeInput {
      * <p>Creates the corresponding partition intake state. It does <strong>not</strong> request records until
      * prior-generation cleanup and replay-intake demand both permit that request.</p>
      */
-    record PartitionGenerationAssigned(PartitionGenerationId generation, long initialOffset)
-        implements ReplayIntakeInput {
+    record PartitionGenerationAssigned(PartitionGenerationId generation) implements ReplayIntakeInput {
         public PartitionGenerationAssigned {
             Objects.requireNonNull(generation, "generation");
-            if (initialOffset < 0) {
-                throw new IllegalArgumentException("initialOffset must not be negative: " + initialOffset);
-            }
         }
     }
 

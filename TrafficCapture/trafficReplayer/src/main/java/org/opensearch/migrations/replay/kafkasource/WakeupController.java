@@ -64,6 +64,8 @@ public final class WakeupController {
     private final KafkaSourceRootContext rootContext;
 
     private Phase phase = Phase.RUNNING;
+    /** Where {@link #leaveProtectedOperation()} returns to, since a commit nests inside either phase. */
+    private Phase phaseBeforeProtectedOperation;
     private boolean wakeupPending;
     private boolean wakeupOutstanding;
     private IKafkaConsumerContexts.IPollScopeContext pollContext;
@@ -100,14 +102,26 @@ public final class WakeupController {
         return false;
     }
 
+    /** Enters a poll with nothing known to be queued. For tests that drive this controller without a queue. */
     public synchronized void enterPoll() {
+        enterPoll(false);
+    }
+
+    /**
+     * @param inputAlreadyQueued whether the source-input queue is non-empty right now. A poll must not settle
+     *                           in to wait on work that is already sitting in the queue
+     */
+    public synchronized void enterPoll(boolean inputAlreadyQueued) {
         requirePhase(Phase.RUNNING, "enterPoll");
         phase = Phase.POLLING;
         // The context counts pollsEntered as it opens, so a poll in progress is observable to other threads.
         pollContext = rootContext.createPollContext();
-        // A submission that arrived while the loop was RUNNING left nothing to issue, but one that arrived
-        // during a protected phase may still be pending; poll must not wait on it.
-        if (wakeupPending) {
+        // Two ways a poll must not wait. A submission during a protected phase left a pending wakeup. And a
+        // submission during RUNNING issued nothing -- correctly, since the loop reaches the queue by itself --
+        // but the loop has already passed its drain by the time it gets here, so that input would otherwise
+        // wait out the entire poll timeout. §5.4's predicate is deliberately conservative: the controller acts
+        // whenever the Kafka thread *may* be waiting.
+        if (wakeupPending || inputAlreadyQueued) {
             wakeupPending = false;
             issueUnlessOutstanding();
         }
@@ -164,29 +178,57 @@ public final class WakeupController {
     /**
      * Guards commit and any other Kafka operation a wakeup must not interrupt.
      *
-     * <p>Only valid from {@code RUNNING}, which is reachable only through
-     * {@link #leavePollAndConsumeWakeup()}, so an outstanding wakeup here is unreachable rather than merely
-     * unexpected. The check remains because that reasoning depends on the two being one operation, and a
-     * later change that separates them would make it reachable.
+     * <p>Valid from {@code RUNNING} and from {@code REBALANCE_CALLBACK}, and the phase it returns to is
+     * whichever it came from. Both are real: the loop commits between polls, and {@code onPartitionsRevoked}
+     * commits from inside its grace wait, which {@code procCommit §9.2} step 5 and {@code kafkaLLD §15.1}
+     * both require. Neither phase permits a wakeup, so nesting changes nothing a submitter can observe — a
+     * submission during either records a pending wakeup and issues none.
+     *
+     * <p>An outstanding wakeup is only impossible on the {@code RUNNING} path, which is reachable solely
+     * through {@link #leavePollAndConsumeWakeup()}. Inside a callback the surrounding {@code poll()} has not
+     * returned, so a wakeup issued before the callback began may still be outstanding and must not be
+     * treated as an invariant failure.
      */
     public synchronized void enterProtectedOperation() {
-        requirePhase(Phase.RUNNING, "enterProtectedOperation");
-        if (wakeupOutstanding) {
+        if (phase != Phase.RUNNING && phase != Phase.REBALANCE_CALLBACK) {
+            throw new IllegalStateException(
+                "enterProtectedOperation requires phase RUNNING or REBALANCE_CALLBACK but was " + phase
+            );
+        }
+        if (phase == Phase.RUNNING && wakeupOutstanding) {
             throw new IllegalStateException(
                 "a wakeup is still outstanding at the start of a protected Kafka operation;"
                     + " it must be consumed at a poll boundary first"
             );
         }
+        phaseBeforeProtectedOperation = phase;
         phase = Phase.PROTECTED_OPERATION;
         commitContext = rootContext.createCommitContext();
     }
 
     public synchronized void leaveProtectedOperation() {
         requirePhase(Phase.PROTECTED_OPERATION, "leaveProtectedOperation");
-        phase = Phase.RUNNING;
+        phase = phaseBeforeProtectedOperation;
+        phaseBeforeProtectedOperation = null;
         commitContext.close();
         commitContext = null;
-        // Left pending rather than issued: there is no poll to interrupt, and the loop will reach the queue.
+        // Left pending rather than issued: there is no poll to interrupt from RUNNING, and a callback must
+        // not be interrupted at all. leaveRebalanceCallback issues it on the way out.
+    }
+
+    /**
+     * Records a generation retiring, on the rebalance-callback scope that is necessarily open when it happens.
+     *
+     * <p>Here rather than on the owner because the callback span's lifetime is this class's to manage, and the
+     * retirement belongs under it: both retirement paths run inside a rebalance callback by construction.
+     */
+    public synchronized void recordGenerationRetired(
+        String generationLabel,
+        long recordsCommitted,
+        long recordsRead
+    ) {
+        requirePhase(Phase.REBALANCE_CALLBACK, "recordGenerationRetired");
+        callbackContext.onGenerationRetired(generationLabel, recordsCommitted, recordsRead);
     }
 
     private boolean issueUnlessOutstanding() {
