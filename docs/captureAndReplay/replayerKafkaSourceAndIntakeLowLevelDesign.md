@@ -431,11 +431,24 @@ Commit handling distinguishes:
 - ownership ended with a submitted operation whose broker outcome is unknown; and
 - a late callback arrived after local cleanup.
 
+These outcomes describe the operation, not individual partitions. A batched operation may be applied
+for some of its partitions and not others, and the Kafka client reports one result for the whole
+operation without identifying which positions were recorded. A failed operation is therefore not
+evidence that nothing was committed, and the source never treats it as such.
+
 None of these outcomes returns a Kafka-record disposition to replay intake. Replay intake already
 finished its record-processing decision before sending `RecordProcessingFinished`.
 
-After revocation, the old generation does not retry or wait indefinitely for a commit. The next
-assigned Kafka position determines redelivery.
+A staged position is discarded when its commit is acknowledged, not when it is attempted. If an
+operation does not succeed, every partition in it that this consumer still owns under the same
+generation keeps its staged position and is offered again in a later operation. Re-offering a position
+that was in fact recorded is harmless, which is what makes this sound while partial application stays
+unobservable. Abandoning the position instead would hold that partition's committed progress until its
+next contiguous prefix advances, which work blocked behind an unfinished record can delay without
+bound.
+
+After revocation, the old generation does not retry or wait indefinitely for a commit. Its staged
+position is discarded rather than re-offered. The next assigned Kafka position determines redelivery.
 
 ## 6. Replay-intake partition state
 
