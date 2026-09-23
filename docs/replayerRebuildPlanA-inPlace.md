@@ -78,7 +78,7 @@ Three consequences worth stating, because each replaces something the earlier sh
 - **The module keeps its real Gradle path, Maven coordinates, package names and jib image mapping
   throughout.** That was the original mechanic's whole purpose, and it now holds trivially rather than by
   arrangement. There is no end-state rename to forget.
-- **Progress is measurable and falsifiable.** `grep -rl REBUILD-LIMBO-OPEN src` is the outstanding-work
+- **Progress is measurable and falsifiable.** `grep -rl REBUILD-LIMBO-START src` is the outstanding-work
   count, and the rebuild is complete when it reaches zero. That is a check, not a judgment.
 - **The assembled application is broken for most of this plan, and that is expected.** Individual milestones
   are proved in isolation. `G10` is the first that needs a working image.
@@ -310,9 +310,11 @@ express `kafkaLLD §17:939-1005` and `connLLD §19:727-788`; fixture strategy
   deliberately wrong expected-association set and prove the fixture rejects it.
 - Start the status table.
 
-**Exit:** module compiles; the dependency prohibition is proved by a failing build when violated;
-fixture self-tests pass; a mixed traffic/heartbeat/probe script pumps through with exact broker
-timestamps and observable pause, wakeup, and commit events.
+**Exit:** module compiles; carried code is proved uncompilable rather than merely unused, which is what
+§2.1 replaced the two-module dependency prohibition with — this clause previously asked for that
+prohibition to fail a build, and the check it named no longer exists; fixture self-tests pass; a mixed
+traffic/heartbeat/probe script pumps through with exact broker timestamps and observable pause, wakeup,
+and commit events.
 
 ### G1 — Reality contact: decode and dump a real topic
 
@@ -330,12 +332,26 @@ The cheapest possible end-to-end evidence, deliberately placed first.
   and is invoked from `TrafficReplayer.java:644`. Its three mode names are a user-facing CLI contract
   (§2.3), so they are preserved. `TrafficStreamDumper` and `HttpTransactionDumper` come with it. This is
   a good example of §3 rule 1 in the permissive direction — useful, close to final, and worth moving.
+- **Scope: `dump-raw` against a Kafka topic.** G1 needs no source owner and no architecture. The dump
+  path opens a plain `KafkaConsumer` with `assign()`, no consumer group, an explicit seek, and no commit,
+  which is exactly why this milestone can precede G2. The only member it needs from the marked
+  `KafkaTrafficCaptureSource` is the self-contained static `buildKafkaProperties`.
 
-**Exit:** the module reads and dumps a topic written by the **current, unmodified proxy**, and
-every envelope case is handled explicitly. This is the milestone that prevents a greenfield module from
-drifting away from what the proxy actually emits, and it is why it comes before any owner work.
-Covers `D1` — "the replayer cannot read its own capture topic" is the total-loss-of-function defect, and
-this is the milestone that retires it.
+**Deferred out of G1 to G3 — `dump-http` and `dump-both`.** Both require HTTP transaction reconstruction,
+whose closure is the legacy accumulator, `ChannelContextManager`, `RootReplayerContext`, and the
+`IReplayContexts` identity chain. Rebuilding those here would be the lateral milestone expansion §6
+forbids. G3 is where source assembly is rebuilt, so that is where these modes return — see G3. Both mode
+names stay in the CLI, because §2.3 makes them a contract; invoking them in the interim fails with a
+message naming G3 rather than producing output that does not match the mode requested. The **file** input
+path defers with them, which also postpones the format question in that region's own note — whether the
+file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope is not a G1 decision once G1
+is Kafka-only.
+
+**Exit:** the module reads and dumps a topic written by the **current, unmodified proxy** via `dump-raw`,
+and every envelope case is handled explicitly, `PAYLOAD_NOT_SET` included. This is the milestone that
+prevents a greenfield module from drifting away from what the proxy actually emits, and it is why it comes
+before any owner work. Covers `D1` — "the replayer cannot read its own capture topic" is the
+total-loss-of-function defect, and this is the milestone that retires it.
 
 ### G2 — Kafka source owner
 
@@ -384,11 +400,21 @@ source-response bytes stay associated through tuple durability. Source reconstru
 close-truncated response is never labelled `COMPLETE`, and an incomplete final response carries no
 partial bytes rendered as complete.
 
+**Inherited from G1 — restore `dump-http` and `dump-both`.** G1 deferred them because HTTP transaction
+reconstruction was the legacy accumulator's job, and this is the milestone that rebuilds it. They belong
+here rather than anywhere later because they are the cheapest possible observation of what this milestone
+builds: run source assembly over a real topic and print each reconstructed transaction. The sink already
+exists — `HttpTransactionDumper` consumes reconstruction callbacks and is carried, marked. Whether it
+still needs a tracing context is a G3 question: it required `ChannelContextManager` and
+`RootReplayerContext` only because the *legacy* accumulator did.
+
 **Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* has exactly both
 associations, matching the `RecordScript` oracle; no record emits completion while an expected
 association remains; a source connection that dies mid-response produces a tuple that says so. No owner
-blocks on a stage only its own thread can complete. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes
-`R11`, `R12`, `R13`.
+blocks on a stage only its own thread can complete. **`dump-http` and `dump-both` work again against a
+real topic, and a close-truncated response is visible as truncated in that output** — reconstruction
+honesty stated as something a person can read. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`,
+`R12`, `R13`.
 
 ### G4 — Commit authority
 
@@ -567,7 +593,7 @@ no longer a distinct step: it happens when the members those consumers need are 
 
 What remains under this heading is bookkeeping that the earlier milestones produce as a side effect:
 
-- Every `REBUILD-LIMBO` region resolved, so `grep -rl REBUILD-LIMBO-OPEN src` is empty. This is the real
+- Every `REBUILD-LIMBO` region resolved, so `grep -rl REBUILD-LIMBO-START src` is empty. This is the real
   completion signal for the whole rebuild, and it is checkable.
 - The `sonar-project.properties:274` path glob updated if `ClientConnectionPool` is gone.
 - The `REBUILD-LIMBO` scaffolding note in the module's `build.gradle` removed with the last region.
@@ -665,7 +691,7 @@ un-marked wholesale without the legacy structure stripped, and the marked count 
 
 Signals to report, any one of which is worth the owner's attention:
 
-1. `grep -rl REBUILD-LIMBO-OPEN src` does not fall across a milestone that was supposed to resolve regions.
+1. `grep -rl REBUILD-LIMBO-START src` does not fall across a milestone that was supposed to resolve regions.
 2. A new class or test is added where a marked counterpart existed, without that counterpart having been read
    and its reuse explicitly rejected. This is an `../AGENTS.md` §8a violation and has already happened once.
 3. Any escape or transformation of marked code is introduced without a guard that reverses it mechanically.

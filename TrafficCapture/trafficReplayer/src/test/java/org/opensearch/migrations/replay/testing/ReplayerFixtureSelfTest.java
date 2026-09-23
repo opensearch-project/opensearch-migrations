@@ -8,39 +8,39 @@
 
 package org.opensearch.migrations.replay.testing;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-
-// REBUILD-LIMBO-START(G11)
-/*
-
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.TreeSet;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
+import org.opensearch.migrations.replay.identity.WriterPartitionId;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInput.PartitionRecordBatch;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.BatchDelivered;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.CommitSubmitted;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.DriverPort;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionBatchRequestId;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionGenerationId;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionPaused;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionRecordBatch;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionResumed;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.RecordProcessingFinished;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.RequestNextPartitionBatch;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.WakeupRequested;
+import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.CaptureProtocolViolationDetected;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.GenerationCleanupFinished;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.RecordProcessingFinished;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.RequestNextPartitionBatch;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
+import io.netty.channel.local.LocalChannel;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -81,6 +81,149 @@ class ReplayerFixtureSelfTest {
         Assertions.assertEquals(0, eventLoop.pendingTimers());
     }
 
+    /**
+     * The reason this fixture does not extend Netty's {@code AbstractScheduledEventExecutor}: that
+     * scheduler measures deadlines against {@code System.nanoTime()}, so timers would fire on wall
+     * clock instead of on the injected clock, and the test could not hold time still.
+     */
+    @Test
+    void testEventLoopTimersFollowTheInjectedClockRatherThanWallClock() {
+        var clock = new FakeClock();
+        var eventLoop = new TestEventLoop(clock);
+        var events = new ArrayList<String>();
+        eventLoop.schedule(() -> events.add("netty-contract-timer"), 1, TimeUnit.MINUTES);
+
+        eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(List.of(), events);
+        Assertions.assertEquals(1, eventLoop.pendingTimers());
+
+        eventLoop.advance(Duration.ofMinutes(1));
+
+        Assertions.assertEquals(List.of("netty-contract-timer"), events);
+    }
+
+    /**
+     * A real event loop never leaves a deadline that has already passed pending, so neither does
+     * this one: a timer scheduled by a timer running inside {@link TestEventLoop#advance} is due
+     * immediately and runs in the same call.
+     */
+    @Test
+    void testEventLoopAdvanceSettlesTimersScheduledWhileItRuns() {
+        var eventLoop = new TestEventLoop();
+        var events = new ArrayList<String>();
+        eventLoop.schedule(() -> {
+            events.add("outer");
+            eventLoop.schedule(() -> events.add("inner"), Duration.ZERO);
+        }, Duration.ofSeconds(1));
+
+        eventLoop.advance(Duration.ofSeconds(1));
+
+        Assertions.assertEquals(List.of("outer", "inner"), events);
+        Assertions.assertEquals(0, eventLoop.pendingTimers());
+        Assertions.assertEquals(0, eventLoop.pendingTasks());
+    }
+
+    @Test
+    void testEventLoopCancelledTimerLeavesNoPendingWork() {
+        var eventLoop = new TestEventLoop();
+        var events = new ArrayList<String>();
+        var timer = eventLoop.schedule(() -> events.add("cancelled"), Duration.ofSeconds(1));
+
+        Assertions.assertTrue(timer.cancel(false));
+        Assertions.assertTrue(timer.isCancelled());
+        Assertions.assertEquals(0, eventLoop.pendingTimers());
+
+        eventLoop.advance(Duration.ofSeconds(5));
+
+        Assertions.assertEquals(List.of(), events);
+        Assertions.assertFalse(timer.cancel(false));
+    }
+
+    /**
+     * Owner affinity is asserted with {@code inEventLoop()}, so the fixture must report membership
+     * only while it is running a submitted task. Otherwise a test could mutate owner state directly
+     * and still satisfy the assertion that exists to forbid exactly that.
+     */
+    @Test
+    void testEventLoopReportsAffinityOnlyWhileRunningATask() {
+        var eventLoop = new TestEventLoop();
+        var affinityInsideTask = new ArrayList<Boolean>();
+
+        Assertions.assertFalse(eventLoop.inEventLoop());
+        eventLoop.execute(() -> affinityInsideTask.add(eventLoop.inEventLoop()));
+        Assertions.assertFalse(eventLoop.inEventLoop());
+
+        eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(List.of(true), affinityInsideTask);
+        Assertions.assertFalse(eventLoop.inEventLoop());
+    }
+
+    /**
+     * Records a constraint rather than a behavior we want, and checks that hitting it is loud.
+     *
+     * <p>Netty's built-in channels gate registration on their own loop implementation, so none can
+     * register against any custom event loop, this one included. Becoming a
+     * {@code SingleThreadEventLoop} would reintroduce both the wall-clock scheduler and a real
+     * thread, so the fixture accepts the limit instead. Nothing needs the combination: target I/O
+     * reaches owners through {@code TargetChannelPort}, not through a channel a test registered to
+     * the owner's loop.
+     *
+     * <p>What is asserted is that {@code register} <strong>throws</strong>. Netty's own path calls
+     * {@code promise.setFailure} and returns, so a test that never inspects the returned future would
+     * see a channel that silently failed to register and then hang waiting for it. The message has to
+     * name the alternative, because whoever trips over this will be reading the exception rather than
+     * this test.
+     */
+    @Test
+    void testEventLoopRefusesToHoldChannelsWithAMessageNamingTheAlternative() {
+        var eventLoop = new TestEventLoop();
+        var channel = new LocalChannel();
+
+        var thrown = Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () -> eventLoop.register(channel)
+        );
+
+        Assertions.assertTrue(thrown.getMessage().contains("TargetChannelPort"));
+        Assertions.assertTrue(thrown.getMessage().contains("NioEventLoopGroup"));
+        Assertions.assertFalse(channel.isRegistered());
+        Assertions.assertEquals(0, eventLoop.pendingTasks());
+    }
+
+    /**
+     * The fatal owner-loss path needs a loop that can die. Rejection and dropped accepted work are
+     * the two shapes of that, per {@code replayerConnectionAndRequestLowLevelDesign.md} 19.6.
+     */
+    @Test
+    void testEventLoopTerminationRejectsNewWorkAndDropsAcceptedWork() {
+        var eventLoop = new TestEventLoop();
+        var events = new ArrayList<String>();
+        eventLoop.execute(() -> events.add("accepted-but-never-run"));
+        eventLoop.schedule(() -> events.add("accepted-timer"), Duration.ofSeconds(1));
+
+        eventLoop.shutdown();
+
+        Assertions.assertTrue(eventLoop.isShutdown());
+        Assertions.assertTrue(eventLoop.isShuttingDown());
+        Assertions.assertFalse(eventLoop.isTerminated());
+        Assertions.assertThrows(
+            RejectedExecutionException.class,
+            () -> eventLoop.execute(() -> events.add("rejected"))
+        );
+        Assertions.assertThrows(
+            RejectedExecutionException.class,
+            () -> eventLoop.schedule(() -> events.add("rejected-timer"), Duration.ofSeconds(1))
+        );
+
+        eventLoop.dropAcceptedWork();
+
+        Assertions.assertTrue(eventLoop.isTerminated());
+        Assertions.assertTrue(eventLoop.terminationFuture().isSuccess());
+        Assertions.assertEquals(List.of(), events);
+    }
+
     @Test
     void recordScriptPreservesEnvelopeCasesMetadataAndIndependentAssociationOracle() {
         var traffic = TrafficStream.newBuilder()
@@ -104,37 +247,79 @@ class ReplayerFixtureSelfTest {
         var heartbeatRecord = script.next();
         var probeRecord = script.next();
 
-        Assertions.assertEquals(new TopicPartition("traffic", 2), trafficRecord.id().topicPartition());
-        Assertions.assertEquals(10, trafficRecord.id().offset());
+        Assertions.assertEquals(script.generation(2), trafficRecord.recordId().generation());
+        Assertions.assertEquals(10, trafficRecord.recordId().offset());
         Assertions.assertEquals(1_000, trafficRecord.logAppendTimeMillis());
-        Assertions.assertEquals("writer-1", trafficRecord.writerNodeId());
-        Assertions.assertEquals(CaptureRecord.PayloadCase.TRAFFICSTREAM, trafficRecord.payloadCase());
+        Assertions.assertEquals(
+            new WriterPartitionId("writer-1", script.generation(2).topicPartition()),
+            script.writerOf(trafficRecord.recordId())
+        );
+        Assertions.assertEquals(
+            CaptureRecord.PayloadCase.TRAFFICSTREAM,
+            trafficRecord.envelope().getPayloadCase()
+        );
         Assertions.assertEquals("writer-1", trafficRecord.envelope().getTrafficStream().getNodeId());
         Assertions.assertEquals(
             CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT,
-            heartbeatRecord.payloadCase()
+            heartbeatRecord.envelope().getPayloadCase()
         );
         Assertions.assertEquals(
             CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE,
-            probeRecord.payloadCase()
+            probeRecord.envelope().getPayloadCase()
         );
-        script.assertAssociations(trafficRecord.id(), List.of("request-8", "request-7"));
+        script.assertAssociations(trafficRecord.recordId(), List.of("request-8", "request-7"));
         var mismatch = Assertions.assertThrows(
             AssertionError.class,
-            () -> script.assertAssociations(trafficRecord.id(), List.of("request-7"))
+            () -> script.assertAssociations(trafficRecord.recordId(), List.of("request-7"))
         );
         Assertions.assertTrue(mismatch.getMessage().contains("request-8"));
         script.assertExhausted();
         Assertions.assertThrows(AssertionError.class, script::next);
     }
 
+    /**
+     * The broker timestamp is the reason {@code ApplicationKafkaRecord} exists, so the script must
+     * carry the value the test wrote rather than any clock reading, and the serialized size must be
+     * the envelope's own.
+     */
+    @Test
+    void recordScriptCarriesExactBrokerTimestampsAndSerializedSizes() {
+        var script = new RecordScript("traffic", 3)
+            .addHeartbeat(1, 21, Instant.ofEpochMilli(10_000), "writer", 10_000)
+            .addProbe(1, 22, Instant.ofEpochMilli(11_000), "writer", "probe")
+            .addPayloadNotSet(1, 23, Instant.ofEpochMilli(12_000), "writer");
+
+        var records = script.records();
+
+        Assertions.assertEquals(
+            List.of(10_000L, 11_000L, 12_000L),
+            records.stream().map(record -> record.logAppendTimeMillis()).toList()
+        );
+        Assertions.assertEquals(
+            List.of(21L, 22L, 23L),
+            records.stream().map(record -> record.recordId().offset()).toList()
+        );
+        records.forEach(record -> Assertions.assertEquals(
+            record.envelope().getSerializedSize(),
+            record.serializedSizeBytes()
+        ));
+        Assertions.assertEquals(
+            CaptureRecord.PayloadCase.PAYLOAD_NOT_SET,
+            records.get(2).envelope().getPayloadCase()
+        );
+        Assertions.assertEquals(
+            new WriterPartitionId("writer", script.generation(1).topicPartition()),
+            script.writerOf(records.get(2).recordId())
+        );
+    }
+
     @Test
     void pumpedSourceObservesCoalescedWakeupPauseResumeDeliveryAndCommit() {
-        var generation = new PartitionGenerationId(new TopicPartition("traffic", 1), 3);
-        var requestId = new PartitionBatchRequestId(generation, 9);
-        var script = new RecordScript("traffic")
+        var script = new RecordScript("traffic", 3)
             .addHeartbeat(1, 21, Instant.ofEpochMilli(10_000), "writer", 10_000)
             .addProbe(1, 22, Instant.ofEpochMilli(11_000), "activation:PROBE", "probe");
+        var generation = script.generation(1);
+        var requestId = new PartitionBatchRequestId(generation, 9);
         var outstandingRequest = new AtomicReference<PartitionBatchRequestId>();
 
         PumpedKafkaSource.SourceOwnerDriver driver = port -> {
@@ -149,7 +334,7 @@ class ReplayerFixtureSelfTest {
         var source = new PumpedKafkaSource(driver);
         source.scriptBatch(script.records());
         source.submit(new RequestNextPartitionBatch(requestId));
-        source.submit(new PumpedKafkaSource.GenerationCleanupFinished(generation));
+        source.submit(new GenerationCleanupFinished(generation));
 
         source.runOnce();
 
@@ -165,7 +350,7 @@ class ReplayerFixtureSelfTest {
         Assertions.assertEquals(requestId, delivered.batch().requestId());
         Assertions.assertEquals(script.records(), delivered.batch().records());
 
-        source.submit(new RecordProcessingFinished(script.records().get(0).id()));
+        source.submit(new RecordProcessingFinished(script.records().get(0).recordId()));
         source.runOnce();
 
         var commit = source.observations()
@@ -195,6 +380,124 @@ class ReplayerFixtureSelfTest {
         Assertions.assertThrows(AssertionError.class, source::runOnce);
     }
 
+    /**
+     * G0's exit evidence, in one deterministic transition history: a mixed traffic, heartbeat and
+     * probe script pumps through the source with its exact broker timestamps intact, and the pause,
+     * wakeup, delivery and commit transitions are all observable in order.
+     *
+     * <p>Two properties are asserted by position in that history rather than by count. The partition
+     * is paused <em>before</em> its batch is delivered ({@code kafkaLLD §17.4}). And three record
+     * completions submitted back to back produce one wakeup, not three, which is the coalescing the
+     * same section requires.
+     *
+     * <p>The commit is a single contiguous-prefix commit computed after every input is drained,
+     * because commit authority belongs to the source alone — no record, request or retry policy may
+     * commit on its own ({@code kafkaLLD §4.2}).
+     */
+    @Test
+    void mixedScriptPumpsThroughWithExactBrokerTimestampsAndObservableTransitions() {
+        var traffic = TrafficStream.newBuilder().setConnectionId("connection-1").setNumber(0).build();
+        var script = new RecordScript("traffic", 7)
+            .addTraffic(4, 100, Instant.ofEpochMilli(1_700_000_000_000L), "writer-a", traffic, "request-1")
+            .addHeartbeat(4, 101, Instant.ofEpochMilli(1_700_000_005_000L), "writer-a", 5_000)
+            .addProbe(4, 102, Instant.ofEpochMilli(1_700_000_010_000L), "writer-a", "probe-1");
+        var generation = script.generation(4);
+        var topicPartition = generation.topicPartition();
+        var requestId = new PartitionBatchRequestId(generation, 1);
+        var outstandingRequest = new AtomicReference<PartitionBatchRequestId>();
+        var finishedOffsets = new TreeSet<Long>();
+        var committedThrough = new AtomicReference<Long>(99L);
+
+        var source = new PumpedKafkaSource(port -> {
+            for (var input = port.pollInput(); input.isPresent(); input = port.pollInput()) {
+                switch (input.get()) {
+                    case RequestNextPartitionBatch request -> {
+                        Assertions.assertNull(outstandingRequest.getAndSet(request.requestId()));
+                        port.resume(topicPartition);
+                    }
+                    case RecordProcessingFinished finished ->
+                        finishedOffsets.add(finished.recordId().offset());
+                    case GenerationCleanupFinished ignored -> {}
+                    case CaptureProtocolViolationDetected ignored -> {}
+                }
+            }
+            if (outstandingRequest.get() != null) {
+                port.pollKafka().ifPresent(records -> {
+                    port.pause(topicPartition, PumpedKafkaSource.PauseReason.BATCH_DEMAND);
+                    port.deliver(new PartitionRecordBatch(outstandingRequest.getAndSet(null), records));
+                });
+            }
+            var nextOffset = committedThrough.get() + 1;
+            while (finishedOffsets.remove(nextOffset)) {
+                nextOffset++;
+            }
+            if (nextOffset > committedThrough.get() + 1) {
+                committedThrough.set(nextOffset - 1);
+                port.submitCommit(Map.of(topicPartition, nextOffset));
+            }
+        });
+
+        source.scriptBatch(script.records());
+        source.submit(new RequestNextPartitionBatch(requestId));
+        source.runOnce();
+
+        var delivered = source.observations()
+            .stream()
+            .filter(BatchDelivered.class::isInstance)
+            .map(BatchDelivered.class::cast)
+            .findFirst()
+            .orElseThrow();
+        Assertions.assertEquals(
+            List.of(1_700_000_000_000L, 1_700_000_005_000L, 1_700_000_010_000L),
+            delivered.batch().records().stream().map(ApplicationKafkaRecord::logAppendTimeMillis).toList()
+        );
+        Assertions.assertEquals(
+            List.of(
+                CaptureRecord.PayloadCase.TRAFFICSTREAM,
+                CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT,
+                CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE
+            ),
+            delivered.batch().records().stream().map(r -> r.envelope().getPayloadCase()).toList()
+        );
+
+        script.records().forEach(record -> source.submit(new RecordProcessingFinished(record.recordId())));
+        source.runOnce();
+
+        Assertions.assertEquals(
+            List.of(
+                "WakeupRequested",
+                "PartitionResumed(traffic-4)",
+                "PartitionPaused(traffic-4,BATCH_DEMAND)",
+                "BatchDelivered(traffic-4#7.batch1,3 records)",
+                "WakeupRequested",
+                "CommitSubmitted(traffic-4=103)"
+            ),
+            source.observations().stream().map(ReplayerFixtureSelfTest::describe).toList()
+        );
+        source.assertExhausted();
+    }
+
+    private static String describe(PumpedKafkaSource.Observation observation) {
+        return switch (observation) {
+            case WakeupRequested ignored -> "WakeupRequested";
+            case PartitionResumed resumed -> "PartitionResumed(" + resumed.topicPartition() + ")";
+            case PartitionPaused paused ->
+                "PartitionPaused(" + paused.topicPartition() + "," + paused.reason() + ")";
+            case BatchDelivered delivered -> "BatchDelivered("
+                + delivered.batch().requestId()
+                + ","
+                + delivered.batch().records().size()
+                + " records)";
+            case CommitSubmitted commit -> commit.nextOffsets()
+                .entrySet()
+                .stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining(",", "CommitSubmitted(", ")"));
+            case PumpedKafkaSource.DriverFailed failed ->
+                "DriverFailed(" + failed.failure().getMessage() + ")";
+        };
+    }
+
     private static void drainInputs(
         DriverPort port,
         AtomicReference<PartitionBatchRequestId> outstandingRequest
@@ -208,17 +511,14 @@ class ReplayerFixtureSelfTest {
                 case RecordProcessingFinished finished -> {
                     var offsets = new LinkedHashMap<TopicPartition, Long>();
                     offsets.put(
-                        finished.recordId().topicPartition(),
+                        finished.recordId().generation().topicPartition(),
                         finished.recordId().offset() + 1
                     );
                     port.submitCommit(offsets);
                 }
-                case PumpedKafkaSource.GenerationCleanupFinished ignored -> {}
-                case PumpedKafkaSource.CaptureProtocolViolationDetected ignored -> {}
+                case GenerationCleanupFinished ignored -> {}
+                case CaptureProtocolViolationDetected ignored -> {}
             }
         }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)

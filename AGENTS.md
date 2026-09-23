@@ -78,6 +78,26 @@ that are numbered steps get done. So:
 The owner reserves the right to adjust direction at any stage boundary. Expect it. Do not treat an
 earlier decision as settled if the owner revisits it.
 
+### 2.1 Deferrals — amend the plan or the work is lost
+
+A deferral is a decision, and the record that survives is the one in the plan. Whenever a milestone
+cannot deliver part of its scope, three things happen **in the same commit as the deferral**:
+
+1. **The deferring milestone says what it no longer delivers**, in its own section and in its `Exit`
+   line. A milestone whose `Exit` still claims work it did not do cannot be closed honestly, and the
+   next agent reads that line as done.
+2. **The receiving milestone gains the obligation**, in its scope and its `Exit`. Name it in the section
+   where the work will actually happen — an obligation recorded only at the point it was deferred *from*
+   is invisible to whoever is positioned to discharge it. Prefer the milestone that already builds the
+   thing the deferred work needs, so it lands as that milestone's evidence rather than as an errand.
+3. **The register's deferral ledger gets a row**: what, from where, to where, and why. Per §6 the plan
+   states which milestone *owns* an obligation while the register states whether it is open, proved, or
+   deferred — this is that split, not a second copy.
+
+**If you cannot name the receiving milestone, the work is not deferred, it is dropped** — and that is an
+escalation, not a judgment call. Deferring into "later" or into the register alone is the failure this
+rule exists to prevent.
+
 ## 3. Reviews
 
 Three different things are called "review" and they have different rules.
@@ -190,6 +210,13 @@ are trustworthy evidence at 200 MB/s where per-record comparison is not affordab
   repository's established patterns instead — `SimpleHttpServer` / `SimpleNettyHttpServer`,
   `LocalChannel` / `EmbeddedChannel`, injected `TestEventLoop` and `FakeClock`, and immutable scripts
   configured at fixture construction rather than mutable runtime stubbing.
+- **Those patterns are two tiers and do not compose on one event loop.** No test can have both
+  deterministic time and a real channel: every Netty channel validates the loop's concrete type, so
+  `LocalChannel`, `EmbeddedChannel`, and anything connecting to `SimpleNettyHttpServer` all reject
+  `TestEventLoop`. Pick one — injected `TestEventLoop` and `FakeClock` with a fake `TargetChannelPort`
+  for owner logic, ordering, timers and cancellation; or a real channel on a real `NioEventLoopGroup`
+  with real time for integration. `TestEventLoop.register` throws and says so, because Netty's own path
+  merely fails a promise, which a test that ignores the returned future experiences as a hang.
 - **No mutable static state**, with a single possible exception for a logging integration that cannot
   reasonably be injected. Telemetry, clocks, coordination counters, event loops, and termination
   behavior are instance-owned and injected. A test must be able to stall only the event loop it owns.
@@ -301,7 +328,7 @@ these apply to the decisions the designs leave to the implementer.
 ## 8a. Limbo is the first place to look, not a graveyard
 
 Carried-but-not-yet-refactored code stays **in place, at the path it will ship from**, marked with
-`REBUILD-LIMBO-OPEN(<milestone>)` / `REBUILD-LIMBO-CLOSED(<milestone>)` around a `/* */` region whose
+`REBUILD-LIMBO-START(<milestone>)` / `REBUILD-LIMBO-END(<milestone>)` around a `/* */` region whose
 delimiters sit on their own lines. The code inside is verbatim, so blame survives both the carry and the
 eventual restore — un-marking is a pure deletion of the marker and delimiter lines, which never touches a
 code line. The only lines that change are inner comment delimiters, escaped so the region cannot terminate
@@ -370,9 +397,18 @@ prefix, so reconstruction stays mechanical. **Never invent an ad-hoc escape with
 rewrite cannot be reversed reliably, because the rewritten form is indistinguishable from code that was
 always written that way.
 
-`TrafficCapture/trafficReplayer/tools/unmark-limbo.awk` reconstructs a marked file, and every marked file in
-the module is verified to round-trip byte-identically through it. That check is the point — carried code is
-only safe to mark if getting it back is mechanical.
+`TrafficCapture/trafficReplayer/tools/unmark-limbo.awk` reconstructs a marked file, and
+`tools/verify-limbo-markers.sh` checks every marked file in the module: that each region's delimiters are
+well-formed, so the marked code is inert rather than merely unused, and that reconstruction recovers every
+code line, compared against the content the marking commit replaced. **Run it after any marking change.**
+That check is the point — carried code is only safe to mark if getting it back is mechanical.
+
+The recovery is exact on code and **not** byte-exact, which this file previously claimed. Marking pads each
+region with a blank line inside its delimiters, and that padding is unguarded: the blank before a mid-file
+`*/` is usually the blank that separated two members, so no rule can tell the marker's blank from the
+original's, and stripping it would lose real content. The verifier therefore ignores blank lines, and
+anything it does report is a genuinely lost, added, or altered line. This is the guard rule above failing in
+miniature on the marker's own output — worth keeping visible rather than quietly restating the claim.
 
 **Mark members, never whole files as a unit.** An all-or-nothing verdict on a file hides the class, its
 history, and its existing coverage, which is what makes the failure above possible. If two of five methods

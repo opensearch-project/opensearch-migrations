@@ -37,13 +37,14 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 |---|---|
 | Branch | `stableAndScalableLiveReplay` |
 | Remote | `origin` = `github.com/gregschohn/opensearch-migrations` (a fork, **not** `opensearch-project`) |
-| Local vs origin | Local is **2 commits ahead**: `822abde4e` (S6b) and `d5f0ef1fb` (the plan reset) are both unpushed. `origin/stableAndScalableLiveReplay` is at `2c4f305f3` |
+| Local vs origin | **Pushed and level** at `0fe180eed`. The tracking ref is trustworthy again: the owner added the missing refspec on 2026-09-23, so `origin/stableAndScalableLiveReplay` now tracks and a plain `--force-with-lease` works. Historical note, because the symptom is baffling if it recurs on another branch: `remote.origin.fetch` listed only `integrating3231`, so this branch's tracking ref stayed frozen at `2c4f305f3` through any number of fetches, and `--force-with-lease` refused a clean fast-forward with "stale info". If that appears again, measure with `git ls-remote origin refs/heads/<branch>` and check the refspec before assuming divergence |
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
-| Test compilation | **Broken: 61 errors across 16 files**, not four. `compileTestFixturesJava` fails first with 4 errors in 2 files (`ActorRequestTestUtils` lines 12/42/55/68 on `AsyncPermitPool`; `ReplayEngineFactory:87` missing the permit-provider argument). `compileTestJava` then fails with 57 errors in 14 files: 25 on the vanished `AsyncPermitPool` type and its nested `Metrics`/`Permit`, 19 on the `RequestSenderOrchestrator` constructor's new argument 2, 4 on `scheduleRequestLifecycle` losing its permit-pool parameter, 3 on `TargetConnectionOwner`'s new constructor argument and the 4-argument `TargetExchange.execute`, 3 cascading. **[corrected]** |
+| Test compilation | **Green.** 108 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 as `ReplayerFixtureSelfTest` was promoted |
+| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 228 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 226 whole-file-marked ones. Run it after any marking change |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
-| File counts | `lifecycle/` holds **29** files (not 33), `tracing/` **16** (not 18), `kafka/` **14** (not 17), `testFixtures/` **21** (not 24). `src/main` totals 179 Java files |
+| File counts | One module. **340 files** under `TrafficCapture/trafficReplayer/src` (**327** Java); **228** carry `REBUILD-LIMBO` regions, of which **2** are partial — `TrafficReplayer` (8 regions) and `ReplayIdentity` (1). `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. The earlier "333 files / 232 marked" figures were measured differently; use the command, not the number |
 | `stash@{0}` | `09df7b9a4` — S6 pre-commit backup, redundant. Do not apply |
 | `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked. **Note:** the four G0 fixtures it was thought to hold already exist on the branch in `src/testFixtures` |
 | Other checkout | `/Users/schohn/dev/replayerCommitHardening` holds an earlier copy of the docs. This repo is authoritative |
@@ -162,6 +163,7 @@ plan is the bug.
 | Plan A §2.3, `testFixtures` rows | "Six `transformation/` modules consume it" raises the stakes on freezing the fixture API | True as a module count, but the **imported surface is three types**: `replay.TestCapturePacketToHttpHandler`, `replay.TestUtils`, `tracing.InstrumentationTest` (plus `tracing.TestContext` transitively). The other 17 fixture files have no external consumer, so the published-API constraint is far narrower than the row implies |
 | Plan A §9, row "Nine obsolete `ReplayIdentity` records" | Nine of twelve are obsolete | Eleven of twelve are, on shape. See the `ReplayIdentity` note above |
 | `replayerRebuildPlan.md` §7 and Plan A `G9` | A "deprecated parse-and-warn alias" set exists to be preserved | **No parse-and-warn adapter exists.** Every alias in `TrafficReplayer.java` is a live functional synonym; grep finds zero deprecation warnings. `--max-concurrent-requests`, `--lookaheadTimeSeconds`, `--quiescentPeriodMs`, and `--observedPacketConnectionTimeout` are all still load-bearing (consumed at `:482-489`, `:737`, `:839`, `:844`). So G9 *creates* that set rather than preserving it, and which options enter it is a red-line-2 decision |
+| Plan A `G0` **Exit**, clause 2 | "the dependency prohibition is proved by a failing build when violated" | **The prohibition it names was deleted by §2.1 on the same day.** §2.1 removed the two-module split along with `verifyReplayerModuleIsolation`, the check that was the failing build. The clause is a stale reference the §2.1 rewrite did not propagate to, and left as written G0 could never be closed. The property it was protecting — no second live correctness model — now holds structurally instead: marked code sits inside `/* */`, so javac never sees it. That is stronger than the check, since it cannot be satisfied by a passing build that simply never exercised the violation. Rewritten to name the mechanism that actually provides it, and `tools/verify-limbo-markers.sh` is the evidence |
 | Plan A §2.3, "Exit codes 80 and 89" → `ReplayProcessFatalHandlerTest` | — | Confirmed, with the real source: `ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED(80)` and `UNEXPECTED_FATAL_ERROR(89)` (`:17-26`), applied at `:190`; the 80-vs-89 classifier is the lambda at `TrafficReplayerTopLevel.java:287-289`, keyed on `RequestSenderOrchestrator.EventLoopTerminatedError`. `TrafficReplayer.java` itself produces only argument-validation codes 2, 3, and 4 |
 
 Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`):
@@ -171,11 +173,22 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
+## Deferral ledger — work moved between milestones
+
+The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
+owns each obligation, in both the deferring and receiving sections; this table states whether it is open.
+A deferral with no row here, or with no receiving milestone named in the plan, is dropped work.
+
+| Deferred | From | To | Why | State |
+|---|---|---|---|---|
+| `dump-http` and `dump-both` CLI modes, and the file-input dump path | G1 | G3 | HTTP transaction reconstruction is the legacy accumulator's job, whose closure is `ChannelContextManager` → `RootReplayerContext` → the `IReplayContexts` identity chain. Rebuilding that inside G1 is the lateral expansion `AGENTS.md` §6 forbids. G3 rebuilds source assembly, so the modes return there as that milestone's cheapest evidence. Mode names stay in the CLI (§2.3 contract); invoking them fails with a message naming G3 | open |
+| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G3 | Recorded in `TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` note as a G1 blocker. It is not one: with G1 scoped to Kafka, no file path is promoted, so nothing forces the answer yet. It must be settled when the file dump path returns | open |
+
 ## Named scaffolding — every row needs a removal milestone
 
 | Scaffold | Introduced | Removal | State |
 |---|---|---|---|
-| `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-OPEN src \| wc -l` is the count; **238 files** at G0 |
+| `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-START src \| wc -l` is the count; **238 files** at G0 |
 | The `REBUILD-LIMBO` note in the module's `build.gradle` | G0 | with the last region | open |
 
 Resolved and removed on 2026-09-23, recorded because they were previously tracked here: the
@@ -194,7 +207,7 @@ connected, **provided** the reason and the intended repair milestone are recorde
 |---|---|---|---|
 | `compileTestFixturesJava` — 4 errors in 2 files | `822abde4e` (S6b), **before** the G0 module move | `wontfix(G11)` unless the owner wants it sooner | `ActorRequestTestUtils` lines 12/42/55 still name `AsyncPermitPool`, and `ReplayEngineFactory:87` calls `RequestSenderOrchestrator` without the permit-provider argument. Repairing it is ~10 minutes of mechanical work **on a module scheduled for deletion**, which is the only reason it is not already done. Recommended default: leave it |
 | `compileTestJava` — 57 errors in 14 files | `822abde4e` (S6b) | `wontfix(G11)` | Cascades from the above plus the `RequestSenderOrchestrator` constructor change. Full enumeration is in the "Test compilation" row of Operational state |
-| `HttpByteBufFormatterTest` — 4 failures | pre-existing, first *observable* 2026-09-23 | `wontfix(environment)` | The directory's `.gitattributes` mandates `eol=crlf` but the blob stored at `822abde4e` already had LF, so the expectation could never have matched in this working tree. Not a regression from the categorization walk: they were unreachable before, because test compilation had been broken since S6b. Git reports "LF will be replaced by CRLF the next time Git touches it", so a fresh clone should pass — verify there before spending anything on it |
+| ~~`HttpByteBufFormatterTest` — 4 failures~~ | — | **resolved 2026-09-23, nothing to fix** | Proved to be a stale working tree, not a defect. A fresh `git worktree` passes **95/0**, with 41 CRLF lines in the fixture where the main checkout had 0 — git applies `eol=crlf` when it materializes files, and `git mv` does not. Refreshing the working copy made the main checkout pass too, and staging those refreshed files is a **no-op**: git normalizes straight back to an identical blob, so the stored bytes were always correct. Storing them as binary remains optional hardening, not a fix |
 | Test compilation for the **eight** redirected `transformation/` modules | `822abde4e` (S6b) — **not** caused by the G0 redirect | follows the two rows above | They consume the replayer's production and `testFixtures` jars, so they inherit the fixture break. Verified after the move: `:transformation:…:jsonTypeMappingsSanitizationTransformer:compileTestJava` fails at `compileTestFixturesJava` with the same 4 errors as before. The redirect preserved the pre-existing state exactly; it neither fixed nor worsened it. One incidental improvement: the break now lives in the module being deleted, so the **new** module's `testFixtures` start clean |
 
 The owner has accepted red CI for the duration (see "Branch and PR strategy"), so none of these gates work.
@@ -342,13 +355,14 @@ has to be replaced anyway.
 **Replacement:** owners take `io.netty.channel.EventLoop` directly, per the design sentence above, with
 `LongSupplier nanoTime` for time. No wrapper, no `ScheduledTask`.
 
-**One open implementation question this creates, for G0.** `TestEventLoop` currently implements `ActorMailbox`,
-a 4-method interface. Against a real `EventLoop` it must satisfy `EventLoop`/`EventLoopGroup`/
-`ScheduledExecutorService`, which is far wider, while still offering deterministic `runUntilIdle` / `runNext` /
-`advance`. Options: extend a Netty base (`SingleThreadEventLoop`, `AbstractScheduledEventExecutor`), or delegate
-to `EmbeddedChannel`'s loop, which `AGENTS.md` §4 already names as an established pattern and which is
-deterministic by construction. Reversible, so it proceeds on the `EmbeddedChannel`-based default unless vetoed —
-but it is the one real cost of this correction and the reason the mailbox looked convenient.
+**The open implementation question this created is now closed — see "`TestEventLoop` is a real Netty
+`EventLoop`" below.** For the record, the recommended default in this row was wrong and would not have compiled:
+`io.netty.channel.embedded.EmbeddedEventLoop` is **package-private** (`final class EmbeddedEventLoop`, no
+`public`), so it cannot be referenced, subclassed, or handed to an owner from our package, and it extends
+`AbstractScheduledEventExecutor` and reads `System.nanoTime()` anyway. `EmbeddedChannel.isCompatible` accepts
+only that loop, so the pattern `AGENTS.md` §4 names is self-contained to `EmbeddedChannel` and is not a source
+of injectable owner loops. The choice taken was the other listed option, narrowed: extend
+`AbstractEventExecutor` — Netty's *unscheduled* base — and keep the fixture's own clock-driven timer queue.
 
 **Adjacent audit, since the failure mode was systematic rather than specific to this type.** Re-checked every
 P9 row against its "design section assigning this responsibility" column: `ActorMailbox` and
@@ -480,6 +494,216 @@ Three ways to get this wrong, all of which end with someone deleting the asserti
 Owned by the milestone that owns commit authority (`G4`), with the rejected/unknown split landing in `G2`
 alongside the commit-submission rework, and asserted as an equation in `G10`/`G12` rather than read off a
 dashboard.
+
+## State at end of the 2026-09-23 session, and what comes next
+
+One module, in place, member-level marking. **340 files, 228 marked, 108 tests passing, build green.**
+**G0 is complete.**
+
+### Landed this session
+
+| Change | Commit |
+|---|---|
+| Carry-over discipline: member-level, marked in place, refactor-from-the-marks (`AGENTS.md` §8a) | `3aa4d61e7` |
+| Production categorization | `cb923a9fc` |
+| Test and fixture categorization | `83fad00a1` |
+| Plan A rewritten for one module; mainline-preservation rule added as §2.2a; renamed to `replayerRebuildPlanA-inPlace.md` | `7446721c6` |
+| Deleted provably-dead branch-added code — 6 files, 1,067 lines | `0093c38b4` |
+| Unified the marker on `START`/`END` | `71aa6ce76` |
+| `TestEventLoop` promoted to a real Netty `EventLoop`; `ReplayerFixtureSelfTest` partly promoted | `aa5461a10` |
+| `RecordScript` and `PumpedKafkaSource` on production types; G0 exit evidence; marking verifier | this commit |
+
+### Findings from the abandoned external-consumer walk
+
+Attempted, then stopped deliberately because it turned into a different milestone. Nothing committed; the
+worktree was discarded. What it established is worth keeping:
+
+- **Three of the five contract types are already live**: `AggregatedRawResponse`, `Utils`,
+  `TestCapturePacketToHttpHandler`. Only `HttpJsonTransformingConsumer` and `TestUtils` need promoting, and
+  both un-mark cleanly by themselves.
+- **But the closure reaches the legacy identity chain.** They require `IReplayContexts`, which welds in seven
+  members typed on `ISourceTrafficChannelKey`, `ITrafficStreamKey` and `UniqueReplayerRequestKey`; behind that
+  sits `SourceTargetCaptureTuple` → `ParsedHttpMessagesAsDicts` → `RequestResponsePacketPair` → `RawPackets`
+  → `UniqueSourceRequestKey`. **So the transform contract is not independent of G3** and must be sequenced
+  after the identity refactor, not before it. An earlier note calling it an early priority was reading the
+  import list rather than the closure behind it.
+- **None of the six promoted datahandlers uses any legacy-identity accessor** — they need only the interface
+  types and the metric methods. So marking those seven members is sufficient, and it was proven to compile.
+- **Partial promotion is validated.** `IReplayContexts` live with its legacy-typed members marked in place is
+  the first real member-level promotion and it worked. That is the pattern G2 and G3 will use repeatedly.
+
+### Two dependency gaps, found and not yet placed
+
+| Missing | Needed by | Note |
+|---|---|---|
+| `libs.jackson.databind` | `datahandlers/JsonAccumulator`, `JsonEmitter` | The incremental JSON parse/re-serialize path *is* the transformation pipeline, not an optional extra |
+| Guava | `datatypes/UniqueSourceRequestKey`, `RequestResponsePacketPair` | Both are legacy-identity-chain files; the need may disappear with the refactor |
+
+Add each when the code needing it is promoted, not speculatively.
+
+### `TestEventLoop` is a real Netty `EventLoop` — how, and the one thing it cannot do
+
+Promoted whole; the file carries no marked regions now. It **extends `AbstractEventExecutor`**, which is
+Netty's base *without* a scheduler, and implements `EventLoop`. The timer queue, `FakeClock`, `runNext`,
+`runUntilIdle`, `advance`, `pendingTasks`, `pendingTimers`, `dropAcceptedWork` and `rejectNewTasks` are the
+carried implementations. Deliberately **not** `AbstractScheduledEventExecutor`: its queue is keyed on
+`System.nanoTime()`, so timers would fire on wall clock and a test could not hold time still.
+`testEventLoopTimersFollowTheInjectedClockRatherThanWallClock` is the regression guard for exactly that, since
+a future agent reaching for the "obvious" Netty base is the likely way this gets undone.
+
+What changed from the carried code, and why:
+
+| Change | Reason |
+|---|---|
+| `implements ActorMailbox` → `extends AbstractEventExecutor implements EventLoop` | `connLLD §1:56` — owners are assigned to a Netty event loop, so the fixture must be one |
+| `inMailbox()` → `inEventLoop(Thread)`, true only while pumping **and** only for the pumping thread | Owner-affinity assertions use `inEventLoop()`; a fixture that returned true off-loop would satisfy the assertion that exists to forbid off-loop mutation |
+| `schedule` returns `ScheduledFuture<?>`, not `ActorMailbox.ScheduledTask`; cancelling it removes the timer from the queue | One cancellation vocabulary, and it keeps `pendingTimers()` an honest leak check |
+| `advance()` now re-drains timers that came due while earlier timers ran | A real loop never leaves an already-expired deadline pending. The carried version promoted once, so a zero-delay timer scheduled *inside* `advance` stayed pending with a deadline in the past. Bounded at 10,000 rounds so a self-rescheduling timer fails with a diagnosis instead of hanging |
+| `shutdown`/`isShutdown`/`isTerminated`/`terminationFuture` map onto the existing reject-and-drop flags; `awaitTermination` reports state without waiting | `connLLD §19.6` needs a loop that can die. Nothing may block: no other thread can advance this loop |
+| `schedule(Runnable, Duration)` still throws on a negative delay; the `(long, TimeUnit)` overloads clamp to zero | The first is the fixture's own stricter contract, worth keeping as a test-bug detector. The second must honour Netty's documented behaviour, because production code passes computed delays |
+
+**The limit: no real Netty channel can register to it.** `LocalChannel.isCompatible` requires
+`SingleThreadEventLoop`, `AbstractNioChannel.isCompatible` requires `NioEventLoop`, and
+`EmbeddedChannel.isCompatible` requires `EmbeddedEventLoop`, so every built-in channel fails registration
+against *any* custom `EventLoop` with `IllegalStateException: incompatible event loop type`. Becoming a
+`SingleThreadEventLoop` would reintroduce both the wall-clock scheduler and a real thread, so the fixture
+accepts the limit. **This costs nothing, by design:** target I/O reaches owners through `TargetChannelPort`
+(`connLLD §1`, `§8`: "the only interface through which request replay changes target-channel state"), not
+through a channel a test registered to the owner's loop.
+
+**What it means when writing a test.** No single test can have both deterministic time and a real socket.
+Choose a tier: deterministic time plus a fake `TargetChannelPort` for owner logic, ordering, timers and
+cancellation; or a real channel on a real `NioEventLoopGroup` with real time for integration. That is the
+split `AGENTS.md` §4 already draws between the implementation loop and confirmation, so no coverage is lost.
+
+**The trap, and why a pinning test alone did not close it.** `AGENTS.md` §4 listed
+`SimpleHttpServer`/`SimpleNettyHttpServer`, `LocalChannel`/`EmbeddedChannel`, and injected
+`TestEventLoop`/`FakeClock` in one sentence, reading like patterns that compose. Those two halves do **not**
+compose on one loop. A test that pins the constraint only helps someone who already went looking for it, and
+the owner asked the right question: *how will I remember?* You would not — and the failure was worse than
+"an opaque message," because Netty's incompatibility path calls `promise.setFailure` and **returns**. A test
+that does not inspect the returned `ChannelFuture` gets a channel that silently never registered, then hangs.
+No exception, no message, nothing pointing at the cause.
+
+So the constraint is now enforced at all three points where someone would pass through it:
+
+1. **`AGENTS.md` §4** names the two tiers explicitly, where the decision is made.
+2. **`TestEventLoop.register` throws** `UnsupportedOperationException` naming both alternatives, instead of
+   delegating to Netty's silent promise failure. Loud, at the responsible line, impossible to ignore.
+3. **`testEventLoopRefusesToHoldChannelsWithAMessageNamingTheAlternative`** asserts that it throws *and*
+   that the message still names `TargetChannelPort` and `NioEventLoopGroup`, so the guidance cannot rot
+   into a bare "unsupported".
+
+`ActorMailbox` and `NettyEventLoopActorMailbox` now have **zero live references** — every remaining mention is
+inside a marked region. They are not deleted yet: their dependents (`TargetConnectionOwner`,
+`RequestSenderOrchestrator`, `ReplayTransaction`, `OwnerTransitionRunner`, `ReplayTransactionRegistry`) are
+still marked, and deleting the interface now would make those regions harder to read during the refactor that
+resolves them. **Verdict: dead; delete with the last dependent.**
+
+One build change: `libs.netty.all` moved from `testFixturesImplementation` to `testFixturesApi`, because
+`TestEventLoop` exposes `EventLoop` and `ScheduledFuture` in its signatures — same reason
+`libs.kafka.clients` was already `api`.
+
+### `TrafficCapture/trafficReplayerLegacy` — deleted by the owner 2026-09-23
+
+It held 2,059 untracked files: no `.java` sources at all outside `build/`, only compiled classes and 33
+replayer run logs. Nothing tracked, absent from `settings.gradle`, so removing it did not affect the build
+(re-verified green afterwards). Recorded because it had already misled one walk — a bare `grep -r` over
+`TrafficCapture/` was reading its stale class files as if they were source. **There is now exactly one
+replayer directory, so a plain recursive grep over `TrafficCapture/` is safe again.**
+
+### The fixtures speak production types now, and that was the point of redoing them
+
+`RecordScript` and `PumpedKafkaSource` are live, and between them they dropped **nine duplicate type
+declarations** for the production ones that already existed: `PartitionGenerationId`,
+`PartitionBatchRequestId`, `RecordScript.RecordId`, `RecordScript.ScriptedRecord`, a private copy of the
+`KafkaSourceInput` family with its four variants, and `PartitionRecordBatch`. Every replacement was already
+declared and live — the identities in `replay/identity/`, `KafkaSourceInput` and `ApplicationKafkaRecord` in
+`kafkasource/`, and `ReplayIntakeInput.PartitionRecordBatch`, which matches the design's declaration at
+`kafkaLLD §5.5:318` exactly.
+
+Two of those copies were not merely redundant. The fixture's `CaptureProtocolViolationDetected` carried only
+a record id, silently dropping the `diagnostic` the real one requires — so a driver written against the
+fixture could not have implemented the diagnostic path at all. And `ScriptedRecord` was a parallel boundary
+type; the field a parallel type most easily loses is exactly `logAppendTimeMillis`, whose absence from the
+old intake boundary is defect **D-1**'s root. The script now emits `ApplicationKafkaRecord` itself, so a
+scripted batch goes straight into `PartitionRecordBatch` with no adapter that could drop a field.
+
+`RecordScript extends TrafficStreamGenerator` is gone. Every member of that class is `static`, so the
+`extends` inherited no behavior and `RecordScript` called none of it — it was decoration.
+
+What moved onto the script rather than the record: expected associations (test-supplied, so they must stay an
+independent oracle) and `WriterPartitionId` via `writerOf`, which also puts the eighth identity to work for
+the first time. A `PAYLOAD_NOT_SET` record has no envelope field to read a writer from, which is the concrete
+reason writer identity cannot live on the record.
+
+One API change: `RecordScript` takes an optional generation sequence (`new RecordScript(topic, 3)`) because
+`KafkaRecordId` is `(generation, offset)` and a script must therefore know its generation. Without it a
+script's record ids could not match the generation a test requested a batch for, and `RecordProcessingFinished`
+would route to the wrong generation.
+
+### G0 exit evidence
+
+`mixedScriptPumpsThroughWithExactBrokerTimestampsAndObservableTransitions` in `ReplayerFixtureSelfTest` is
+the mixed traffic/heartbeat/probe pump the milestone asks for. It asserts the whole transition history as an
+ordered list rather than counting events, which makes two required properties positional: the partition is
+paused **before** its batch is delivered, and three record completions submitted back to back produce **one**
+wakeup, not three (`kafkaLLD §17.4`). The commit is one contiguous-prefix commit computed after every input
+is drained, because commit authority belongs to the source alone (`kafkaLLD §4.2`).
+
+Exact broker timestamps survive the round trip: `1_700_000_000_000`, `+5s`, `+10s` are asserted on the
+delivered batch, not on the script.
+
+### Marking integrity is now checked, and checking it found two real tool bugs
+
+`tools/verify-limbo-markers.sh` is new and passes on all 228 marked files. `AGENTS.md` §8a already asserted
+that every marked file was "verified to round-trip byte-identically," but **no runnable check existed** —
+only the prose. Writing it exposed two defects in `unmark-limbo.awk`, both confined to partially-marked files,
+which is the member-level mode §8a calls primary:
+
+1. **Markers were anchored at column 0.** A member-level region is indented to its member, so the awk did not
+   recognise the markers in `TrafficReplayer` or `ReplayIdentity` at all and reconstructed them with every
+   marker still in place. Anchors now allow leading whitespace, and a `*/` counts as a region closer only
+   while a region is open — otherwise an indented javadoc closer, which looks identical at line start, would
+   be mistaken for one.
+2. **Per-region notes were emitted as code.** A member-level region carries a `//` note between its `START`
+   and its `/*` naming what blocks that member; the awk printed those notes into the reconstruction. They are
+   now dropped like the whole-file header.
+
+**And the byte-identical claim itself was false.** Marking pads each region with a blank line inside its
+delimiters, and that padding is *unguarded* — the blank before a mid-file `*/` is usually the blank that
+separated two members, so no rule can distinguish the marker's blank from the original's, and a heuristic
+that stripped it would lose real content. Recovery is therefore exact on code and approximate on blank lines;
+the verifier ignores blank lines and `AGENTS.md` §8a is corrected. This is §8a's own "never invent an ad-hoc
+escape without a guard" rule failing in miniature on the marker's own output, which is why it is recorded
+rather than quietly restated. Making it byte-exact would mean re-marking 228 files to guard the padding —
+not worth it, since no code line is at risk.
+
+### One marked file now references types that no longer exist
+
+`RecordAssociationAccumulatorTest` (whole-file marked, so inert and not a build problem) calls
+`RecordScript.RecordId` and a **four-argument** `KafkaRecordId(TOPIC, 0, 0, 0)` — a third shape of that
+identity, distinct from both the deleted fixture copy and the design's two-component
+`(generation, offset)`. Whoever promotes it rewires both to `replay/identity/KafkaRecordId`. Same status as
+the `ActorMailbox` dependents: a dangling reference inside a marked region is expected during the rebuild,
+and it is recorded rather than repaired so that promoting the file is the moment the decision gets made.
+
+### Stale note to fix in G3
+
+`ReplayIdentity.java`'s marked-region note says `UniqueReplayerRequestKey` "stays in
+`trafficReplayerLegacy`." There is no such module. The note predates the one-module collapse; its substance
+(that this adapter goes when its 18 callers move to `replay/identity/`) still holds.
+
+### Next
+
+**G0 is complete.** All four fixtures are live, their self-tests pass, and the exit evidence exists. G1 is
+next: reality contact — decode and dump a real topic, which promotes `runDumpMode` from
+`TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` region. That region's own note already records the open
+question G1 must settle first — the file source decodes bare base64 `TrafficStream` while Kafka decodes a
+`CaptureRecord` envelope, and G1 has to decide which format the file path speaks.
+
+Deferred by the owner, with reasons already recorded: the external-consumer contract (after G3), the
+`TrafficReplayer` wiring walk, and the DCO rewrite (post-G12).
 
 ## Standing rule: how to carry code so blame survives
 
