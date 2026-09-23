@@ -302,7 +302,13 @@ express `kafkaLLD §17:939-1005` and `connLLD §19:727-788`; fixture strategy
   `CancellationDeadline`. Exactly eight. None added to the capture protobuf.
 - Declare the named component types and sealed result types as empty shells or deliberately simplified
   implementations. This is the shells-first move: it is cheap precisely because nothing depends on them
-  yet.
+  yet. **Partly not delivered, and now deferred rather than owed here.** Six of the seven named types —
+  `PartitionIntakeState`, `ConnectionAdmissionEntry`, `TargetChannelPort`, `RequestPreparationResult`,
+  `RetryDecision`, `TupleWriteResult` — are absent from `main`. The cheapness this clause relied on has
+  expired: each type's shape is now decided by the milestone that gives it a consumer, so declaring an empty
+  shell first would fix a shape before the thing that constrains it exists. `PartitionIntakeState` goes to
+  `G3`, which already builds it; the connection and request types to `G5`; `TupleWriter`/`TupleWriteResult`
+  to `G9`. One ledger row each.
 - Build the four deterministic fixtures: `FakeClock`, `TestEventLoop` (`runUntilIdle`/`runNext`/
   `advance`), `RecordScript` emitting `CaptureRecord` sequences with explicit partition, offset,
   `LogAppendTime`, `writerNodeId`, and payload case, and `PumpedKafkaSource` driven only by the test
@@ -359,7 +365,13 @@ total-loss-of-function defect, and this is the milestone that retires it.
 trade-off, `§5.2` assignment, `§5.3` batch request and delivery, `§5.4` poll interruption and wakeup,
 `§5.5` poll-result registration, `§5.6` record-processing-finished, `§5.7` commit submission. Also
 `kafkaLLD §3:106-147`; `procCommit §5.1:518-651` and `§8:1048-1071`; `replayerLLD §2:75-94`.
-**Required tests: `kafkaLLD §17.4:970-994`** — nineteen cases, the densest list in the corpus.
+**Required tests: `kafkaLLD §17.4:983-1007`** — nineteen cases, the densest list in the corpus, and
+**shared with `G7`**. The section's title is its own partition: the Kafka half is G2's, the demand half is
+G7's, which cites the same section. G2 owns cases 7 (source-side), 8, 9, 10, 13, 15, 16, 17, 18 and 19.
+Cases 1–6, 11, 12, 14 and case 7's intake half need the `§13` supply count, `N = P * T_threads`, and the
+retry boundary — none of which exists before `G6`/`G7` — and are deferred to `G7` with a row each in the
+register's deferral ledger. Writing them here would mean standing up intake demand state inside G2, which is
+the lateral expansion §6 of `AGENTS.md` forbids.
 
 `KafkaSourceOwner`, `KafkaSourceInputQueue`, `PartitionSourceState`, `WakeupController`,
 `ObservedRecordCommitQueue` registration. Deferred, coalesced `wakeup()`, suppressed during rebalance
@@ -383,7 +395,11 @@ commits occur at all.
 **Exit:** proved against `PumpedKafkaSource` — a queued input wakes a long poll without interrupting a
 rebalance callback or another Kafka operation; one partition paused for cleanup does not stall
 unrelated partitions; a poll failure is fatal; and a commit attempted during revocation cannot hold the
-callback past the grace deadline. Covers `D5`, `D12`, `D16`; contributes `R3`, `R9`.
+callback past the grace deadline. Also `§17.4` case 18: a wakeup arriving between revocation and assignment
+postpones the assignment callback to a later poll without losing it. **Production startup does not construct
+the source here** — `runReplayMode` is marked `REBUILD-LIMBO(G9)` and `G9` wires it; per `AGENTS.md` §4 the
+register names G9 as the milestone that replaces the shell. Covers `D5`, `D12`, `D16`; contributes `R3`,
+`R9`.
 
 ### G3 — Replay intake owner and source assembly
 
@@ -399,6 +415,12 @@ observation is applied**, many per record, never rejecting a second association.
 source-response bytes stay associated through tuple durability. Source reconstruction is honest: a
 close-truncated response is never labelled `COMPLETE`, and an incomplete final response carries no
 partial bytes rendered as complete.
+
+**Deferred out of G3 to G5 — tracing for intake and source assembly.** `ChannelContextManager` carries the
+non-atomic refcount defect G5 already owns, and G3's own evidence — record accounting and source
+reconstruction — is provable without instrumentation. G5 repairs that defect and adds the contexts then.
+Everything else about observability in this milestone is unchanged; this names one component, not a licence to
+ship G3 uninstrumented.
 
 **Inherited from G1 — restore `dump-http` and `dump-both`.** G1 deferred them because HTTP transaction
 reconstruction was the legacy accumulator's job, and this is the milestone that rebuilds it. They belong
@@ -446,6 +468,18 @@ completion, `§11` final source response, `§12` tuple durability, `§13` reques
 activity monitoring. Also `procCommit §3.2:155-204`, `§3.4:226-279`, `§7:871-1047`.
 **Required tests: `connLLD §19.1-19.3:729-762`.**
 
+**Inherited from G3 — tracing for intake and source assembly**, deferred here because repairing
+`ChannelContextManager`'s non-atomic refcount is this milestone's work and G3 needed no instrumentation to
+prove record accounting. Add the intake and assembly contexts alongside that repair.
+
+**Inherited from G0 — the shells for `ConnectionAdmissionEntry`, `TargetChannelPort`,
+`RequestPreparationResult` and `RetryDecision`**, which G0 never declared. They arrive here as real types
+rather than shells, since this is the milestone that gives them consumers and therefore decides their shape.
+`RequestPreparationResult` is `connLLD §6`'s two cases and **only** those two: an unexpected preparation
+throw is process-fatal, not an outcome value. Strike `PreparationOutcome.Filtered` and `.Failed` from
+`ReplayOutcomes` as part of this — expected transformation fallback travels inside
+`RequestPreparationReady` via `HttpRequestTransformationStatus`.
+
 `TargetConnectionOwner` with separated admission and execution queues, `RequestReplayOwner`,
 `TargetChannelPort`, `TargetAttemptPermitProvider`, `TupleWriter`. Two milestones per request:
 `ConnectionTurnFinished` clears the turn, removes the execution entry, advances the head, and **keeps
@@ -458,8 +492,10 @@ no-response. Tuple output is unconditional and retried to durability.
 
 **Exit:** every admitted request produces at most one turn completion and at most one processing
 completion, and a normal completion produces both in order with the second after tuple durability; with
-the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits.
-Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
+the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits;
+**preparation has exactly the two outcomes `connLLD §6` names, and an unexpected preparation throw reaches
+the process-failure boundary rather than becoming a value**. Covers `D6`, `D7`, `D10`, `D17`; contributes
+`R2`, `R8`, `R10`.
 
 ### G6 — Retry boundary and broker-time expiration
 
@@ -492,7 +528,10 @@ trade-off stated once at `kafkaLLD §5.1:264-269`. The design writes this as `N 
 (`procCommit:1079`); this plan writes `T_threads` because the design also uses `T` for the
 first-traffic fallback timestamp (`captureArch §8.1`). Same rule; the `T_threads`/`T_first` convention is
 declared at `replayerRebuildPlan.md:91`.
-**Required tests: `kafkaLLD §17.4:970-994`.**
+**Required tests: `kafkaLLD §17.4:983-1007`**, shared with `G2`. **This milestone owns the demand half**:
+cases 1–6, 11, 12, 14 and the intake half of case 7, all deferred here from `G2` because they need the
+`§13` supply count, `N = P * T_threads`, and — for cases 3, 4 and 14 — the `G6` retry boundary. G2 proved
+the Kafka half. See the register's deferral ledger for the row behind each case.
 
 `RequestNextPartitionBatch` / `PartitionRecordBatch`, at most one outstanding request per partition
 generation, `N = P * T_threads` over requests with resolved retry input and unfinished target turns.
@@ -500,8 +539,10 @@ Empty polls neither resolve a request nor reach intake. No record or byte cap ex
 
 **Exit:** intake requests another batch only while retry-ready supply is below `N`; a fast complete
 response satisfies supply before `B + W`; a target-finished or cancelled request cannot re-enter supply;
-no cap can block the reads needed to reach retry or heartbeat evidence. Covers `D15` — the hard-cap
-deadlock cannot recur because no cap exists to saturate. Contributes `R4`, `R5`, `R7`, `R18`.
+no cap can block the reads needed to reach retry or heartbeat evidence; **intake enforces at most one
+outstanding batch request per generation on its own side, cannot request the next batch until the current
+one is fully applied, and a batch that overshoots `N` loses and reorders nothing**. Covers `D15` — the
+hard-cap deadlock cannot recur because no cap exists to saturate. Contributes `R4`, `R5`, `R7`, `R18`.
 
 ### G8 — Cancellation, generation cleanup, protocol violation
 
@@ -544,10 +585,19 @@ the intake fence; no unbounded doubling loop; no join on a group that may be dea
 config surface from previous-plan §7, including every deprecated parse-and-warn alias. Startup rejects
 `P < 1`, `T_threads < 1`, `W <= 0`, `E <= 0`, `S < 0`.
 
+**Inherited from G2 — constructing the Kafka source in the real startup path.** `runReplayMode` is marked
+`REBUILD-LIMBO(G9)`, so `KafkaSourceOwner`, `KafkaConsumerSourcePort`, the queues and the wakeup controller
+have no production construction site until this milestone un-marks it. `AGENTS.md` §4 permits that only
+while the register names the replacing milestone, which it does; this line is the other half.
+
+**Inherited from G0 — the shells for `TupleWriter` and `TupleWriteResult`**, which G0 never declared. The
+threading contract that must survive is in the register's `TupleWriter` row.
+
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
 dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
-behavioral effect, and does not fail as an unrecognized key. Covers `D13`, `D14`; contributes `R1`,
-`R19`.
+behavioral effect, and does not fail as an unrecognized key; **the replay path constructs the Kafka source
+owner and its port for real, so no replayer component remains unwired**. Covers `D13`, `D14`; contributes
+`R1`, `R19`.
 
 ### G9.5 — Full correctness review at production-complete
 
