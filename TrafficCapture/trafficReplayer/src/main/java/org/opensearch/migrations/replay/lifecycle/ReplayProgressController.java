@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ReplayReadGate SourcePartitionLifecycleListener . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Collection;
@@ -22,6 +33,8 @@ import lombok.NonNull;
 import lombok.Value;
 import lombok.experimental.Accessors;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * Controls how far replay intake may advance based on work already admitted for replay.
  *
@@ -50,6 +63,8 @@ import lombok.experimental.Accessors;
  * belong to the reconstruction, disposition-ledger, Kafka-source, and transaction components
  * described in {@code replayerProcessingAndCommitArchitecture.md}.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 public final class ReplayProgressController implements SourcePartitionLifecycleListener {
     public sealed interface Input extends ReplayIntakeInput permits
         PartitionsAssigned,
@@ -210,10 +225,14 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Advances only partitions that have no admitted work. Active work therefore freezes its
      * partition's contribution to the global minimum.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public void advanceIdlePartitions(@NonNull Instant replayClock) {
         ownerInputSink.accept(new IdlePartitionsAdvanced(replayClock));
     }
@@ -222,10 +241,14 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         return outstandingSnapshot.get() > 0;
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Completes the next time all admitted work has settled. Work admitted before that point joins
      * the same interval; work admitted after quiescence starts a new interval.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public CompletionStage<Void> whenQuiescent() {
         return quiescenceGate.get().stage();
     }
@@ -414,3 +437,6 @@ public final class ReplayProgressController implements SourcePartitionLifecycleL
         publish();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

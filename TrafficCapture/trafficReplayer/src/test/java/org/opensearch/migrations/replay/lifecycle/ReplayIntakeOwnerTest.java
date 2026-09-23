@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.EOFException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,7 +37,11 @@ import org.mockito.Mockito;
 class ReplayIntakeOwnerTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Proves R1: source inputs are applied in order on the dedicated replay-intake thread. */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void appliesWholeSourceBatchOnDedicatedOwnerThread() throws Exception {
         var fixture = new OwnerFixture();
@@ -60,7 +72,11 @@ class ReplayIntakeOwnerTest {
         fixture.stop();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Proves R19: an unexpected replay-intake transition reaches the process-fatal handler. */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void injectedOwnerFailureReachesProcessFatalHandler() throws Exception {
         var exitCode = new CompletableFuture<Integer>();
@@ -92,7 +108,11 @@ class ReplayIntakeOwnerTest {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Proves required input rejection is fatal rather than silently dropped. */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void rejectedRequiredSubmissionReachesFatalHandler() throws Exception {
         var failures = new ArrayList<Error>();
@@ -141,3 +161,6 @@ class ReplayIntakeOwnerTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

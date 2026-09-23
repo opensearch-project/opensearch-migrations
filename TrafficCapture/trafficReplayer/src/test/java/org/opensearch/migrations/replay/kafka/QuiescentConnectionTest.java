@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: IgnoringSourcePartitionLifecycleListener InstrumentationTest . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -24,18 +35,26 @@ import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Unit tests for quiescent period tagging on resumed connections.
  */
+// REBUILD-LIMBO-START(G10)
+/*
 class QuiescentConnectionTest extends InstrumentationTest {
 
     private static final String TOPIC = "test-topic";
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * A stream for a connection NOT in the active set and NOT starting with a READ observation
      * (i.e., another replayer was mid-connection) must be tagged with a non-null quiescentUntil.
      * Before fix: isResumedConnection() always returns null.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @SneakyThrows
     void resumedConnection_taggedWithQuiescentUntil() throws Exception {
@@ -74,10 +93,14 @@ class QuiescentConnectionTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * A stream starting with a READ observation for a new connection must NOT be tagged
      * (it's a fresh connection, not a resumed).
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @SneakyThrows
     void freshConnection_notTaggedWithQuiescentUntil() throws Exception {
@@ -116,3 +139,6 @@ class QuiescentConnectionTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

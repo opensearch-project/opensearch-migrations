@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: BlockingTrafficSource CapturedTrafficToHttpTransactionAccumulator ClientConnectionPool IRootReplayerContext NettyPacketToHttpConsumer . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.net.URI;
 import java.time.Duration;
 import java.util.Arrays;
@@ -66,12 +77,20 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
     private final AtomicReference<ReplayEngine> currentReplayEngine = new AtomicReference<>();
 
+*/
+// REBUILD-LIMBO-END(G5)
     /** Returns the current accumulator, or null if not yet initialized. */
+// REBUILD-LIMBO-START(G5)
+/*
     public CapturedTrafficToHttpTransactionAccumulator getCurrentAccumulator() {
         return currentAccumulator.get();
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /** Returns the current replay engine, or null if not yet initialized. */
+// REBUILD-LIMBO-START(G5)
+/*
     public ReplayEngine getCurrentReplayEngine() {
         return currentReplayEngine.get();
     }
@@ -247,7 +266,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /** Legacy overload: uses the old synchronous Consumer-based tuple path (Log4J). */
+// REBUILD-LIMBO-START(G5)
+/*
     public void setupRunAndWaitForReplayToFinish(
         Duration observedPacketConnectionTimeout,
         Duration targetServerResponseTimeout,
@@ -394,6 +417,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Called after the TrafficReplayer has finished accumulating and reconstructing every transaction from
      * the incoming stream.  This implementation will NOT wait for the ReplayEngine independently to complete,
@@ -404,6 +429,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
      * @param trafficToHttpTransactionAccumulator The accumulator that had reconstructed the incoming records and
      *                                            has now finished
      */
+// REBUILD-LIMBO-START(G5)
+/*
     protected void wrapUpWorkAndEmitSummary(
         ReplayEngine replayEngine,
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator
@@ -456,7 +483,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /** Legacy overload: uses the old synchronous Consumer-based tuple path (Log4J). */
+// REBUILD-LIMBO-START(G5)
+/*
     public void setupRunAndWaitForReplayWithShutdownChecks(
         Duration observedPacketConnectionTimeout,
         Duration targetServerResponseTimeout,
@@ -807,10 +838,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         DONE
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * A shutdown that cannot finish is otherwise silent, which leaves nothing to diagnose from. Name
      * the stage that hasn't finished along with the work it is still waiting on.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     private void reportShutdownProgressUntilComplete(
         AtomicReference<ShutdownStage> stage,
         CompletableFuture<Void> completion,
@@ -934,3 +969,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         shutdown(null).get();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

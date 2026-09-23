@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: AccumulationCallbacks CapturedTrafficToHttpTransactionAccumulator ChannelContextManager HttpMessageAndTimestamp InstrumentationTest . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,11 +41,15 @@ import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Verifies that stale per-connection state (ChannelContextManager and
  * CapturedTrafficToHttpTransactionAccumulator) is discarded when a Kafka partition
  * is revoked and reassigned (detected via a generation bump on the ITrafficStreamKey).
  */
+// REBUILD-LIMBO-START(G10)
+/*
 public class PartitionRevocationStaleStateTest extends InstrumentationTest {
 
     @Override
@@ -46,10 +61,14 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
     // ChannelContextManager tests
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * When the same connectionId arrives with a higher generation, the old context
      * must be replaced (and force-closed) rather than reused.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void channelContextManager_staleContextReplacedOnGenerationBump() {
         var mgr = new ChannelContextManager(rootContext);
@@ -64,9 +83,13 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
             "A new context must be created when the generation increases");
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Same generation → same context object is returned (existing behaviour preserved).
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void channelContextManager_sameGenerationReturnsSameContext() {
         var mgr = new ChannelContextManager(rootContext);
@@ -85,6 +108,8 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
     // CapturedTrafficToHttpTransactionAccumulator tests
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * When a traffic stream arrives for a connection that already has an accumulation
      * from a lower generation, the old accumulation must be discarded via
@@ -93,6 +118,8 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
      * channel session is marked cancelled and won't self-heal when the re-delivered
      * Kafka records (post-rebalance fetch-position reset) create a fresh accumulation.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void accumulator_staleAccumulationDiscardedOnGenerationBump() {
         var expiredStatuses = new ArrayList<RequestResponsePacketPair.ReconstructionStatus>();
@@ -156,9 +183,13 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
                 "channel session is cancelled and won't self-heal");
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Same generation → accumulation is reused, no spurious expiry fired.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void accumulator_sameGenerationReusesAccumulation() {
         var expiredCount = new AtomicInteger();
@@ -278,11 +309,15 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
     // Phase 4: Synthetic close events
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * TrafficSourceReaderInterruptedClose fed to the accumulator must fire
      * onConnectionClose with ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED.
      * Before fix: accumulator doesn't handle this type — no onConnectionClose fires.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void accumulatorHandlesTrafficSourceReaderInterruptedClose() {
         var capturedStatus = new AtomicReference<RequestResponsePacketPair.ReconstructionStatus>();
@@ -332,3 +367,6 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
         );
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.e2etests;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: LocalStackContainer S3Client . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -54,6 +65,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.S3Object;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * End-to-end process-level test for the replayer's S3 tuple sink shutdown behavior.
  *
@@ -78,6 +91,8 @@ import software.amazon.awssdk.services.s3.model.S3Object;
  *
  * <p>Launched as a subprocess so JVM-exit is a real assertion.</p>
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("isolatedTest")
@@ -344,3 +359,6 @@ public class ReplayerProcessExitTest {
         return process;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

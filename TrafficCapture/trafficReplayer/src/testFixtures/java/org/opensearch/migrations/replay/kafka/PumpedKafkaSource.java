@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -22,6 +30,8 @@ import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 
 import org.apache.kafka.common.TopicPartition;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Deterministic Kafka-source harness driven only by explicit {@link #runOnce()} calls.
  *
@@ -29,6 +39,8 @@ import org.apache.kafka.common.TopicPartition;
  * transitions. S8 can connect the production Kafka-source owner through that driver without
  * rewriting record scripts or observation assertions.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public final class PumpedKafkaSource {
     public record PartitionGenerationId(TopicPartition topicPartition, long localSequence) {
         public PartitionGenerationId {
@@ -254,3 +266,6 @@ public final class PumpedKafkaSource {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

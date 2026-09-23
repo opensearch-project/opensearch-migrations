@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +41,8 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.event.Level;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * The BlockingTrafficSource class implements ITrafficCaptureSource and wraps another instance.
  * It keeps track of a couple Instants for the last timestamp from a TrafficStreamObservation
@@ -43,15 +56,21 @@ import org.slf4j.event.Level;
  * and independently for one caller to call readNextTrafficStreamChunk() and to wait for the result
  * to complete before another caller calls it again.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlowController {
 
     private final ISimpleTrafficCaptureSource underlyingSource;
     private final AtomicReference<Instant> lastTimestampSecondsRef;
     private final AtomicReference<Instant> stopReadingAtRef;
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Limit the number of readers to one at a time and only if we haven't yet maxed out our time buffer
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private final Semaphore readGate;
     @Getter
     private final Duration bufferTimeWindow;
@@ -73,10 +92,14 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Moves the current high-watermark to the supplied exact source-time frontier.
      * @param pointInTime
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Override
     public void stopReadsPast(Instant pointInTime) {
         var prospectiveBarrier = pointInTime;
@@ -97,10 +120,14 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
     ) {
@@ -132,6 +159,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         });
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * This could be rewritten as a fully asynchronous function that uses times, but for a single
      * thread in the application, it isn't worth it.  It's also easier to debug the state machine
@@ -139,6 +168,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * @param readContext
      * @return
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
         if (stopReadingAtRef.get().equals(Instant.EPOCH)
             && underlyingSource.isReadCapacityAvailable()) {
@@ -302,3 +333,6 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
             .toString();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

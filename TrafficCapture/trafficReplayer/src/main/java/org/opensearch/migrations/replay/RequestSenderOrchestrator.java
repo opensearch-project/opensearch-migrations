@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ActorMailbox ClientConnectionPool ConnectionReplaySession NettyEventLoopActorMailbox ReplayTransaction . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -70,6 +81,8 @@ import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * Owns the per-connection actor runtimes that prepare, order, send, retry, and close target traffic.
  * Request and close admission occurs before asynchronous preparation, so the actor's FIFO is the
@@ -87,6 +100,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  *
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class RequestSenderOrchestrator {
     public record ScheduledClose(
@@ -142,6 +157,8 @@ public class RequestSenderOrchestrator {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Notice that the two arguments need to be in agreement with each other.  The clientConnectionPool will need to
      * be able to create/return ConnectionReplaySession objects with Channels (or, to be more exact, ChannelFutures
@@ -151,6 +168,8 @@ public class RequestSenderOrchestrator {
      * @param clientConnectionPool
      * @param packetConsumerFactory
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
         TargetAttemptPermitProvider permitProvider,
@@ -443,11 +462,15 @@ public class RequestSenderOrchestrator {
             acknowledgeSourceTermination(outcome);
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
         /**
          * Every terminal path has to drop the runtime, not just the successful one.  A retained entry
          * would keep the session in shutdown's set of live actors forever and would shadow any later
          * session that reuses the key.
          */
+// REBUILD-LIMBO-START(G5)
+/*
         private void settleTermination(SessionOutcome outcome) {
             actorRuntimes.remove(key, this);
             terminationOwner.complete(outcome);
@@ -2066,11 +2089,15 @@ public class RequestSenderOrchestrator {
     }
 
     public interface RetryVisitor<T> extends AutoCloseable {
+*/
+// REBUILD-LIMBO-END(G5)
         /**
          * Return null to continue trying according to
          * @param arr
          * @return
          */
+// REBUILD-LIMBO-START(G5)
+/*
         TrackedFuture<String,DeterminedTransformedResponse<T>>
         visit(
             ByteBuf requestBytes,
@@ -2347,7 +2374,11 @@ public class RequestSenderOrchestrator {
         return shutdown.completion.minimalCompletionStage();
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /** Connection sessions whose actor has not reached termination, for shutdown diagnostics. */
+// REBUILD-LIMBO-START(G5)
+/*
     public Set<String> describeUnterminatedSessions() {
         return actorRuntimes.values().stream()
             .filter(runtime -> !runtime.terminationOwner.isDone())
@@ -2558,3 +2589,6 @@ public class RequestSenderOrchestrator {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

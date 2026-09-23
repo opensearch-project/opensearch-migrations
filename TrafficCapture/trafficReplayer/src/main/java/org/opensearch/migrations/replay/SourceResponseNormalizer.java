@@ -1,8 +1,21 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: HttpMessageAndTimestamp . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * Removes complete informational responses that precede a captured source response.
  *
@@ -10,6 +23,8 @@ import java.util.Arrays;
  * responses in front of the terminal response. Downstream source-status classification must see
  * the terminal response rather than the first {@code 1xx} status.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 final class SourceResponseNormalizer {
     private static final byte[] HTTP_PREFIX = "HTTP/".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
 
@@ -142,3 +157,6 @@ final class SourceResponseNormalizer {
         return true;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

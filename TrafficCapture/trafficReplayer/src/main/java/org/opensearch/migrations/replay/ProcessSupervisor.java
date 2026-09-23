@@ -8,12 +8,22 @@
 
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.PrintStream;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Objects;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Runs the controlled process-failure ladder.
  *
@@ -21,6 +31,8 @@ import java.util.Objects;
  * opportunity to finish. If they do not, the watchdog writes a thread dump and terminates through
  * {@link Runtime#halt(int)} with the same reason-specific exit code.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public final class ProcessSupervisor implements ReplayProcessFatalHandler.ProcessTerminator {
     public static final Duration EXIT_WATCHDOG_LIMIT = Duration.ofMinutes(10);
 
@@ -144,3 +156,6 @@ public final class ProcessSupervisor implements ReplayProcessFatalHandler.Proces
             });
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

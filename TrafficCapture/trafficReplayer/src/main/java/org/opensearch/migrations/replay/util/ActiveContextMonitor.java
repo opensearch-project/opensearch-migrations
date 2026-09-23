@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.util;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: OrderedWorkerTracker . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -119,10 +130,14 @@ public class ActiveContextMonitor implements Runnable {
         setAgeToLevelMap(levelShowsAgeOlderThanMap);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Supply new level-age edge values and convert them into the internal data structure for this class to use.
      * @param levelShowsAgeOlderThanMap
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public void setAgeToLevelMap(Map<Level, Duration> levelShowsAgeOlderThanMap) {
         ageToLevelEdgeMapRef.set(
             new TreeMap<>(
@@ -164,10 +179,14 @@ public class ActiveContextMonitor implements Runnable {
         java.util.Map.entry("waitForNextBackPressureCheck", Duration.ofSeconds(30))
     );
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Emit a compact one-line summary to the main log. Long-lived types are gauge counts;
      * ephemeral types that exceed their expected max age are listed with parent chain.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     @SuppressWarnings("unchecked")
     public void logCompactSummary() {
         var sb = new StringBuilder();
@@ -242,10 +261,14 @@ public class ActiveContextMonitor implements Runnable {
         return Duration.ofNanos(System.nanoTime() - recordedNanoTime);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Try to print out the most valuable details at the end, assuming that a user is tailing a file that's
      * constantly being appended, and therefore could be harder to home in on the start of a block.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public void logTopOpenActivities(boolean dedupCommonTraces) {
         logRequests().ifPresent(ll -> logger.accept(ll, () -> "\n"));
         logScopes(dedupCommonTraces);
@@ -508,3 +531,6 @@ public class ActiveContextMonitor implements Runnable {
         logTopOpenActivities(true);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

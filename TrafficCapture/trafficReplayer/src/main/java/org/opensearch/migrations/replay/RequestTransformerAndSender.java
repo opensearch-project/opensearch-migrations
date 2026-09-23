@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: IReplayContexts ReplayEngine RequestResponsePacketPair . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Consumer;
@@ -69,15 +80,25 @@ public class RequestTransformerAndSender<T> {
         };
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Do nothing but give subclasses the opportunity to do more.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
-        /* only present for extension purposes */
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-LIMBO-ESCAPED-LINE(G5):         /* only present for extension purposes */
+// REBUILD-LIMBO-START(G5)
+/*
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Take a source request and transform it (on the work thread that we'll also SEND the transformed
      * request).  If an exception happens during transformation, the returned TrackedFuture will have
@@ -95,6 +116,8 @@ public class RequestTransformerAndSender<T> {
      * will NOT be included as responses since that's independent of the outgoing request (since bytes
      * hadn't begun to be sent).
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public TrackedFuture<String, T> transformAndSendRequest(
         PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
         ReplayEngine replayEngine,
@@ -170,3 +193,6 @@ public class RequestTransformerAndSender<T> {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

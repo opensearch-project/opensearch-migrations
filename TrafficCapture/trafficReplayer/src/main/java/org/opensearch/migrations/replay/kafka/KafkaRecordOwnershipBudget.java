@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -8,9 +19,13 @@ import lombok.NonNull;
 import lombok.Value;
 import lombok.experimental.Accessors;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Owns the hard record and byte limits for Kafka records accepted by this consumer generation.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 final class KafkaRecordOwnershipBudget {
     @Value
     @Accessors(fluent = true)
@@ -180,3 +195,6 @@ final class KafkaRecordOwnershipBudget {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

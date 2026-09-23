@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.http.retries;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ByteBufferFeeder IRequestResponsePacketPair JsonParser JsonToken RequestSenderOrchestrator . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.IOException;
 import java.util.LinkedHashSet;
 import java.util.Optional;
@@ -45,11 +56,23 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     }
 
     public enum BulkResponseAnalysis {
+*/
+// REBUILD-LIMBO-END(G5)
         /** No errors at all */
+// REBUILD-LIMBO-START(G5)
+/*
         NO_ERRORS,
+*/
+// REBUILD-LIMBO-END(G5)
         /** Has errors, but at least one is retryable */
+// REBUILD-LIMBO-START(G5)
+/*
         HAS_RETRYABLE_ERRORS,
+*/
+// REBUILD-LIMBO-END(G5)
         /** Has errors, but ALL are non-retryable */
+// REBUILD-LIMBO-START(G5)
+/*
         ONLY_NON_RETRYABLE_ERRORS
     }
 
@@ -60,11 +83,15 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         Set<String> errorTypes;
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Streaming JSON analyzer that processes bulk response chunks as they arrive.
      * Uses Jackson's non-blocking parser to avoid buffering the entire response body.
      * Short-circuits as soon as a determination can be made (e.g. "errors":false).
      */
+// REBUILD-LIMBO-START(G5)
+/*
     static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
         private final JsonParser parser;
         private final ByteBufferFeeder feeder;
@@ -300,3 +327,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

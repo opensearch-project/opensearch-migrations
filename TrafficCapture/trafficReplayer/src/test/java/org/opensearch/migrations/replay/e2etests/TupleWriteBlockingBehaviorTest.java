@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.e2etests;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ArrayCursorTrafficSourceContext InstrumentationTest ReplayProcessFatalHandler RootReplayerConstructorExtensions TupleSink . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -44,6 +55,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Verifies that the ThreadLocalTupleWriter architecture correctly:
  * <ol>
@@ -51,16 +64,22 @@ import org.junit.jupiter.api.Timeout;
  *   <li>Does NOT block subsequent requests while tuple writes are pending</li>
  * </ol>
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
 
     private static final int NUM_REQUESTS = 3;
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * A TupleSink that holds futures without completing them until explicitly released.
      * This lets us observe whether offset commits are gated on future completion.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     static class LatchedTupleSink implements TupleSink {
         final List<CompletableFuture<Void>> heldFutures = Collections.synchronizedList(new ArrayList<>());
         final CountDownLatch allAccepted;
@@ -140,6 +159,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         return tsb.build();
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Verifies that offset commits are blocked until tuple futures complete.
      *
@@ -150,6 +171,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
      * method-level {@code @Timeout} and the {@link #awaitCursorAdvance} safety net —
      * no tight inner deadline depends on CI scheduling fairness.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     public void tupleWriteBlocksOffsetCommit() throws Throwable {
@@ -224,6 +247,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Verifies that subsequent requests on the same connection are NOT blocked
      * while tuple writes are pending.
@@ -234,6 +259,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
      * {@code await()} relies on the method-level {@code @Timeout} as the upper bound
      * rather than picking a number that has to absorb cold-JVM and CI-scheduling jitter.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     public void tupleWriteDoesNotBlockNextRequest() throws Throwable {
@@ -292,11 +319,15 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Polls a signal the production code controls — the commit cursor — until it
      * reaches the expected value. Deadline-bounded so a real hang fails the test
      * rather than tying up the CI runner.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static void awaitCursorAdvance(
             ArrayCursorTrafficSourceContext ctx, int target, Duration deadline)
             throws InterruptedException {
@@ -398,3 +429,6 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         );
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

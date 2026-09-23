@@ -8,11 +8,21 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 
 import lombok.NonNull;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Runs required owner transitions on one mailbox and converts rejected or impossible transitions
  * into process-fatal failures.
@@ -21,6 +31,8 @@ import lombok.NonNull;
  * mailbox reports the process-fatal failure without mutating owner state from the submitting
  * thread.</p>
  */
+// REBUILD-LIMBO-START(G11)
+/*
 final class OwnerTransitionRunner {
     private final ActorMailbox mailbox;
     private final OwnerThreadGuard ownerThreadGuard;
@@ -107,12 +119,16 @@ final class OwnerTransitionRunner {
         ));
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Reports an asynchronous cleanup failure without mutating the owner-confined fatal latch.
      *
      * <p>Completion callbacks may run either inline in the owner mailbox or on arbitrary threads
      * after the mailbox is unavailable, so this path cannot infer or change owner state.</p>
      */
+// REBUILD-LIMBO-START(G11)
+/*
     void reportCleanupFailure(String operation, Throwable cause) {
         fatalHandler.accept(new Error(
             "Connection-owner cleanup failed during "
@@ -200,3 +216,6 @@ final class OwnerTransitionRunner {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

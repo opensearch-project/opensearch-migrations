@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: AccumulationCallbacks CapturedTrafficToHttpTransactionAccumulator HttpMessageAndTimestamp InstrumentationTest IReplayContexts . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -40,6 +51,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Real-Kafka regression test for the "Stale accumulation found" production failure.
  *
@@ -71,6 +84,8 @@ import org.testcontainers.kafka.ConfluentKafkaContainer;
  * {@code MockConsumer}) by validating the same behavior against the real Kafka client's
  * rebalance machinery.
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("isolatedTest")
@@ -81,11 +96,15 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
     private static final String NODE_ID = "node1";
     private static final String CONN_ID = "conn-mid-flight";
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Short enough that we can deliberately exceed it to force a fence + rejoin, but above the
      * broker's {@code group.min.session.timeout.ms} (default 6000ms in Confluent) since we set
      * {@code session.timeout.ms} to a value just under {@code MAX_POLL_INTERVAL_MS} below.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static final long MAX_POLL_INTERVAL_MS = 8_000;
     private static final long SESSION_TIMEOUT_MS = 7_000;
 
@@ -238,6 +257,8 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Drains traffic streams from the source and feeds them into the accumulator. Returns when
      * a record matching {@code targetConnId} has been observed at least once. Bounds the work by
@@ -246,6 +267,8 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
      * @return the {@link ITrafficStreamWithKey} for the first matching record (caller can read
      *         {@code getKey().getSourceGeneration()} from it).
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private ITrafficStreamWithKey drainUntilFoundConnId(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator,
@@ -269,11 +292,15 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
             + " after " + maxAttempts + " polls");
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Drains traffic streams and returns the cumulative ordered list once we've seen BOTH a
      * synthetic close for {@code targetConnId} AND a real (non-synthetic) record for it. Bounded
      * by {@code maxAttempts}.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private List<ITrafficStreamWithKey> drainUntilSyntheticAndConnIdSeen(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator,
@@ -373,3 +400,6 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
         log.atInfo().setMessage("Produced record offset={} conn={}").addArgument(offset).addArgument(CONN_ID).log();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

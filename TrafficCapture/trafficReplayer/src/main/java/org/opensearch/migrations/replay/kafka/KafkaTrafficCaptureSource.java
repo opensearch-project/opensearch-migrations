@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ChannelContextManager ISimpleTrafficCaptureSource ITrafficSourceContexts ITrafficStreamKey KafkaCaptureControlRecord . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G2)
+/*
+
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,6 +71,8 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 
+*/
+// REBUILD-LIMBO-END(G2)
 /**
  * Adapt a Kafka stream into a TrafficCaptureSource.
  *
@@ -86,6 +99,8 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
  * simply run a background job to keep the client warm.  We need the caller to touch
  * this object periodically to keep the connection alive.
  */
+// REBUILD-LIMBO-START(G2)
+/*
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public record CaptureRecordCounters(long traffic, long heartbeats, long capabilityProbes) {}
@@ -109,10 +124,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     // overridden — the value is exposed through a method so subclass intent is honored).
     public static final String DEFAULT_POLL_INTERVAL_MS = "300000";
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Default value for {@code max.poll.interval.ms} when no operator-supplied properties file
      * sets it. Subclasses may override to vary the broker-enforced fence threshold.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     protected static String defaultPollIntervalMs() {
         return DEFAULT_POLL_INTERVAL_MS;
     }
@@ -132,14 +151,22 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final AtomicBoolean isClosed;
     private final ConcurrentHashMap<KafkaRecordId, ITrafficStreamKey> observedRecordContexts =
         new ConcurrentHashMap<>();
+*/
+// REBUILD-LIMBO-END(G2)
     /** Active connections per Kafka partition. Entries removed when connections are closed */
+// REBUILD-LIMBO-START(G2)
+/*
     final ConcurrentHashMap<Integer, Set<ScopedConnectionIdKey>> partitionToActiveConnections =
         new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ScopedConnectionIdKey, SourcePartitionKey> activeConnectionSourcePartitions =
         new ConcurrentHashMap<>();
     private final Set<SourcePartitionKey> retiringSourcePartitions = ConcurrentHashMap.newKeySet();
+*/
+// REBUILD-LIMBO-END(G2)
     /** Batches of synthetic close events to drain before returning real Kafka records.
      *  Each entry is one batch from a single partition-revocation event. */
+// REBUILD-LIMBO-START(G2)
+/*
     private final Queue<List<TrafficSourceReaderInterruptedClose>> trafficSourceReaderInterruptedCloseQueue = new ConcurrentLinkedQueue<>();
     static final class SessionTerminationObligation {
         private final int partition;
@@ -408,10 +435,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         channelContextManager.releaseContextFor(kafkaCtx.getImmediateEnclosingScope());
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Called by the accumulator when a connection is fully done (closed or expired).
      * Removes the connection from partitionToActiveConnections so the map doesn't grow unboundedly.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     @Override
     public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
         var connKey = new ScopedConnectionIdKey(trafficStreamKey.getNodeId(), trafficStreamKey.getConnectionId());
@@ -539,11 +570,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         CompletableFuture.runAsync(() -> trackingKafkaConsumer.touch(context), kafkaExecutor).get();
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * If messages are outstanding, we need to keep the connection alive, otherwise, there's no
      * reason to.  It's OK to fall out of the group and rejoin once ready.
      * @return
      */
+// REBUILD-LIMBO-START(G2)
+/*
     @Override
     public Optional<Instant> getNextRequiredTouch() {
         return trackingKafkaConsumer.getNextRequiredTouch();
@@ -871,10 +906,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         trackingKafkaConsumer.setSourcePartitionLifecycleListener(listener);
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Log a periodic heartbeat summarizing the Kafka consumer state.
      * Safe to call from any thread — uses only atomic reads and synchronized blocks.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     @Override
     public void logHeartbeat() {
         trackingKafkaConsumer.logHeartbeat();
@@ -910,3 +949,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G2)

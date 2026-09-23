@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -12,10 +23,14 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Tests for expiry bugs where connections become orphaned in the ExpiringTrafficStreamMap
  * and are never expired despite being older than the timeout.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 class ExpiringTrafficStreamMapOrphanTest extends InstrumentationTest {
 
     private static final String NODE_ID = "test_node";
@@ -66,6 +81,8 @@ class ExpiringTrafficStreamMapOrphanTest extends InstrumentationTest {
         Assertions.assertTrue(expired.contains("connVictim"), "connVictim should be expired");
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Mid-operation sweep orphans connection into older bucket.
      *
@@ -81,6 +98,8 @@ class ExpiringTrafficStreamMapOrphanTest extends InstrumentationTest {
      *
      * The fix: don't delete buckets that still have live (unexpired) entries.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void testConnectionNotOrphanedByMidOperationSweep() {
         var expired = new ArrayList<String>();
@@ -128,3 +147,6 @@ class ExpiringTrafficStreamMapOrphanTest extends InstrumentationTest {
             "connIdle should eventually be expired — must not be orphaned");
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

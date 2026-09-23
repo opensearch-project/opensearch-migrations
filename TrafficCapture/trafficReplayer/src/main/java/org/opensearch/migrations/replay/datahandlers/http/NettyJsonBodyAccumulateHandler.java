@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: IReplayContexts . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -30,6 +41,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.event.Level;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * This accumulates HttpContent messages through a JsonAccumulator and eventually fires off a
  * fully parsed json object as parsed by the JsonAccumulator (not by a signal that end of content
@@ -38,6 +51,8 @@ import org.slf4j.event.Level;
  * This handler currently has undefined behavior if multiple json objects are within the stream of
  * HttpContent messages.  This will also NOT fire a
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter {
 
@@ -220,3 +235,6 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         return params;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

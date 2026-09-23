@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: IReplayContexts PacketConsumerFactory . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
@@ -14,6 +25,8 @@ import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
 
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * Factory for creating packet consumers that transform HTTP content using a per-thread {@link IJsonTransformer}.
  * <p>
@@ -23,6 +36,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>
  * Failure to call {@code close()} may result in delayed cleanup in long-lived thread pools.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class PacketToTransformingHttpHandlerFactory
     implements PacketConsumerFactory<TransformedOutputAndResult<ByteBufListProducer>>, AutoCloseable {
@@ -58,3 +73,6 @@ public class PacketToTransformingHttpHandlerFactory
         threadSafeTransformer.close();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.traffic.expiration;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
@@ -12,6 +23,8 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * This object manages the lifecycle of Accumulation objects, creating new ones and expiring old entries.
  * Callers are expected to modify the Accumulation values themselves, but to proxy every distinct interaction
@@ -35,6 +48,8 @@ import lombok.extern.slf4j.Slf4j;
  * from the collections while they're still in use since this doesn't have visibility into how items are used.
  * Requiring collection items to have atomically updated refCounts would mitigate that situation.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class ExpiringTrafficStreamMap {
 
@@ -68,9 +83,13 @@ public class ExpiringTrafficStreamMap {
         return newConnectionCounter.get();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * @return false if the expiration couldn't be updated because the item was already expired.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private boolean updateExpirationTrackers(
         ITrafficStreamKey trafficStreamKey,
         EpochMillis observedTimestampMillis,
@@ -216,3 +235,6 @@ public class ExpiringTrafficStreamMap {
         // leave everything else fall aside, like we do for remove()
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

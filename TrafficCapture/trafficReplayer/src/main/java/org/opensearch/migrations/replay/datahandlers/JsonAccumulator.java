@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ByteBufferFeeder JsonParser . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
@@ -14,14 +25,20 @@ import com.fasterxml.jackson.core.async.ByteBufferFeeder;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * Consume data, building the json object tree as it goes.  This returns null until the top-level
  * object or array has been built, in which case that value will be returned.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class JsonAccumulator {
 
     private final JsonParser parser;
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * This stack will contain JSON Objects, FieldName tokens, and ArrayLists.
      * ArrayLists will be converted into arrays upon popping them from the stack.
@@ -29,6 +46,8 @@ public class JsonAccumulator {
      * be popped and added to the object that is situated directly above the Field
      * Name in the stack.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     private final Deque<Object> jsonObjectStack;
     private final ByteBufferFeeder feeder;
     @Getter
@@ -49,12 +68,16 @@ public class JsonAccumulator {
         return !jsonObjectStack.isEmpty();
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Returns the top-level object once it has been fully constructed or null if more input is still required.
      * @param byteBuffer
      * @return
      * @throws IOException
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public Object consumeByteBufferForSingleObject(ByteBuffer byteBuffer) throws IOException {
         consumeByteBuffer(byteBuffer);
         return getNextTopLevelObject();
@@ -156,3 +179,6 @@ public class JsonAccumulator {
         return sb.toString();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

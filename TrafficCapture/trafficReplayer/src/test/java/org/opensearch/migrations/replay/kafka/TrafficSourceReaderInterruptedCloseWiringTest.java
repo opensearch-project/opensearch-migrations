@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -37,9 +48,13 @@ import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Phase A failing tests for synthetic close wiring.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public class TrafficSourceReaderInterruptedCloseWiringTest extends InstrumentationTest {
 
     @Override
@@ -47,6 +62,8 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
         return TestContext.withTracking(false, true);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * When a TrafficSourceReaderInterruptedClose fires for a connection in ACCUMULATING_WRITES
      * state, fireAccumulationsCallbacksAndClose must be called BEFORE onConnectionClose, so that
@@ -56,6 +73,8 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
      * fireAccumulationsCallbacksAndClose is called, so onTrafficStreamsExpired/handleEndOfResponse
      * is never invoked for the in-flight request.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void trafficSourceReaderInterruptedClose_completesFinishedAccumulatingResponseFuture() {
         var responseAccumulatedCallbackFired = new AtomicBoolean(false);
@@ -160,6 +179,8 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
             "response callback must fire before onConnectionClose, but order was: " + orderTracker);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) must call replayEngine.closeConnection() — currently skipped.
      * We verify this indirectly: the TRAFFIC_SOURCE_READER_INTERRUPTED path must NOT return early before scheduling
@@ -168,6 +189,8 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
      * This test is a placeholder — the full verification requires integration with ReplayEngine.
      * The key assertion: TRAFFIC_SOURCE_READER_INTERRUPTED status does NOT skip replayEngine.closeConnection().
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void trafficSourceReaderInterruptedClose_doesNotSkipReplayEngineClose() {
         var reassignedCloseCallCount = new AtomicInteger(0);
@@ -227,10 +250,14 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
     // Source termination obligation tests
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * After draining trafficSourceReaderInterruptedCloseQueue, reads remain gated while an
      * attributable source termination obligation is unresolved.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void emptyBatchReturnedWhileTerminationObligationIsPending() throws Exception {
         var mc = new org.apache.kafka.clients.consumer.MockConsumer<String, byte[]>(
@@ -288,3 +315,6 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
         );
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)
