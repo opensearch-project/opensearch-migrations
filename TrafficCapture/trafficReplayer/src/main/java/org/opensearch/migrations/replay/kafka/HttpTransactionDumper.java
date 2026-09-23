@@ -8,12 +8,12 @@
 
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// REBUILD-LIMBO(G3) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
 // javadoc with it. See AGENTS.md section 8a.
 
-// REBUILD-LIMBO-START(G11)
+// REBUILD-LIMBO-START(G3)
 /*
 
 import java.io.PrintStream;
@@ -34,12 +34,12 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 */
-// REBUILD-LIMBO-END(G11)
+// REBUILD-LIMBO-END(G3)
 /**
  * AccumulationCallbacks implementation for dump-http mode.
  * Prints one line per request and one line per response to the given PrintStream.
  */
-// REBUILD-LIMBO-START(G11)
+// REBUILD-LIMBO-START(G3)
 /*
 @Slf4j
 public class HttpTransactionDumper implements AccumulationCallbacks {
@@ -119,11 +119,11 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     }
 
 */
-// REBUILD-LIMBO-END(G11)
+// REBUILD-LIMBO-END(G3)
     /**
      * All lines share the same column layout: [ts-ts] p:N o:N s:N nc:node.conn:
      */
-// REBUILD-LIMBO-START(G11)
+// REBUILD-LIMBO-START(G3)
 /*
     private String buildPrefix(ISourceTrafficChannelKey channelKey, Instant first, Instant last) {
         var sb = new StringBuilder();
@@ -193,4 +193,4 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
 }
 
 */
-// REBUILD-LIMBO-END(G11)
+// REBUILD-LIMBO-END(G3)

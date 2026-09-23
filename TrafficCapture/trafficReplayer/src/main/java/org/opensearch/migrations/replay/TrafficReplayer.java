@@ -10,6 +10,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.URIHelper;
 
@@ -33,8 +34,6 @@ public class TrafficReplayer {
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
     static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
-    static final int DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS = 100_000;
-    static final long DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES = 1024L * 1024 * 1024;
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
@@ -225,24 +224,6 @@ public class TrafficReplayer {
         int maxConcurrentTargetAttempts = 10000;
         @Parameter(
             required = false,
-            names = { "--max-owned-kafka-records", "--maxOwnedKafkaRecords" },
-            arity = 1,
-            description = "Hard maximum number of Kafka records owned locally before replay intake pauses.")
-        int maximumOwnedKafkaRecords = DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS;
-        @Parameter(
-            required = false,
-            names = { "--max-owned-kafka-bytes", "--maxOwnedKafkaBytes" },
-            arity = 1,
-            description = "Hard maximum serialized bytes of Kafka records owned locally before replay intake pauses.")
-        long maximumOwnedKafkaBytes = DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES;
-        @Parameter(
-            required = false,
-            names = { "--disable-liveness-scanner", "--disableLivenessScanner" },
-            arity = 0,
-            description = "Disable Kafka metadata lookahead. Structural proof is then discovered by normal replay.")
-        boolean disableLivenessScanner;
-        @Parameter(
-            required = false,
             names = { "--num-client-threads", "--numClientThreads" },
             arity = 1,
             description = "Number of threads to use to send requests from.")
@@ -429,15 +410,6 @@ public class TrafficReplayer {
             }
         }
 
-        void validateOwnershipLimits() {
-            if (maximumOwnedKafkaRecords <= 0) {
-                throw new ParameterException("--max-owned-kafka-records must be positive");
-            }
-            if (maximumOwnedKafkaBytes <= 0) {
-                throw new ParameterException("--max-owned-kafka-bytes must be positive");
-            }
-        }
-
         boolean isKafkaTrafficEnableMSKAuth() {
             return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
         }
@@ -547,7 +519,6 @@ public class TrafficReplayer {
         try {
             parser.parse(args);
             p.validateKafkaAuthFlags();
-            p.validateOwnershipLimits();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -571,14 +542,47 @@ public class TrafficReplayer {
             throw new ParameterException(
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
         }
+        // All three mode names stay accepted by the parser because they are a published CLI contract, but
+        // dump-http and dump-both need HTTP transaction reconstruction, which milestone G3 rebuilds. Failing
+        // here with the milestone named beats emitting raw-shaped output for a mode that asked for parsed
+        // output. See docs/replayerRebuildPlanA-inPlace.md G1 and the deferral ledger in
+        // docs/replayerRebuildStatus.md.
+        if (MODE_DUMP_HTTP.equals(params.mode) || MODE_DUMP_BOTH.equals(params.mode)) {
+            throw new ParameterException(
+                params.mode
+                    + " is not available yet: HTTP transaction reconstruction is restored in milestone G3."
+                    + " "
+                    + MODE_DUMP_RAW
+                    + " is available and decodes every CaptureRecord envelope case.");
+        }
+        if (params.inputFilename != null) {
+            throw new ParameterException(
+                "dump modes read from Kafka only for now; file input is restored with the source"
+                    + " abstraction in milestone G3. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
+        }
     }
-    // REBUILD-LIMBO-START(G1)
-    // runDumpMode -- blocked on P10 (KafkaTopicDumper, TrafficStreamDumper, HttpTransactionDumper),
-    // RootReplayerContext, TrafficCaptureSourceFactory.
-    // Open decision: the file source decodes bare base64 TrafficStream while Kafka decodes a CaptureRecord
-    // envelope. G1 must settle which format the file path speaks before this returns unchanged.
-    /*
+    /** Runs a dump mode against a Kafka topic. */
     private static void runDumpMode(Parameters params) throws Exception {
+        var runner = new KafkaTopicDumper();
+
+        if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
+            runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
+                params.getEffectiveKafkaAuthType(), params.kafkaTrafficUserName, params.kafkaTrafficPassword,
+                params.kafkaTrafficPropertyFile,
+                params.startOffset, params.startTime, params.endOffset, params.endTime,
+                params.previewBytesRead, params.previewBytesWrite,
+                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME);
+        } else {
+            System.err.println("Dump modes require --kafka-traffic-brokers and --kafka-traffic-topic");
+            System.exit(2);
+        }
+    }
+// REBUILD-LIMBO-START(G3)
+// The file-input branch of runDumpMode, and the tracing context it needs. Blocked on
+// TrafficCaptureSourceFactory and RootReplayerContext; returns with runDumpFromSource in G3, which is also
+// where the open question in the ledger is settled -- whether the file source speaks bare base64
+// TrafficStream or a CaptureRecord envelope.
+/*
         var topContext = new RootReplayerContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
                 OtelCollectorEndpoints.empty(),
@@ -587,8 +591,6 @@ public class TrafficReplayer {
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
-        var runner = new KafkaTopicDumper();
-
         if (params.inputFilename != null) {
             try (var source = TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource(topContext, params)) {
                 runner.runDumpFromSource(params.mode, source,
@@ -596,21 +598,9 @@ public class TrafficReplayer {
                     params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
                     topContext);
             }
-        } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
-            runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
-                params.getEffectiveKafkaAuthType(), params.kafkaTrafficUserName, params.kafkaTrafficPassword,
-                params.kafkaTrafficPropertyFile,
-                params.startOffset, params.startTime, params.endOffset, params.endTime,
-                params.previewBytesRead, params.previewBytesWrite,
-                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
-                topContext);
-        } else {
-            System.err.println("Dump modes require either -i (file input) or --kafka-traffic-brokers and --kafka-traffic-topic");
-            System.exit(2);
         }
-    }
-    */
-    // REBUILD-LIMBO-END(G1)
+*/
+// REBUILD-LIMBO-END(G3)
 
     /**
      * Parse and validate the replay target URI and timing params. On invalid input this prints the
@@ -738,16 +728,11 @@ public class TrafficReplayer {
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
-                    " maxOwnedKafkaRecords={} maxOwnedKafkaBytes={}" +
-                    " livenessScannerEnabled={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
                 .addArgument(params.getEffectiveLookaheadTimeSeconds())
                 .addArgument(params.speedupFactor)
                 .addArgument(params.maxConcurrentTargetAttempts)
-                .addArgument(params.maximumOwnedKafkaRecords)
-                .addArgument(params.maximumOwnedKafkaBytes)
-                .addArgument(!params.disableLivenessScanner)
                 .addArgument(params.targetServerResponseTimeoutSeconds)
                 .addArgument(params.observedPacketConnectionTimeout)
                 .addArgument(uri)
@@ -1040,12 +1025,33 @@ public class TrafficReplayer {
      * assembled application not working during reconstruction is expected and accepted; failing quietly is
      * not.</p>
      */
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        var params = parseArgs(args);
+
+        // Dump mode is the one reachable path as of G1. Without this dispatch the dumper would be live,
+        // compiled and tested but with no production caller -- which AGENTS.md section 4 does not count as
+        // wired, and is how 707 lines of RecordDispositionLedger previously sat dead.
+        if (isDumpMode(params)) {
+            try {
+                validateDumpModeParams(params);
+            } catch (ParameterException badDumpArgs) {
+                // Exit code 2 is the existing convention for argument validation here, alongside 3 and 4 from
+                // parseAndValidateReplayTarget. parseArgs has already returned by now, so its handler cannot
+                // cover this.
+                System.err.println(badDumpArgs.getMessage());
+                System.exit(2);
+                return;
+            }
+            runDumpMode(params);
+            return;
+        }
+
         System.err.println(
-            "This traffic replayer is under reconstruction and has no runnable entry point yet.\n"
-                + "Reading a topic lands at milestone G1; the full replay path and supervision at G9.\n"
-                + "See docs/replayerRebuildPlanA-inPlace.md and docs/replayerRebuildStatus.md.\n"
-                + "The previous implementation remains in TrafficCapture/trafficReplayerLegacy for reference.");
+            "Replay mode is under reconstruction and has no runnable entry point yet.\n"
+                + "Available now: --mode dump-raw, which reads a capture topic and prints one line per\n"
+                + "record. --mode dump-http and --mode dump-both are restored at milestone G3, and the\n"
+                + "full replay path and supervision at G9.\n"
+                + "See docs/replayerRebuildPlanA-inPlace.md and docs/replayerRebuildStatus.md.");
         System.exit(NOT_IMPLEMENTED_EXIT_CODE);
     }
 }

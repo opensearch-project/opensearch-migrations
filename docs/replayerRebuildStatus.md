@@ -170,8 +170,190 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 
 | Item | Milestone | State |
 |---|---|---|
+| Proxy Kafka tests cannot start the proxy — no test creates the topic with `LogAppendTime`, so the capability probe aborts. Full detail and repair in `replayerRebuildPlan.md` §3.2, PA2 item 1. **Fix first; it masks item 2** | PA2 | open, verified by running it |
+| Stale `MAX_ID_SIZE = 100` assert in `StreamChannelConnectionCaptureSerializer:150` vs ~111 actual. Assert-only, no production impact, but blocks every assertions-enabled capture test. `replayerRebuildPlan.md` §3.2, PA2 item 2 | PA2 | open, worked around with `-da:` in the replayer's `build.gradle` — **that workaround is deleted by this repair** |
+| `CaptureProxy`'s fatal handler calls `System.exit(78)`, killing the test JVM when run in-process. `replayerRebuildPlan.md` §3.2, PA2 item 3 | PA2 | open |
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
+
+## G1 — complete
+
+`replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
+the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
+`KafkaTopicDumperEvidenceTest`. 108 unit tests plus 2 `isolatedTest` cases, all passing.
+
+**What was promoted, by un-marking rather than rewriting** — the code lines are the carried ones, so blame
+survives: `runDumpFromKafka`, `runRawFromKafka`, `seekToStart`, `isAtEnd`, `pastEnd`, `protocolViolation`,
+`getBaseEpoch` from `KafkaTopicDumper`, and `runDumpMode`'s Kafka branch from `TrafficReplayer`. The
+exhaustive `CaptureRecord` switch G1 exists to prove was **already live** in `TrafficStreamDumper`, all four
+cases with `PAYLOAD_NOT_SET` throwing, so raw mode inherits it by delegation. 183 lines of
+HTTP-reconstruction members stay marked in the same file, retagged `G3`.
+
+Three things were not simple un-markings, and each is a decision worth finding later:
+
+1. **`buildKafkaProperties` moved to a new live class, `KafkaConsumerProperties`.** It could not be promoted
+   in place: `KafkaTrafficCaptureSource` declares `implements ISimpleTrafficCaptureSource` and every field
+   around the method is typed on legacy identities, all deferred, so promoting it would have meant
+   temporarily stripping an interface off a live class declaration. Building consumer properties is a pure
+   function of configuration, so a shared home is the honest destination — G2's rebuilt source should call
+   this rather than reach into a legacy class for a static. The marked copy is left untouched: it does not
+   compile, so it cannot be a second live implementation, and editing carried code would break the recovery
+   check. G2 deletes it.
+2. **`runDumpFromKafka` lost exactly one parameter, `RootReplayerContext`.** It cannot appear in a live
+   signature because it reaches the legacy identity chain G3 replaces.
+
+   The first version of this dropped `observedPacketConnectionTimeout` and `packetTimeoutParamName` too,
+   since only `dump-http` reads them. **Owner correction:** that churns blame for no gain, and worse, a
+   deleted parameter is a wiring connection someone has to rediscover — the path to reinventing proven
+   code. Both are restored and threaded from `runDumpMode` exactly as before, unused for now and marked
+   `@SuppressWarnings("java:S1172")` with a javadoc note telling the next reader not to "clean them up".
+   A parameter that is threaded but idle costs nothing; a deleted one costs a rediscovery.
+
+   The general rule this yields: **when a member is promoted but its consumer is deferred, keep the
+   signature and defer only what cannot compile.** Restoration should be un-marking plus wiring one
+   argument, never re-deriving an argument list.
+
+   So the restoration is now mechanical and written down where it will be read. `runDumpFromKafka`'s `else`
+   branch carries the exact call G3 reinstates, notes that `topContext` is the single argument to add, and
+   points at the marked region in `TrafficReplayer.runDumpMode` that constructs it verbatim.
+   `runHttpFromKafka` is marked with its signature untouched, so G3's edit is: add one parameter, delete the
+   throw, un-mark two methods.
+3. **`main` now dispatches to dump mode.** It was a stub exiting 70, so `isDumpMode`,
+   `validateDumpModeParams` and `runDumpMode` were live with **no caller at all** — compiled and tested but
+   not wired in `AGENTS.md` §4's sense, which is how 707 lines of `RecordDispositionLedger` previously sat
+   dead. Found by grepping for callers rather than by any test failing, which is the point: nothing fails
+   when an entry point is unreachable. The evidence test therefore goes through `main`, not through the
+   dumper directly.
+
+`validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http`,
+`dump-both`, and `-i` file input with a message naming G3, at exit code 2. The mode names stay in the CLI
+because §2.3 makes them a contract; what changed is that asking for them says when they return instead of
+producing output that does not match the mode requested.
+
+The stub's old text pointed at `TrafficCapture/trafficReplayerLegacy` for the previous implementation. That
+directory no longer exists, so the message would have sent someone to a deleted path.
+
+## G1 supply side — proven, and what proving it uncovered
+
+`ProxyWrittenTopic` (replayer `testFixtures`) starts a Kafka broker, an in-process destination, and the
+**real `CaptureProxy`**, then exposes the broker, topic, and raw record bytes.
+`ProxyWrittenTopicSelfTest` drives one request through it and asserts the records decode as
+`CaptureRecord` envelopes containing a `TrafficStream`. **It passes.** That is G1's supply side: the
+replayer reads bytes the proxy actually produced, not bytes a test wrote to look like them — which is the
+only version of the claim that can detect the drift `D1` is.
+
+It reuses `CaptureProxyContainer`, moved with `git mv` from the proxy module's `test` source set to its
+`testFixtures` so another module can consume it (9 files, blame preserved, nothing duplicated). The
+fixture stops at raw bytes deliberately: decoding is the dumper's job, so "does the proxy emit what we
+think" and "do we render it correctly" stay separate claims and a formatting change cannot mask a format
+change.
+
+Three findings, in the order they surfaced. Each was a failure that taught something:
+
+### 1. `LogAppendTime` on the traffic topic is a hard requirement, enforced by the proxy at startup
+
+The proxy runs a Kafka capability probe and **refuses to serve traffic** unless the topic assigns broker
+timestamps: *"Kafka capability probe did not receive a positive broker-assigned timestamp for
+&lt;topic&gt;/0; the traffic topic must use message.timestamp.type=LogAppendTime"*. An auto-created topic
+gets the broker default, `CreateTime`, and the proxy aborts. The fixture creates the topic explicitly with
+`message.timestamp.type=LogAppendTime` via `AdminClient`.
+
+This is load-bearing well past the fixture. `LogAppendTime` is what makes
+`ApplicationKafkaRecord.logAppendTimeMillis` a broker-assigned time rather than a producer guess, and
+broker-time expiration, the backward-skew fatal check, and heartbeat baselines are all computed from it.
+**`D-1` is what happens when it is absent**, so the proxy enforcing it at startup is the supply-side half
+of that defect's fix, and worth knowing explicitly rather than by accident.
+
+### 2. The proxy's own Kafka tests are broken, for exactly that reason — escalation, not a fix
+
+Every case in `KafkaConfigurationCaptureProxyTest` fails at the same probe, because nothing there creates
+the topic with `LogAppendTime` either. Verified directly by running it. This is pre-existing on the branch
+and sits in the **proxy module**, which `AGENTS.md` §7 keeps in a separate conversation — so it is recorded
+and escalated rather than repaired here. The one-line fix is the same `AdminClient` call
+`ProxyWrittenTopic` now makes; `KafkaContainerTestBase` would be the natural home.
+
+### 3. A stale `MAX_ID_SIZE` assert blocks *any* assertions-enabled capture test — masked until now
+
+Past the probe, capture died on a bare `assert` in
+`StreamChannelConnectionCaptureSerializer:150`, which checks that `writerNodeId` and `connectionId` fit in
+`MAX_ID_SIZE = 100`, commented as "the default size of netty connectionId and kafka nodeId". That
+assumption no longer holds: `ProcessHelpers.getNodeInstanceName()` returns `<base>_<uuid>` — 47 bytes with
+no `HOSTNAME`, and never below ~37 because the UUID alone is 36 — while the proxy passes Netty's
+`Channel.id().asLongText()`, about 60. As protobuf strings that is roughly **49 + 62 = 111 > 100**, so it
+fires on every captured connection.
+
+**Not a production defect:** `MAX_ID_SIZE` is referenced nowhere else, so nothing sizes a buffer from it,
+and production runs without `-ea`. It is a sanity check whose premise went stale. But with assertions on —
+Gradle's default — no test can capture through the real proxy, and **finding 2 is why nobody noticed**: the
+probe failure aborts first, so this code was never reached. Fixing one without the other reveals nothing.
+
+Worked around narrowly: `-da:` for that single class on the replayer's test tasks, with the reasoning in
+`build.gradle`. Remove it when the assert is corrected. Proxy module, so also escalated.
+
+### 4. The in-process proxy can take the test JVM with it
+
+`CaptureProxyContainer` runs `CaptureProxy.main` on a thread, and the proxy's fatal handler calls
+`System.exit(78)` — "Capture is compromised or the proxy is unstable". In-process that kills the Gradle
+test executor, which surfaces as `Process 'Gradle Test Executor N' finished with non-zero exit value 78`
+and a `SKIPPED` test rather than a failure with a cause. Worth knowing before debugging a future
+disappearing test run: look above the Gradle error for the proxy's own stack trace. An injectable exit hook
+would fix it, and that is proxy-module work.
+
+## G2 — contract breaks the owner authorized, and the two-model defect it inherits
+
+### Three CLI options removed outright, 2026-09-23
+
+`--max-owned-kafka-records` / `--maxOwnedKafkaRecords`, `--max-owned-kafka-bytes` /
+`--maxOwnedKafkaBytes`, and `--disable-liveness-scanner` / `--disableLivenessScanner` are gone. Passing any
+of them now fails at startup with jcommander's unknown-option error. **This is a red-line-2 break, chosen
+deliberately over parse-and-warn**, so a deployed config or script using them stops rather than silently
+losing an effect it asked for.
+
+The caps are ruled out by the design in the strongest terms available. `kafkaLLD §5.1`: *"There is no
+record-count or byte-count ownership limit... The design does not refuse a batch partway through: a later
+record in that batch may be the heartbeat, close, response, or broker-time evidence needed to release
+earlier work, so a hard cap could deadlock the replayer. This is the one place this trade-off is made."*
+Keeping them would have preserved a deadlock the design exists to remove. Demand is bounded instead by one
+outstanding `PartitionBatchRequestId` per partition generation — a batch-count property, not a byte ceiling.
+
+Deleted with them: `KafkaRecordOwnershipBudget` (199 lines) and its test, `DEFAULT_MAXIMUM_OWNED_*`
+constants, `Parameters.validateOwnershipLimits` and its `parseArgs` call, and the three arguments they fed
+into the marked `runReplayMode` log line — updated rather than left dangling so G9 does not trip on a field
+that no longer exists.
+
+The liveness scanner is a different kind of dead: not contradicted by the design, **absent from it**. Its
+~150 lines in `TrackingKafkaConsumer` (`scanAhead`, `ScanCycle`, `ScanBaseline`, `pollForScan`,
+`collectScanRecords`, `restoreReplayPositions`, `atScanEnd`, `remainingScanDuration`,
+`scanGenerationIsStable`, `generationMatches`, `validateScanBudget`, `captureScanBaseline`) performed Kafka
+metadata lookahead to discover structural proof early. The rebuilt intake gets that evidence from heartbeat
+and probe records instead. **Verdict: dead.** The members are not deleted individually because
+`TrackingKafkaConsumer` is whole-file marked and editing carried code would break the byte-recovery check;
+they go when that file goes, at the end of G2.
+
+The three tests of the removed options are deleted with no replacement, and the first attempt at a
+replacement is worth recording because it looked reasonable and was not. It asserted that all six option
+spellings are rejected — but **it passed just as well for `--this-flag-never-existed`**, measured rather
+than assumed. Once the `@Parameter` fields are gone, rejection is jcommander's default behavior for any
+unknown string, so the test asserted a third-party default while appearing to verify our decision. A test
+that cannot distinguish the thing it names from arbitrary garbage is worse than no test: it occupies the
+space where a real check would go.
+
+What actually guards the removal is the comment block left at the deletion site in `Parameters`, naming
+each removed option and why `kafkaLLD §5.1` forbids it. Re-adding one means editing past that comment, which
+is a tripwire in the path rather than a check somewhere else that has to be remembered.
+
+### `ObservedRecordCommitQueue` is live on the wrong identity model
+
+The one design-named G2 component that already exists is built on the **legacy** identities: it imports
+`ReplayIdentity.KafkaRecordId` and `ReplayIdentity.PartitionGenerationId`, and its `requireGeneration`
+compares `recordId.topic()`, `.partition()` and `.sourceGeneration()` separately because that record is a
+flat shape rather than the design's `KafkaRecordId(generation, offset)`.
+
+Two live correctness models is what `AGENTS.md` §6 forbids outright. The bound is the useful part:
+**`ObservedRecordCommitQueue` is the only live consumer of the legacy identities** — everything else live
+(`KafkaSourceInput`, `ApplicationKafkaRecord`, `ReplayIntakeInput`, the eight identity records, both source
+fixtures) already uses `replay/identity/`. So G2 refactoring this one file collapses the split rather than
+extending it, and `requireGeneration` reduces to a single `equals`.
 
 ## Deferral ledger — work moved between milestones
 
@@ -497,8 +679,8 @@ dashboard.
 
 ## State at end of the 2026-09-23 session, and what comes next
 
-One module, in place, member-level marking. **340 files, 228 marked, 108 tests passing, build green.**
-**G0 is complete.**
+One module, in place, member-level marking. **341 files, 228 marked, 108 unit tests + 2 isolatedTest passing, build green.**
+**G0 and G1 are complete.**
 
 ### Landed this session
 
@@ -511,7 +693,9 @@ One module, in place, member-level marking. **340 files, 228 marked, 108 tests p
 | Deleted provably-dead branch-added code — 6 files, 1,067 lines | `0093c38b4` |
 | Unified the marker on `START`/`END` | `71aa6ce76` |
 | `TestEventLoop` promoted to a real Netty `EventLoop`; `ReplayerFixtureSelfTest` partly promoted | `aa5461a10` |
-| `RecordScript` and `PumpedKafkaSource` on production types; G0 exit evidence; marking verifier | this commit |
+| `RecordScript` and `PumpedKafkaSource` on production types; G0 exit evidence; marking verifier | `aa54aaab6` |
+| G1 supply-side rig with the real proxy | `6c7f805fb` |
+| G1: dump-raw promoted and wired through `main` | this commit |
 
 ### Findings from the abandoned external-consumer walk
 
@@ -696,11 +880,15 @@ and it is recorded rather than repaired so that promoting the file is the moment
 
 ### Next
 
-**G0 is complete.** All four fixtures are live, their self-tests pass, and the exit evidence exists. G1 is
-next: reality contact — decode and dump a real topic, which promotes `runDumpMode` from
-`TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` region. That region's own note already records the open
-question G1 must settle first — the file source decodes bare base64 `TrafficStream` while Kafka decodes a
-`CaptureRecord` envelope, and G1 has to decide which format the file path speaks.
+**G0 and G1 are complete.** G2 is next: the Kafka source owner. It inherits two things from G1 rather than
+starting clean — `ProxyWrittenTopic.start(topic, partitions)` already takes a partition count, which is what
+G2 needs to exercise per-partition demand and revocation against a real broker; and
+`KafkaConsumerProperties` is where its consumer properties already live, so it should call that rather than
+the marked static in `KafkaTrafficCaptureSource`, then delete the marked copy.
+
+Three PA2 repairs are open against the proxy and are recorded in `replayerRebuildPlan.md` §3.2. None blocks
+G2, but the `-da:` workaround in the replayer's `build.gradle` is deleted by PA2 item 2 and will otherwise
+outlive its cause.
 
 Deferred by the owner, with reasons already recorded: the external-consumer contract (after G3), the
 `TrafficReplayer` wiring walk, and the DCO rewrite (post-G12).
