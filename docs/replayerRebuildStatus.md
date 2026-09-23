@@ -172,7 +172,7 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 |---|---|---|
 | Proxy Kafka tests cannot start the proxy — no test creates the topic with `LogAppendTime`, so the capability probe aborts. Full detail and repair in `replayerRebuildPlan.md` §3.2, PA2 item 1. **Fix first; it masks item 2** | PA2 | open, verified by running it |
 | Stale `MAX_ID_SIZE = 100` assert in `StreamChannelConnectionCaptureSerializer:150` vs ~111 actual. Assert-only, no production impact, but blocks every assertions-enabled capture test. `replayerRebuildPlan.md` §3.2, PA2 item 2 | PA2 | open, worked around with `-da:` in the replayer's `build.gradle` — **that workaround is deleted by this repair** |
-| `CaptureProxy`'s fatal handler calls `System.exit(78)`, killing the test JVM when run in-process. `replayerRebuildPlan.md` §3.2, PA2 item 3 | PA2 | open |
+| `CaptureProxy`'s fatal handler calls `System.exit(78)`, killing the test JVM when run in-process. `replayerRebuildPlan.md` §3.2, PA2 item 3 | PA2 | open, worked around — **observed failing, not just theorised**: `CaptureProxyContainer.stop()` interrupts the server thread but not the Kafka publisher, so an orphaned publisher whose broker has stopped exits the JVM and fails whichever test class is running. `ProxyWrittenTopic.close()` therefore leaves its broker up, keeping the topic present so the publisher never fails; Ryuk reaps the container at JVM exit. **That workaround is deleted by this repair** |
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
@@ -342,18 +342,98 @@ What actually guards the removal is the comment block left at the deletion site 
 each removed option and why `kafkaLLD §5.1` forbids it. Re-adding one means editing past that comment, which
 is a tripwire in the path rather than a check somewhere else that has to be remembered.
 
-### `ObservedRecordCommitQueue` is live on the wrong identity model
+### The two live identity models are now one — resolved
 
-The one design-named G2 component that already exists is built on the **legacy** identities: it imports
-`ReplayIdentity.KafkaRecordId` and `ReplayIdentity.PartitionGenerationId`, and its `requireGeneration`
-compares `recordId.topic()`, `.partition()` and `.sourceGeneration()` separately because that record is a
-flat shape rather than the design's `KafkaRecordId(generation, offset)`.
+`ObservedRecordCommitQueue`, the only design-named G2 component that already existed, was live on the
+**legacy** identities: `ReplayIdentity.KafkaRecordId` and `ReplayIdentity.PartitionGenerationId`, with a
+`requireGeneration` that compared topic, partition and generation as three separate fields because that
+record was flat rather than the design's `KafkaRecordId(generation, offset)`. Two live correctness models
+is what `AGENTS.md` §6 forbids outright.
 
-Two live correctness models is what `AGENTS.md` §6 forbids outright. The bound is the useful part:
-**`ObservedRecordCommitQueue` is the only live consumer of the legacy identities** — everything else live
-(`KafkaSourceInput`, `ApplicationKafkaRecord`, `ReplayIntakeInput`, the eight identity records, both source
-fixtures) already uses `replay/identity/`. So G2 refactoring this one file collapses the split rather than
-extending it, and `requireGeneration` reduces to a single `equals`.
+It and its test are refactored onto `replay/identity/`. `requireGeneration` is now one `equals`, and the
+test's assertions are unchanged in substance — observed-order commit advance with physical offset gaps,
+duplicate registration and completion as invariant failures, unknown record and wrong generation rejected —
+with only the identity construction changed. Wrong-generation is now expressed as a later generation of the
+same partition, which is the case that actually occurs after a rebalance.
+
+**`ReplayIdentity` consequently has zero live consumers and is now marked whole** (`G3`). Leaving it live
+would have left 199 lines of superseded records compiling with nothing using them, which is the state §4
+names as the `RecordDispositionLedger` failure. Its remaining references are all inside marked regions, so
+G3 deletes it along with the callers it refactors — the same call made for `ActorMailbox`, for the same
+reason: deleting it now would make those regions harder to read during the refactor that resolves them.
+
+**No live file references the legacy identity model any more.** That is checkable:
+`grep -rln 'ReplayIdentity\.' src` returns only marked files.
+
+## G2 — the legacy Kafka source is deleted, and what its tests still owe
+
+`TrackingKafkaConsumer` (1,231 lines) and `KafkaTrafficCaptureSource` (953) are gone, replaced by
+`KafkaSourceOwner`, `PartitionSourceState`, `KafkaSourceInputQueue`, `WakeupController` and the live
+`ObservedRecordCommitQueue`. One live reference to the old name survives deliberately:
+`IKafkaConsumerContexts.ScopeNames.KAFKA_CONSUMER_SCOPE` is the string `"TrackingKafkaConsumer"`, and a trace
+scope name is a published contract, so renaming it is a red-line-2 decision rather than tidying.
+
+Eleven marked test files reference the deleted classes. They do not compile, so nothing is broken, but
+without verdicts someone will try to restore them. Read before deciding, and they do not all resolve the
+same way:
+
+| Marked test | Verdict | Receiving milestone |
+|---|---|---|
+| `TrackingKafkaConsumerTest`, `KafkaTrafficCaptureSourceTest` — `onAssigned`/`onRevoked`/`onRetired`/`commitSync` | **dead**: same subject, and the design's version of each is covered by `KafkaSourceOwnerTest` against `kafkaLLD §17.4` | — |
+| `KafkaCommitsWorkBetweenLongPollsTest` — commits and reads keep working across long polls | **dead**: not in `§17.4`, and its guarantee is now split across the wakeup cases and the commit-prefix case, both covered | — |
+| `StaleAccumulationCancelOnRejoinTest`, `StaleAccumulationCancelOnRejoinKafkaTest` — synthetic closes precede new-generation records after revoke and reassign | **refactor**: the generation-bump half is G2's and holds (a new generation gets a new `PartitionSourceState` and a new commit queue); the accumulation half is source assembly | G3 |
+| `PartitionRevocationStaleStateTest` — stale accumulation and stale channel context discarded on generation bump | **refactor** | G3 |
+| `ActiveConnectionTrackingTest` — connections tracked across keep-alive, removed on accumulation complete | **refactor** | G3 |
+| `QuiescentConnectionTest`, `ReplayEngineQuiescentTest` — quiescent tagging of resumed connections | **refactor** | G5 |
+| `TrafficSourceReaderInterruptedCloseWiringTest`, `TrafficSourceReaderInterruptedCloseAccountingTest` — synthetic close accounting | **refactor** | G3 |
+| `KafkaKeepAliveTests`, `KafkaTrafficCaptureSourceLongTermTest`, `e2etests/KafkaRestartingTrafficReplayerTest` | **refactor**: end-to-end behaviour that needs the full replay path wired | G9 |
+
+`PumpedKafkaSource` now implements `KafkaSourcePort`, so the owner drives it. `SourceOwnerDriver` and
+`DriverPort` are deleted: both existed only because the owner did not, and the fixture could not otherwise
+serve the exit criterion that names it. Rebalance callbacks fire from inside `poll()`, matching Kafka, which
+is what makes `§17.4`'s wakeup-between-revocation-and-assignment case expressible at all.
+
+### Kafka's batched commit applies partially and says nothing about it
+
+Verified in `kafka-clients` 4.2.0 sources rather than assumed.
+`ConsumerCoordinator.OffsetCommitResponseHandler` iterates the broker's per-partition error codes, and on the
+first non-tolerable one calls `future.raise(...)` and **returns** — so later partitions in that iteration are
+never examined, even for logging. Two consequences:
+
+- **Partial application is real.** Partitions the broker answered `Errors.NONE` for are committed; the
+  handler logs "Committed offset {} for partition {}" before a sibling's error aborts the loop.
+- **It is unobservable to the caller.** One exception arrives with no indication of which positions were
+  recorded.
+
+**A failed batch must not strand the partitions that were fine.** Staged positions are removed on success,
+not before the attempt. Clearing them up front discarded every partition's progress whenever any one of them
+failed, and because a position is only re-derived when the next `RecordProcessingFinished` advances a
+partition's contiguous prefix, a partition blocked behind an unfinished head could wait arbitrarily long to be
+offered again. Now a failure retains the still-owned entries and drops only those whose partition is no longer
+owned. Re-committing a position that did commit is idempotent, which is what makes this sound despite partial
+application being unobservable.
+
+That is not the retry §5.7 forbids. The prohibition is precisely that "after revocation, the old generation
+does not retry or wait indefinitely for a commit" — so a **revoked** partition's staged position is dropped,
+which `onPartitionsRevoked` previously failed to do: it removed the partition state but left the staged
+position behind, so the old generation would have gone on offering a commit. A still-owned partition reissuing
+a position it already computed is a different thing, and abandoning it is the defect, not the fix. Reissue is
+paced by the loop — one attempt per iteration, each of which also polls — rather than spinning.
+
+So `KafkaSourcePort.commit` returns **one** outcome for the operation, not one per partition. An earlier
+attempt here returned `Map<TopicPartition, CommitOutcome>` and classified a failure by whether each partition
+was still in `consumer.assignment()`. That was fabricated precision: assignment membership has nothing to do
+with which partition's commit failed, so the map would have reported confident per-partition fates the client
+never supplied.
+
+Safe under `kafkaLLD §5.7`'s own rules — no outcome is retried and none reaches intake — so whatever
+committed is committed and whatever did not is redelivered from the next assigned position. The one thing the
+owner must not do is treat a failure as proof that nothing was committed, which is why the hazard is stated
+at the call rather than left to be rediscovered.
+
+Batching is kept rather than reduced to one call per partition because `commitSync` blocks, and multiplying
+blocking calls by the partition count is how a commit overruns `max.poll.interval.ms` — defect `D5`'s
+mechanism — and, during revocation, the grace interval.
 
 ## Deferral ledger — work moved between milestones
 
@@ -371,6 +451,7 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 | Scaffold | Introduced | Removal | State |
 |---|---|---|---|
 | `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-START src \| wc -l` is the count; **238 files** at G0 |
+| `KafkaSourceRootContext` — holds the Kafka source's metric instruments under the same field names `RootReplayerContext` already uses (`pollInstruments`, `commitInstruments`, `kafkaCommitInstruments`). That class is the real home but aggregates instruments for ~30 contexts and is typed on `ISourceTrafficChannelKey`/`ITrafficStreamKey`, so promoting it means promoting the whole chain. Contexts keep their shape, so G3 deletes this and repoints them | G3 |
 | The `REBUILD-LIMBO` note in the module's `build.gradle` | G0 | with the last region | open |
 
 Resolved and removed on 2026-09-23, recorded because they were previously tracked here: the

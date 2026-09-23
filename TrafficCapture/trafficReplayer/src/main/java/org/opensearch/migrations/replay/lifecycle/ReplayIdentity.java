@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G3) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Superseded by the eight design identities in replay/identity/. Nothing live uses these records any
+// more; the remaining references are all inside marked regions, so G3 deletes this file along with the
+// callers it refactors. replayRequestId also needs UniqueReplayerRequestKey, which G3 replaces.
+
+// REBUILD-LIMBO-START(G3)
+/*
+
 
 import org.apache.kafka.common.TopicPartition;
 
@@ -125,13 +136,6 @@ public final class ReplayIdentity {
         }
     }
 
-    // REBUILD-LIMBO-START(G3)
-    // replayRequestId(UniqueReplayerRequestKey) -- the only member of this class that reaches a
-    // left-behind legacy identity. UniqueReplayerRequestKey stays in trafficReplayerLegacy; this
-    // adapter exists to translate it, so it goes when its 18 remaining callers move to the eight
-    // design identities in replay/identity/. The rest of ReplayIdentity stays live because those
-    // callers still need it, which is itself the transitional state G3 and G5 resolve.
-    /*
     import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;  // hoist on un-comment
     public static ReplayRequestId replayRequestId(@NonNull UniqueReplayerRequestKey requestKey) {
         return new ReplayRequestId(
@@ -146,8 +150,6 @@ public final class ReplayIdentity {
             requestKey.getReplayerRequestIndex()
         );
     }
-    */
-    // REBUILD-LIMBO-END(G3)
 
     public sealed interface RecordId permits KafkaRecordId, TrafficStreamRecordId, SourceControlRecordId {}
 
@@ -197,3 +199,7 @@ public final class ReplayIdentity {
         }
     }
 }
+
+
+*/
+// REBUILD-LIMBO-END(G3)

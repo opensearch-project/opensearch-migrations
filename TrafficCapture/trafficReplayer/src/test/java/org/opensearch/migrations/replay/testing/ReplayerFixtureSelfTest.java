@@ -13,27 +13,23 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.TreeSet;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.WriterPartitionId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput.PartitionRecordBatch;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.BatchDelivered;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.CommitSubmitted;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.DriverPort;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionPaused;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.PartitionResumed;
-import org.opensearch.migrations.replay.kafka.PumpedKafkaSource.WakeupRequested;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
+import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
-import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.CaptureProtocolViolationDetected;
-import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.GenerationCleanupFinished;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.RecordProcessingFinished;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.RequestNextPartitionBatch;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
@@ -41,7 +37,6 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import io.netty.channel.local.LocalChannel;
-import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -303,212 +298,107 @@ class ReplayerFixtureSelfTest {
         );
     }
 
-    @Test
-    void pumpedSourceObservesCoalescedWakeupPauseResumeDeliveryAndCommit() {
-        var script = new RecordScript("traffic", 3)
-            .addHeartbeat(1, 21, Instant.ofEpochMilli(10_000), "writer", 10_000)
-            .addProbe(1, 22, Instant.ofEpochMilli(11_000), "activation:PROBE", "probe");
-        var generation = script.generation(1);
-        var requestId = new PartitionBatchRequestId(generation, 9);
-        var outstandingRequest = new AtomicReference<PartitionBatchRequestId>();
-
-        PumpedKafkaSource.SourceOwnerDriver driver = port -> {
-            drainInputs(port, outstandingRequest);
-            if (outstandingRequest.get() != null) {
-                port.pollKafka().ifPresent(records -> {
-                    port.pause(generation.topicPartition(), PumpedKafkaSource.PauseReason.BATCH_DEMAND);
-                    port.deliver(new PartitionRecordBatch(outstandingRequest.getAndSet(null), records));
-                });
-            }
-        };
-        var source = new PumpedKafkaSource(driver);
-        source.scriptBatch(script.records());
-        source.submit(new RequestNextPartitionBatch(requestId));
-        source.submit(new GenerationCleanupFinished(generation));
-
-        source.runOnce();
-
-        var firstPass = source.observations();
-        Assertions.assertEquals(1, firstPass.stream().filter(WakeupRequested.class::isInstance).count());
-        Assertions.assertEquals(1, firstPass.stream().filter(PartitionResumed.class::isInstance).count());
-        Assertions.assertEquals(1, firstPass.stream().filter(PartitionPaused.class::isInstance).count());
-        var delivered = firstPass.stream()
-            .filter(BatchDelivered.class::isInstance)
-            .map(BatchDelivered.class::cast)
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(requestId, delivered.batch().requestId());
-        Assertions.assertEquals(script.records(), delivered.batch().records());
-
-        source.submit(new RecordProcessingFinished(script.records().get(0).recordId()));
-        source.runOnce();
-
-        var commit = source.observations()
-            .stream()
-            .filter(CommitSubmitted.class::isInstance)
-            .map(CommitSubmitted.class::cast)
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(Map.of(generation.topicPartition(), 22L), commit.nextOffsets());
-        source.assertExhausted();
-    }
-
-    @Test
-    void pumpedSourceReportsDriverFailureAndRefusesFurtherUse() {
-        var failure = new IllegalStateException("injected owner failure");
-        var source = new PumpedKafkaSource(port -> {
-            throw failure;
-        });
-
-        var thrown = Assertions.assertThrows(AssertionError.class, source::runOnce);
-
-        Assertions.assertSame(failure, thrown.getCause());
-        Assertions.assertInstanceOf(
-            PumpedKafkaSource.DriverFailed.class,
-            source.observations().get(0)
-        );
-        Assertions.assertThrows(AssertionError.class, source::runOnce);
-    }
-
     /**
-     * G0's exit evidence, in one deterministic transition history: a mixed traffic, heartbeat and
-     * probe script pumps through the source with its exact broker timestamps intact, and the pause,
-     * wakeup, delivery and commit transitions are all observable in order.
-     *
-     * <p>Two properties are asserted by position in that history rather than by count. The partition
-     * is paused <em>before</em> its batch is delivered ({@code kafkaLLD §17.4}). And three record
-     * completions submitted back to back produce one wakeup, not three, which is the coalescing the
-     * same section requires.
-     *
-     * <p>The commit is a single contiguous-prefix commit computed after every input is drained,
-     * because commit authority belongs to the source alone — no record, request or retry policy may
-     * commit on its own ({@code kafkaLLD §4.2}).
+     * G0's exit evidence, restated against the owner that now drives the fixture: a mixed traffic, heartbeat
+     * and probe batch reaches replay intake with its exact broker timestamps, and the pause, resume, poll and
+     * commit transitions are observable in order.
      */
     @Test
-    void mixedScriptPumpsThroughWithExactBrokerTimestampsAndObservableTransitions() {
+    void mixedScriptPumpsThroughWithExactBrokerTimestampsAndObservableTransitions() throws Exception {
         var traffic = TrafficStream.newBuilder().setConnectionId("connection-1").setNumber(0).build();
         var script = new RecordScript("traffic", 7)
             .addTraffic(4, 100, Instant.ofEpochMilli(1_700_000_000_000L), "writer-a", traffic, "request-1")
             .addHeartbeat(4, 101, Instant.ofEpochMilli(1_700_000_005_000L), "writer-a", 5_000)
             .addProbe(4, 102, Instant.ofEpochMilli(1_700_000_010_000L), "writer-a", "probe-1");
-        var generation = script.generation(4);
-        var topicPartition = generation.topicPartition();
-        var requestId = new PartitionBatchRequestId(generation, 1);
-        var outstandingRequest = new AtomicReference<PartitionBatchRequestId>();
-        var finishedOffsets = new TreeSet<Long>();
-        var committedThrough = new AtomicReference<Long>(99L);
+        var topicPartition = script.generation(4).topicPartition();
 
-        var source = new PumpedKafkaSource(port -> {
-            for (var input = port.pollInput(); input.isPresent(); input = port.pollInput()) {
-                switch (input.get()) {
-                    case RequestNextPartitionBatch request -> {
-                        Assertions.assertNull(outstandingRequest.getAndSet(request.requestId()));
-                        port.resume(topicPartition);
-                    }
-                    case RecordProcessingFinished finished ->
-                        finishedOffsets.add(finished.recordId().offset());
-                    case GenerationCleanupFinished ignored -> {}
-                    case CaptureProtocolViolationDetected ignored -> {}
+        var telemetry = new InMemoryInstrumentationBundle(false, false);
+        try {
+            var port = new PumpedKafkaSource(List.of(topicPartition));
+            // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
+            var rootContext = new KafkaSourceRootContext(telemetry.openTelemetrySdk);
+            var wakeupController = new WakeupController(() -> {}, rootContext);
+            var sourceInputs = new KafkaSourceInputQueue(wakeupController);
+            var intakeInputs = new ReplayIntakeInputQueue();
+            var owner = new KafkaSourceOwner(
+                port, sourceInputs, intakeInputs, wakeupController, Duration.ofSeconds(1), () -> 0L
+            );
+
+            // Assignment arrives from inside a poll, which is where Kafka delivers rebalance callbacks.
+            port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsAssigned(List.of(topicPartition)));
+            owner.runOnce();
+            var generation = owner.partitionState(topicPartition).orElseThrow().generation();
+            var requestId = new PartitionBatchRequestId(generation, 1);
+            sourceInputs.submit(new RequestNextPartitionBatch(requestId));
+            port.scriptPoll(Map.of(topicPartition, reStampedForGeneration(script, generation)));
+            port.clearHistory();
+
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                List.of("resume(traffic-4)", "poll->[traffic-4]", "pause(traffic-4)"),
+                port.history(),
+                "the partition must be resumed to read, then paused before its batch is applied"
+            );
+
+            // Assignment queued a PartitionGenerationAssigned first, so select the batch rather than
+            // assuming it is at the head.
+            PartitionRecordBatch batch = null;
+            while (intakeInputs.size() > 0) {
+                var queued = intakeInputs.take();
+                if (queued instanceof PartitionRecordBatch delivered) {
+                    batch = delivered;
                 }
             }
-            if (outstandingRequest.get() != null) {
-                port.pollKafka().ifPresent(records -> {
-                    port.pause(topicPartition, PumpedKafkaSource.PauseReason.BATCH_DEMAND);
-                    port.deliver(new PartitionRecordBatch(outstandingRequest.getAndSet(null), records));
-                });
-            }
-            var nextOffset = committedThrough.get() + 1;
-            while (finishedOffsets.remove(nextOffset)) {
-                nextOffset++;
-            }
-            if (nextOffset > committedThrough.get() + 1) {
-                committedThrough.set(nextOffset - 1);
-                port.submitCommit(Map.of(topicPartition, nextOffset));
-            }
-        });
+            Assertions.assertNotNull(batch, "no PartitionRecordBatch reached intake");
+            Assertions.assertEquals(requestId, batch.requestId());
+            Assertions.assertEquals(
+                List.of(1_700_000_000_000L, 1_700_000_005_000L, 1_700_000_010_000L),
+                batch.records().stream().map(ApplicationKafkaRecord::logAppendTimeMillis).toList(),
+                "broker timestamps must survive the trip to intake exactly"
+            );
+            Assertions.assertEquals(
+                List.of(
+                    CaptureRecord.PayloadCase.TRAFFICSTREAM,
+                    CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT,
+                    CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE
+                ),
+                batch.records().stream().map(r -> r.envelope().getPayloadCase()).toList(),
+                "every envelope case must arrive, in order"
+            );
 
-        source.scriptBatch(script.records());
-        source.submit(new RequestNextPartitionBatch(requestId));
-        source.runOnce();
+            // Finishing every record commits the contiguous prefix once, at the last offset plus one.
+            batch.records().forEach(r -> sourceInputs.submit(new RecordProcessingFinished(r.recordId())));
+            port.clearHistory();
+            owner.runOnce();
 
-        var delivered = source.observations()
-            .stream()
-            .filter(BatchDelivered.class::isInstance)
-            .map(BatchDelivered.class::cast)
-            .findFirst()
-            .orElseThrow();
-        Assertions.assertEquals(
-            List.of(1_700_000_000_000L, 1_700_000_005_000L, 1_700_000_010_000L),
-            delivered.batch().records().stream().map(ApplicationKafkaRecord::logAppendTimeMillis).toList()
-        );
-        Assertions.assertEquals(
-            List.of(
-                CaptureRecord.PayloadCase.TRAFFICSTREAM,
-                CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT,
-                CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE
-            ),
-            delivered.batch().records().stream().map(r -> r.envelope().getPayloadCase()).toList()
-        );
-
-        script.records().forEach(record -> source.submit(new RecordProcessingFinished(record.recordId())));
-        source.runOnce();
-
-        Assertions.assertEquals(
-            List.of(
-                "WakeupRequested",
-                "PartitionResumed(traffic-4)",
-                "PartitionPaused(traffic-4,BATCH_DEMAND)",
-                "BatchDelivered(traffic-4#7.batch1,3 records)",
-                "WakeupRequested",
-                "CommitSubmitted(traffic-4=103)"
-            ),
-            source.observations().stream().map(ReplayerFixtureSelfTest::describe).toList()
-        );
-        source.assertExhausted();
-    }
-
-    private static String describe(PumpedKafkaSource.Observation observation) {
-        return switch (observation) {
-            case WakeupRequested ignored -> "WakeupRequested";
-            case PartitionResumed resumed -> "PartitionResumed(" + resumed.topicPartition() + ")";
-            case PartitionPaused paused ->
-                "PartitionPaused(" + paused.topicPartition() + "," + paused.reason() + ")";
-            case BatchDelivered delivered -> "BatchDelivered("
-                + delivered.batch().requestId()
-                + ","
-                + delivered.batch().records().size()
-                + " records)";
-            case CommitSubmitted commit -> commit.nextOffsets()
-                .entrySet()
-                .stream()
-                .map(entry -> entry.getKey() + "=" + entry.getValue())
-                .collect(Collectors.joining(",", "CommitSubmitted(", ")"));
-            case PumpedKafkaSource.DriverFailed failed ->
-                "DriverFailed(" + failed.failure().getMessage() + ")";
-        };
-    }
-
-    private static void drainInputs(
-        DriverPort port,
-        AtomicReference<PartitionBatchRequestId> outstandingRequest
-    ) {
-        for (var input = port.pollInput(); input.isPresent(); input = port.pollInput()) {
-            switch (input.get()) {
-                case RequestNextPartitionBatch request -> {
-                    Assertions.assertNull(outstandingRequest.getAndSet(request.requestId()));
-                    port.resume(request.requestId().generation().topicPartition());
-                }
-                case RecordProcessingFinished finished -> {
-                    var offsets = new LinkedHashMap<TopicPartition, Long>();
-                    offsets.put(
-                        finished.recordId().generation().topicPartition(),
-                        finished.recordId().offset() + 1
-                    );
-                    port.submitCommit(offsets);
-                }
-                case GenerationCleanupFinished ignored -> {}
-                case CaptureProtocolViolationDetected ignored -> {}
-            }
+            Assertions.assertEquals(
+                List.of("commit{traffic-4=103}"),
+                port.history().stream().filter(call -> call.startsWith("commit")).toList(),
+                () -> "one contiguous commit expected; history: " + port.history()
+            );
+        } finally {
+            telemetry.close();
         }
+    }
+
+    /**
+     * The script builds records for generation 0 by default; the owner allocates its own generation on
+     * assignment, so the records are restamped to match rather than the script being told a generation it
+     * cannot know in advance.
+     */
+    private static List<ApplicationKafkaRecord> reStampedForGeneration(
+        RecordScript script,
+        PartitionGenerationId generation
+    ) {
+        return script.records()
+            .stream()
+            .map(record -> new ApplicationKafkaRecord(
+                new KafkaRecordId(generation, record.recordId().offset()),
+                record.logAppendTimeMillis(),
+                record.serializedSizeBytes(),
+                record.envelope()
+            ))
+            .toList();
     }
 }
