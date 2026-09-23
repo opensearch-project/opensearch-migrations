@@ -1,0 +1,22 @@
+# Copy this file to terraform.tfvars and adjust it for your environment.
+# terraform.tfvars is ignored because it may contain environment-specific data.
+
+region = "us-east-1"
+stage  = "dev"
+
+# New VPC (default)
+create_vpc = true
+
+# To use an existing VPC instead:
+# create_vpc          = false
+# existing_vpc_id     = "vpc-0123456789abcdef0"
+# existing_subnet_ids = ["subnet-0123456789abcdef0", "subnet-abcdef01234567890"]
+# vpc_endpoints       = ["s3", "ecr.api", "ecr.dkr", "logs", "sts", "eks-auth"]
+
+# Optional: install the chart with public Migration Assistant images.
+# deploy_helm                 = true
+# migration_assistant_version = "3.3.4"
+
+tags = {
+  Environment = "development"
+}

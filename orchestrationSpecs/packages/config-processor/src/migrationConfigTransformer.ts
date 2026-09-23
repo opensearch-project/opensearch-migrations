@@ -2,6 +2,7 @@ import {
     ARGO_METADATA_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
+    DEFAULT_RESOURCES,
     DENORMALIZED_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
@@ -93,8 +94,15 @@ async function rewriteRepoEndpointIfLocalStack(
     repoName: string
 ): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
-    // GCS repos have no LocalStack-equivalent; the endpoint check is a no-op
-    // for gs:// URIs and the resulting useLocalStack stays false.
+    // The localstack:// rewrite below is an S3 addressing workaround, not a
+    // generic emulator feature: resolving the host to an IP forces the AWS SDK
+    // out of virtual-host-style addressing. See MetadataMigration/DEVELOPER_GUIDE.md.
+    //
+    // Path-style emulators need none of this. fake-gcs-server is reached through
+    // a plain http:// endpoint (see the gcs/ chart templates), and GcsRepo.create
+    // infers "emulator" from a non-empty endpoint and installs NoCredentials.
+    // So the check below is a no-op for gs:// URIs and useLocalStack stays false,
+    // not because GCS lacks an emulator, but because it does not need the rewrite.
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -417,6 +425,7 @@ function prepareMetadataConfig(
     const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
+        resources: rest.resources ?? DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
         skipEvaluateApproval: rest.skipEvaluateApproval ?? skipApprovals,
         skipMigrateApproval: rest.skipMigrateApproval ?? skipApprovals,
         ...fileSourceRegistry.resolvedFields,

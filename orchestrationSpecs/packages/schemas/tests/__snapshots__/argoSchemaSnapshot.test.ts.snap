@@ -2011,6 +2011,56 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "resources": {
+                      "type": "object",
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                        }
+                      },
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Kubernetes resource limits and requests for the metadata migration container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
+                    },
                     "skipEvaluateApproval": {
                       "type": "boolean"
                     },
@@ -4350,6 +4400,56 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "default": "",
                         "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                      },
+                      "resources": {
+                        "type": "object",
+                        "properties": {
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "cpu": {
+                                "type": "string",
+                                "pattern": "^[0-9]+m$",
+                                "description": "CPU allocation for the container in Kubernetes millicores."
+                              },
+                              "memory": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Memory allocation for the container."
+                              }
+                            },
+                            "required": [
+                              "cpu",
+                              "memory"
+                            ],
+                            "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                          },
+                          "requests": {
+                            "type": "object",
+                            "properties": {
+                              "cpu": {
+                                "type": "string",
+                                "pattern": "^[0-9]+m$",
+                                "description": "CPU allocation for the container in Kubernetes millicores."
+                              },
+                              "memory": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Memory allocation for the container."
+                              }
+                            },
+                            "required": [
+                              "cpu",
+                              "memory"
+                            ],
+                            "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                          }
+                        },
+                        "required": [
+                          "limits",
+                          "requests"
+                        ],
+                        "description": "Kubernetes resource limits and requests for the metadata migration container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                       },
                       "skipEvaluateApproval": {
                         "type": "boolean",
