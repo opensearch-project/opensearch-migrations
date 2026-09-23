@@ -37,7 +37,7 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 |---|---|
 | Branch | `stableAndScalableLiveReplay` |
 | Remote | `origin` = `github.com/gregschohn/opensearch-migrations` (a fork, **not** `opensearch-project`) |
-| Local vs origin | **Pushed and level** at `aa54aaab6` as of 2026-09-23. **Do not trust `origin/stableAndScalableLiveReplay`** — `remote.origin.fetch` is `+refs/heads/integrating3231:refs/remotes/origin/integrating3231` only, so this branch has **no fetch refspec** and its remote-tracking ref is frozen at `2c4f305f3` no matter how often you fetch. That is what made a plain `--force-with-lease` fail with "stale info" on a push that was a clean fast-forward. Measure with `git ls-remote origin refs/heads/stableAndScalableLiveReplay`, and pass the lease explicitly. Permanent fix, the owner's call since it edits repo config: `git config --add remote.origin.fetch '+refs/heads/stableAndScalableLiveReplay:refs/remotes/origin/stableAndScalableLiveReplay'` |
+| Local vs origin | **Pushed and level** at `0fe180eed`. The tracking ref is trustworthy again: the owner added the missing refspec on 2026-09-23, so `origin/stableAndScalableLiveReplay` now tracks and a plain `--force-with-lease` works. Historical note, because the symptom is baffling if it recurs on another branch: `remote.origin.fetch` listed only `integrating3231`, so this branch's tracking ref stayed frozen at `2c4f305f3` through any number of fetches, and `--force-with-lease` refused a clean fast-forward with "stale info". If that appears again, measure with `git ls-remote origin refs/heads/<branch>` and check the refspec before assuming divergence |
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
 | Test compilation | **Green.** 108 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 as `ReplayerFixtureSelfTest` was promoted |
@@ -552,13 +552,24 @@ What changed from the carried code, and why:
 | `schedule(Runnable, Duration)` still throws on a negative delay; the `(long, TimeUnit)` overloads clamp to zero | The first is the fixture's own stricter contract, worth keeping as a test-bug detector. The second must honour Netty's documented behaviour, because production code passes computed delays |
 
 **The limit: no real Netty channel can register to it.** `LocalChannel.isCompatible` requires
-`SingleThreadEventLoop` and `AbstractNioChannel.isCompatible` requires `NioEventLoop`, so every built-in
-channel fails registration against *any* custom `EventLoop` with `IllegalStateException: incompatible event
-loop type`. Becoming a `SingleThreadEventLoop` would reintroduce both the wall-clock scheduler and a real
-thread, so the fixture accepts the limit. **This costs nothing, by design:** target I/O reaches owners through
-`TargetChannelPort` (`connLLD §1`), a narrow event-loop-only interface, not through a channel a test
-registered to the owner's loop. `testEventLoopCannotRegisterNettyBuiltInChannels` pins the constraint so it
-is found here rather than surfacing as an opaque message in G6.
+`SingleThreadEventLoop`, `AbstractNioChannel.isCompatible` requires `NioEventLoop`, and
+`EmbeddedChannel.isCompatible` requires `EmbeddedEventLoop`, so every built-in channel fails registration
+against *any* custom `EventLoop` with `IllegalStateException: incompatible event loop type`. Becoming a
+`SingleThreadEventLoop` would reintroduce both the wall-clock scheduler and a real thread, so the fixture
+accepts the limit. **This costs nothing, by design:** target I/O reaches owners through `TargetChannelPort`
+(`connLLD §1`, `§8`: "the only interface through which request replay changes target-channel state"), not
+through a channel a test registered to the owner's loop.
+
+**What it means when writing a test.** No single test can have both deterministic time and a real socket.
+Choose a tier: deterministic time plus a fake `TargetChannelPort` for owner logic, ordering, timers and
+cancellation; or a real channel on a real `NioEventLoopGroup` with real time for integration. That is the
+split `AGENTS.md` §4 already draws between the implementation loop and confirmation, so no coverage is lost.
+
+**The trap to avoid:** `AGENTS.md` §4 lists `SimpleHttpServer`/`SimpleNettyHttpServer`,
+`LocalChannel`/`EmbeddedChannel`, and injected `TestEventLoop`/`FakeClock` in one sentence, which reads like
+a set of patterns that compose. Those two halves do **not** compose on one loop.
+`testEventLoopCannotRegisterNettyBuiltInChannels` pins the constraint so it is found here rather than
+surfacing in G6 as a message that looks like a defect in `TestEventLoop` instead of a designed boundary.
 
 `ActorMailbox` and `NettyEventLoopActorMailbox` now have **zero live references** — every remaining mention is
 inside a marked region. They are not deleted yet: their dependents (`TargetConnectionOwner`,
@@ -570,14 +581,13 @@ One build change: `libs.netty.all` moved from `testFixturesImplementation` to `t
 `TestEventLoop` exposes `EventLoop` and `ScheduledFuture` in its signatures — same reason
 `libs.kafka.clients` was already `api`.
 
-### Untracked debris: `TrafficCapture/trafficReplayerLegacy`
+### `TrafficCapture/trafficReplayerLegacy` — deleted by the owner 2026-09-23
 
-2,059 files on disk, **zero tracked in git**, absent from `settings.gradle`. Residue from the abandoned
-two-module attempt. It holds **no `.java` sources at all** outside `build/` — only compiled classes and 33
-replayer run logs, of which nothing is unique but the logs. Harmless to the build, but it makes a bare
-`grep -r` over `TrafficCapture/` read stale class files, which already misled one walk in the previous
-session. Left in place because the run logs may be wanted evidence; deleting it is a one-line `rm -rf` when
-the owner says so.
+It held 2,059 untracked files: no `.java` sources at all outside `build/`, only compiled classes and 33
+replayer run logs. Nothing tracked, absent from `settings.gradle`, so removing it did not affect the build
+(re-verified green afterwards). Recorded because it had already misled one walk — a bare `grep -r` over
+`TrafficCapture/` was reading its stale class files as if they were source. **There is now exactly one
+replayer directory, so a plain recursive grep over `TrafficCapture/` is safe again.**
 
 ### The fixtures speak production types now, and that was the point of redoing them
 
