@@ -105,12 +105,14 @@ class KafkaSourceInputQueueTest {
      */
     @Test
     void awaitInputWakesOnSubmissionAndOtherwiseHonoursTheMonotonicDeadline() throws Exception {
-        var farFuture = System.nanoTime() + Duration.ofMinutes(5).toNanos();
+        // A duration, because that is what awaitInput takes: it cannot read the owner's clock, so the owner
+        // converts its deadline and this measures only elapsed time (kafkaLLD §15.1, one source per deadline).
+        var longEnoughToProveTheSignalDidIt = Duration.ofMinutes(5).toNanos();
         var waiterReturned = new CountDownLatch(1);
         var sawInput = new AtomicBoolean();
         var waiter = new Thread(() -> {
             try {
-                sawInput.set(queue.awaitInput(farFuture));
+                sawInput.set(queue.awaitInput(longEnoughToProveTheSignalDidIt));
                 waiterReturned.countDown();
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -128,10 +130,21 @@ class KafkaSourceInputQueueTest {
         waiter.join();
     }
 
+    /**
+     * A caller whose deadline has already passed asks for no wait at all, and still gets an honest answer about
+     * what is queued rather than a blanket false.
+     */
     @Test
-    void awaitInputReturnsFalseOnceTheDeadlineHasPassed() throws Exception {
-        Assertions.assertFalse(queue.awaitInput(System.nanoTime() - 1));
+    void awaitInputDoesNotWaitWhenNoTimeRemainsButStillReportsQueuedInput() throws Exception {
+        Assertions.assertFalse(queue.awaitInput(0), "an empty queue with no time left has nothing to report");
         Assertions.assertTrue(queue.isEmpty());
+
+        queue.submit(request(1));
+
+        Assertions.assertTrue(
+            queue.awaitInput(-1),
+            "an input already queued must be reported even when the caller can no longer wait for one"
+        );
     }
 
     /**

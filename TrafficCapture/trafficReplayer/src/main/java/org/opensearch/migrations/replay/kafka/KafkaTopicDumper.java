@@ -2,7 +2,9 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
@@ -191,10 +193,23 @@ public class KafkaTopicDumper {
         Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite
     ) {
-        while (!isAtEnd(consumer, endOffsets)) {
+        // Each partition reaches its bound on its own. Kafka defines no order across partitions, so one
+        // partition crossing its snapshot end or the requested --end-offset/--end-time says nothing about
+        // whether another still has records to dump. Retiring the partition and pausing it is what keeps the
+        // rest of the dump running while still terminating.
+        var finishedPartitions = new HashSet<TopicPartition>();
+        while (finishedPartitions.size() < endOffsets.size() && !isAtEnd(consumer, endOffsets)) {
             var polled = consumer.poll(Duration.ofSeconds(2));
             for (var rec : polled) {
-                if (pastEnd(rec, endOffset, endTime, endOffsets)) return;
+                var recordPartition = new TopicPartition(rec.topic(), rec.partition());
+                if (finishedPartitions.contains(recordPartition)) {
+                    continue;
+                }
+                if (pastEnd(rec, endOffset, endTime, endOffsets)) {
+                    finishedPartitions.add(recordPartition);
+                    consumer.pause(Set.of(recordPartition));
+                    continue;
+                }
                 try {
                     var captureRecord = CaptureRecord.parseFrom(rec.value());
                     if (captureRecord.hasTrafficStream()) {

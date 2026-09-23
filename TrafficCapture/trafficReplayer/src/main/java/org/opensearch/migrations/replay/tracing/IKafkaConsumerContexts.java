@@ -58,6 +58,12 @@ public interface IKafkaConsumerContexts {
         public static final String WAKEUPS_ISSUED = "kafkaSourceWakeupsIssued";
         public static final String WAKEUPS_COALESCED = "kafkaSourceWakeupsCoalesced";
         public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
+        public static final String GENERATIONS_RETIRED = "kafkaSourceGenerationsRetired";
+        public static final String GENERATIONS_RETIRED_WITHOUT_COMMIT =
+            "kafkaSourceGenerationsRetiredWithoutCommit";
+        public static final String RETIRED_GENERATION_RECORDS_COMMITTED =
+            "kafkaSourceRetiredGenerationRecordsCommitted";
+        public static final String RETIRED_GENERATION_RECORDS_READ = "kafkaSourceRetiredGenerationRecordsRead";
         public static final String DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT =
             "kafkaSourceDeferredWakeupsIssuedOnCallbackExit";
     }
@@ -111,6 +117,23 @@ public interface IKafkaConsumerContexts {
 
         /** Records that a wakeup deferred during the callback was issued as it returned. */
         void onIssuedDeferredWakeupOnExit();
+
+        /**
+         * Records a partition generation being retired, per {@code kafkaLLD §15.4}.
+         *
+         * <p>The generation identity goes on the span and the totals go on counters. Putting the generation on
+         * a metric attribute instead would make its cardinality unbounded — one series per generation per
+         * partition, forever — while the question operators actually ask is "how often does a generation
+         * retire having committed nothing", which needs no per-generation series to answer.
+         *
+         * @param generationLabel the retiring generation, for the span
+         * @param recordsCommitted how far the committed position advanced over the generation's whole life,
+         *                         not only during the grace interval. Zero is the signal {@code procCommit
+         *                         §9.5} describes
+         * @param recordsRead every record the generation delivered to replay intake, which against
+         *                    {@code recordsCommitted} gives the re-work this retirement cost
+         */
+        void onGenerationRetired(String generationLabel, long recordsCommitted, long recordsRead);
     }
 
     /**

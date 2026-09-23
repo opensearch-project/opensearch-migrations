@@ -5,6 +5,7 @@ import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
@@ -243,11 +244,23 @@ public class KafkaConsumerContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public final LongCounter deferredWakeupsIssuedOnExit;
+            public final LongCounter generationsRetired;
+            public final LongCounter generationsRetiredWithoutCommit;
+            public final LongCounter retiredGenerationRecordsCommitted;
+            public final LongCounter retiredGenerationRecordsRead;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
                 deferredWakeupsIssuedOnExit = meter.counterBuilder(
                     IKafkaConsumerContexts.MetricNames.DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT).build();
+                generationsRetired = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED).build();
+                generationsRetiredWithoutCommit = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT).build();
+                retiredGenerationRecordsCommitted = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED).build();
+                retiredGenerationRecordsRead = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ).build();
             }
         }
 
@@ -268,6 +281,33 @@ public class KafkaConsumerContexts {
         @Override
         public void onIssuedDeferredWakeupOnExit() {
             meterIncrementEvent(getMetrics().deferredWakeupsIssuedOnExit);
+        }
+
+        /**
+         * The generation goes on the span, the totals go on counters. A generation attribute on a metric
+         * would be one series per generation per partition forever, while the question operators ask —
+         * how often a generation retires having committed nothing — needs no per-generation series.
+         */
+        public static final AttributeKey<String> RETIRED_GENERATION_ATTRIBUTE =
+            AttributeKey.stringKey("retiredGeneration");
+        public static final AttributeKey<Long> RETIRED_RECORDS_COMMITTED_ATTRIBUTE =
+            AttributeKey.longKey("retiredGenerationRecordsCommitted");
+        public static final AttributeKey<Long> RETIRED_RECORDS_READ_ATTRIBUTE =
+            AttributeKey.longKey("retiredGenerationRecordsRead");
+
+        @Override
+        public void onGenerationRetired(String generationLabel, long recordsCommitted, long recordsRead) {
+            setAttribute(RETIRED_GENERATION_ATTRIBUTE, generationLabel);
+            setTraceAttribute(RETIRED_RECORDS_COMMITTED_ATTRIBUTE, recordsCommitted);
+            setTraceAttribute(RETIRED_RECORDS_READ_ATTRIBUTE, recordsRead);
+            meterIncrementEvent(getMetrics().generationsRetired);
+            meterIncrementEvent(getMetrics().retiredGenerationRecordsCommitted, recordsCommitted);
+            meterIncrementEvent(getMetrics().retiredGenerationRecordsRead, recordsRead);
+            if (recordsCommitted == 0) {
+                // Counted rather than derived, so the condition procCommit §9.5 names is one series to alarm
+                // on. A run of these on one partition is the head-of-line stall.
+                meterIncrementEvent(getMetrics().generationsRetiredWithoutCommit);
+            }
         }
     }
 

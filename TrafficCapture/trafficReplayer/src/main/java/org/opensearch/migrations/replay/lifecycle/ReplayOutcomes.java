@@ -109,6 +109,13 @@ public final class ReplayOutcomes {
         }
     }
 
+// REBUILD-LIMBO-START(G5)
+// Four outcome families no design names. Every consumer is already inside a G5 or G11 region, so none has a
+// live caller; what kept them compiling was one test asserting that a visitor covers the type it was written
+// against. G5 is the region's milestone because it is the milestone that opens this file anyway, for the
+// PreparationOutcome strip connLLD §6 requires -- it resolves these four then, deleting or re-marking the
+// pair whose consumers belong to G11.
+/*
     public sealed interface ProcessingCancellationResult
         permits ProcessingCancellationResult.CancellationWon,
             ProcessingCancellationResult.ProcessingCompletionWon {
@@ -273,4 +280,7 @@ public final class ReplayOutcomes {
             }
         }
     }
+
+*/
+// REBUILD-LIMBO-END(G5)
 }

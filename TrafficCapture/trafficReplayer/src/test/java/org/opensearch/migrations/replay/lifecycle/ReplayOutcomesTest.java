@@ -6,6 +6,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ReplayOutcomesTest {
+// REBUILD-LIMBO-START(G5)
+// Both methods are about the four outcome families marked in ReplayOutcomes, and both assert that a visitor
+// defined inside the test covers the type it was written against -- which the compiler already guarantees for
+// a sealed hierarchy. Marked with those families rather than deleted so one milestone decides both.
+/*
     @Test
     void sourceAndEvidenceOutcomesAreExhaustiveValues() {
         var sourceVisitor = new ReplayOutcomes.SourceOutcome.Visitor<String>() {
@@ -102,4 +107,7 @@ class ReplayOutcomesTest {
             new ReplayOutcomes.SessionOutcome.Failed(new IllegalStateException("bad")).visit(visitor)
         );
     }
+
+*/
+// REBUILD-LIMBO-END(G5)
 }

@@ -176,7 +176,15 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
-## G1 — complete
+## G1 — production path done, evidence reopened by the 2026-09-23 review
+
+**Not complete.** The dump path works and is wired through `main`, but three of its evidence claims did not
+hold: the real-proxy tests gated on "at least one record", which a startup capability probe satisfies before
+the record under test exists; multi-partition raw dumping truncates the whole dump when one partition reaches
+its bound; and neither all three payload types with a malformed envelope, nor rendered-versus-consumed
+metadata, was shown against a real broker. `G1R` in the repair staging above closes all four. The heading
+previously said "complete", which a reader takes at face value — the same failure mode as the stale line
+citations this pass fixed.
 
 `replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
 the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
@@ -555,6 +563,25 @@ intake send the cleanup message when its tracker completes — so a lost generat
 pending-cleanup set like a revoked one. The alternative, excluding lost generations, would let a successor
 read while the lost generation's work is still unwinding. Cheap to reverse: one condition in
 `onPartitionsLost`.
+
+### The live-but-unmarked sweep — one instance, and the test that distinguishes it
+
+`ReplayOutcomes` raised the question of whether the G0 walk had left other un-carried halves live and
+unmarked. It had not. The sweep stripped every marked region from all 339 source files, listed the 116
+top-level types declared in what remained, and counted references within that same live corpus. Forty-five
+types have no live reference, and all of them fall into three benign classes:
+
+- **test classes**, which nothing references by construction;
+- **Netty handlers** registered by class literal rather than by name; and
+- **approved carries** — `CompletionGate` is the clearest, referenced only from `TargetConnectionOwner` and
+  `ReplayProgressController` code that is itself inside G5 regions, and recorded as a `CARRY` in group P9.
+
+**"Live-declared, referenced only from marked code" is therefore not the defect.** It is the expected shape of
+carrying a primitive ahead of the milestone that consumes it, and §8a asks for exactly that. What made
+`ReplayOutcomes` different is narrower and worth stating so the next sweep looks for the right thing: its
+`PreparationOutcome` **contradicted** `connLLD §6`'s two permitted cases, and four further families had no
+design basis anywhere in the corpus. The test is whether a design names the vocabulary, not whether a live
+caller exists yet.
 
 ### Stale line citations — corrected
 
@@ -1109,7 +1136,13 @@ One API change: `RecordScript` takes an optional generation sequence (`new Recor
 script's record ids could not match the generation a test requested a batch for, and `RecordProcessingFinished`
 would route to the wrong generation.
 
-### G0 exit evidence
+### G0 exit evidence — with two clauses that were not met
+
+Recorded below as it stood. Two clauses did not hold and are now deferred with ledger rows rather than
+claimed here: six of the seven named component and result **shells** were never declared (to `G3`, `G5`,
+`G9`), and the fixture self-test installs a **no-op wakeup action**, so it cannot distinguish zero, one, or
+several wakeups — the observable-wakeup clause is met by `WakeupControllerTest` and the real-broker test
+instead, and `G2R-b` gives the self-test a real action.
 
 `mixedScriptPumpsThroughWithExactBrokerTimestampsAndObservableTransitions` in `ReplayerFixtureSelfTest` is
 the mixed traffic/heartbeat/probe pump the milestone asks for. It asserts the whole transition history as an

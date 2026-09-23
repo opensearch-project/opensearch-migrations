@@ -8,6 +8,7 @@
 
 package org.opensearch.migrations.replay.kafka;
 
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -19,6 +20,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.LongConsumer;
 
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
@@ -43,6 +46,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         PartitionPaused,
         PartitionResumed,
         Polled,
+        CommitSubmittedAsync,
         CommitAttempted {}
 
     public record PartitionPaused(TopicPartition topicPartition) implements Observation {}
@@ -52,7 +56,17 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     /** One poll and the partitions it returned records for, so an empty poll is distinguishable. */
     public record Polled(Set<TopicPartition> partitionsReturned) implements Observation {}
 
-    public record CommitAttempted(Map<TopicPartition, Long> nextPositions) implements Observation {}
+    /** An asynchronous submission from the ordinary loop; its outcome arrives at a later {@link #poll()}. */
+    public record CommitSubmittedAsync(Map<TopicPartition, Long> nextPositions) implements Observation {}
+
+    /**
+     * A bounded synchronous submission from inside a rebalance callback.
+     *
+     * @param bound what the owner allowed it, which is the observable form of "cannot hold the callback past
+     *              the grace deadline" — assert on this rather than on elapsed time
+     */
+    public record CommitAttempted(Map<TopicPartition, Long> nextPositions, Duration bound)
+        implements Observation {}
 
     private final Set<TopicPartition> assignment = new LinkedHashSet<>();
     private final Set<TopicPartition> paused = new LinkedHashSet<>();
@@ -60,8 +74,12 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private final Deque<Map<TopicPartition, List<ApplicationKafkaRecord>>> scriptedPolls = new ArrayDeque<>();
     private final List<Observation> observations = new ArrayList<>();
     private final Deque<ThrowingRunnable> scriptedRebalances = new ArrayDeque<>();
+    /** Async commits awaiting a poll to resolve them, exactly as the real client defers its callbacks. */
+    private final Deque<Runnable> pendingAsyncCommits = new ArrayDeque<>();
+    private final LongConsumer clockAdvance;
     private CommitOutcome nextCommitOutcome = CommitOutcome.ACKNOWLEDGED;
     private RuntimeException pollFailure;
+    private Duration commitDuration;
 
     /** A rebalance callback can throw, because {@code onPartitionsRevoked} waits and can be interrupted. */
     public interface ThrowingRunnable {
@@ -69,7 +87,17 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     public PumpedKafkaSource(Collection<TopicPartition> assignedPartitions) {
+        this(assignedPartitions, nanos -> {});
+    }
+
+    /**
+     * @param clockAdvance advances the same injected clock the owner reads, so a scripted commit duration is
+     *                     observable to the owner's deadline arithmetic. Without it a grace-interval test could
+     *                     only reach its deadline by sleeping
+     */
+    public PumpedKafkaSource(Collection<TopicPartition> assignedPartitions, LongConsumer clockAdvance) {
         assignment.addAll(assignedPartitions);
+        this.clockAdvance = Objects.requireNonNull(clockAdvance, "clockAdvance");
     }
 
     // ---------------------------------------------------------------- scripting
@@ -119,6 +147,10 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
 
     @Override
     public Map<TopicPartition, List<ApplicationKafkaRecord>> poll() {
+        // Async commit callbacks are delivered from inside poll, which is where the real client delivers them.
+        while (!pendingAsyncCommits.isEmpty()) {
+            pendingAsyncCommits.removeFirst().run();
+        }
         while (!scriptedRebalances.isEmpty()) {
             var rebalance = scriptedRebalances.removeFirst();
             try {
@@ -167,9 +199,34 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     @Override
-    public CommitOutcome commit(Map<TopicPartition, Long> nextPositions) {
-        observations.add(new CommitAttempted(Map.copyOf(nextPositions)));
+    public void commitAsync(
+        Map<TopicPartition, Long> nextPositions,
+        BiConsumer<Map<TopicPartition, Long>, CommitOutcome> onResolved
+    ) {
+        var submitted = Map.copyOf(nextPositions);
+        observations.add(new CommitSubmittedAsync(submitted));
+        // Held rather than resolved here, because the real client resolves from inside a later poll(). A test
+        // that asserts the loop is not blocked depends on that difference being real in the fixture too.
+        pendingAsyncCommits.add(() -> onResolved.accept(submitted, nextCommitOutcome));
+    }
+
+    @Override
+    public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
+        observations.add(new CommitAttempted(Map.copyOf(nextPositions), bound));
+        // Advances the injected clock, which is what lets a test drive a grace interval to its deadline without
+        // sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
+        if (commitDuration != null) {
+            clockAdvance.accept(commitDuration.toNanos());
+        }
         return nextCommitOutcome;
+    }
+
+    /**
+     * Makes {@link #commitSync} advance the injected clock by {@code duration}, modelling a commit that takes
+     * time. Scripting the duration rather than sleeping is what keeps a grace-interval test deterministic.
+     */
+    public void scriptCommitDuration(Duration duration) {
+        this.commitDuration = Objects.requireNonNull(duration);
     }
 
     // ---------------------------------------------------------------- observation
@@ -188,7 +245,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             case PartitionPaused paused -> "pause(" + paused.topicPartition() + ")";
             case PartitionResumed resumed -> "resume(" + resumed.topicPartition() + ")";
             case Polled polled -> "poll->" + polled.partitionsReturned();
-            case CommitAttempted commit -> "commit" + commit.nextPositions();
+            case CommitSubmittedAsync commit -> "commitAsync" + commit.nextPositions();
+            case CommitAttempted commit -> "commitSync" + commit.nextPositions();
         }).toList();
     }
 
