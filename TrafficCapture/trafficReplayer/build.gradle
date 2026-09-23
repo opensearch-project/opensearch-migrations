@@ -102,24 +102,11 @@ tasks.withType(Test).configureEach {
     // Allow lenient line parsing for compatibility with older clients and tests
     systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
 
-    // Disables assertions in exactly one inherited class, and nothing else. Gradle enables assertions by
-    // default; production does not, which is why this has never been visible outside tests.
-    //
-    // StreamChannelConnectionCaptureSerializer asserts that its writerNodeId and connectionId fit in
-    // MAX_ID_SIZE = 100 bytes, commented as "the default size of netty connectionId and kafka nodeId".
-    // That assumption no longer holds: ProcessHelpers.getNodeInstanceName() is "<base>_<uuid>", so 47 bytes
-    // in a test, and the proxy uses Netty's Channel.id().asLongText(), about 60. Serialized as protobuf
-    // strings that is roughly 49 + 62 = 111, so the assert fires on every captured connection.
-    //
-    // It is a stale sanity check rather than a live defect: MAX_ID_SIZE is referenced nowhere else, so
-    // nothing reserves a buffer from it and production behaviour does not depend on it. But with
-    // assertions on, no test can capture traffic through the real proxy at all, which is what
-    // ProxyWrittenTopic needs to do. It stayed hidden because the proxy's own Kafka tests fail earlier,
-    // at the LogAppendTime capability probe.
-    //
-    // DELETE THIS WITH MILESTONE PA2. The fix belongs to the proxy module, which AGENTS.md section 7 keeps
-    // in a separate conversation, so this is scoped to the single class rather than fixed here. The repair
-    // that removes it is docs/replayerRebuildPlan.md section 3.2, PA2 item 2, which names this line.
+    // DELETE WITH MILESTONE PA2 (docs/replayerRebuildPlan.md section 3.2, item 2, which names this line).
+    // StreamChannelConnectionCaptureSerializer asserts its ids fit MAX_ID_SIZE = 100; real ids total about
+    // 111, so the assert fires on every captured connection and no test can capture through the real proxy.
+    // MAX_ID_SIZE is used nowhere else and production runs without -ea, so only tests are affected. The fix
+    // is the proxy module's, which AGENTS.md section 7 keeps in a separate conversation.
     jvmArgs '-da:org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer'
 }
 

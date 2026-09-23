@@ -60,18 +60,11 @@ public class KafkaTopicDumper {
     /**
      * Reads a topic and writes one line per record to stdout.
      *
-     * <p>Carried from the pre-rebuild implementation with its parameter list intact except for the
-     * trailing {@code RootReplayerContext}, which cannot appear in a live signature because it reaches the
-     * legacy identity chain that G3 replaces.
-     *
-     * <p>{@code observedPacketConnectionTimeout} and {@code packetTimeoutParamName} are
-     * <strong>deliberately unused right now</strong>. They feed the accumulator that {@code dump-http}
-     * builds, and they are kept because the cost of a parameter that is threaded but idle is nothing,
-     * while the cost of deleting it is that someone has to rediscover which CLI option fed it. Do not
-     * "clean them up" — {@link #runDumpFromKafka} is wired to them from {@code TrafficReplayer.runDumpMode}
-     * exactly as it was before, so that wiring is preserved rather than reconstructed.
+     * <p>{@code observedPacketConnectionTimeout} and {@code packetTimeoutParamName} configure the
+     * accumulator that {@code dump-http} builds, so only that mode reads them. They are threaded here so
+     * the CLI options stay connected to the method that consumes them; do not remove them as unused.
      */
-    @SuppressWarnings("java:S1172") // unused parameters, intentionally: see javadoc
+    @SuppressWarnings("java:S1172") // see javadoc: read by the dump-http path only
     public void runDumpFromKafka(
         String mode, String brokers, String topic, String authType,
         String kafkaUserName, String kafkaPassword, String propertyFile,
@@ -96,23 +89,7 @@ public class KafkaTopicDumper {
                 runRawFromKafka(consumer, endOffsets, endOffset, endTime,
                     previewBytesRead, previewBytesWrite);
             } else {
-                // TrafficReplayer rejects these modes before reaching here, so this is the defensive half of
-                // that check rather than the user-facing message.
-                //
-                // G3 restores this branch by replacing this throw with the call below, which is what the
-                // pre-rebuild code did and is recorded here so it does not have to be re-derived. Every
-                // argument already exists: the two timeout parameters are threaded into this method, and
-                // topContext is the one thing to add -- built by the marked region in
-                // TrafficReplayer.runDumpMode, which carries its construction verbatim.
-                //
-                //     boolean emitRaw = "dump-both".equals(mode);
-                //     runHttpFromKafka(consumer, endOffsets, endOffset, endTime,
-                //         previewBytesRead, previewBytesWrite, emitRaw,
-                //         observedPacketConnectionTimeout, packetTimeoutParamName, topContext);
-                //
-                // runHttpFromKafka itself is marked below with its signature unchanged, so the only edits
-                // are: add the topContext parameter here, delete this throw, and un-mark that method plus
-                // processHttpRecords.
+                // TrafficReplayer rejects these modes before parsing gets here; this is the defensive half.
                 throw new IllegalStateException(
                     mode + " requires HTTP transaction reconstruction, which is restored in milestone G3");
             }
@@ -240,8 +217,13 @@ public class KafkaTopicDumper {
 
 // REBUILD-LIMBO-START(G3)
 // runHttpFromKafka -- the Kafka dump-http/dump-both driver. Blocked on
-// CapturedTrafficToHttpTransactionAccumulator, ChannelContextManager and RootReplayerContext. G3 restores
-// this together with processHttpRecords and replaces the throw in runDumpFromKafka's else branch.
+// CapturedTrafficToHttpTransactionAccumulator, ChannelContextManager and RootReplayerContext.
+// To restore: un-mark this and processHttpRecords, add a RootReplayerContext parameter to
+// runDumpFromKafka, and replace the throw in its else branch with
+//     boolean emitRaw = "dump-both".equals(mode);
+//     runHttpFromKafka(consumer, endOffsets, endOffset, endTime, previewBytesRead, previewBytesWrite,
+//         emitRaw, observedPacketConnectionTimeout, packetTimeoutParamName, topContext);
+// The context is constructed by the marked region in TrafficReplayer.runDumpMode.
 /*
     @SuppressWarnings("java:S1854")
     private void runHttpFromKafka(

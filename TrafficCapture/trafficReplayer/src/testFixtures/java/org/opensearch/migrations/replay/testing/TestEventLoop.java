@@ -45,10 +45,10 @@ import io.netty.util.concurrent.ScheduledFuture;
  *
  * <p>This is a real Netty {@link EventLoop} so that owners can be assigned to it exactly as
  * {@code replayerConnectionAndRequestLowLevelDesign.md} section 1 requires — there is no owner
- * executor, and every owner asserts affinity with {@link #inEventLoop()}. It deliberately does
- * <em>not</em> extend {@code AbstractScheduledEventExecutor}: Netty's scheduler reads
- * {@code System.nanoTime()}, which would make timer expiry depend on wall-clock time. Timers here
- * are queued against the injected {@link FakeClock} and fire only when a test advances it.
+ * executor, and every owner asserts affinity with {@link #inEventLoop()}. It must <em>not</em> extend
+ * {@code AbstractScheduledEventExecutor}: Netty's scheduler reads {@code System.nanoTime()}, which would
+ * make timer expiry depend on wall-clock time. Timers here are queued against the injected
+ * {@link FakeClock} and fire only when a test advances it.
  *
  * <p>{@link #inEventLoop()} is true only while a task submitted to this loop is running, so state
  * touched from outside a pumped task fails an affinity assertion rather than racing.
@@ -261,11 +261,10 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
     }
 
     /**
-     * Throws, and the throwing is the feature. Every channel Netty ships checks the loop's concrete
-     * type in {@code isCompatible} and rejects this one, but it does so by calling
-     * {@code promise.setFailure} and returning — so a test that does not inspect the returned future
-     * sees a channel that silently never registered, and then hangs. Failing loudly at the call turns
-     * that into a message at the line responsible.
+     * Throws, and the throwing is the feature. Every channel Netty ships checks the loop's concrete type
+     * in {@code isCompatible} and rejects this one by calling {@code promise.setFailure} and returning —
+     * so a caller that does not inspect the returned future sees a channel that silently never registered,
+     * and then hangs. Failing at the call site turns that into a message on the responsible line.
      */
     @Override
     public ChannelFuture register(Channel channel) {
