@@ -435,6 +435,17 @@ Batching is kept rather than reduced to one call per partition because `commitSy
 blocking calls by the partition count is how a commit overruns `max.poll.interval.ms` — defect `D5`'s
 mechanism — and, during revocation, the grace interval.
 
+## Design changes — only ever on the owner's instruction
+
+`AGENTS.md` red line 1 and the document table both forbid an implementation agent from changing
+`docs/captureAndReplay/`. Every row here exists because the owner directed the change, and each records what
+was added so it can be vetoed on reading.
+
+| Date | Section | What was added | Why it was not already there |
+|---|---|---|---|
+| 2026-09-23 | `kafkaLLD §5.7` | That the five commit outcomes describe the **operation, not individual partitions**; that a batched operation may apply to some partitions and not others with the client reporting one result for the whole thing; and that a failed operation is therefore not evidence that nothing was committed. | A fact about the Kafka client, verified in its 4.2.0 sources, that §5.7 was silent on. Silence let an implementation read a single failure as "none committed", which is wrong. |
+| 2026-09-23 | `kafkaLLD §5.7` | That a staged position is discarded **when its commit is acknowledged, not when it is attempted**; that a partition still owned under the same generation keeps its position and is offered again; and that a revoked generation discards its position rather than re-offering it. | §5.7 said when a position is *staged* but never when it is cleared. That gap produced two defects: clearing on attempt stranded every partition in a failed batch, and `onPartitionsRevoked` leaving a position staged let a revoked generation go on offering a commit. The revocation half follows from §5.7's existing no-retry sentence; the retention half is the decision the silence left open. |
+
 ## Deferral ledger — work moved between milestones
 
 The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
