@@ -34,8 +34,6 @@ public class TrafficReplayer {
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
     static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
-    static final int DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS = 100_000;
-    static final long DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES = 1024L * 1024 * 1024;
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
@@ -226,24 +224,6 @@ public class TrafficReplayer {
         int maxConcurrentTargetAttempts = 10000;
         @Parameter(
             required = false,
-            names = { "--max-owned-kafka-records", "--maxOwnedKafkaRecords" },
-            arity = 1,
-            description = "Hard maximum number of Kafka records owned locally before replay intake pauses.")
-        int maximumOwnedKafkaRecords = DEFAULT_MAXIMUM_OWNED_KAFKA_RECORDS;
-        @Parameter(
-            required = false,
-            names = { "--max-owned-kafka-bytes", "--maxOwnedKafkaBytes" },
-            arity = 1,
-            description = "Hard maximum serialized bytes of Kafka records owned locally before replay intake pauses.")
-        long maximumOwnedKafkaBytes = DEFAULT_MAXIMUM_OWNED_KAFKA_BYTES;
-        @Parameter(
-            required = false,
-            names = { "--disable-liveness-scanner", "--disableLivenessScanner" },
-            arity = 0,
-            description = "Disable Kafka metadata lookahead. Structural proof is then discovered by normal replay.")
-        boolean disableLivenessScanner;
-        @Parameter(
-            required = false,
             names = { "--num-client-threads", "--numClientThreads" },
             arity = 1,
             description = "Number of threads to use to send requests from.")
@@ -430,15 +410,6 @@ public class TrafficReplayer {
             }
         }
 
-        void validateOwnershipLimits() {
-            if (maximumOwnedKafkaRecords <= 0) {
-                throw new ParameterException("--max-owned-kafka-records must be positive");
-            }
-            if (maximumOwnedKafkaBytes <= 0) {
-                throw new ParameterException("--max-owned-kafka-bytes must be positive");
-            }
-        }
-
         boolean isKafkaTrafficEnableMSKAuth() {
             return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
         }
@@ -548,7 +519,6 @@ public class TrafficReplayer {
         try {
             parser.parse(args);
             p.validateKafkaAuthFlags();
-            p.validateOwnershipLimits();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -591,16 +561,7 @@ public class TrafficReplayer {
                     + " abstraction in milestone G3. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
         }
     }
-    /**
-     * Runs a dump mode against a Kafka topic.
-     *
-     * <p>The argument list is the pre-rebuild one, unchanged, including the two packet-timeout arguments
-     * that only {@code dump-http} consumes. Keeping them threaded means the CLI option they come from stays
-     * wired to the method that will need them, so G3 restores a branch rather than rediscovering a
-     * connection. No tracing context is built: the Kafka raw path needs none, and
-     * {@code RootReplayerContext} reaches the legacy identity chain, so its construction and the file-input
-     * branch are marked below rather than deleted.
-     */
+    /** Runs a dump mode against a Kafka topic. */
     private static void runDumpMode(Parameters params) throws Exception {
         var runner = new KafkaTopicDumper();
 
@@ -767,16 +728,11 @@ public class TrafficReplayer {
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
-                    " maxOwnedKafkaRecords={} maxOwnedKafkaBytes={}" +
-                    " livenessScannerEnabled={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
                 .addArgument(params.getEffectiveLookaheadTimeSeconds())
                 .addArgument(params.speedupFactor)
                 .addArgument(params.maxConcurrentTargetAttempts)
-                .addArgument(params.maximumOwnedKafkaRecords)
-                .addArgument(params.maximumOwnedKafkaBytes)
-                .addArgument(!params.disableLivenessScanner)
                 .addArgument(params.targetServerResponseTimeoutSeconds)
                 .addArgument(params.observedPacketConnectionTimeout)
                 .addArgument(uri)

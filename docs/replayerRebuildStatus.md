@@ -299,6 +299,62 @@ and a `SKIPPED` test rather than a failure with a cause. Worth knowing before de
 disappearing test run: look above the Gradle error for the proxy's own stack trace. An injectable exit hook
 would fix it, and that is proxy-module work.
 
+## G2 — contract breaks the owner authorized, and the two-model defect it inherits
+
+### Three CLI options removed outright, 2026-09-23
+
+`--max-owned-kafka-records` / `--maxOwnedKafkaRecords`, `--max-owned-kafka-bytes` /
+`--maxOwnedKafkaBytes`, and `--disable-liveness-scanner` / `--disableLivenessScanner` are gone. Passing any
+of them now fails at startup with jcommander's unknown-option error. **This is a red-line-2 break, chosen
+deliberately over parse-and-warn**, so a deployed config or script using them stops rather than silently
+losing an effect it asked for.
+
+The caps are ruled out by the design in the strongest terms available. `kafkaLLD §5.1`: *"There is no
+record-count or byte-count ownership limit... The design does not refuse a batch partway through: a later
+record in that batch may be the heartbeat, close, response, or broker-time evidence needed to release
+earlier work, so a hard cap could deadlock the replayer. This is the one place this trade-off is made."*
+Keeping them would have preserved a deadlock the design exists to remove. Demand is bounded instead by one
+outstanding `PartitionBatchRequestId` per partition generation — a batch-count property, not a byte ceiling.
+
+Deleted with them: `KafkaRecordOwnershipBudget` (199 lines) and its test, `DEFAULT_MAXIMUM_OWNED_*`
+constants, `Parameters.validateOwnershipLimits` and its `parseArgs` call, and the three arguments they fed
+into the marked `runReplayMode` log line — updated rather than left dangling so G9 does not trip on a field
+that no longer exists.
+
+The liveness scanner is a different kind of dead: not contradicted by the design, **absent from it**. Its
+~150 lines in `TrackingKafkaConsumer` (`scanAhead`, `ScanCycle`, `ScanBaseline`, `pollForScan`,
+`collectScanRecords`, `restoreReplayPositions`, `atScanEnd`, `remainingScanDuration`,
+`scanGenerationIsStable`, `generationMatches`, `validateScanBudget`, `captureScanBaseline`) performed Kafka
+metadata lookahead to discover structural proof early. The rebuilt intake gets that evidence from heartbeat
+and probe records instead. **Verdict: dead.** The members are not deleted individually because
+`TrackingKafkaConsumer` is whole-file marked and editing carried code would break the byte-recovery check;
+they go when that file goes, at the end of G2.
+
+The three tests of the removed options are deleted with no replacement, and the first attempt at a
+replacement is worth recording because it looked reasonable and was not. It asserted that all six option
+spellings are rejected — but **it passed just as well for `--this-flag-never-existed`**, measured rather
+than assumed. Once the `@Parameter` fields are gone, rejection is jcommander's default behavior for any
+unknown string, so the test asserted a third-party default while appearing to verify our decision. A test
+that cannot distinguish the thing it names from arbitrary garbage is worse than no test: it occupies the
+space where a real check would go.
+
+What actually guards the removal is the comment block left at the deletion site in `Parameters`, naming
+each removed option and why `kafkaLLD §5.1` forbids it. Re-adding one means editing past that comment, which
+is a tripwire in the path rather than a check somewhere else that has to be remembered.
+
+### `ObservedRecordCommitQueue` is live on the wrong identity model
+
+The one design-named G2 component that already exists is built on the **legacy** identities: it imports
+`ReplayIdentity.KafkaRecordId` and `ReplayIdentity.PartitionGenerationId`, and its `requireGeneration`
+compares `recordId.topic()`, `.partition()` and `.sourceGeneration()` separately because that record is a
+flat shape rather than the design's `KafkaRecordId(generation, offset)`.
+
+Two live correctness models is what `AGENTS.md` §6 forbids outright. The bound is the useful part:
+**`ObservedRecordCommitQueue` is the only live consumer of the legacy identities** — everything else live
+(`KafkaSourceInput`, `ApplicationKafkaRecord`, `ReplayIntakeInput`, the eight identity records, both source
+fixtures) already uses `replay/identity/`. So G2 refactoring this one file collapses the split rather than
+extending it, and `requireGeneration` reduces to a single `equals`.
+
 ## Deferral ledger — work moved between milestones
 
 The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
