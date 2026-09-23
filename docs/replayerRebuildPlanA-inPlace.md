@@ -687,6 +687,9 @@ Every milestone, in addition to its own exit condition:
    listed in the status table as deferred or won't-fix with a reason. This is not a coverage metric — it
    is a finite enumerated list the design already wrote, and the honest options are "done", "deferred to
    *milestone*", or "we are not doing this, because".
+7. **Its timing, ordering, interruption and waiting tests were falsified** — each shown to fail when the
+   property is removed from production, per `../AGENTS.md` §4.1, with the inversion and the observed
+   failure recorded. A test that still passes is the finding.
 
 **There is no coverage gate.** There is no requirement to re-read the whole design corpus — only the
 sections this milestone cites. There is no prose checkpoint narrative.
@@ -715,6 +718,12 @@ rather than at final acceptance.
 Codex is the reviewer, invoked per milestone against the milestone diff **and the design sections named in
 that milestone's `Design refs:` line**, with the specific invariants to check. Findings come back to the human as a summary with impact and mitigations,
 not as raw output. See `../AGENTS.md` §3.
+
+The review pass also runs the **falsification check** of `../AGENTS.md` §4.1 as a separate subagent in a
+throwaway worktree: it breaks one timing, ordering, interruption or waiting property at a time and
+confirms the corresponding test fails. This is the one review activity that mutates code, which is why it
+is isolated to a discarded worktree rather than run under §3.2a's read-only reviewer. It starts at `G3`,
+whose accumulation and apply-order tests are the first large set of ordering assertions in the rebuild.
 
 ## 9. Open decisions
 
