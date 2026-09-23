@@ -1,6 +1,6 @@
 package org.opensearch.migrations.replay;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// REBUILD-LIMBO(G3) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
 // javadoc with it. See AGENTS.md section 8a.
@@ -8,7 +8,7 @@ package org.opensearch.migrations.replay;
 // Un-mark a member by deleting the delimiter lines around it and splitting this region; the
 // code between them is verbatim, so blame survives. Read this before writing anything new
 
-// REBUILD-LIMBO-START(G5)
+// REBUILD-LIMBO-START(G3)
 /*
 
 import java.io.FileInputStream;
@@ -82,4 +82,4 @@ public class TrafficCaptureSourceFactory {
 }
 
 */
-// REBUILD-LIMBO-END(G5)
+// REBUILD-LIMBO-END(G3)
