@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -21,7 +29,11 @@ import org.junit.jupiter.api.Test;
 
 class ProcessSupervisorTest {
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Proves replayer LLD §8 and processing architecture §10.3's fatal-exit ladder. */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void armsTenMinuteWatchdogBeforeExitThenDumpsAndHaltsWithSameCode() {
         var events = new ArrayList<String>();
@@ -59,3 +71,6 @@ class ProcessSupervisorTest {
         Assertions.assertTrue(stderr.contains("test thread dump"));
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

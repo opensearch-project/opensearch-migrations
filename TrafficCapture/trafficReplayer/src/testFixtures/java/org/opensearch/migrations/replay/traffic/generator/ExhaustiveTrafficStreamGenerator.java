@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.traffic.generator;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: TestContext TrafficStreamGenerator . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -97,6 +108,8 @@ public class ExhaustiveTrafficStreamGenerator {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * This converts summary statistics for a TrafficStream into a single scalar that identifies the
      * traits that we're interested in tracking for test purposes.
@@ -105,6 +118,8 @@ public class ExhaustiveTrafficStreamGenerator {
      * will require mapping which transitions are possible after how many steps.  It will also require
      * a bit more work to fully implement.  For now, the count parameter is ignored.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static int makeClassificationValue(ObservationType ot1, ObservationType ot2, Integer count) {
         return ((ot1.intValue) * CLASSIFY_COMPONENT_INT_SHIFT) + ot2.intValue;
     }
@@ -309,10 +324,14 @@ public class ExhaustiveTrafficStreamGenerator {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * track all possibilities of start + end per a TrafficStream.
      * notice that one created sequence of streams may have a number of different classifications of streams
      */
+// REBUILD-LIMBO-START(G10)
+/*
     public static HashSet<Integer> getPossibleTests() {
         // these transitions are impossible to do within one TrafficStream since segmented reads are only required
         // when the span multiple records
@@ -429,3 +448,6 @@ public class ExhaustiveTrafficStreamGenerator {
         );
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

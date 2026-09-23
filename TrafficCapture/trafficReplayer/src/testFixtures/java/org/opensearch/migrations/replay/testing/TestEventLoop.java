@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.testing;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -19,6 +27,8 @@ import java.util.concurrent.RejectedExecutionException;
 
 import org.opensearch.migrations.replay.lifecycle.ActorMailbox;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Single-threaded event-loop fixture driven explicitly by its test.
  *
@@ -26,6 +36,8 @@ import org.opensearch.migrations.replay.lifecycle.ActorMailbox;
  * deadline then insertion order. {@link #advance(Duration)} runs every task made eligible by the
  * time change, matching the event-loop behavior expected by existing replay lifecycle tests.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public final class TestEventLoop implements ActorMailbox {
     private record Timer(Instant due, long sequence, Runnable command) {}
 
@@ -117,7 +129,11 @@ public final class TestEventLoop implements ActorMailbox {
         return timers.size();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Mimics an event loop that accepted tasks before termination but never ran them. */
+// REBUILD-LIMBO-START(G11)
+/*
     public void dropAcceptedWork() {
         immediate.clear();
         timers.clear();
@@ -127,3 +143,6 @@ public final class TestEventLoop implements ActorMailbox {
         rejectNewTasks = true;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

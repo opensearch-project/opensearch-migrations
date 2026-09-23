@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ChannelContextManager InstrumentationTest KafkaTrafficCaptureSource ReplayContexts SourceCommitNotAcceptedException . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -263,7 +274,11 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Proves replayer rebuild plan S1's exhaustive CaptureRecord intake contract. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void decodesEveryRecognizedCaptureRecordPayloadAndCountsControlRecords() throws Exception {
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
@@ -339,7 +354,11 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Proves replayer rebuild plan S1's no-trial-decoding protocol boundary. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void malformedEnvelopeIsAProtocolViolation() throws Exception {
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
@@ -372,7 +391,11 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Proves replayer rebuild plan S1's explicit PAYLOAD_NOT_SET violation case. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void unsetEnvelopePayloadIsAProtocolViolation() throws Exception {
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
@@ -498,6 +521,8 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * This helper function will generate N (or numTrafficStreams) traffic streams and place each traffic stream into
      * one Consumer Record. The Consumer Records will then be added to the provided mockConsumer and simulate records
@@ -508,6 +533,8 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
      * @param mockConsumer
      * @param substreamCountTracker
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static void addGeneratedTrafficStreamsToTopic(
         int numTrafficStreams,
         int offsetStart,
@@ -569,11 +596,15 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     // Phase 3: Active connection tracking
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * After consuming records for N connections on partition 0, all N connection IDs
      * must appear in partitionToActiveConnections.get(0).
      * Before fix: partitionToActiveConnections is never populated.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     public void activeConnectionsTrackedPerPartition() throws Exception {
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
@@ -611,3 +642,6 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)
