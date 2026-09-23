@@ -446,6 +446,51 @@ was added so it can be vetoed on reading.
 | 2026-09-23 | `kafkaLLD §5.7` | That the five commit outcomes describe the **operation, not individual partitions**; that a batched operation may apply to some partitions and not others with the client reporting one result for the whole thing; and that a failed operation is therefore not evidence that nothing was committed. | A fact about the Kafka client, verified in its 4.2.0 sources, that §5.7 was silent on. Silence let an implementation read a single failure as "none committed", which is wrong. |
 | 2026-09-23 | `kafkaLLD §5.7` | That a staged position is discarded **when its commit is acknowledged, not when it is attempted**; that a partition still owned under the same generation keeps its position and is offered again; and that a revoked generation discards its position rather than re-offering it. | §5.7 said when a position is *staged* but never when it is cleared. That gap produced two defects: clearing on attempt stranded every partition in a failed batch, and `onPartitionsRevoked` leaving a position staged let a revoked generation go on offering a commit. The revocation half follows from §5.7's existing no-retry sentence; the retention half is the decision the silence left open. |
 
+## G3 — approved plan and standing decisions
+
+Agreed with the owner 2026-09-23, before any code was written. **Read this before starting or resuming G3.**
+
+### Sequencing — three units, each with its own evidence
+
+G3 was escalated as too large for one review (`AGENTS.md` §6 allows escalating rather than subdividing
+silently). The owner approved three units:
+
+| Unit | Contents |
+|---|---|
+| 1 | Identity collapse, `RecordWorkTracker` refactored onto `replay/identity/`, `PartitionIntakeState` built, `kafkaLLD §17.1` record-accounting tests |
+| 2 | `SourceConnectionState`, the `§7` ten-step apply order, `§17.2` source-reconstruction tests |
+| 3 | `dump-http`/`dump-both` restored, the 8 `REBUILD-LIMBO-NOTE(G3)` root-switch sites, `ReplayIdentity` deleted |
+
+### The governing constraint on how
+
+Owner, verbatim in substance: **refactoring that makes better and more maintainable code is welcome, but
+nothing already solved gets rewritten.** So every component below is a *refactor* of carried code, not a
+reimplementation, and a proposal to rewrite one of them is a decision to escalate rather than take.
+
+### Verdicts, from reading the code against the design
+
+Most of the accumulation code survives, and more directly than expected: it already speaks
+`RecordAssociationId`, `SourceRequestAssemblyId` and `ReplayRequestId`, so it had already been reshaped
+toward this design.
+
+| Component | Lines | Verdict |
+|---|---|---|
+| `RecordWorkTracker` | 254 | **refactor, minimal.** Already `§8` to the letter — `register`/`associate`/`relabel`, `openForNewAssociations`, `completionEmitted`, and a `recordsByAssociation` reverse index that is exactly what `§8.3`'s "remove only that request's association from each contributing record" requires. The change is the identity import. |
+| `Accumulation` | 237 | **refactor.** Is `§9`'s `SourceConnectionState` in all but name: per-connection `State`, `RequestResponsePacketPair`, `hasBeenExpired`, source-request ordinal. |
+| `RequestResponsePacketPair`, `RawPackets`, `IRequestResponsePacketPair` | 154 + 47 + 18 | **keep.** `§9.2`'s "bytes remain in replay intake until the response is complete" is this buffer. |
+| `ExpiringTrafficStreamMap` + `ExpiringKeyQueue`, `AccumulatorMap`, `EpochMillis`, `ScopedConnectionIdKey`, `BehavioralPolicy` | 239 + 150 + 20 + 55 + 24 + 131 | **keep.** The expiry machinery `§9`'s `expired` state and `§7` step 5 need. The owner flagged this set earlier in the rebuild and was right to. |
+| `CapturedTrafficToHttpTransactionAccumulator` | 962 | **refactor, and the one real reshaping.** Holds both `§7`'s apply order and `§9`'s assembly; the design splits them. `§9` assembly is extracted into `SourceConnectionState`, the apply order stays. Approved explicitly. |
+| `PartitionIntakeState` | — | **build.** Does not exist; `§6` lists twelve fields the accumulator currently holds loose. |
+| `ReplayIntakeOwner`'s input family — `StartSourceRead`, `SourceReadCompleted`, `SourceReadFailed`, `StopReading`, `CloseAccumulator` | of 588 | **dead.** `§3` pushes `PartitionRecordBatch` to intake; it no longer pulls from a traffic source. Its owner-thread discipline and `validateKafkaAssociations` survive. |
+| `ReplayIdentity` | 199 | **dead**, deleted in unit 3 once nothing marked references it. |
+
+### Deferred out of G3, with the owner's agreement
+
+**`ChannelContextManager` and the accumulator's tracing stay out of G3 entirely.** It carries the
+non-atomic refcount defect already open against G5, and unit 1 needs no tracing to prove record accounting.
+`AGENTS.md` §4 makes observability a deliverable of the milestone that creates a component, so this is a
+real deferral and is in the ledger below with G5 as its receiver — not an omission.
+
 ## Deferral ledger — work moved between milestones
 
 The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
@@ -455,7 +500,8 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 | Deferred | From | To | Why | State |
 |---|---|---|---|---|
 | `dump-http` and `dump-both` CLI modes, and the file-input dump path | G1 | G3 | HTTP transaction reconstruction is the legacy accumulator's job, whose closure is `ChannelContextManager` → `RootReplayerContext` → the `IReplayContexts` identity chain. Rebuilding that inside G1 is the lateral expansion `AGENTS.md` §6 forbids. G3 rebuilds source assembly, so the modes return there as that milestone's cheapest evidence. Mode names stay in the CLI (§2.3 contract); invoking them fails with a message naming G3 | open |
-| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G3 | Recorded in `TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` note as a G1 blocker. It is not one: with G1 scoped to Kafka, no file path is promoted, so nothing forces the answer yet. It must be settled when the file dump path returns | open |
+| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G3 |
+| Tracing for replay intake and source assembly — `ChannelContextManager` and the accumulator's instrumentation contexts | G3 | G5 | `ChannelContextManager` carries the non-atomic refcount defect already open against G5 (`:39-43` reached from `:73-83`), and repairing it inside G3 would mean fixing a G5 defect to add observability G3's own evidence does not need. Record accounting is provable without it. `AGENTS.md` §4 otherwise makes observability a deliverable of the creating milestone, which is why this is recorded rather than simply left out | open | Recorded in `TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` note as a G1 blocker. It is not one: with G1 scoped to Kafka, no file path is promoted, so nothing forces the answer yet. It must be settled when the file dump path returns | open |
 
 ## Named scaffolding — every row needs a removal milestone
 

@@ -400,6 +400,12 @@ source-response bytes stay associated through tuple durability. Source reconstru
 close-truncated response is never labelled `COMPLETE`, and an incomplete final response carries no
 partial bytes rendered as complete.
 
+**Deferred out of G3 to G5 — tracing for intake and source assembly.** `ChannelContextManager` carries the
+non-atomic refcount defect G5 already owns, and G3's own evidence — record accounting and source
+reconstruction — is provable without instrumentation. G5 repairs that defect and adds the contexts then.
+Everything else about observability in this milestone is unchanged; this names one component, not a licence to
+ship G3 uninstrumented.
+
 **Inherited from G1 — restore `dump-http` and `dump-both`.** G1 deferred them because HTTP transaction
 reconstruction was the legacy accumulator's job, and this is the milestone that rebuilds it. They belong
 here rather than anywhere later because they are the cheapest possible observation of what this milestone
@@ -445,6 +451,10 @@ completion, `§11` final source response, `§12` tuple durability, `§13` reques
 `§14` the request state model and its fatal impossible transitions, `§15` resource lifetime, `§18`
 activity monitoring. Also `procCommit §3.2:155-204`, `§3.4:226-279`, `§7:871-1047`.
 **Required tests: `connLLD §19.1-19.3:729-762`.**
+
+**Inherited from G3 — tracing for intake and source assembly**, deferred here because repairing
+`ChannelContextManager`'s non-atomic refcount is this milestone's work and G3 needed no instrumentation to
+prove record accounting. Add the intake and assembly contexts alongside that repair.
 
 `TargetConnectionOwner` with separated admission and execution queues, `RequestReplayOwner`,
 `TargetChannelPort`, `TargetAttemptPermitProvider`, `TupleWriter`. Two milestones per request:
