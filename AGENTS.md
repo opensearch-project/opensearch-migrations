@@ -192,6 +192,37 @@ The posture is **integrate first, observability as the debugging substrate.** No
   once production is coherent.
 - **Metrics are conservation invariants** — see the definition below.
 
+### 4.1 Falsification — a test that cannot fail is not evidence
+
+A green test proves only that it ran. At each milestone's review pass, every test asserting a
+**timing, ordering, interruption, or waiting** property is checked by removing that property from the
+production code and confirming the test then fails. The inversion used and the failure observed are
+recorded with the milestone's evidence.
+
+This is not ceremony on every assertion. It is scoped to the class of property whose test can silently
+assert nothing, because the *absence* of an event is indistinguishable from an event that was never
+reachable. A plain value assertion fails loudly when the value is wrong; "X happened before Y" passes
+just as well when neither happened.
+
+The rule exists because four G0–G2 tests passed for reasons unrelated to their names, and none was
+subtle:
+
+- two revocation tests advanced the injected clock past the deadline *before* revoking, so the
+  grace-wait body never executed;
+- one was named for a commit staged during the grace interval and never called `onPartitionsRevoked`;
+- the real-broker wakeup test caught `WakeupException` itself, so the production boundary that must
+  catch it could stay broken underneath a passing test; and
+- two real-proxy tests gated on "at least one record", which a startup capability probe satisfies
+  before the record under test exists.
+
+Each would have been caught by the same check, and the cost of the check is near zero for a real test.
+It is expensive only for a test that is not testing anything, which is the point.
+
+**Run it as a subagent in a throwaway worktree**, not by hand and not in the working tree: the subagent
+breaks one property, runs the narrowed test, reports pass or fail, and the worktree is discarded. A
+*pass* is the finding. Doing this in place risks committing a deliberate break, and doing it by hand is
+how it gets skipped under time pressure.
+
 ### Two terms this document uses precisely
 
 **"Wired"** means reachable through the real message paths, not merely present and compiling. A component
