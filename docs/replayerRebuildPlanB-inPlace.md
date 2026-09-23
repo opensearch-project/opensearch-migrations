@@ -2,7 +2,7 @@
 
 **Status:** fallback plan. Not in effect. Invoked only on explicit instruction.
 
-**Primary:** [`replayerRebuildPlanA-newModule.md`](replayerRebuildPlanA-newModule.md) — selected
+**Primary:** [`replayerRebuildPlanA-inPlace.md`](replayerRebuildPlanA-inPlace.md) — selected
 2026-09-22. Read that first; this document assumes it and describes what changes if it is abandoned.
 
 **Supersedes:** [`replayerRebuildPlan.md`](replayerRebuildPlan.md) for sequencing and per-step

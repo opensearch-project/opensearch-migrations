@@ -1,4 +1,4 @@
-# Replayer Rebuild Plan A — build a new module alongside, then swing
+# Replayer Rebuild Plan A — rebuild in place, marking what has not been decided
 
 **Status:** primary plan, selected 2026-09-22
 
@@ -62,18 +62,30 @@ two owners end to end, which is why Plan B makes that read its first milestone.
 
 ## 2. The shape
 
-Build the replayer as a **new Gradle module** using the **same Java package names**, with **no
-dependency on the existing module in either direction**. Nothing is copied forward unless it arrives
-in the form it will have in the final implementation. The existing module stays in the tree, untouched
-and buildable, as reference.
+Rebuild the replayer **in the module it already lives in**. Every member is either live — it belongs in the
+final deliverable — or inside a `REBUILD-LIMBO` region at the path it will ship from. There is no second
+module, no rename, and no cutover.
 
-Two modules may hold the same package names because they are never on one classpath. That is the
-mechanic that makes this cheap: **there is no rename at the end.** The final cutover is a directory
-deletion plus removing one `settings.gradle` line — not a module-wide package refactor, and not a
-coordinate or image change.
+The property this protects is the one the in-place attempt lost: **exactly one live correctness model.** That
+attempt failed because every step had to leave the old implementation compiling beside the new one, so the
+cheapest correct move at each step was to add rather than replace, and twelve slices later two models were
+live. Marking gives the property directly and more cheaply than a second module did — marked code does not
+compile, so nothing can depend on it, while it stays visible at the path it will ship from. A second module
+achieved the same separation by keeping two classpaths apart; marking needs no classpath at all.
 
-It is expected and acceptable that the assembled application does not work for most of this plan.
-Individual milestones are proved in isolation.
+Three consequences worth stating, because each replaces something the earlier shape needed:
+
+- **The module keeps its real Gradle path, Maven coordinates, package names and jib image mapping
+  throughout.** That was the original mechanic's whole purpose, and it now holds trivially rather than by
+  arrangement. There is no end-state rename to forget.
+- **Progress is measurable and falsifiable.** `grep -rl REBUILD-LIMBO-OPEN src` is the outstanding-work
+  count, and the rebuild is complete when it reaches zero. That is a check, not a judgment.
+- **The assembled application is broken for most of this plan, and that is expected.** Individual milestones
+  are proved in isolation. `G10` is the first that needs a working image.
+
+`../AGENTS.md` §8a governs how marked code is used. The rule that matters most: it is the **first** place to
+look, not a graveyard. Before writing any new class, method or test, find the thing you are about to create
+among the marked regions and refactor it rather than inventing beside it.
 
 ### 2.1 Module mechanics — superseded 2026-09-23
 
@@ -124,7 +136,7 @@ is deliberate: inline, the existing implementation is unavoidable when you next 
 stops it being reinvented. See `../AGENTS.md` §8a.
 
 The abandoned set is reserved for code that is provably dead, that the design positively forbids, or that
-duplicates something the new module already has — *not* for code whose responsibility the design merely
+duplicates something already present — *not* for code whose responsibility the design merely
 reassigns. That distinction was got wrong once: reassignment means refactor, and refactoring needs the code.
 
 **`git mv`, always.** Blame is preserved on carry and on restore, with no dependence on copy detection —
@@ -136,9 +148,41 @@ three limits in `docs/replayerRebuildStatus.md`.
 decision — **promoting one to live is**, and so is writing something new when a limbo counterpart exists.
 `../AGENTS.md` §8a governs the second, and it exists because it was violated.
 
+### 2.2a Two sources of "must survive", and they are different
+
+A member survives for one of two independent reasons, and conflating them is how functionality gets lost:
+
+1. **The new design needs it.** Judged against `docs/captureAndReplay/`. This is the reason most of the
+   marked set will be promoted or refactored.
+2. **Mainline depends on it**, regardless of what the new design says. Behaviour, contracts, CLI surface,
+   metric names, exit codes, wire formats and published APIs that exist on `main` and that something outside
+   this module relies on. These survive **even where the design is silent about them**, because the design
+   describes the replayer's internals and says nothing about, for example, which CLI aliases deployments
+   already pass.
+
+**Reason 2 is the one that gets forgotten**, because it is invisible from inside the design. The design is the
+authority on how the replayer should work; it is not an inventory of what the outside world already expects.
+So "the design does not mention it" is never sufficient grounds to drop something — the question is also
+whether anything on mainline would notice.
+
+The practical test at promotion or deletion time is two questions, not one:
+
+- Does the new design need this? If yes, promote or refactor it.
+- Does anything outside this module depend on it as it exists on `main`? If yes, it survives in a form that
+  keeps that dependency satisfied, even if the design would have shaped it differently. Changing it anyway is
+  a red-line-2 decision under `../AGENTS.md` §1, not an implementation detail.
+
+§2.3 enumerates the contract surface known today. **That list is evidence, not a guarantee of completeness** —
+it was measured once, and two of its rows were already found overstated by an order of magnitude. Before
+deleting anything, check mainline for consumers rather than trusting the list to have caught them.
+
+**The safest deletions are therefore members that mainline never had.** Code added on this branch that the new
+design does not need cannot have a mainline consumer, so it can be removed on design grounds alone.
+Everything else needs the second question answered first.
+
 ### 2.3 The external contract surface
 
-This is the complete set of things the swing must not break. It is small, which is why this plan is
+This is the complete set of things the rebuild must not break. It is small, which is why this plan is
 viable. Each item is a red-line-2 contract; changing any of them is an escalated decision.
 
 | Surface | Where it is established |
@@ -167,14 +211,14 @@ measured, not assumed: no `src/main` source set outside `TrafficCapture/trafficR
 
 The two rows of "six" are **overlapping but different sets**, and their union is **eight** modules — six
 consume `testFixtures`, six depend on the module directly, and four do both. Do not treat "the six
-modules" as a single list when planning the swing.
+modules" as a single list when reasoning about those consumers.
 
 Because `testFixtures` is **published to Maven**, its API is a public contract and not merely an
 arrangement with six sibling modules. That raises the stakes on the `G11` decision below: updating six
 in-repo consumers is cheap, but anyone outside the repo compiling against the published fixtures jar is
 not visible from here.
 
-So the entire *in-repo* compile-time coupling to be satisfied at the swing is test-scope, in one directory
+So the entire *in-repo* compile-time coupling to be satisfied is test-scope, in one directory
 tree. Everything else references the replayer as an *artifact* — by Maven coordinates, image name, service
 name, CLI surface, or K8s label — and does not care which module produced it. That is the measurement that
 makes this plan viable rather than ambitious.
@@ -287,7 +331,7 @@ The cheapest possible end-to-end evidence, deliberately placed first.
   (§2.3), so they are preserved. `TrafficStreamDumper` and `HttpTransactionDumper` come with it. This is
   a good example of §3 rule 1 in the permissive direction — useful, close to final, and worth moving.
 
-**Exit:** the new module reads and dumps a topic written by the **current, unmodified proxy**, and
+**Exit:** the module reads and dumps a topic written by the **current, unmodified proxy**, and
 every envelope case is handled explicitly. This is the milestone that prevents a greenfield module from
 drifting away from what the proxy actually emits, and it is why it comes before any owner work.
 Covers `D1` — "the replayer cannot read its own capture topic" is the total-loss-of-function defect, and
@@ -603,7 +647,7 @@ Escalated per `../AGENTS.md` §2. Blocking items first.
 | Broken `traffic_replayer` image during construction | Accept it, or keep the image building from the legacy module until `G10`? | Yes | Accept. Keeping it alive means a jib edit at `G11`, and the owner has already accepted a non-working app during construction |
 | Eight `transformation/` modules redirected at the legacy module | Named scaffolding removed at `G11`, or break their tests for the duration? | Yes | Redirect. One line per module, mechanical, on code scheduled for deletion — not a bridge between correctness models |
 | `RecordDispositionLedger` (707 lines, 0 refs) | Delete from the legacy module now, or leave it frozen? | Yes | Leave frozen — the legacy module is reference and gets deleted whole at `G11` |
-| Nine obsolete `ReplayIdentity` records | Not carried forward; new module declares exactly eight | No — internal contract break | Proceed; escalating for the record since red line 3 makes *keeping* them a decision too |
+| Nine obsolete `ReplayIdentity` records | Marked, not promoted; exactly eight design identities declared | No — internal contract break | Proceed; escalating for the record since red line 3 makes *keeping* them a decision too |
 | `testFixtures` API for six `transformation/` modules | Preserve the existing surface, or update those six modules? | No — contract break | Decide at `G11`; preferring to update six test-only consumers over freezing a fixture API we'd otherwise redesign |
 | Ship gate in the definition of done | Does `G12` become a required acceptance condition alongside `R1`–`R19`? | No | Deferred by the human 2026-09-22; revisit at `G10` |
 
@@ -614,18 +658,21 @@ hedging toward it, and never treats a signal below as authorization to change ap
 is **report**, in the milestone summary, and keep executing Plan A until told otherwise. These are
 instrumentation, not a trigger.
 
-Plan A fails in one specific, detectable way: the new module starts depending on the old one, in spirit
-if not in the build file — legacy types carried over for convenience, shells left simplified because
-real implementations were inconvenient, the swing receding indefinitely.
+Plan A fails in one specific, detectable way: **marked code becomes load-bearing rather than being resolved.**
+Not by compiling — it cannot — but by the marked set ceasing to shrink while new code is written beside it. The
+symptoms are new implementations appearing next to marked counterparts that were never read, regions being
+un-marked wholesale without the legacy structure stripped, and the marked count flat across a milestone.
 
 Signals to report, any one of which is worth the owner's attention:
 
-1. The dependency prohibition in §2.1 is weakened or waived for any reason.
-2. More than two red-line-3 decisions in one milestone resolve as "carry the legacy type forward."
-3. `G1` cannot decode the current proxy's output and the cause is a design ambiguity rather than an
-   implementation bug — that means the greenfield module is being built against a misread of the
-   protocol, and the in-place plan's continuous contact with working code is worth more.
-4. Two consecutive milestones miss their exit condition for reasons of size rather than difficulty.
+1. `grep -rl REBUILD-LIMBO-OPEN src` does not fall across a milestone that was supposed to resolve regions.
+2. A new class or test is added where a marked counterpart existed, without that counterpart having been read
+   and its reuse explicitly rejected. This is an `../AGENTS.md` §8a violation and has already happened once.
+3. Any escape or transformation of marked code is introduced without a guard that reverses it mechanically.
+   `tools/unmark-limbo.awk` must continue to round-trip every marked file.
+4. `G1` cannot decode the current proxy's output and the cause is a design ambiguity rather than an
+   implementation bug — that means the rebuild is proceeding against a misread of the protocol.
+5. Two consecutive milestones miss their exit condition for reasons of size rather than difficulty.
 
 Plan B is a complete alternative, not a degraded one, and the work done under Plan A is not wasted if it
 is invoked: the four fixtures, the eight identity records, the `Design refs:` citations, and the status
