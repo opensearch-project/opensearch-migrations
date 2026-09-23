@@ -1261,19 +1261,23 @@ clean. A successor generation cannot overtake that accepted batch.
 ### 9.2 Bounded revocation grace and scoped cancellation
 
 The replayer uses one startup-configured cancellation grace interval for partition revocation and
-normal shutdown. Its default is five seconds. Deployments may lower it, including to one second,
-when their target and tuple behavior make that appropriate. It must remain short enough, with
-operational margin, that `onPartitionsRevoked` returns before the consumer risks exceeding its poll
-interval.
+normal shutdown. **Its default is one second, and it is raised or lowered by a command-line option.**
+The default is deliberately the smallest useful value rather than a generous one: the callback stalls
+every partition this consumer holds, not only the revoked ones, and it blocks the whole consumer
+group's rebalance for its duration. A deployment raises it only when it has measured that it needs
+to. It must remain short enough, with operational margin, that `onPartitionsRevoked` returns before
+the consumer risks exceeding its poll interval — that interval is also the rebalance timeout, and
+exceeding it fences the member, converting a graceful revocation into a lost one and discarding every
+staged position.
 
 When revocation begins, the Kafka source submits one scoped graceful-cancellation input to replay
 intake. That input identifies the revoked partition generation and the grace deadline.
 
 1. replay intake stops admitting new work from that partition generation;
-2. as each owner processes the cancellation, it immediately cancels work whose target request has not been sent, including work queued behind a request that is still finishing; 
+2. as each owner processes the cancellation, it immediately cancels work whose target request has not been sent, including work queued behind a request that is still finishing;
 3. a request already sent to the target may finish target processing and durable tuple output
    during the grace interval;
-4. tuple output already started may continue during that interval;
+4. a tuple write already in flight may finish during that interval;
 5. completed work may still produce commit requests and the Kafka source owner may attempt them;
 6. when the grace deadline arrives, the Kafka source submits a scoped force-cancellation input;
 7. `onPartitionsRevoked` waits only until replay intake accepts that force-cancellation input and
@@ -1367,6 +1371,38 @@ After ownership is gone:
 
 The source owner avoids broker spam by submitting only the commit position after consecutive finished records at the head of its observed-record queue and by
 never retrying an old-generation commit after rejection or unknown outcome.
+
+### 9.5 Forward progress across revocations, and how it is observed
+
+A revocation commits the contiguous prefix of records that finished before the deadline, so progress
+is normally proportional to completed work rather than all-or-nothing. The exception is head-of-line:
+if the **earliest** uncommitted record of a partition is the one still finishing, the prefix cannot
+advance and the revocation commits nothing, however much later work completed.
+
+**Forward progress for a partition therefore requires that revocations arrive less often than its
+earliest uncommitted record takes to finish.** Where they do not, the committed position never
+advances: each generation re-reads the same records, starts the same work, and is revoked before its
+head completes. The replayer cannot detect this from a single revocation — every individual one looks
+like ordinary at-least-once redelivery — so the condition is made **observable rather than
+self-correcting.** Nothing adapts the deadline in response to it: extending the wait to cover
+in-flight work would stall every retained partition and hold the whole group's rebalance open for as
+long as the slowest target and tuple chain takes, which trades one partition's progress for every
+partition's throughput.
+
+Two per-partition measurements are recorded **when a generation is retired**, at revocation or loss:
+
+- **records committed during that generation** — the count the contiguous prefix advanced by over the
+  generation's whole life, not only during the grace interval. A generation that retires having
+  committed zero is the signal: one is unremarkable, a sustained pattern of zeroes on the same
+  partition is the livelock above, and the operator's response is to raise the grace interval or
+  reduce how much is admitted before the head finishes.
+- **records read during that generation** — every record delivered to replay intake under it. Read
+  against the committed count it gives the re-work ratio a revocation cost, which is what makes the
+  trade-off between grace length and duplicate volume measurable rather than argued.
+
+Both are attributed to the retiring generation rather than to the partition, so successive
+generations of one partition are distinguishable and a churning partition is visible as a run of
+short generations with no commits.
 
 ## 10. Shutdown and failure
 

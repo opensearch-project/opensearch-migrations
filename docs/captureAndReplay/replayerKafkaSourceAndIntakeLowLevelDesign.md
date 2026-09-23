@@ -874,7 +874,15 @@ record GracefulGenerationCancellation(
 ```
 
 The deadline is measured with a process-local monotonic clock. Wall-clock changes cannot shorten
-or extend the configured grace interval.
+or extend the configured grace interval. **One monotonic source serves the whole deadline**: the value
+the source owner reads to create the deadline and the value anything else compares it against come
+from the same injected clock. A deadline compared against a second, independently-originated clock is
+not a shorter or longer wait but an arbitrary one, since the two origins are unrelated.
+
+The interval is set by `--cancellation-grace-ms` (alias `--cancellationGraceMs`), defaulting to
+`1000`. `replayerProcessingAndCommitArchitecture.md` §1.1 leaves the option name to this document;
+§9.2 there fixes the behavior and the default, and §9.5 why the default is the smallest useful value
+rather than a generous one.
 
 Replay intake:
 
@@ -931,6 +939,27 @@ record GenerationCleanupFinished(PartitionGenerationId generation) {}
 through `KafkaSourceInputQueue`. The source may clear only the prior-generation-cleanup pause
 reason for a new assignment of that partition. That newer generation still remains paused until
 it has an outstanding `RequestNextPartitionBatch`.
+
+### 15.4 Generation retirement measurements
+
+`KafkaSourceOwner` records two values for a partition generation at the moment it retires it — from
+`onPartitionsRevoked` after the callback's staged commits are resolved, and from `onPartitionsLost`
+before the state is dropped. Both are attributed to the retiring `PartitionGenerationId`, not to the
+`TopicPartition`, so successive generations of one partition stay distinguishable.
+
+- `recordsCommittedInGeneration` — how far the generation's `ObservedRecordCommitQueue` advanced the
+  committed position over its whole life, not only during the grace interval. A generation retiring at
+  zero is the observable form of the head-of-line stall in
+  `replayerProcessingAndCommitArchitecture.md` §9.5.
+- `recordsReadInGeneration` — every record the generation delivered to replay intake. Against the
+  committed count it gives the re-work a revocation cost.
+
+Both are recorded exactly once per generation. A generation that never became readable still retires,
+and reports zero for both, because a generation absent from the measurement is indistinguishable from
+one that committed nothing — which is precisely the case these exist to make visible.
+
+The owner records the values; it draws no conclusion from them and changes no behavior in response.
+The grace interval is configuration, never adapted at runtime (§9.5).
 
 ## 16. Protocol violation and fatal failure
 
@@ -1015,3 +1044,10 @@ the process supervisor immediately.
 - The successor generation stays paused until `GenerationCleanupFinished`.
 - Unrelated partitions continue.
 - Rejected or unknown old-generation commits are not retried.
+- A commit attempted inside the callback cannot hold it past the grace deadline, and one begun with
+  less than the configured floor of grace remaining is not attempted at all.
+- Every retired generation reports `recordsCommittedInGeneration` and `recordsReadInGeneration`
+  exactly once, including a generation that committed nothing and a generation that never became
+  readable.
+- A generation whose earliest uncommitted record does not finish within the grace interval retires
+  reporting zero commits and a non-zero read count.
