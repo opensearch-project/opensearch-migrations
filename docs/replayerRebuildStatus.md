@@ -365,6 +365,34 @@ reason: deleting it now would make those regions harder to read during the refac
 **No live file references the legacy identity model any more.** That is checkable:
 `grep -rln 'ReplayIdentity\.' src` returns only marked files.
 
+## G2 — the legacy Kafka source is deleted, and what its tests still owe
+
+`TrackingKafkaConsumer` (1,231 lines) and `KafkaTrafficCaptureSource` (953) are gone, replaced by
+`KafkaSourceOwner`, `PartitionSourceState`, `KafkaSourceInputQueue`, `WakeupController` and the live
+`ObservedRecordCommitQueue`. One live reference to the old name survives deliberately:
+`IKafkaConsumerContexts.ScopeNames.KAFKA_CONSUMER_SCOPE` is the string `"TrackingKafkaConsumer"`, and a trace
+scope name is a published contract, so renaming it is a red-line-2 decision rather than tidying.
+
+Eleven marked test files reference the deleted classes. They do not compile, so nothing is broken, but
+without verdicts someone will try to restore them. Read before deciding, and they do not all resolve the
+same way:
+
+| Marked test | Verdict | Receiving milestone |
+|---|---|---|
+| `TrackingKafkaConsumerTest`, `KafkaTrafficCaptureSourceTest` — `onAssigned`/`onRevoked`/`onRetired`/`commitSync` | **dead**: same subject, and the design's version of each is covered by `KafkaSourceOwnerTest` against `kafkaLLD §17.4` | — |
+| `KafkaCommitsWorkBetweenLongPollsTest` — commits and reads keep working across long polls | **dead**: not in `§17.4`, and its guarantee is now split across the wakeup cases and the commit-prefix case, both covered | — |
+| `StaleAccumulationCancelOnRejoinTest`, `StaleAccumulationCancelOnRejoinKafkaTest` — synthetic closes precede new-generation records after revoke and reassign | **refactor**: the generation-bump half is G2's and holds (a new generation gets a new `PartitionSourceState` and a new commit queue); the accumulation half is source assembly | G3 |
+| `PartitionRevocationStaleStateTest` — stale accumulation and stale channel context discarded on generation bump | **refactor** | G3 |
+| `ActiveConnectionTrackingTest` — connections tracked across keep-alive, removed on accumulation complete | **refactor** | G3 |
+| `QuiescentConnectionTest`, `ReplayEngineQuiescentTest` — quiescent tagging of resumed connections | **refactor** | G5 |
+| `TrafficSourceReaderInterruptedCloseWiringTest`, `TrafficSourceReaderInterruptedCloseAccountingTest` — synthetic close accounting | **refactor** | G3 |
+| `KafkaKeepAliveTests`, `KafkaTrafficCaptureSourceLongTermTest`, `e2etests/KafkaRestartingTrafficReplayerTest` | **refactor**: end-to-end behaviour that needs the full replay path wired | G9 |
+
+`PumpedKafkaSource` now implements `KafkaSourcePort`, so the owner drives it. `SourceOwnerDriver` and
+`DriverPort` are deleted: both existed only because the owner did not, and the fixture could not otherwise
+serve the exit criterion that names it. Rebalance callbacks fire from inside `poll()`, matching Kafka, which
+is what makes `§17.4`'s wakeup-between-revocation-and-assignment case expressible at all.
+
 ## Deferral ledger — work moved between milestones
 
 The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
