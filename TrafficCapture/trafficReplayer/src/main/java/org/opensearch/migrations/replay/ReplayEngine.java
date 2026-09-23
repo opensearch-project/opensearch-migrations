@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
@@ -30,6 +41,8 @@ import org.opensearch.migrations.utils.TrackedFuture;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * This class is responsible for managing the BufferedFlowController, which is responsible for releasing
  * backpressure on the traffic source so that this class can schedule those requests to run on a
@@ -37,6 +50,8 @@ import lombok.extern.slf4j.Slf4j;
  * progress of tasks, and periods of inactivity, to move determine
  * from the current time, what the frontier time value should be for the traffic source
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class ReplayEngine {
     public static final int BACKPRESSURE_UPDATE_FREQUENCY = 8;
@@ -181,14 +196,22 @@ public class ReplayEngine {
         return networkSendOrchestrator.shutdownActors(cause);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Connection sessions whose actors have not yet reached termination, for shutdown diagnostics. */
+// REBUILD-LIMBO-START(G11)
+/*
     public Set<String> describeUnterminatedSessions() {
         return networkSendOrchestrator.describeUnterminatedSessions();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Immediately aborts a connection actor due to a traffic source reader interruption.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public TrackedFuture<String, Void> cancelConnection(
         IReplayContexts.IChannelKeyContext ctx,
         int channelSessionNumber
@@ -276,12 +299,20 @@ public class ReplayEngine {
         timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Record a target response status code for heartbeat reporting. */
+// REBUILD-LIMBO-START(G11)
+/*
     public void recordTargetResponseCode(int statusCode) {
         responseCodeCounters.computeIfAbsent(statusCode, k -> new AtomicLong()).incrementAndGet();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Emit a periodic heartbeat log summarizing the replay engine state. */
+// REBUILD-LIMBO-START(G11)
+/*
     public void logHeartbeat() {
         var sb = new StringBuilder();
         var progress = progressController.currentSnapshot();
@@ -319,3 +350,6 @@ public class ReplayEngine {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

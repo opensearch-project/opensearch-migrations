@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ITrafficStreamWithKey PojoTrafficStreamAndKey RootReplayerContext . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Optional;
@@ -59,3 +70,6 @@ public class V0_1TrafficCaptureSource extends CompressedFileTrafficCaptureSource
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

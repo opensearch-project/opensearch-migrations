@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -37,6 +48,8 @@ import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * This class consumes TrafficObservation objects, which will be predominated by reads and writes that
  * were received by some HTTP source.  Reads represent data read by a server from traffic that was
@@ -63,6 +76,8 @@ import lombok.extern.slf4j.Slf4j;
  * It has no notion of time, limiting its ability to terminate and prune transactions whose requests or
  * responses may not have been completely received.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class CapturedTrafficToHttpTransactionAccumulator {
 
@@ -92,7 +107,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .toString();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /** Emit a periodic heartbeat log summarizing the accumulator state. */
+// REBUILD-LIMBO-START(G11)
+/*
     public void logHeartbeat() {
         var sb = new StringBuilder();
         int waiting = 0;
@@ -806,9 +825,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * @return True if something was sent to the callback, false if nothing had been accumulated
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private boolean handleEndOfRequest(Accumulation accumulation) {
         assert accumulation.state == Accumulation.State.ACCUMULATING_READS : "state == " + accumulation.state;
         var rrPairWithCallback = accumulation.getRrPairWithCallback();
@@ -857,6 +880,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         liveStreams.clear();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Single entry point for closing an accumulation in response to source-layer partition
      * reassignment. Always uses {@code TRAFFIC_SOURCE_READER_INTERRUPTED} (never
@@ -867,6 +892,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      * Used by both the synth-close branch (primary path) and the stale-generation defensive
      * backstop, so the two cannot drift in close semantics.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private void closeAsTrafficSourceReaderInterruptedAndRemove(
         Accumulation existingAccum,
         ITrafficStreamKey tsk
@@ -931,3 +958,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

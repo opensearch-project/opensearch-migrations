@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.traffic.generator;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,12 +33,16 @@ import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
 import org.apache.kafka.common.TopicPartition;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Deterministic Kafka application-record script for replay tests.
  *
  * <p>Expected work associations are supplied literally by the test. The fixture never derives them
  * from source-assembly transitions, so they remain an independent oracle for record accounting.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public final class RecordScript extends TrafficStreamGenerator {
     public record RecordId(TopicPartition topicPartition, long offset) {
         public RecordId {
@@ -233,3 +245,6 @@ public final class RecordScript extends TrafficStreamGenerator {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

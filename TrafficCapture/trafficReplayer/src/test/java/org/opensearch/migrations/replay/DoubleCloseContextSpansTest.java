@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ConnectionReplaySession InstrumentationTest NettyPacketToHttpConsumer TestContext . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
@@ -21,6 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Verifies that NettyPacketToHttpConsumer.finalizeRequest() closes context spans exactly once.
  *
@@ -30,6 +43,8 @@ import org.junit.jupiter.api.Test;
  *
  * This test verifies that spans are closed exactly once, so metric count = 1 for 1 request.
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 public class DoubleCloseContextSpansTest extends InstrumentationTest {
 
@@ -84,3 +99,6 @@ public class DoubleCloseContextSpansTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

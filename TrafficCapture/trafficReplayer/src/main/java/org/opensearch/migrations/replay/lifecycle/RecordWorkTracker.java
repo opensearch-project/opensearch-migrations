@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -23,12 +31,16 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.RecordAssociati
 
 import lombok.NonNull;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Intake-owned whole-record association state.
  *
  * <p>Each registered Kafka record has an independent association set, close flag, and one-shot
  * completion latch. Completion is evidence only until the S4b commit-authority cutover.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public final class RecordWorkTracker {
     public sealed interface Input extends ReplayIntakeInput permits AssociationFinished {}
 
@@ -125,10 +137,14 @@ public final class RecordWorkTracker {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Removes one record/operation association. This method deliberately returns no completion
      * authority; the one-shot listener is emitted internally when the closed record becomes empty.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public void associationFinished(
         @NonNull KafkaRecordId recordId,
         @NonNull RecordAssociationId association
@@ -155,9 +171,13 @@ public final class RecordWorkTracker {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Returns tuple/request completion to the intake owner without blocking the completing thread.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public void submitAssociationFinished(@NonNull RecordAssociationId association) {
         ownerInputSink.accept(new AssociationFinished(association));
     }
@@ -230,3 +250,6 @@ public final class RecordWorkTracker {
         completionListener.accept(record.id);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

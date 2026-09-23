@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: AsyncPermitPool IRootReplayerContext ReplayEngine ReplayIntakeOwner ReplayProgressController . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.time.Duration;
@@ -25,7 +36,11 @@ import org.slf4j.event.Level;
 
 class TrafficReplayerTopLevelShutdownTest {
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Proves rebuild plan S2: runtime shutdown hooks signal shutdown without joining owner work. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void runtimeShutdownHookSignalsWithoutWaitingForOwnedShutdown() {
         var replayer = Mockito.mock(TrafficReplayerTopLevel.class);
@@ -38,7 +53,11 @@ class TrafficReplayerTopLevelShutdownTest {
         Assertions.assertFalse(shutdown.isDone());
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Proves processing architecture §10.3: fatal shutdown never waits on a failed owner. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void fatalShutdownSkipsActorAndNettyCleanup() throws Exception {
         var connectionPool = Mockito.mock(ClientConnectionPool.class);
@@ -65,7 +84,11 @@ class TrafficReplayerTopLevelShutdownTest {
         Mockito.verifyNoInteractions(connectionPool);
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Proves rebuild plan S2's single named bound for normal remaining-work waiting. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void normalWrapUpWaitsOnlyOnce() throws Exception {
         var replayer = new TimeoutRecordingReplayer();
@@ -181,3 +204,6 @@ class TrafficReplayerTopLevelShutdownTest {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

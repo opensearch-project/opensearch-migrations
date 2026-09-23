@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 
@@ -35,9 +46,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Tests #13, #14: Quiescent delay enforcement in ReplayEngine.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 class ReplayEngineQuiescentTest {
 
     private IReplayContexts.IReplayerHttpTransactionContext buildMockCtx() {
@@ -74,11 +89,15 @@ class ReplayEngineQuiescentTest {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Test #13: Schedule a request with quiescentUntil 200ms in the future.
      * Assert the effective start time passed to networkSendOrchestrator.scheduleRequest
      * is at least quiescentUntil (not the original time-shifted start).
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void replayEngineHonorsQuiescentDelay() {
         var orchestrator = mock(RequestSenderOrchestrator.class);
@@ -130,10 +149,14 @@ class ReplayEngineQuiescentTest {
         producer.release();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Test #14: Without quiescentUntil, the start time should be the normal time-shifted value.
      * Verifies quiescent delay only applies when explicitly set.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void quiescentOnlyAppliesToFirstRequest() {
         var orchestrator = mock(RequestSenderOrchestrator.class);
@@ -185,3 +208,6 @@ class ReplayEngineQuiescentTest {
         producer.release();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: AccumulationCallbacks CapturedTrafficToHttpTransactionAccumulator HttpMessageAndTimestamp IgnoringSourcePartitionLifecycleListener InstrumentationTest . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -38,6 +49,8 @@ import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * End-to-end regression test for the "Stale accumulation found" production failure that fired
  * when a single-partition single-consumer deployment was fenced and the same partition was
@@ -75,12 +88,16 @@ import org.junit.jupiter.api.Test;
  *       not fire under correct source-layer behavior.
  * </ul>
  */
+// REBUILD-LIMBO-START(G10)
+/*
 public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
 
     private static final String TOPIC = "stale-accum-test";
     private static final String NODE_ID = "node1";
     private static final String CONN_ID = "conn-mid-flight";
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * End-to-end Path 2 reproduction:
      * <pre>
@@ -94,6 +111,8 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
      * the re-delivered record must create a fresh accumulation. The accumulator's defensive
      * stale-check branch must NOT fire.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     void revokeAndReassign_synthClosesBeforeNewGenRecord() throws Exception {
         var mc = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
@@ -253,6 +272,8 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Drains chunks from the source (mirroring {@code pullCaptureFromSourceToAccumulator}) and
      * accumulates everything across chunks until BOTH a synthetic close AND a real record for
@@ -264,6 +285,8 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
      * synthetic session after the accumulator consumes it. Production does this only after the
      * runtime's transaction and channel completion gates settle.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private List<ITrafficStreamWithKey> drainUntilSyntheticAndRealForConn(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator
@@ -300,7 +323,11 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
             + CONN_ID + " after 32 polls. Observed=" + observed);
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Mimics one iteration of {@code TrafficReplayerCore.pullCaptureFromSourceToAccumulator}. */
+// REBUILD-LIMBO-START(G10)
+/*
     private void drainOnce(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator
@@ -320,7 +347,11 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
         throw new AssertionError("drainOnce: source returned no records after 16 polls");
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Adds a READ + EOM record at the given offset for {@link #CONN_ID} on partition 0. */
+// REBUILD-LIMBO-START(G10)
+/*
     private static void addReadEomRecord(MockConsumer<String, byte[]> mc, long offset) {
         var ts = Timestamp.newBuilder().setSeconds(Instant.now().getEpochSecond()).build();
         var stream = TrafficStream.newBuilder()
@@ -344,3 +375,6 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

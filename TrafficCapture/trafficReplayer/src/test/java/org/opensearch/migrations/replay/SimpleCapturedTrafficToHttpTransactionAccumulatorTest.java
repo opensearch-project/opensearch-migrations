@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ExhaustiveTrafficStreamGenerator InstrumentationTest IReplayContexts ITrafficStreamKey PojoTrafficStreamAndKey . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -31,6 +42,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Some things to consider - Reads, Writes, ReadSegments, WriteSegments, EndOfSegment, EndOfMessage
  * In a well-formed stream, these will always occur in the pattern
@@ -46,6 +59,8 @@ import org.junit.jupiter.params.provider.MethodSource;
  * the last observation of a TrafficStream.  That's already 49 possibilities
  * @return
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends InstrumentationTest {
     public static final int MAX_COMMANDS_IN_CONNECTION = 256;
@@ -157,6 +172,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
         Assertions.assertEquals(requestsReceived.get(), reconstructedTransactions.size());
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Returns the traffic stream indices whose contents have been fully received.
      * @param trafficStreams
@@ -164,6 +181,8 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
      * @param requestsReceived
      * @return
      */
+// REBUILD-LIMBO-START(G10)
+/*
     static void accumulateTrafficStreamsWithNewAccumulator(
         TestContext context,
         Stream<TrafficStream> trafficStreams,
@@ -246,3 +265,6 @@ public class SimpleCapturedTrafficToHttpTransactionAccumulatorTest extends Instr
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

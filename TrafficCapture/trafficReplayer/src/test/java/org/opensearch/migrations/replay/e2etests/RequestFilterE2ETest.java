@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.e2etests;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ExhaustiveTrafficStreamGenerator FullTrafficReplayerTest ITrafficSourceContexts ITrafficStreamKey PojoTrafficStreamAndKey . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import javax.net.ssl.SSLException;
 
 import java.io.EOFException;
@@ -41,10 +52,14 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * End-to-end integration tests for request filter extension point.
  * Exercises the full pipeline path through RequestTransformerAndSender.
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 @Tag("longTest")
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
@@ -59,10 +74,14 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
         return TrafficStreamFixtures.makeHttpRequestTrafficStream(TEST_NODE_ID, TEST_CONNECTION_ID, httpRequest);
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Filter rejects all requests → target server never receives traffic,
      * but traffic stream is still committed (Kafka offset advances).
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @ResourceLock("TrafficReplayerRunner")
     void filteredRequest_rejectAll_skipsTargetAndCommits() throws Throwable {
@@ -95,10 +114,14 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Filter accepts all requests → requests flow through to target normally.
      * Proves the filter doesn't break the normal pipeline when it accepts.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @ResourceLock("TrafficReplayerRunner")
     void filteredRequest_acceptAll_reachesTarget() throws Throwable {
@@ -155,10 +178,14 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Selective filter — only GET requests pass, POST requests are filtered.
      * Verifies per-request filtering logic works correctly.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @ResourceLock("TrafficReplayerRunner")
     void filteredRequest_selectiveFilter_onlyGetPassesThrough() throws Throwable {
@@ -199,10 +226,14 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Filter throws a non-RequestFilteredException → should propagate as error,
      * not be treated as a filtered request.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @ResourceLock("TrafficReplayerRunner")
     void filterThrowsUnexpectedException_propagatesAsError() throws Throwable {
@@ -232,3 +263,6 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

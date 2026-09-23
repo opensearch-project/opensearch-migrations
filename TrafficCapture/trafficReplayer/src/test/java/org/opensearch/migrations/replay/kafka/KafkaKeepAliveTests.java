@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: BlockingTrafficSource InstrumentationTest ITrafficStreamKey KafkaTrafficCaptureSource TestContext . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,12 +65,16 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
 
     private KafkaTrafficCaptureSource kafkaSource;
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Set up the test case where we've produced and received 1 message, but have not yet committed it.
      * Another message is in the process of being produced.
      * The BlockingTrafficSource is blocked on everything after a point before the beginning of the test.
      * @throws Exception
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @BeforeEach
     private void setupTestCase() throws Exception {
         kafkaProducer = KafkaTestUtils.buildKafkaProducer(embeddedKafkaBroker.getBootstrapServers());
@@ -218,3 +233,6 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

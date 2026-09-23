@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -254,3 +262,6 @@ class OwnerTransitionRunnerTest {
         Assertions.assertFalse(laterTransitionRan.get());
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

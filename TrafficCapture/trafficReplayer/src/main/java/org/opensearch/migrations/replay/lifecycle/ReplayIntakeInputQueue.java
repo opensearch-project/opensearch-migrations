@@ -8,17 +8,29 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 
 import lombok.NonNull;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Thread-safe submission boundary for immutable replay-intake inputs.
  *
  * <p>The queue owns no replay state. Only {@link ReplayIntakeOwner} removes inputs.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public final class ReplayIntakeInputQueue {
     record QueuedInput(
         @NonNull ReplayIntakeInput input,
@@ -65,3 +77,6 @@ public final class ReplayIntakeInputQueue {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

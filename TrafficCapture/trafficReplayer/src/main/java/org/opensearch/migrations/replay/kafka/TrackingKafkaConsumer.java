@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ITrafficSourceContexts KafkaCommitOffsetData KafkaRecordOwnershipBudget SourcePartitionLifecycleListener UnconfiguredSourcePartitionLifecycleListener . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G2)
+/*
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,12 +54,16 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.slf4j.event.Level;
 
+*/
+// REBUILD-LIMBO-END(G2)
 /**
  * This is a wrapper around Kafka's Consumer class that provides tracking of partitions
  * and their current (asynchronously 'committed' by the calling contexts) offsets.  It
  * manages those offsets and the 'active' set of records that have been rendered by this
  * consumer, when to pause a poll loop(), and how to deal with consumer rebalances.
  */
+// REBUILD-LIMBO-START(G2)
+/*
 @Slf4j
 public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     public interface Metrics {
@@ -115,6 +130,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     private record ObservedRecordMetadata(String connectionId, Instant acceptedAt) {}
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * The keep-alive should already be set to a fraction of the max poll timeout for
      * the consumer (done outside of this class).  The keep-alive tells this class how
@@ -124,6 +141,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      * when there aren't messages that there isn't enough time to commit messages,
      * which happens after we poll() (on the same thread, as per Consumer requirements).
      */
+// REBUILD-LIMBO-START(G2)
+/*
     public static final int POLL_TIMEOUT_KEEP_ALIVE_DIVISOR = 4;
     static final int UNBOUNDED_OWNED_RECORDS = Integer.MAX_VALUE;
     static final long UNBOUNDED_OWNED_BYTES = Long.MAX_VALUE;
@@ -134,12 +153,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     final String topic;
     private final Clock clock;
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * This collection holds the definitive list, as per the rebalance callback, of the partitions
      * that are currently assigned to this consumer.  The objects are removed when partitions are
      * revoked and new objects are only created/inserted when they're assigned.  That means that
      * the generations of each observed-record queue may be different.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     final Map<Integer, ObservedRecordCommitQueue> partitionToObservedRecordQueueMap;
     private final AtomicReference<Map<Integer, ObservedRecordCommitQueue.Snapshot>>
         observedRecordQueueSnapshots;
@@ -160,18 +183,26 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicInteger commitsSinceLastHeartbeat = new AtomicInteger();
     private static final org.slf4j.Logger heartbeatLogger =
         org.slf4j.LoggerFactory.getLogger("KafkaHeartbeat");
+*/
+// REBUILD-LIMBO-END(G2)
     /** Called with revoked partition numbers so the source layer can synthesize interrupted-close
      *  events for any active connections on them. Always invoked at the OLD generation (before
      *  any subsequent onPartitionsAssigned bumps it), matching the generation stamped on the
      *  source termination obligations. */
+// REBUILD-LIMBO-START(G2)
+/*
     private java.util.function.Consumer<Collection<SourcePartitionKey>> onPartitionsTrulyLostCallback =
         ignored -> {};
     private SourcePartitionLifecycleListener sourcePartitionLifecycleListener =
         new UnconfiguredSourcePartitionLifecycleListener();
+*/
+// REBUILD-LIMBO-END(G2)
     /** Set true by {@link #cleanupRevokedPartitions} when a rebalance callback fires inline
      *  during {@code kafkaConsumer.poll()}; cleared at the top of each poll. The post-poll
      *  recovery in {@link #safePollWithSwallowedRuntimeExceptions} reads this to decide
      *  whether to drop records and rewind. */
+// REBUILD-LIMBO-START(G2)
+/*
     private final AtomicBoolean rebalanceDuringPoll = new AtomicBoolean();
 
     public TrackingKafkaConsumer(
@@ -261,14 +292,24 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     @Override
     public void onPartitionsLost(Collection<TopicPartition> partitions) {
         // Fence/timeout: commits are impossible. Same cleanup as a revocation, just no commit attempt.
-        cleanupRevokedPartitions(partitions, /*attemptCommit=*/ false);
+*/
+// REBUILD-LIMBO-END(G2)
+// REBUILD-LIMBO-ESCAPED-LINE(G2):         cleanupRevokedPartitions(partitions, /*attemptCommit=*/ false);
+// REBUILD-LIMBO-START(G2)
+/*
     }
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-        cleanupRevokedPartitions(partitions, /*attemptCommit=*/ true);
+*/
+// REBUILD-LIMBO-END(G2)
+// REBUILD-LIMBO-ESCAPED-LINE(G2):         cleanupRevokedPartitions(partitions, /*attemptCommit=*/ true);
+// REBUILD-LIMBO-START(G2)
+/*
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Tear down per-partition state and fire {@link #onPartitionsTrulyLostCallback} at the OLD
      * generation (before any subsequent onPartitionsAssigned bumps it), so synthesized close
@@ -276,6 +317,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      * The truly-lost callback runs OUTSIDE {@code commitDataLock} so it can freely touch the
      * source's concurrent collections.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     private void cleanupRevokedPartitions(Collection<TopicPartition> partitions, boolean attemptCommit) {
         if (partitions.isEmpty()) {
             log.atDebug().setMessage("{} revoked/lost no partitions.").addArgument(this).log();
@@ -425,12 +468,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         return r;
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Flushes staged offset commits without a driving read or back-pressure block. Once intake
      * stops (end of stream or shutdown), no poll cycle ever runs again, so commits staged by late
      * dispositions would otherwise sit unflushed and their acknowledgements would never complete.
      * Must run on the same executor that owns every other consumer interaction.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     public void commitStagedOffsets() {
         safeCommit(globalContext::createCommitContext);
     }
@@ -812,6 +859,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Inline-rebalance recovery: drop everything this poll() returned and seek every still-
      * assigned partition to {@code min(prePollPosition, lowestOffsetReturnedForPartition)}.
@@ -837,6 +886,8 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      * has already advanced past records this poll returned, hiding the broker's reset value
      * for touched partitions. The lowest returned offset is the un-advanced reference.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     private ConsumerRecords<String, byte[]> recoverFromInlineRebalance(
         ConsumerRecords<String, byte[]> polled,
         Map<TopicPartition, Long> prePollPositions
@@ -1057,7 +1108,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /** Emit a periodic heartbeat log summarizing the Kafka consumer state. */
+// REBUILD-LIMBO-START(G2)
+/*
     public void logHeartbeat() {
         int polls = pollsSinceLastHeartbeat.getAndSet(0);
         int emptyPolls = emptyPollsSinceLastHeartbeat.getAndSet(0);
@@ -1172,3 +1227,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G2)

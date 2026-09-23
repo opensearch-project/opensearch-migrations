@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: JsonGenerator ObjectMapper . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayDeque;
@@ -23,12 +34,16 @@ import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * This class writes a JSON object to a series of ByteBufs using Jackson's JsonGenerator.
  * Those ByteBufs are returned by a generation function returned by getChunksAndContinuations.
  * This block-based generator fits in well with our streaming pipeline, allowing us to minimize
  * the memory load rather than expanding the working set for a large textual stream.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class JsonEmitter implements AutoCloseable {
 
@@ -103,11 +118,15 @@ public class JsonEmitter implements AutoCloseable {
             }
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
         /**
          * Transfers the retained ByteBuf.  Caller is responsible for release().
          *
          * @return
          */
+// REBUILD-LIMBO-START(G5)
+/*
         public ByteBuf recycleByteBufRetained() {
             var rval = compositeByteBuf;
             compositeByteBuf = byteBufAllocator.compositeBuffer(rval.maxNumComponents());
@@ -133,6 +152,8 @@ public class JsonEmitter implements AutoCloseable {
         outputStream.close();
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * This returns a ByteBuf block of serialized data plus a recursive generation function (Supplier)
      * for the next block and continuation.  The size of the ByteBuf that will be returned can be
@@ -147,11 +168,15 @@ public class JsonEmitter implements AutoCloseable {
      * @return
      * @throws IOException
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public PartialOutputAndContinuation getChunkAndContinuations(Object object, int minBytes) throws IOException {
         log.atTrace().setMessage("getChunkAndContinuations(..., {})").addArgument(minBytes).log();
         return getChunkAndContinuationsHelper(walkTreeWithContinuations(object), minBytes);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * This is a helper function to rotate the internal buffers out to the calling context that
      * will be consuming the data that has been written.  It is also responsible for threading
@@ -167,6 +192,8 @@ public class JsonEmitter implements AutoCloseable {
      * @param minBytes
      * @return
      */
+// REBUILD-LIMBO-START(G5)
+/*
     private PartialOutputAndContinuation getChunkAndContinuationsHelper(
         FragmentSupplier nextFragmentSupplier,
         int minBytes
@@ -216,6 +243,8 @@ public class JsonEmitter implements AutoCloseable {
         cursorStack.push(new LevelContext<>(it, onPopContinuation));
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * This maintains the json stack of elements encountered so far, along with a continuation
      * to run when the item is popped from the stack.  Maintaining that stack outside of the
@@ -230,6 +259,8 @@ public class JsonEmitter implements AutoCloseable {
      * @param o
      * @return
      */
+// REBUILD-LIMBO-START(G5)
+/*
     private FragmentSupplier walkTreeWithContinuations(Object o) {
         log.atTrace().setMessage("walkTree... {}").addArgument(o).log();
         if (o instanceof Map.Entry) {
@@ -289,3 +320,6 @@ public class JsonEmitter implements AutoCloseable {
         outputStream.flush();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

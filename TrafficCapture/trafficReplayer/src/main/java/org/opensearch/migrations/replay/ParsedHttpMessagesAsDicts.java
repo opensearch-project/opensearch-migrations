@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: NettyDecodedHttpRequestConvertHandler NettyDecodedHttpResponseConvertHandler NettyJsonBodyAccumulateHandler . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -28,6 +39,8 @@ import io.netty.handler.codec.base64.Base64Dialect;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * TODO - This class will pull all bodies in as a byte[], even if that byte[] isn't
  * going to be used.  While in most cases, we'll likely want to emit all of the bytes
@@ -37,6 +50,8 @@ import lombok.extern.slf4j.Slf4j;
  * stream-like interface for bodies instead of parsing the bytes.  Just leaving the
  * ByteBufs as is might make sense, though it requires callers to understand ownership.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
@@ -162,9 +177,13 @@ public class ParsedHttpMessagesAsDicts {
         fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps5);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Build the structured tuple map used by {@link org.opensearch.migrations.replay.sink.TupleSink} implementations.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public Map<String, Object> toTupleMap(SourceTargetCaptureTuple tuple) {
         var map = new LinkedHashMap<String, Object>();
         sourceRequestOp.ifPresent(r -> map.put("sourceRequest", r));
@@ -307,3 +326,6 @@ public class ParsedHttpMessagesAsDicts {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

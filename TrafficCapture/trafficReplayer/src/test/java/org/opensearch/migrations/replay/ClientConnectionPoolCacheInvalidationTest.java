@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,7 +29,11 @@ import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /** Verifies generation-scoped session caching and actor-owned invalidation. */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTest {
 
@@ -29,12 +44,16 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         return (LoadingCache<?, ?>) f.get(pool);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Verifies that actor close keeps the cache entry alive until the close actually runs,
      * so that in-flight response futures can complete on the same session.
      * Immediate invalidation caused deadlocks: new requests got a new session, leaving
      * finishedAccumulatingResponseFuture on the old session permanently incomplete.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     @SneakyThrows
     void actorClose_cacheRemainsUntilCloseCompletes() throws Exception {
@@ -115,11 +134,15 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Verifies that a new source generation creates a session carrying that generation.
      * Session cancellation on generation bump is NOT done here (would cause deadlocks);
      * it is handled by the synthetic close path.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     @SneakyThrows
     void newGeneration_isCarriedByTheNewSession() throws Exception {
@@ -191,9 +214,13 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Same generation must reuse the existing session.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     @SneakyThrows
     void sameGenerationReusesSession() throws Exception {
@@ -211,3 +238,6 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

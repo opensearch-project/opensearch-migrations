@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ConnectionReplaySession IReplayContexts . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -54,10 +65,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
 
     private static final String HEAD_METHOD = "HEAD";
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
 
     private static final Duration MAX_WAIT_BETWEEN_CREATE_RETRIES = Duration.ofSeconds(30);
@@ -69,11 +84,15 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
     public static final String WRITE_COUNT_WATCHER_HANDLER_NAME = "writeCountWatcher";
     public static final String READ_COUNT_WATCHER_HANDLER_NAME = "readCountWatcher";
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * This is a future that chains work onto the channel.  If the value is ready, the future isn't waiting
      * on anything to happen for the channel.  If the future isn't done, something in the chain is still
      * pending.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     TrackedFuture<String, PacketSendOutcome> activeChannelFuture;
     ConnectionReplaySession replaySession;
     private Channel channel;
@@ -450,10 +469,18 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
             completion.complete(initializedChannelFuture);
         }
 
-        /*
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-LIMBO-ESCAPED-LINE(G5):         /*
+// REBUILD-LIMBO-START(G5)
+/*
          * TLS handshake failures remain terminal for this attempt rather than entering the
          * connection-acquisition retry loop.
-         */
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-LIMBO-ESCAPED-LINE(G5):          */
+// REBUILD-LIMBO-START(G5)
+/*
         private TrackedFuture<String, ChannelFuture> initializeConnectionHandlers(
             ChannelFuture outboundChannelFuture
         ) {
@@ -881,10 +908,14 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         closeSpans();
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Closes the target request span and whichever phase span is current.  Every path that finishes a target
      * request funnels through here so that an abort racing an orderly finalization closes each span once.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     private void closeSpans() {
         if (spansClosed) {
             return;
@@ -894,3 +925,6 @@ public class NettyPacketToHttpConsumer implements TargetPacketConsumer {
         getParentContext().close();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)
