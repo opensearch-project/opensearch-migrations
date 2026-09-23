@@ -14,10 +14,11 @@
 
 import http from './http-client.js';
 import { check } from 'k6';
+import exec from 'k6/execution';
 
-// __VU and __ITER are k6 built-in globals; unique per VU + iteration combination.
+// __VU restarts at 1 in every runner pod; idInTest is unique across the whole test.
 function generateId() {
-  return `seq-${__VU}-${__ITER}`;
+  return `seq-${exec.vu.idInTest}-${__ITER}`;
 }
 
 function createDocument(proxyUrl, index, connParams, randomDocument) {

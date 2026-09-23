@@ -97,6 +97,8 @@ class Test0080CdcK6LoadTest(MATestBase):
     K6_DURATION = "20s"
     K6_RATE = "10"
     K6_PARALLELISM = 2
+    # Keep request-error thresholds active while avoiding latency flakes on loaded CI.
+    K6_OVERRIDES = "LATENCY_THRESHOLDS_ENABLED=false\n"
 
     def __init__(self, user_args: MATestUserArguments):
         super().__init__(
@@ -140,8 +142,7 @@ class Test0080CdcK6LoadTest(MATestBase):
                 scenario="ingest", parallelism=self.K6_PARALLELISM, target_url=target_url,
                 duration=self.K6_DURATION, rate=self.K6_RATE,
                 auth_secret_name=secret_name if secret_data else None,
-                # Keep request-error thresholds active while avoiding latency flakes on loaded CI.
-                overrides_text="LATENCY_THRESHOLDS_ENABLED=false",
+                overrides_text=self.K6_OVERRIDES,
             )
             name = submit_k6_run(namespace, params)
             logger.info("Submitted k6 run %s against %s", name, target_url)

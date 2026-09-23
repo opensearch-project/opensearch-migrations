@@ -18,11 +18,14 @@ RUN xk6 build v2.2.0 \
       --with github.com/grafana/xk6-redis@v0.4.1 \
       --output /tmp/k6
 
-# Exercise the repository-owned signer with deterministic vectors before the runner is packaged.
-# This runs entirely inside the build and performs no network requests.
-COPY lib/sigv4.js /tmp/sigv4/lib/sigv4.js
-COPY tests/sigv4.js /tmp/sigv4/tests/sigv4.js
-RUN /tmp/k6 run --quiet /tmp/sigv4/tests/sigv4.js
+# Exercise the repository-owned signer and the index-preparation rules before packaging. Both run
+# inside the build and perform no network requests. lib/ and k6-config/ are copied whole because
+# index-setup reaches config.js, which open()s every preset by literal relative path.
+COPY lib/       /tmp/selftest/lib/
+COPY tests/     /tmp/selftest/tests/
+COPY k6-config/ /tmp/selftest/k6-config/
+RUN /tmp/k6 run --quiet /tmp/selftest/tests/sigv4.js \
+ && /tmp/k6 run --quiet /tmp/selftest/tests/index-setup.js
 
 FROM grafana/k6:2.2.0
 

@@ -47,7 +47,8 @@
  *   CONTROL_CMD_KEY         — Valkey key polled for control commands (default: "control_cmd")
  */
 
-import http from '../lib/http-client.js';
+import http, { requestFailed } from '../lib/http-client.js';
+import { prepareIndex, requireIndexReady } from '../lib/index-setup.js';
 import { check } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
@@ -55,6 +56,7 @@ import * as logsDocs         from '../lib/data/logs_data/documents.js';
 import * as nycTaxisQueries  from '../lib/data/nyc_taxis/queries.js';
 import * as logsQueries      from '../lib/data/logs_data/queries.js';
 import { runSequence } from '../lib/sequences.js';
+import exec from 'k6/execution';
 import { pinned, spread } from '../lib/connection-control.js';
 import { registryFlush, registryWrite, registryRead } from '../lib/id-registry.js';
 import { checkControl } from '../lib/control.js';
@@ -180,6 +182,7 @@ const mixedSearchScenario = EXECUTOR === 'ramping-arrival-rate'
 export const options = {
   insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
   ...(NO_CONNECTION_REUSE ? { noConnectionReuse: true } : {}),
+  setupTimeout: '120s', // setup() waits on the endpoint and the index; 60s default is too tight.
 
   scenarios: {
     mixed_ingest: mixedIngestScenario,
@@ -189,7 +192,7 @@ export const options = {
   thresholds: {
     'http_req_failed':                              ['rate<0.05'],
     'mixed_ingest_errors':                          ['rate<0.05'],
-    'mixed_ingest_sequence_errors':                 ['rate<0.05'],
+    // Unthresholded: far fewer samples than mixed_ingest_errors, which counts the same failures.
     'mixed_search_errors':                          ['rate<0.05'],
     'http_req_duration{name:bulk_write}':           ['p(95)<3000'],
     'http_req_duration{name:single_doc}':           ['p(95)<2000'],
@@ -211,20 +214,16 @@ export const options = {
 export async function setup() {
   const indexUrl = `${PROXY_URL}/${INDEX}`;
 
-  const existing = http.get(indexUrl, { tags: { name: 'setup_check_index' } });
-  if (existing.status === 404) {
-    const createRes = http.put(indexUrl, INDEX_MAPPING, {
-      headers: { 'Content-Type': 'application/json' },
-      tags: { name: 'setup_create_index' },
-    });
-    check(createRes, { 'index created (200)': (r) => r.status === 200 });
-    if (createRes.status !== 200) {
-      console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
-    } else {
-      console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
-    }
+  const index = prepareIndex(PROXY_URL, INDEX, INDEX_MAPPING);
+  check(index, {
+    'index ready': (r) => r.ready,
+    'index writable': (r) => r.writable,
+  });
+  requireIndexReady(INDEX, index);
+  if (!index.existed) {
+    console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
   } else {
-    console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);
+    console.log(`setup: index ${INDEX} already exists (status ${index.status})`);
 
     // Guard against a stale index with dynamic (wrong) field types.
     const mappingRes = http.get(`${indexUrl}/_mapping`, { tags: { name: 'setup_verify_mapping' } });
@@ -336,16 +335,16 @@ function doSequence() {
 }
 
 async function doSingleDocWithRegistry() {
-  // Use an explicit PUT with a known ID so we can register it after a successful write.
-  // mix-<VU>-<ITER> is unique per VU + iteration within the run.
-  const id = `mix-${__VU}-${__ITER}`;
+  // Explicit PUT with a known ID so we can register it after a successful write.
+  // idInTest rather than __VU: __VU restarts at 1 in every runner pod.
+  const id = `mix-${exec.vu.idInTest}-${__ITER}`;
   const res = http.put(
     `${PROXY_URL}/${INDEX}/_doc/${id}`,
     JSON.stringify(docs.randomDocument()),
     { ...connParams, tags: { name: 'single_doc' } },
   );
   ingestSingleRequests.add(1);
-  ingestErrors.add(res.status >= 400 ? 1 : 0);
+  ingestErrors.add(requestFailed(res) ? 1 : 0);
   check(res, { 'single doc written (200/201)': (r) => r.status === 200 || r.status === 201 });
   if (res.status === 200 || res.status === 201) {
     await registryWrite(id);
@@ -361,7 +360,7 @@ function sendBulk() {
   );
   ingestBulkDocs.add(docCount);
   ingestBulkRequests.add(1);
-  ingestErrors.add(res.status >= 400 ? 1 : 0);
+  ingestErrors.add(requestFailed(res) ? 1 : 0);
   check(res, {
     'bulk status 200': (r) => r.status === 200,
     'bulk no item errors': (r) => {
@@ -387,20 +386,20 @@ async function doConsistencyRead() {
     { ...connParams, tags: { name: 'consistency_read' } },
   );
   consistencyReads.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
   check(res, { 'consistency read (200)': (r) => r.status === 200 });
 }
 
 function doFlatSearch() {
   const res = queries.flatSearch(PROXY_URL, INDEX, connParams);
   searchFlatRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doAggSearch() {
   const res = queries.aggSearch(PROXY_URL, INDEX, connParams);
   searchAggRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doPartialUpdate(seedDocIds) {
@@ -416,7 +415,7 @@ function doPartialUpdate(seedDocIds) {
   );
   check(res, { 'partial update (200)': (r) => r.status === 200 });
   searchUpdateRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doSingleDocWrite() {
@@ -427,5 +426,5 @@ function doSingleDocWrite() {
   );
   check(res, { 'single doc created (201)': (r) => r.status === 201 });
   searchWriteRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }

@@ -128,4 +128,19 @@ export function request(method, url, body, params) {
   return http.request(method, url, body, withAuth(method, url, body, params));
 }
 
-export default { get, del, post, put, patch, request, withAuth, AUTH_MODE, AUTH_ENABLED };
+/** k6's own default success range, for building a per-request override. */
+export const DEFAULT_OK_STATUSES = { min: 200, max: 399 };
+
+export function expectedStatuses(...statuses) {
+  return http.expectedStatuses(...statuses);
+}
+
+/** A transport failure reports status 0, which `status >= 400` drops and http_req_failed counts. */
+export function requestFailed(res) {
+  return !res || !res.status || res.status >= 400;
+}
+
+export default {
+  get, del, post, put, patch, request, withAuth, AUTH_MODE, AUTH_ENABLED,
+  expectedStatuses, requestFailed, DEFAULT_OK_STATUSES,
+};

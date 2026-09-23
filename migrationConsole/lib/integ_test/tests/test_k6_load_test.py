@@ -1,11 +1,16 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import yaml
 from kubernetes.client.rest import ApiException
 
 from console_link.models.cluster import Cluster
 from integ_test.test_cases import k6_load_test_tests as k6_test
+
+_CHART_VALUES = (Path(__file__).resolve().parents[4]
+                 / "deployment/k8s/charts/components/k6LoadTest/values.yaml")
 
 
 class _Session:
@@ -101,3 +106,15 @@ def test_delete_k6_auth_secret_ignores_not_found(monkeypatch):
     monkeypatch.setattr(k6_test.client, "CoreV1Api", lambda: core)
 
     k6_test._delete_k6_auth_secret("ma", "gone")
+
+
+def test_k6_run_overrides_name_settings_the_ingest_profile_declares():
+    """A name that has drifted from the chart fails only once the run is submitted."""
+    from console_link.loadtest.runs import _parse_overrides
+
+    overrides = _parse_overrides(k6_test.Test0080CdcK6LoadTest.K6_OVERRIDES)
+    assert overrides["LATENCY_THRESHOLDS_ENABLED"] == "false"
+
+    values = yaml.safe_load(_CHART_VALUES.read_text())
+    declared = set(values["scenarios"]["ingest"]["env"])
+    assert set(overrides) <= declared, f"not settings of the ingest profile: {set(overrides) - declared}"

@@ -35,7 +35,8 @@
  *                            e.g. '[{"duration":"2m","target":100},{"duration":"1m","target":0}]'
  */
 
-import http from '../lib/http-client.js';
+import http, { requestFailed } from '../lib/http-client.js';
+import { prepareIndex, requireIndexReady } from '../lib/index-setup.js';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 import * as nycTaxisDocs    from '../lib/data/nyc_taxis/documents.js';
@@ -119,6 +120,7 @@ const searchScenario = EXECUTOR === 'ramping-arrival-rate'
 export const options = {
   insecureSkipTLSVerify: true, // capture proxy uses a self-signed cert
   ...(NO_CONNECTION_REUSE ? { noConnectionReuse: true } : {}),
+  setupTimeout: '120s', // setup() waits on the endpoint and the index; 60s default is too tight.
 
   scenarios: {
     search: searchScenario,
@@ -127,7 +129,7 @@ export const options = {
   thresholds: {
     'http_req_failed':                             ['rate<0.05'],
     'search_errors':                               ['rate<0.05'],
-    'search_deep_paging_errors':                   ['rate<0.05'],
+    // Unthresholded: far fewer samples than search_errors, which counts the same failures.
     'http_req_duration{name:search_flat}':         ['p(95)<3000'],
     'http_req_duration{name:search_agg}':          ['p(95)<5000'],
     'http_req_duration{name:search_update}':       ['p(95)<2000'],
@@ -146,20 +148,16 @@ export const options = {
 export function setup() {
   const indexUrl = `${PROXY_URL}/${INDEX}`;
 
-  const existing = http.get(indexUrl, { tags: { name: 'setup_check_index' } });
-  if (existing.status === 404) {
-    const createRes = http.put(indexUrl, INDEX_MAPPING, {
-      headers: { 'Content-Type': 'application/json' },
-      tags: { name: 'setup_create_index' },
-    });
-    check(createRes, { 'index created (200)': (r) => r.status === 200 });
-    if (createRes.status !== 200) {
-      console.error(`setup: failed to create index: ${createRes.status} ${createRes.body}`);
-    } else {
-      console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
-    }
+  const index = prepareIndex(PROXY_URL, INDEX, INDEX_MAPPING);
+  check(index, {
+    'index ready': (r) => r.ready,
+    'index writable': (r) => r.writable,
+  });
+  requireIndexReady(INDEX, index);
+  if (!index.existed) {
+    console.log(`setup: created index ${INDEX} with ${SCHEMA} mapping`);
   } else {
-    console.log(`setup: index ${INDEX} already exists (status ${existing.status})`);
+    console.log(`setup: index ${INDEX} already exists (status ${index.status})`);
 
     // Guard against a stale index with dynamic (wrong) field types.
     const mappingRes = http.get(`${indexUrl}/_mapping`, { tags: { name: 'setup_verify_mapping' } });
@@ -233,13 +231,13 @@ export default function (data) {
 function doFlatSearch() {
   const res = queries.flatSearch(PROXY_URL, INDEX, connParams);
   flatRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doAggSearch() {
   const res = queries.aggSearch(PROXY_URL, INDEX, connParams);
   aggRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doPartialUpdate(seedDocIds) {
@@ -256,7 +254,7 @@ function doPartialUpdate(seedDocIds) {
   );
   check(res, { 'partial update (200)': (r) => r.status === 200 });
   updateRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doSingleDocWrite() {
@@ -267,7 +265,7 @@ function doSingleDocWrite() {
   );
   check(res, { 'single doc created (201)': (r) => r.status === 201 });
   writeRequests.add(1);
-  searchErrors.add(res.status >= 400 ? 1 : 0);
+  searchErrors.add(requestFailed(res) ? 1 : 0);
 }
 
 function doDeepPaging() {
