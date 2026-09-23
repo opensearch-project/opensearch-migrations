@@ -360,9 +360,18 @@ class KafkaSourceOwnerTest {
         );
     }
 
-    /** §17.4: a rejected commit is not retried and reports nothing back to intake. */
+    /**
+     * A rejected commit tells intake nothing, and is reissued rather than abandoned while the partition is
+     * still owned.
+     *
+     * <p>{@code kafkaLLD §5.7}'s no-retry rule is specifically that "after revocation, the old generation does
+     * not retry or wait indefinitely for a commit" — it does not ask a still-owned partition to discard a
+     * position it has already computed. Abandoning it would mean waiting for the next
+     * {@code RecordProcessingFinished} to re-derive the same prefix, which head-of-line blocking can delay
+     * indefinitely. Reissuing is paced by the loop: one attempt per iteration, each of which also polls.
+     */
     @Test
-    void aRejectedCommitIsNotRetriedAndTellsIntakeNothing() {
+    void aRejectedCommitTellsIntakeNothingAndIsReissuedOncePerIteration() {
         var port = new PumpedKafkaSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
@@ -377,18 +386,90 @@ class KafkaSourceOwnerTest {
         port.clearHistory();
 
         owner.runOnce();
-        var afterFirstAttempt = port.history().stream().filter(c -> c.startsWith("commit")).count();
         owner.runOnce();
-        var afterSecondAttempt = port.history().stream().filter(c -> c.startsWith("commit")).count();
 
-        Assertions.assertEquals(1, afterFirstAttempt, () -> "history: " + port.history());
+        var commits = port.history().stream().filter(c -> c.startsWith("commit")).toList();
         Assertions.assertEquals(
-            1,
-            afterSecondAttempt,
-            () -> "the rejected commit was retried; the next assigned position decides redelivery instead: "
-                + port.history()
+            List.of("commit{traffic-0=11}", "commit{traffic-0=11}"),
+            commits,
+            () -> "expected one attempt per iteration, not a spin and not abandonment: " + port.history()
         );
         Assertions.assertTrue(drainIntake().isEmpty(), "a commit outcome must not travel back to intake");
+        Assertions.assertTrue(
+            owner.stagedCommitPosition(PARTITION_0).isPresent(),
+            "the position stays staged while the partition is still owned"
+        );
+    }
+
+    /**
+     * A failed batch must not strand the partitions that were fine.
+     *
+     * <p>Three partitions stage a commit; the batch fails because one of them is no longer owned. The two
+     * still owned keep their staged positions and commit on the next iteration, while the unowned one is
+     * dropped — {@code kafkaLLD §5.7} forbids an old generation retrying. Without this, all three positions
+     * would be discarded and only re-derived when the next {@code RecordProcessingFinished} advanced each
+     * partition's prefix, which head-of-line blocking can delay indefinitely.
+     */
+    @Test
+    void aFailedBatchRetainsStillOwnedPositionsAndDropsUnownedOnes() {
+        var partition2 = new TopicPartition("traffic", 2);
+        var port = new PumpedKafkaSource(List.of(PARTITION_0, PARTITION_1, partition2));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1, partition2));
+
+        var generations = new java.util.LinkedHashMap<TopicPartition, PartitionGenerationId>();
+        var records = new java.util.LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
+        for (var topicPartition : List.of(PARTITION_0, PARTITION_1, partition2)) {
+            var generation = owner.partitionState(topicPartition).orElseThrow().generation();
+            generations.put(topicPartition, generation);
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation, 1)));
+            records.put(topicPartition, List.of(record(generation, 10)));
+        }
+        port.scriptPoll(records);
+        owner.runOnce();
+        generations.forEach((topicPartition, generation) -> sourceInputs.submit(
+            new KafkaSourceInput.RecordProcessingFinished(new KafkaRecordId(generation, 10))));
+        drainIntake();
+
+        // Partition 0 is revoked, which is what makes the batch fail. Revoking it also removes its state, so
+        // the owner can tell it apart from the two it still holds.
+        clockNanos.set(GRACE.toNanos() * 2);
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OWNERSHIP_ENDED_BEFORE_SUBMISSION);
+        port.clearHistory();
+        owner.runOnce();
+
+        var failedAttempt = port.history().stream().filter(c -> c.startsWith("commit")).toList();
+        Assertions.assertEquals(1, failedAttempt.size(), () -> "history: " + port.history());
+        Assertions.assertTrue(
+            owner.stagedCommitPosition(PARTITION_1).isPresent()
+                && owner.stagedCommitPosition(partition2).isPresent(),
+            "the still-owned partitions must keep their staged positions after a failed batch"
+        );
+        Assertions.assertTrue(
+            owner.stagedCommitPosition(PARTITION_0).isEmpty(),
+            "the revoked partition must be dropped, not retried"
+        );
+
+        // Next iteration: the retained positions are offered again, without the dropped one.
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+        port.clearHistory();
+        owner.runOnce();
+
+        var retry = port.history().stream().filter(c -> c.startsWith("commit")).toList();
+        Assertions.assertEquals(1, retry.size(), () -> "expected one retry commit: " + port.history());
+        Assertions.assertTrue(
+            retry.get(0).contains("traffic-1=11") && retry.get(0).contains("traffic-2=11"),
+            () -> "both still-owned positions should be reissued: " + retry
+        );
+        Assertions.assertFalse(retry.get(0).contains("traffic-0"),
+            () -> "the revoked partition must not reappear: " + retry);
+        Assertions.assertTrue(
+            owner.stagedCommitPosition(PARTITION_1).isEmpty()
+                && owner.stagedCommitPosition(partition2).isEmpty(),
+            "an acknowledged commit clears what it committed"
+        );
     }
 
     private static int indexOfType(List<ReplayIntakeInput> inputs, Class<?> type) {

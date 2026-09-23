@@ -393,6 +393,48 @@ same way:
 serve the exit criterion that names it. Rebalance callbacks fire from inside `poll()`, matching Kafka, which
 is what makes `§17.4`'s wakeup-between-revocation-and-assignment case expressible at all.
 
+### Kafka's batched commit applies partially and says nothing about it
+
+Verified in `kafka-clients` 4.2.0 sources rather than assumed.
+`ConsumerCoordinator.OffsetCommitResponseHandler` iterates the broker's per-partition error codes, and on the
+first non-tolerable one calls `future.raise(...)` and **returns** — so later partitions in that iteration are
+never examined, even for logging. Two consequences:
+
+- **Partial application is real.** Partitions the broker answered `Errors.NONE` for are committed; the
+  handler logs "Committed offset {} for partition {}" before a sibling's error aborts the loop.
+- **It is unobservable to the caller.** One exception arrives with no indication of which positions were
+  recorded.
+
+**A failed batch must not strand the partitions that were fine.** Staged positions are removed on success,
+not before the attempt. Clearing them up front discarded every partition's progress whenever any one of them
+failed, and because a position is only re-derived when the next `RecordProcessingFinished` advances a
+partition's contiguous prefix, a partition blocked behind an unfinished head could wait arbitrarily long to be
+offered again. Now a failure retains the still-owned entries and drops only those whose partition is no longer
+owned. Re-committing a position that did commit is idempotent, which is what makes this sound despite partial
+application being unobservable.
+
+That is not the retry §5.7 forbids. The prohibition is precisely that "after revocation, the old generation
+does not retry or wait indefinitely for a commit" — so a **revoked** partition's staged position is dropped,
+which `onPartitionsRevoked` previously failed to do: it removed the partition state but left the staged
+position behind, so the old generation would have gone on offering a commit. A still-owned partition reissuing
+a position it already computed is a different thing, and abandoning it is the defect, not the fix. Reissue is
+paced by the loop — one attempt per iteration, each of which also polls — rather than spinning.
+
+So `KafkaSourcePort.commit` returns **one** outcome for the operation, not one per partition. An earlier
+attempt here returned `Map<TopicPartition, CommitOutcome>` and classified a failure by whether each partition
+was still in `consumer.assignment()`. That was fabricated precision: assignment membership has nothing to do
+with which partition's commit failed, so the map would have reported confident per-partition fates the client
+never supplied.
+
+Safe under `kafkaLLD §5.7`'s own rules — no outcome is retried and none reaches intake — so whatever
+committed is committed and whatever did not is redelivered from the next assigned position. The one thing the
+owner must not do is treat a failure as proof that nothing was committed, which is why the hazard is stated
+at the call rather than left to be rediscovered.
+
+Batching is kept rather than reduced to one call per partition because `commitSync` blocks, and multiplying
+blocking calls by the partition count is how a commit overruns `max.poll.interval.ms` — defect `D5`'s
+mechanism — and, during revocation, the grace interval.
+
 ## Deferral ledger — work moved between milestones
 
 The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone

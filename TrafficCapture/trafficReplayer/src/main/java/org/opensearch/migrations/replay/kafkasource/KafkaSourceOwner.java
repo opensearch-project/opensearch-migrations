@@ -150,24 +150,63 @@ public final class KafkaSourceOwner {
 
     // ---------------------------------------------------------------- commit
 
+    /**
+     * Attempts one commit for every staged position, and keeps the staged entries a failure did not resolve.
+     *
+     * <p>Staged positions are removed on success, not before the attempt. Clearing them up front loses the
+     * progress of every partition in a failed batch, including the ones the broker accepted — and because a
+     * position is only re-derived when the next {@code RecordProcessingFinished} advances a partition's
+     * contiguous prefix, a partition blocked behind an unfinished head could wait arbitrarily long to be
+     * offered again.
+     *
+     * <p>Re-staging is safe on both counts that matter. Committing a position that did in fact commit is
+     * idempotent, which is what makes it sound despite a failed batch's partial application being
+     * unobservable. And it is not the retry {@code kafkaLLD §5.7} forbids: that prohibition is specifically
+     * that "after revocation, the old generation does not retry or wait indefinitely for a commit", so
+     * partitions whose generation is no longer current are dropped here rather than re-staged.
+     *
+     * <p>Paced by the loop rather than spinning: one attempt per iteration, and every iteration also polls.
+     */
     private void submitEligibleCommits() {
         if (stagedCommitPositions.isEmpty()) {
             return;
         }
-        var positions = Map.copyOf(stagedCommitPositions);
-        stagedCommitPositions.clear();
+        var attempted = Map.copyOf(stagedCommitPositions);
         wakeupController.enterProtectedOperation();
+        KafkaSourcePort.CommitOutcome outcome;
         try {
-            var outcome = port.commit(positions);
-            if (outcome == KafkaSourcePort.CommitOutcome.REJECTED) {
-                // Not retried and not reported to intake. After revocation the next assigned position decides
-                // redelivery, and intake finished its decision before sending RecordProcessingFinished
-                // (kafkaLLD §5.7).
-                log.atWarn().setMessage("Commit rejected for {}; not retrying").addArgument(positions).log();
-            }
+            outcome = port.commit(attempted);
         } finally {
             wakeupController.leaveProtectedOperation();
         }
+
+        if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+            attempted.forEach(stagedCommitPositions::remove);
+            return;
+        }
+
+        // Nothing is reported to intake, which finished its record-processing decision before sending
+        // RecordProcessingFinished (kafkaLLD §5.7).
+        attempted.forEach((topicPartition, position) -> {
+            if (!isCurrentlyOwned(topicPartition)) {
+                stagedCommitPositions.remove(topicPartition);
+                log.atInfo().setMessage("Dropping staged commit for {} at {}: no longer owned")
+                    .addArgument(topicPartition).addArgument(position).log();
+            }
+        });
+        log.atWarn().setMessage("Commit was {} for {}; retaining {} still-owned position(s) for the next attempt")
+            .addArgument(outcome)
+            .addArgument(attempted::keySet)
+            .addArgument(stagedCommitPositions::size)
+            .log();
+    }
+
+    /**
+     * True while this partition is assigned under the generation the staged position belongs to. A successor
+     * generation gets its own staged position, so a stale one must not ride along with it.
+     */
+    private boolean isCurrentlyOwned(TopicPartition topicPartition) {
+        return partitions.containsKey(topicPartition);
     }
 
     // ---------------------------------------------------------------- pause and resume
@@ -308,7 +347,12 @@ public final class KafkaSourceOwner {
             generations.forEach(generation -> intakeInputs.submit(
                 new ReplayIntakeInput.ForceGenerationCancellation(generation)
             ));
-            revoked.forEach(partitions::remove);
+            revoked.forEach(topicPartition -> {
+                partitions.remove(topicPartition);
+                // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying
+                // nor waiting, with the next assigned position deciding redelivery instead.
+                stagedCommitPositions.remove(topicPartition);
+            });
         } finally {
             wakeupController.leaveRebalanceCallback();
         }

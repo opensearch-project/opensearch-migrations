@@ -120,6 +120,12 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         return committed == null ? Optional.empty() : Optional.of(committed.offset());
     }
 
+    /**
+     * The catch wraps the single Kafka call because there is one operation and therefore one failure. It is
+     * deliberately not a loop with a catch per partition: the client offers no per-partition result to catch,
+     * and classifying partitions by anything available here — the current assignment, say — would be a guess
+     * dressed as a distinction.
+     */
     @Override
     public CommitOutcome commit(Map<TopicPartition, Long> nextPositions) {
         var offsets = nextPositions.entrySet()
@@ -133,6 +139,8 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
             return CommitOutcome.OWNERSHIP_ENDED_OUTCOME_UNKNOWN;
         } catch (org.apache.kafka.common.errors.RebalanceInProgressException
             | org.apache.kafka.clients.consumer.CommitFailedException ownershipEnded) {
+            // These two name the generation being gone, which is what distinguishes them from a plain
+            // rejection. Some positions in the batch may still have been recorded before it went.
             return CommitOutcome.OWNERSHIP_ENDED_BEFORE_SUBMISSION;
         } catch (org.apache.kafka.common.KafkaException rejected) {
             return CommitOutcome.REJECTED;
