@@ -27,10 +27,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>Submission reports acceptance and never silently discards. Once closed, submission is refused rather
  * than dropped, because an input that vanishes is a record that never completes
  * ({@code kafkaLLD §4.2}).
+ *
+ * <p>Submission also signals {@link #awaitInput(long)} directly. That is how a revocation callback waiting
+ * for its grace deadline learns about commit and lifecycle inputs: {@code kafkaLLD §15.1} requires that
+ * "queue submission signals the callback's wait directly; it does not call {@code KafkaConsumer.wakeup()}
+ * while callback handling is protected from wakeup". The signal and the wakeup are therefore two separate
+ * mechanisms, and only the signal reaches a callback.
  */
 public final class KafkaSourceInputQueue {
 
     private final ConcurrentLinkedQueue<KafkaSourceInput> inputs = new ConcurrentLinkedQueue<>();
+    /** Separate from the Kafka wakeup: this is the only notification a protected callback may receive. */
+    private final Object signal = new Object();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final WakeupController wakeupController;
 
@@ -50,7 +58,36 @@ public final class KafkaSourceInputQueue {
             throw new IllegalStateException("Kafka source input queue is closed; refusing " + input);
         }
         inputs.add(input);
+        synchronized (signal) {
+            signal.notifyAll();
+        }
         wakeupController.onInputSubmitted();
+    }
+
+    /**
+     * Waits until an input is queued or the monotonic deadline passes, whichever happens first. Used by
+     * {@code onPartitionsRevoked} to process commit and lifecycle inputs while it waits out the grace
+     * interval, without polling and without a Kafka wakeup it is not allowed to receive.
+     *
+     * <p>The deadline is {@code System.nanoTime()}-based to match {@code CancellationDeadline}: a wall-clock
+     * change must not be able to shorten or extend the configured grace interval
+     * ({@code kafkaLLD §15.1}).
+     *
+     * @return true if an input is available, false if the deadline passed first
+     */
+    public boolean awaitInput(long monotonicDeadlineNanos) throws InterruptedException {
+        synchronized (signal) {
+            while (inputs.isEmpty()) {
+                var remainingNanos = monotonicDeadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    return false;
+                }
+                // Millisecond granularity is what Object.wait offers; the nanos argument only refines the
+                // final millisecond, and rounding up by one avoids a zero timeout meaning "wait forever".
+                signal.wait(remainingNanos / 1_000_000L + 1);
+            }
+            return true;
+        }
     }
 
     /** Removes the next input, or empty if none is queued. Kafka thread only. */
@@ -87,6 +124,10 @@ public final class KafkaSourceInputQueue {
     /** Refuses further submissions. Already-queued inputs remain drainable so shutdown can finish them. */
     public void close() {
         closed.set(true);
+        synchronized (signal) {
+            // Release any waiter so a closing source does not sit out a grace interval it can no longer use.
+            signal.notifyAll();
+        }
     }
 
     public boolean isClosed() {

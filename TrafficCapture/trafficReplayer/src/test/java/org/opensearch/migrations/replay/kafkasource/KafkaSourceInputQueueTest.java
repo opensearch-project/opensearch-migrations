@@ -8,8 +8,12 @@
 
 package org.opensearch.migrations.replay.kafkasource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -82,6 +86,41 @@ class KafkaSourceInputQueueTest {
         Assertions.assertEquals(request(1), queue.poll().orElseThrow());
         Assertions.assertEquals(request(2), queue.poll().orElseThrow());
         Assertions.assertTrue(queue.poll().isEmpty());
+    }
+
+    /**
+     * A revocation callback waiting out its grace deadline must learn about commit and lifecycle inputs from
+     * the queue signal, because it is protected from Kafka wakeup ({@code kafkaLLD §15.1}).
+     */
+    @Test
+    void awaitInputWakesOnSubmissionAndOtherwiseHonoursTheMonotonicDeadline() throws Exception {
+        var farFuture = System.nanoTime() + Duration.ofMinutes(5).toNanos();
+        var waiterReturned = new CountDownLatch(1);
+        var sawInput = new AtomicBoolean();
+        var waiter = new Thread(() -> {
+            try {
+                sawInput.set(queue.awaitInput(farFuture));
+                waiterReturned.countDown();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        waiter.start();
+
+        queue.submit(request(1));
+
+        Assertions.assertTrue(
+            waiterReturned.await(10, TimeUnit.SECONDS),
+            "submission did not signal the waiting callback, so it would have sat out the whole interval"
+        );
+        Assertions.assertTrue(sawInput.get());
+        waiter.join();
+    }
+
+    @Test
+    void awaitInputReturnsFalseOnceTheDeadlineHasPassed() throws Exception {
+        Assertions.assertFalse(queue.awaitInput(System.nanoTime() - 1));
+        Assertions.assertTrue(queue.isEmpty());
     }
 
     /** A refused submission must fail its caller rather than disappear: a lost input is a stuck record. */
