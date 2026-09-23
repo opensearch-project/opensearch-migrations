@@ -9,8 +9,8 @@ from kubernetes.client.rest import ApiException
 from console_link.models.cluster import Cluster
 from integ_test.test_cases import k6_load_test_tests as k6_test
 
-_CHART_VALUES = (Path(__file__).resolve().parents[4]
-                 / "deployment/k8s/charts/components/k6LoadTest/values.yaml")
+_CHART_VALUES = (Path(__file__).resolve().parents[4] /
+                 "deployment/k8s/charts/components/k6LoadTest/values.yaml")
 
 
 class _Session:
