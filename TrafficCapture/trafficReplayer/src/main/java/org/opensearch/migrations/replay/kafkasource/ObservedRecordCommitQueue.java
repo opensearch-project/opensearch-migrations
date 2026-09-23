@@ -6,7 +6,7 @@
  * compatible open source license.
  */
 
-package org.opensearch.migrations.replay.kafka;
+package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -29,13 +29,13 @@ import lombok.NonNull;
  * <p>Physical Kafka offsets may contain gaps. Commit eligibility therefore advances through the
  * deque of records actually observed by this consumer, never through assumed numeric offsets.
  */
-final class ObservedRecordCommitQueue {
-    record Completion(
+public final class ObservedRecordCommitQueue {
+    public record Completion(
         @NonNull List<KafkaRecordId> newlyContiguousRecords,
         @NonNull OptionalLong nextCommitOffset
     ) {}
 
-    record Snapshot(
+    public record Snapshot(
         @NonNull PartitionGenerationId generation,
         int size,
         int unfinishedCount,
@@ -59,16 +59,16 @@ final class ObservedRecordCommitQueue {
     private final Map<KafkaRecordId, Entry> recordsById = new LinkedHashMap<>();
     private long greatestObservedOffset = -1;
 
-    ObservedRecordCommitQueue(@NonNull PartitionGenerationId generation) {
+    public ObservedRecordCommitQueue(@NonNull PartitionGenerationId generation) {
         this.generation = generation;
         ownerThreadGuard.guard(() -> {}).run();
     }
 
-    PartitionGenerationId generation() {
+    public PartitionGenerationId generation() {
         return generation;
     }
 
-    void register(@NonNull KafkaRecordId recordId) {
+    public void register(@NonNull KafkaRecordId recordId) {
         ownerThreadGuard.requireOwnerThread();
         requireGeneration(recordId);
         if (recordsById.containsKey(recordId)) {
@@ -90,7 +90,7 @@ final class ObservedRecordCommitQueue {
         greatestObservedOffset = recordId.offset();
     }
 
-    Completion recordProcessingFinished(@NonNull KafkaRecordId recordId) {
+    public Completion recordProcessingFinished(@NonNull KafkaRecordId recordId) {
         ownerThreadGuard.requireOwnerThread();
         requireGeneration(recordId);
         var entry = recordsById.get(recordId);
@@ -116,38 +116,38 @@ final class ObservedRecordCommitQueue {
         return new Completion(List.copyOf(contiguous), nextCommitOffset);
     }
 
-    int size() {
+    public int size() {
         ownerThreadGuard.requireOwnerThread();
         return observedRecords.size();
     }
 
-    boolean isEmpty() {
+    public boolean isEmpty() {
         ownerThreadGuard.requireOwnerThread();
         return observedRecords.isEmpty();
     }
 
-    int unfinishedCount() {
+    public int unfinishedCount() {
         ownerThreadGuard.requireOwnerThread();
         return (int) observedRecords.stream().filter(entry -> !entry.completed).count();
     }
 
-    OptionalLong headOffset() {
+    public OptionalLong headOffset() {
         ownerThreadGuard.requireOwnerThread();
         var head = observedRecords.peekFirst();
         return head == null ? OptionalLong.empty() : OptionalLong.of(head.recordId.offset());
     }
 
-    long greatestObservedOffset() {
+    public long greatestObservedOffset() {
         ownerThreadGuard.requireOwnerThread();
         return greatestObservedOffset;
     }
 
-    boolean hasAlreadyObserved(long offset) {
+    public boolean hasAlreadyObserved(long offset) {
         ownerThreadGuard.requireOwnerThread();
         return greatestObservedOffset >= offset;
     }
 
-    Snapshot snapshot() {
+    public Snapshot snapshot() {
         ownerThreadGuard.requireOwnerThread();
         var head = observedRecords.peekFirst();
         return new Snapshot(

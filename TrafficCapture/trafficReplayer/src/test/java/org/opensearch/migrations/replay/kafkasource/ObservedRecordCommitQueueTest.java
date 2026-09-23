@@ -6,7 +6,7 @@
  * compatible open source license.
  */
 
-package org.opensearch.migrations.replay.kafka;
+package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.List;
 import java.util.OptionalLong;

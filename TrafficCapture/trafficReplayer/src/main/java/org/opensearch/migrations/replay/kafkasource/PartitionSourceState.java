@@ -26,13 +26,14 @@ import org.apache.kafka.common.TopicPartition;
  * different message from a different owner. Collapsing them into one boolean is how a partition resumes
  * while another reason still forbids reading.
  *
- * <p>{@link #kafkaPaused} tracks what Kafka was actually told, so the owner calls {@code pause} or
+ * <p>{@link #isKafkaPaused()} tracks what Kafka was actually told, so the owner calls {@code pause} or
  * {@code resume} only on a change. Kafka does not preserve pause state across an assignment change, so this
  * is reset rather than trusted after a rebalance.
  */
 public final class PartitionSourceState {
 
     private final PartitionGenerationId generation;
+    private final ObservedRecordCommitQueue commitQueue;
     private PartitionBatchRequestId outstandingRequest;
     private boolean priorGenerationCleanupPending;
     private boolean lifecycleAllowsIntake = true;
@@ -41,10 +42,20 @@ public final class PartitionSourceState {
 
     public PartitionSourceState(PartitionGenerationId generation) {
         this.generation = Objects.requireNonNull(generation, "generation");
+        this.commitQueue = new ObservedRecordCommitQueue(generation);
     }
 
     public PartitionGenerationId generation() {
         return generation;
+    }
+
+    /**
+     * The observed-record queue for this generation. {@code kafkaLLD §5.1} lists it as part of this state, so
+     * it is held here rather than in a parallel map the owner would have to keep in step -- and a new
+     * generation gets a new queue because it may not reuse the previous one's mutable state.
+     */
+    public ObservedRecordCommitQueue commitQueue() {
+        return commitQueue;
     }
 
     public TopicPartition topicPartition() {
