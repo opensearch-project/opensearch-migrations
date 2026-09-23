@@ -40,10 +40,10 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 | Local vs origin | Local is **2 commits ahead**: `822abde4e` (S6b) and `d5f0ef1fb` (the plan reset) are both unpushed. `origin/stableAndScalableLiveReplay` is at `2c4f305f3` |
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
-| Test compilation | **Broken: 61 errors across 16 files**, not four. `compileTestFixturesJava` fails first with 4 errors in 2 files (`ActorRequestTestUtils` lines 12/42/55/68 on `AsyncPermitPool`; `ReplayEngineFactory:87` missing the permit-provider argument). `compileTestJava` then fails with 57 errors in 14 files: 25 on the vanished `AsyncPermitPool` type and its nested `Metrics`/`Permit`, 19 on the `RequestSenderOrchestrator` constructor's new argument 2, 4 on `scheduleRequestLifecycle` losing its permit-pool parameter, 3 on `TargetConnectionOwner`'s new constructor argument and the 4-argument `TargetExchange.execute`, 3 cascading. **[corrected]** |
+| Test compilation | **Green.** 95 tests pass. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
-| File counts | `lifecycle/` holds **29** files (not 33), `tracing/` **16** (not 18), `kafka/` **14** (not 17), `testFixtures/` **21** (not 24). `src/main` totals 179 Java files |
+| File counts | One module. **333 files** under `TrafficCapture/trafficReplayer/src`; **232** carry `REBUILD-LIMBO` regions. `grep -rl REBUILD-LIMBO-START src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0 |
 | `stash@{0}` | `09df7b9a4` — S6 pre-commit backup, redundant. Do not apply |
 | `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked. **Note:** the four G0 fixtures it was thought to hold already exist on the branch in `src/testFixtures` |
 | Other checkout | `/Users/schohn/dev/replayerCommitHardening` holds an earlier copy of the docs. This repo is authoritative |
@@ -194,7 +194,7 @@ connected, **provided** the reason and the intended repair milestone are recorde
 |---|---|---|---|
 | `compileTestFixturesJava` — 4 errors in 2 files | `822abde4e` (S6b), **before** the G0 module move | `wontfix(G11)` unless the owner wants it sooner | `ActorRequestTestUtils` lines 12/42/55 still name `AsyncPermitPool`, and `ReplayEngineFactory:87` calls `RequestSenderOrchestrator` without the permit-provider argument. Repairing it is ~10 minutes of mechanical work **on a module scheduled for deletion**, which is the only reason it is not already done. Recommended default: leave it |
 | `compileTestJava` — 57 errors in 14 files | `822abde4e` (S6b) | `wontfix(G11)` | Cascades from the above plus the `RequestSenderOrchestrator` constructor change. Full enumeration is in the "Test compilation" row of Operational state |
-| `HttpByteBufFormatterTest` — 4 failures | pre-existing, first *observable* 2026-09-23 | `wontfix(environment)` | The directory's `.gitattributes` mandates `eol=crlf` but the blob stored at `822abde4e` already had LF, so the expectation could never have matched in this working tree. Not a regression from the categorization walk: they were unreachable before, because test compilation had been broken since S6b. Git reports "LF will be replaced by CRLF the next time Git touches it", so a fresh clone should pass — verify there before spending anything on it |
+| ~~`HttpByteBufFormatterTest` — 4 failures~~ | — | **resolved 2026-09-23, nothing to fix** | Proved to be a stale working tree, not a defect. A fresh `git worktree` passes **95/0**, with 41 CRLF lines in the fixture where the main checkout had 0 — git applies `eol=crlf` when it materializes files, and `git mv` does not. Refreshing the working copy made the main checkout pass too, and staging those refreshed files is a **no-op**: git normalizes straight back to an identical blob, so the stored bytes were always correct. Storing them as binary remains optional hardening, not a fix |
 | Test compilation for the **eight** redirected `transformation/` modules | `822abde4e` (S6b) — **not** caused by the G0 redirect | follows the two rows above | They consume the replayer's production and `testFixtures` jars, so they inherit the fixture break. Verified after the move: `:transformation:…:jsonTypeMappingsSanitizationTransformer:compileTestJava` fails at `compileTestFixturesJava` with the same 4 errors as before. The redirect preserved the pre-existing state exactly; it neither fixed nor worsened it. One incidental improvement: the break now lives in the module being deleted, so the **new** module's `testFixtures` start clean |
 
 The owner has accepted red CI for the duration (see "Branch and PR strategy"), so none of these gates work.
@@ -480,6 +480,68 @@ Three ways to get this wrong, all of which end with someone deleting the asserti
 Owned by the milestone that owns commit authority (`G4`), with the rejected/unknown split landing in `G2`
 alongside the commit-submission rework, and asserted as an equation in `G10`/`G12` rather than read off a
 dashboard.
+
+## State at end of the 2026-09-23 session, and what comes next
+
+One module, in place, member-level marking. **333 files, 232 marked, 95 tests passing, build green.**
+
+### Landed this session
+
+| Change | Commit |
+|---|---|
+| Carry-over discipline: member-level, marked in place, refactor-from-the-marks (`AGENTS.md` §8a) | `3aa4d61e7` |
+| Production categorization | `cb923a9fc` |
+| Test and fixture categorization | `83fad00a1` |
+| Plan A rewritten for one module; mainline-preservation rule added as §2.2a; renamed to `replayerRebuildPlanA-inPlace.md` | `7446721c6` |
+| Deleted provably-dead branch-added code — 6 files, 1,067 lines | `0093c38b4` |
+| Unified the marker on `START`/`END` | `71aa6ce76` |
+
+### Findings from the abandoned external-consumer walk
+
+Attempted, then stopped deliberately because it turned into a different milestone. Nothing committed; the
+worktree was discarded. What it established is worth keeping:
+
+- **Three of the five contract types are already live**: `AggregatedRawResponse`, `Utils`,
+  `TestCapturePacketToHttpHandler`. Only `HttpJsonTransformingConsumer` and `TestUtils` need promoting, and
+  both un-mark cleanly by themselves.
+- **But the closure reaches the legacy identity chain.** They require `IReplayContexts`, which welds in seven
+  members typed on `ISourceTrafficChannelKey`, `ITrafficStreamKey` and `UniqueReplayerRequestKey`; behind that
+  sits `SourceTargetCaptureTuple` → `ParsedHttpMessagesAsDicts` → `RequestResponsePacketPair` → `RawPackets`
+  → `UniqueSourceRequestKey`. **So the transform contract is not independent of G3** and must be sequenced
+  after the identity refactor, not before it. An earlier note calling it an early priority was reading the
+  import list rather than the closure behind it.
+- **None of the six promoted datahandlers uses any legacy-identity accessor** — they need only the interface
+  types and the metric methods. So marking those seven members is sufficient, and it was proven to compile.
+- **Partial promotion is validated.** `IReplayContexts` live with its legacy-typed members marked in place is
+  the first real member-level promotion and it worked. That is the pattern G2 and G3 will use repeatedly.
+
+### Two dependency gaps, found and not yet placed
+
+| Missing | Needed by | Note |
+|---|---|---|
+| `libs.jackson.databind` | `datahandlers/JsonAccumulator`, `JsonEmitter` | The incremental JSON parse/re-serialize path *is* the transformation pipeline, not an optional extra |
+| Guava | `datatypes/UniqueSourceRequestKey`, `RequestResponsePacketPair` | Both are legacy-identity-chain files; the need may disappear with the refactor |
+
+Add each when the code needing it is promoted, not speculatively.
+
+### Next
+
+G0's remaining work is the fixtures and the exit evidence, in this order:
+
+1. **`TestEventLoop`** — implement Netty's `EventLoop` while **keeping** the existing timer queue and
+   `schedule(Runnable, Duration)` semantics. Do not inherit Netty's scheduler; the constraints and the four
+   integration problems it causes are recorded in that file's own header. Read `ReplayerFixtureSelfTest`
+   first — it already specifies the behaviour to preserve.
+2. **`RecordScript` and `PumpedKafkaSource`** — rewire to the eight identities in `replay/identity/` and the
+   real `KafkaSourceInput`, dropping their duplicate identity records and `RecordScript`'s
+   `TrafficStreamGenerator` inheritance.
+3. **`ReplayerFixtureSelfTest`** — promote once all four fixtures are live; three of its five methods are
+   already viable. Fold any new event-loop cases into it rather than beside it (`AGENTS.md` §8a).
+4. **G0 exit evidence** — a mixed traffic/heartbeat/probe script pumping through with exact broker timestamps
+   and observable pause, wakeup and commit events. No single test does all of this yet.
+
+Deferred by the owner, with reasons already recorded: the external-consumer contract (after G3), the
+`TrafficReplayer` wiring walk, and the DCO rewrite (post-G12).
 
 ## Standing rule: how to carry code so blame survives
 
