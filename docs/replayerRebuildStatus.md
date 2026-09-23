@@ -40,10 +40,10 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 | Local vs origin | Local is **2 commits ahead**: `822abde4e` (S6b) and `d5f0ef1fb` (the plan reset) are both unpushed. `origin/stableAndScalableLiveReplay` is at `2c4f305f3` |
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
-| Test compilation | **Green.** 95 tests pass. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail |
+| Test compilation | **Green.** 103 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 when `ReplayerFixtureSelfTest` was partly promoted |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
-| File counts | One module. **333 files** under `TrafficCapture/trafficReplayer/src`; **232** carry `REBUILD-LIMBO` regions. `grep -rl REBUILD-LIMBO-START src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0 |
+| File counts | One module. **340 files** under `TrafficCapture/trafficReplayer/src` (**327** Java); **231** carry `REBUILD-LIMBO` regions, of which **3** are partial — `TrafficReplayer` (8 regions), `ReplayerFixtureSelfTest` (2), `ReplayIdentity` (1). `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. The earlier "333 files / 232 marked" figures were measured differently; use the command, not the number |
 | `stash@{0}` | `09df7b9a4` — S6 pre-commit backup, redundant. Do not apply |
 | `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked. **Note:** the four G0 fixtures it was thought to hold already exist on the branch in `src/testFixtures` |
 | Other checkout | `/Users/schohn/dev/replayerCommitHardening` holds an earlier copy of the docs. This repo is authoritative |
@@ -342,13 +342,14 @@ has to be replaced anyway.
 **Replacement:** owners take `io.netty.channel.EventLoop` directly, per the design sentence above, with
 `LongSupplier nanoTime` for time. No wrapper, no `ScheduledTask`.
 
-**One open implementation question this creates, for G0.** `TestEventLoop` currently implements `ActorMailbox`,
-a 4-method interface. Against a real `EventLoop` it must satisfy `EventLoop`/`EventLoopGroup`/
-`ScheduledExecutorService`, which is far wider, while still offering deterministic `runUntilIdle` / `runNext` /
-`advance`. Options: extend a Netty base (`SingleThreadEventLoop`, `AbstractScheduledEventExecutor`), or delegate
-to `EmbeddedChannel`'s loop, which `AGENTS.md` §4 already names as an established pattern and which is
-deterministic by construction. Reversible, so it proceeds on the `EmbeddedChannel`-based default unless vetoed —
-but it is the one real cost of this correction and the reason the mailbox looked convenient.
+**The open implementation question this created is now closed — see "`TestEventLoop` is a real Netty
+`EventLoop`" below.** For the record, the recommended default in this row was wrong and would not have compiled:
+`io.netty.channel.embedded.EmbeddedEventLoop` is **package-private** (`final class EmbeddedEventLoop`, no
+`public`), so it cannot be referenced, subclassed, or handed to an owner from our package, and it extends
+`AbstractScheduledEventExecutor` and reads `System.nanoTime()` anyway. `EmbeddedChannel.isCompatible` accepts
+only that loop, so the pattern `AGENTS.md` §4 names is self-contained to `EmbeddedChannel` and is not a source
+of injectable owner loops. The choice taken was the other listed option, narrowed: extend
+`AbstractEventExecutor` — Netty's *unscheduled* base — and keep the fixture's own clock-driven timer queue.
 
 **Adjacent audit, since the failure mode was systematic rather than specific to this type.** Re-checked every
 P9 row against its "design section assigning this responsibility" column: `ActorMailbox` and
@@ -483,7 +484,7 @@ dashboard.
 
 ## State at end of the 2026-09-23 session, and what comes next
 
-One module, in place, member-level marking. **333 files, 232 marked, 95 tests passing, build green.**
+One module, in place, member-level marking. **340 files, 231 marked, 103 tests passing, build green.**
 
 ### Landed this session
 
@@ -495,6 +496,7 @@ One module, in place, member-level marking. **333 files, 232 marked, 95 tests pa
 | Plan A rewritten for one module; mainline-preservation rule added as §2.2a; renamed to `replayerRebuildPlanA-inPlace.md` | `7446721c6` |
 | Deleted provably-dead branch-added code — 6 files, 1,067 lines | `0093c38b4` |
 | Unified the marker on `START`/`END` | `71aa6ce76` |
+| `TestEventLoop` promoted to a real Netty `EventLoop`; `ReplayerFixtureSelfTest` partly promoted | this commit |
 
 ### Findings from the abandoned external-consumer walk
 
@@ -524,21 +526,67 @@ worktree was discarded. What it established is worth keeping:
 
 Add each when the code needing it is promoted, not speculatively.
 
+### `TestEventLoop` is a real Netty `EventLoop` — how, and the one thing it cannot do
+
+Promoted whole; the file carries no marked regions now. It **extends `AbstractEventExecutor`**, which is
+Netty's base *without* a scheduler, and implements `EventLoop`. The timer queue, `FakeClock`, `runNext`,
+`runUntilIdle`, `advance`, `pendingTasks`, `pendingTimers`, `dropAcceptedWork` and `rejectNewTasks` are the
+carried implementations. Deliberately **not** `AbstractScheduledEventExecutor`: its queue is keyed on
+`System.nanoTime()`, so timers would fire on wall clock and a test could not hold time still.
+`testEventLoopTimersFollowTheInjectedClockRatherThanWallClock` is the regression guard for exactly that, since
+a future agent reaching for the "obvious" Netty base is the likely way this gets undone.
+
+What changed from the carried code, and why:
+
+| Change | Reason |
+|---|---|
+| `implements ActorMailbox` → `extends AbstractEventExecutor implements EventLoop` | `connLLD §1:56` — owners are assigned to a Netty event loop, so the fixture must be one |
+| `inMailbox()` → `inEventLoop(Thread)`, true only while pumping **and** only for the pumping thread | Owner-affinity assertions use `inEventLoop()`; a fixture that returned true off-loop would satisfy the assertion that exists to forbid off-loop mutation |
+| `schedule` returns `ScheduledFuture<?>`, not `ActorMailbox.ScheduledTask`; cancelling it removes the timer from the queue | One cancellation vocabulary, and it keeps `pendingTimers()` an honest leak check |
+| `advance()` now re-drains timers that came due while earlier timers ran | A real loop never leaves an already-expired deadline pending. The carried version promoted once, so a zero-delay timer scheduled *inside* `advance` stayed pending with a deadline in the past. Bounded at 10,000 rounds so a self-rescheduling timer fails with a diagnosis instead of hanging |
+| `shutdown`/`isShutdown`/`isTerminated`/`terminationFuture` map onto the existing reject-and-drop flags; `awaitTermination` reports state without waiting | `connLLD §19.6` needs a loop that can die. Nothing may block: no other thread can advance this loop |
+| `schedule(Runnable, Duration)` still throws on a negative delay; the `(long, TimeUnit)` overloads clamp to zero | The first is the fixture's own stricter contract, worth keeping as a test-bug detector. The second must honour Netty's documented behaviour, because production code passes computed delays |
+
+**The limit: no real Netty channel can register to it.** `LocalChannel.isCompatible` requires
+`SingleThreadEventLoop` and `AbstractNioChannel.isCompatible` requires `NioEventLoop`, so every built-in
+channel fails registration against *any* custom `EventLoop` with `IllegalStateException: incompatible event
+loop type`. Becoming a `SingleThreadEventLoop` would reintroduce both the wall-clock scheduler and a real
+thread, so the fixture accepts the limit. **This costs nothing, by design:** target I/O reaches owners through
+`TargetChannelPort` (`connLLD §1`), a narrow event-loop-only interface, not through a channel a test
+registered to the owner's loop. `testEventLoopCannotRegisterNettyBuiltInChannels` pins the constraint so it
+is found here rather than surfacing as an opaque message in G6.
+
+`ActorMailbox` and `NettyEventLoopActorMailbox` now have **zero live references** — every remaining mention is
+inside a marked region. They are not deleted yet: their dependents (`TargetConnectionOwner`,
+`RequestSenderOrchestrator`, `ReplayTransaction`, `OwnerTransitionRunner`, `ReplayTransactionRegistry`) are
+still marked, and deleting the interface now would make those regions harder to read during the refactor that
+resolves them. **Verdict: dead; delete with the last dependent.**
+
+One build change: `libs.netty.all` moved from `testFixturesImplementation` to `testFixturesApi`, because
+`TestEventLoop` exposes `EventLoop` and `ScheduledFuture` in its signatures — same reason
+`libs.kafka.clients` was already `api`.
+
+### Untracked debris: `TrafficCapture/trafficReplayerLegacy`
+
+2,059 files on disk, **zero tracked in git**, absent from `settings.gradle`. Residue from the abandoned
+two-module attempt. It holds **no `.java` sources at all** outside `build/` — only compiled classes and 33
+replayer run logs, of which nothing is unique but the logs. Harmless to the build, but it makes a bare
+`grep -r` over `TrafficCapture/` read stale class files, which already misled one walk in the previous
+session. Left in place because the run logs may be wanted evidence; deleting it is a one-line `rm -rf` when
+the owner says so.
+
 ### Next
 
 G0's remaining work is the fixtures and the exit evidence, in this order:
 
-1. **`TestEventLoop`** — implement Netty's `EventLoop` while **keeping** the existing timer queue and
-   `schedule(Runnable, Duration)` semantics. Do not inherit Netty's scheduler; the constraints and the four
-   integration problems it causes are recorded in that file's own header. Read `ReplayerFixtureSelfTest`
-   first — it already specifies the behaviour to preserve.
+1. ~~`TestEventLoop`~~ — **done**, see above.
 2. **`RecordScript` and `PumpedKafkaSource`** — rewire to the eight identities in `replay/identity/` and the
    real `KafkaSourceInput`, dropping their duplicate identity records and `RecordScript`'s
-   `TrafficStreamGenerator` inheritance.
-3. **`ReplayerFixtureSelfTest`** — promote once all four fixtures are live; three of its five methods are
-   already viable. Fold any new event-loop cases into it rather than beside it (`AGENTS.md` §8a).
-4. **G0 exit evidence** — a mixed traffic/heartbeat/probe script pumping through with exact broker timestamps
-   and observable pause, wakeup and commit events. No single test does all of this yet.
+   `TrafficStreamGenerator` inheritance. Their three cases in `ReplayerFixtureSelfTest` are still marked and
+   are the specification to restore them against.
+3. **G0 exit evidence** — a mixed traffic/heartbeat/probe script pumping through with exact broker timestamps
+   and observable pause, wakeup and commit events. No single test does all of this yet. Fold it into
+   `ReplayerFixtureSelfTest` rather than beside it (`AGENTS.md` §8a).
 
 Deferred by the owner, with reasons already recorded: the external-consumer contract (after G3), the
 `TrafficReplayer` wiring walk, and the DCO rewrite (post-G12).
