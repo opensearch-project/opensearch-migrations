@@ -1,5 +1,9 @@
 # Replayer Rebuild Execution Log
 
+> **RETIRED. Do not read, follow, or add to this file.** Live status is
+> [`replayerRebuildStatus.md`](replayerRebuildStatus.md); the contract is
+> [`../AGENTS.md`](../AGENTS.md). Awaiting deletion in the final cleanup sweep.
+
 This log records implementation evidence for
 [`replayerRebuildPlan.md`](replayerRebuildPlan.md). Every milestone remains non-production until
 S0-S15, PA1-PA3, and final acceptance are complete.
