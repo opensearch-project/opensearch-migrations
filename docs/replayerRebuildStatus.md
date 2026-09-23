@@ -59,13 +59,13 @@ criteria, and on conflict the design's list wins.
 |---|---|---|---|---|---|---|
 | R1 | One named owner per mutable value | G9 | procCommit §3.1; replayerLLD §2; async §2 | connLLD §19.6; procCommit §13.1 | open | |
 | R2 | At most one turn + one processing completion; normal has both | G5 | procCommit §3.2; connLLD §10, §13 | connLLD §19.2 | open | |
-| R3 | At most one outstanding batch request per generation | G2 | kafkaLLD §4.2, §13; replayerLLD §2 | kafkaLLD §17.4 | open | |
+| R3 | At most one outstanding batch request per generation | G2, G7 | kafkaLLD §4.2, §13; replayerLLD §2 | kafkaLLD §17.4 | open | Source half proved (`PartitionSourceStateTest`). Intake's own `partitionBatchState` is G7's; ledger row filed. Still open on G2's side until the `§5.3` ended-intake acceptance guard lands |
 | R4 | Delivered batch matches one request, applied before next | G7 | kafkaLLD §5.3, §13 | kafkaLLD §17.4 | open | |
 | R5 | Demand open while retry-ready supply below N | G7 | procCommit §8.1; kafkaLLD §13 | kafkaLLD §17.4 | open | |
 | R6 | Fast responses satisfy supply before B+W | G6 | procCommit §8.2; kafkaLLD §11 | kafkaLLD §17.3, §17.4 | open | |
 | R7 | Finished/cancelled cannot re-enter supply | G6, G7 | kafkaLLD §12, §13; procCommit §8.1 | kafkaLLD §17.4 | open | |
 | R8 | Target-write start stays local cancellation state | G5 | connLLD §8; procCommit §3.2 | connLLD §19.2 | open | |
-| R9 | Queued input wakes long poll without interrupting protected work | G2 | kafkaLLD §5.4; replayerLLD §2 | kafkaLLD §17.4 | open | |
+| R9 | Queued input wakes long poll without interrupting protected work | G2 | kafkaLLD §5.4; replayerLLD §2 | kafkaLLD §17.4 | open | Protected-work half proved against a real broker. The waking half is **not** met: an input submitted while the phase is `RUNNING` records nothing, so it waits a full poll timeout, and `WakeupException` escapes `runOnce()` rather than returning control to queue draining |
 | R10 | No processing completion before tuple durability | G5 | connLLD §12, §13; replayerLLD §5 | connLLD §19.2, §19.3 | open | |
 | R11 | No record completion with unfinished associations | G3, G4 | kafkaLLD §8 | kafkaLLD §17.1 | open | |
 | R12 | Shared record waits for all its requests | G3 | kafkaLLD §8.3; procCommit §6.2 | kafkaLLD §17.1 | open | |
@@ -74,7 +74,7 @@ criteria, and on conflict the design's list wins.
 | R15 | Cancellation cleanup cannot produce a commit request | G8 | replayerLLD §6; kafkaLLD §15.3; connLLD §17.2 | connLLD §19.5; kafkaLLD §17.5 | open | |
 | R16 | Successor generation waits for prior cleanup | G8 | kafkaLLD §15.3; procCommit §9.3 | kafkaLLD §17.5 | open | Owner directive: solid fast deterministic coverage here, not via load test |
 | R17 | Unrelated partitions continue | G8 | kafkaLLD §5.1; procCommit §8 | kafkaLLD §17.4, §17.5 | open | Same directive as R16 |
-| R18 | No hard cap blocks retry or heartbeat evidence | G7 | kafkaLLD §5.1; procCommit §8.3 | kafkaLLD §17.4:986 | open | |
+| R18 | No hard cap blocks retry or heartbeat evidence | G7 | kafkaLLD §5.1; procCommit §8.3 | kafkaLLD §17.4:999 | open | |
 | R19 | Every unexpected owner failure reaches the supervisor | G9 | replayerLLD §8, §4; async §2 | connLLD §19.6; procCommit §13.5 | open | |
 
 ## Defects D1–D18 — behaviors the implementation must not exhibit
@@ -435,6 +435,119 @@ Batching is kept rather than reduced to one call per partition because `commitSy
 blocking calls by the partition count is how a commit overruns `max.poll.interval.ms` — defect `D5`'s
 mechanism — and, during revocation, the grace interval.
 
+## G0–G2 external review, 2026-09-23 — triage against the design
+
+An external review of `191252805` reported fourteen production findings and seven test findings and
+recommended that G2 not close. Every claim was re-verified against the cited design sections before being
+accepted: four read-only agents each took a cluster, quoted the deciding design text, and traced whether the
+alleged consequence is reachable in live code. This table is the verdict set. **A finding marked NOT REAL is
+recorded rather than dropped**, because the reasoning is what stops it being re-raised.
+
+The review's own framing was wrong in three places, and one of those mattered: its commit-outcome finding
+prescribed behavior that `kafkaLLD §5.7` forbids. Verifying rather than adopting is what caught that.
+
+| # | Claim | Verdict | Deciding text | Reachable now? |
+|---|---|---|---|---|
+| 1 | Required intake submissions ignore acceptance | **REAL** | `kafkaLLD §4.1` "An input submission needed for correctness must report acceptance. Queue rejection or an unexpected failure to submit is process-fatal." `replayerLLD §4` repeats it | No — `submit()` can only return false after `close()`, which nothing calls until G11. **5** sites, not the 3 reported; the review missed `onPartitionsLost` |
+| 2 | `WakeupException` escapes the owner loop | **REAL** | `kafkaLLD §5.4`; `KafkaConsumerSourcePort` propagates deliberately | Yes, on the real adapter. A routine queued input unwinds `runOnce()` |
+| 3 | Revocation commits unbounded by the grace deadline | **REAL, means design-silent** | `procCommit §9.2` "short enough, with operational margin, that `onPartitionsRevoked` returns before the consumer risks exceeding its poll interval"; §9.4 "neither retried nor awaited indefinitely"; Plan A G2 `Exit:` names it verbatim | Not *yet* — blocked behind finding 15. Not "unbounded": `commitSync(Map)` is bounded by `default.api.timeout.ms`, 60 s, a 12–60× overrun of a 1–5 s grace |
+| 4 | Successor-generation cleanup gating ineffective | **REAL** | `procCommit §9.3`, `kafkaLLD §5.2` step 4 and `§15.3`; required test `kafkaLLD §17.5` | Yes. `hadPriorGeneration` is false *by construction* — `beginGeneration` is only reached under `if (containsKey) continue;`, so the pause reason is entirely inert |
+| 5 | Revocation mixes two clock domains | **REAL** | `kafkaLLD §15.1` "measured with a process-local monotonic clock"; `CancellationDeadline` documents "the same monotonic source this deadline was created from" | Yes, in every path that runs today. Owner builds the deadline from injected `monotonicNanos`; the queue compares against hardcoded `System.nanoTime()` |
+| 6 | Inputs miss the wakeup between drain and poll | **REAL** | `kafkaLLD §5.4`'s conservative predicate "the Kafka thread **may be** waiting in `poll()`"; `procCommit §5.1` node `D`; `§17.4` "wakes a long all-partitions-paused poll promptly" | Yes. The whole post-drain span is phase `RUNNING`, where `onInputSubmitted` records nothing. Costs one full poll timeout of latency; no safety break |
+| 7 | Ownership-ended outcomes can be retried | **Mostly NOT REAL — as prescribed it would introduce a defect** | `kafkaLLD §5.7` scopes no-retry to "**After revocation**, the old generation does not retry", and requires that "every partition in it that this consumer **still owns under the same generation** keeps its staged position and is offered again" after *any* unsuccessful operation | Treating non-`ACKNOWLEDGED` alike is **conforming**. Dropping on an ownership-ended label would abandon progress for partitions we keep — `RebalanceInProgressException` is Kafka's retriable case. This is the second time this misreading has arisen; it is the "fabricated precision" rejected above. Narrow residue is real: see finding 16 |
+| 8 | Adapter needs a second mutable generation model | **REAL** | `kafkaLLD §5` gives the owner sole authority over generations | Yes. `KafkaConsumerSourcePort` takes a map nothing populates; `WakeupAgainstRealKafkaTest:322` passes `Map.of()`, so a real poll returning records would throw |
+| 8b | G2 not wired through production startup | **REAL but correctly placed** | `AGENTS.md` §4: "If a milestone's real consumer does not exist yet, wiring to a named shell counts, provided the status table names the milestone that replaces it" | `runReplayMode` is inside `REBUILD-LIMBO(G9)`; Plan A assigns startup to **G9**. This row is that naming |
+| 9 | `KafkaSourceInputQueue` close/submission race | **NOT REAL** | Design is **silent** on this queue's close/drain ordering | The interleaving exists; the harm does not. `close()` deliberately retains inputs and neither `drain()` nor `poll()` consults `closed`, so nothing discards and nothing stops draining. Becomes real only if a "final drain then close" sequence is added — which needs the design to state the ordering first |
+| 10 | Batch requests accepted after intake ended | **REAL** | `kafkaLLD §5.3` third bullet: accept "only when … lifecycle state has not permanently ended intake for the generation" | Reachable; consequence benign because `isReadable()` also ANDs `lifecycleAllowsIntake`. The invariant rests on one check where the design specifies two |
+| 11 | Assignment carries `committed()`, not Kafka's position | **PARTIALLY REAL** | `kafkaLLD §5.2` step 2 names "Kafka's assigned position" only for the **commit queue**. On what the *message* carries the design is **silent** | Unreachable: `initialOffset` is read by nothing, and `ObservedRecordCommitQueue` takes no start position — an empty deque begins at the first polled record, satisfying §5.2. Latent wrong value plus a fabricated `0` |
+| 12 | Records omit Kafka key and headers | **NOT REAL** | `kafkaLLD §5.5` qualifies them "**as required for diagnostics**" — a condition, not a schema. `captureArch §2.2`: "Kafka headers are not used for that purpose." `replayerRebuildPlan.md §3`: headers "Diagnostic only"; **no row for the key at all** | Premise partly false: the proxy sets **no** headers, and every key component (`connectionId`, `writerNodeId`, `probeId`) is already inside the envelope. §5.5's list is needs, not fields — it also omits `serializedSizeBytes`, which we do carry |
+| 13 | G1 raw dump truncates across partitions | **REAL** | Kafka orders within a partition only | Yes. `if (pastEnd(rec, ...)) return;` leaves the whole dump, while `pastEnd` tests a *per-partition* bound and `polled` interleaves partitions |
+| 14 | `PreparationOutcome` contradicts the design | **REAL** | `connLLD §6` permits exactly `RequestPreparationReady` and `RequestPreparationCancelled`. `Filtered` is **absorbed** — "Expected transformation fallback behavior … is represented inside `RequestPreparationReady`" — and `Failed` excluded categorically, since "An unexpected transformation throw or exceptional completion is process-fatal" | Declaration is live and wrong; all consumers are in G5/G11 limbo. The strip is **already approved** as G0 group P9 and simply never happened. The two-correctness-models rule is *not* engaged — it triggers on "both live with real callers", and there are zero on either side |
+| 15 | *(not in the review)* The design-mandated in-callback commit throws | **REAL — most severe** | `procCommit §9.2` step 5 and `kafkaLLD §15.1` require commits from inside the grace wait; Plan A G2 says so in bold | Yes, on first use. `submitEligibleCommits` calls `enterProtectedOperation`, which is `requirePhase(RUNNING)`, but the grace wait runs in `REBALANCE_CALLBACK`. Raises out of the callback through `poll()`, fatally |
+| 16 | *(not in the review)* `isCurrentlyOwned` counts a mid-revocation generation as owned | **REAL, needs one ruling** | `kafkaLLD §5.7` "After revocation, the old generation does not retry"; `procCommit §9.4` "never retrying an old-generation commit" | Unreachable today behind finding 15; reachable the moment it is fixed, so the two land together. Turns on when "after revocation" begins — callback entry or callback return |
+
+### Why no test caught the revocation defects
+
+Both revocation tests set `clockNanos` past the deadline *before* revoking, so the grace-wait body never
+executes. The test named `aCommitStagedDuringTheGraceIntervalIsSubmittedFromInsideTheWait` never calls
+`onPartitionsRevoked` at all — it asserts an ordinary `runOnce()` commit. A test asserting a property under a
+name it does not exercise is worse than an absent test, because it reads as coverage.
+
+One comment states something false by construction: "The deadline has already passed on the injected clock,
+so the callback takes its shortest path". The deadline is computed as `now + grace`, so it can never be
+already-passed. The callback returned only because of the clock-domain defect in finding 5.
+
+Fixing the domains makes that frozen-clock test *hang* rather than fail, which is why finding 5's repair and
+its tests are one change: the tests must advance the injected clock, which is the shape `AGENTS.md` §4 asks
+for anyway.
+
+### `kafkaLLD §17.4` — nineteen cases, and who owns them
+
+The review counted ten missing and concluded G2 cannot close. The count is right; the conclusion is not.
+Plan A cites `§17.4` as the required-test list for **both** G2 and G7, and the section's title is its own
+partition: "Demand and Kafka".
+
+Nine of the ten need G7's demand machinery, and that absence is *measured*, not assumed — `grep` for
+`retryReadyRequestSupplyCount`, `requestSupplyTarget`, `targetSupplyState`, `countedAsRetryReadySupply`,
+`needsAnotherBatch` returns zero hits across `src/main` and `src/test`. Three additionally depend on G6 for
+`B`, `W`, and a representation of "explicitly unavailable". Writing them inside G2 would mean standing up
+intake demand state there, which is the lateral expansion `AGENTS.md` §6 forbids.
+
+**Exactly one missing case is a real G2 gap: case 18** — "A wakeup between revocation and assignment
+postpones assignment until a later poll without losing the callback" (`kafkaLLD §5.4`: "the assignment
+callback is postponed, not discarded"). Every production part exists. The blocker is fixture
+expressiveness: `PumpedKafkaSource.poll()` has no `WakeupException` path and no notion of a partially
+completed rebalance, so it cannot express "revoke ran, wakeup fired, assign did not, assign arrives next
+poll."
+
+Covered today: cases 8, 9, 10, 13, 15, 16, 17, 19. Partial: 7 (source-side enforcement only; the intake half
+is G7's).
+
+### Repair staging — four commits, and why they are grouped this way
+
+G2 does not close until the first three land. G3 waits on them, because findings 1, 4 and 11 are all on the
+**G2→G3 interface** — what `PartitionRecordBatch` and `PartitionGenerationAssigned` carry, and how cleanup
+completion is identified. Building intake against that interface first means reworking both sides.
+
+| Stage | Contents | Blocked on |
+|---|---|---|
+| **G2R-a — the revocation path** | Findings 15 (phase guard), 5 (clock domain), 4 (cleanup gate), 16 (mid-revocation ownership), 3 (bounded commit). One commit: they share the grace-wait code and their tests interlock — the clock fix is what makes an in-grace commit testable at all, and the phase fix is what makes finding 16 reachable | Owner rulings on the `§5.7` boundary and the timeout outcome |
+| **G2R-b — the poll and wakeup boundary** | Findings 2 (`WakeupException` escape), 6 (`RUNNING`-window submission), `§17.4` case 18 plus the `PumpedKafkaSource` split-rebalance and wakeup expressiveness it needs | nothing |
+| **G2R-c — submission and admission** | Findings 1 (`submitRequired` at all five sites), 10 (`§5.3` ended-intake guard) | nothing |
+| **G1R — multi-partition dump** | Finding 13, plus the `readRecordValues(1)` durability gate in both real-proxy tests, plus a two-partition topic so the truncation is detectable | nothing |
+
+G2R-b, G2R-c and G1R are disjoint from each other and from G2R-a by package, so they can proceed while the
+rulings are outstanding. G1R touches only `replay/kafka/` and the proxy fixtures.
+
+Finding 14's `PreparationOutcome` strip is **not** staged here: `connLLD §6` assigns preparation to G5, the
+consumers are all in G5 limbo, and the strip is already an approved G0 verdict. It lands with G5, now
+recorded in that milestone's scope and `Exit`.
+
+### Reversible decisions taken on a default, per `AGENTS.md` §2
+
+Both are recorded here rather than escalated because they are reversible and nothing downstream is committed
+to them yet.
+
+**`ReplayIntakeInputQueue.close()` keeps clearing accepted inputs.** The design is silent on whether close
+may discard inputs that `submit()` already accepted — `kafkaLLD §4.1` constrains only submission acceptance,
+and `replayerLLD §4`'s "never silently dropped" is about routing, not teardown. Both call sites are teardown
+paths already governed by `replayerLLD §8`'s process-failure boundary, and nothing calls `close()` until G11.
+Left as-is; if G11 gives the queue an orderly shutdown rather than a fatal one, the question becomes real and
+the design has to state the close-versus-drain ordering first.
+
+**A lost partition's generation does produce `GenerationCleanupFinished`.** `onPartitionsLost` submits
+`ForceGenerationCancellation`, force cancellation drives intake's tracker to completion, and `§15.3` has
+intake send the cleanup message when its tracker completes — so a lost generation is added to the
+pending-cleanup set like a revoked one. The alternative, excluding lost generations, would let a successor
+read while the lost generation's work is still unwinding. Cheap to reverse: one condition in
+`onPartitionsLost`.
+
+### Stale line citations — corrected
+
+`§17.4` is at `983-1007`, not `970-994`: a uniform +13 shift, wrong in Plan A twice and in this register's
+R18 row once. `AGENTS.md` §6 forbids implementing from a paraphrase, and a stale line cite is how someone
+reads the wrong bullets while believing they read the design.
+
 ## Design changes — only ever on the owner's instruction
 
 `AGENTS.md` red line 1 and the document table both forbid an implementation agent from changing
@@ -446,6 +559,51 @@ was added so it can be vetoed on reading.
 | 2026-09-23 | `kafkaLLD §5.7` | That the five commit outcomes describe the **operation, not individual partitions**; that a batched operation may apply to some partitions and not others with the client reporting one result for the whole thing; and that a failed operation is therefore not evidence that nothing was committed. | A fact about the Kafka client, verified in its 4.2.0 sources, that §5.7 was silent on. Silence let an implementation read a single failure as "none committed", which is wrong. |
 | 2026-09-23 | `kafkaLLD §5.7` | That a staged position is discarded **when its commit is acknowledged, not when it is attempted**; that a partition still owned under the same generation keeps its position and is offered again; and that a revoked generation discards its position rather than re-offering it. | §5.7 said when a position is *staged* but never when it is cleared. That gap produced two defects: clearing on attempt stranded every partition in a failed batch, and `onPartitionsRevoked` leaving a position staged let a revoked generation go on offering a commit. The revocation half follows from §5.7's existing no-retry sentence; the retention half is the decision the silence left open. |
 
+## G3 — approved plan and standing decisions
+
+Agreed with the owner 2026-09-23, before any code was written. **Read this before starting or resuming G3.**
+
+### Sequencing — three units, each with its own evidence
+
+G3 was escalated as too large for one review (`AGENTS.md` §6 allows escalating rather than subdividing
+silently). The owner approved three units:
+
+| Unit | Contents |
+|---|---|
+| 1 | Identity collapse, `RecordWorkTracker` refactored onto `replay/identity/`, `PartitionIntakeState` built, `kafkaLLD §17.1` record-accounting tests |
+| 2 | `SourceConnectionState`, the `§7` ten-step apply order, `§17.2` source-reconstruction tests |
+| 3 | `dump-http`/`dump-both` restored, the 8 `REBUILD-LIMBO-NOTE(G3)` root-switch sites, `ReplayIdentity` deleted |
+
+### The governing constraint on how
+
+Owner, verbatim in substance: **refactoring that makes better and more maintainable code is welcome, but
+nothing already solved gets rewritten.** So every component below is a *refactor* of carried code, not a
+reimplementation, and a proposal to rewrite one of them is a decision to escalate rather than take.
+
+### Verdicts, from reading the code against the design
+
+Most of the accumulation code survives, and more directly than expected: it already speaks
+`RecordAssociationId`, `SourceRequestAssemblyId` and `ReplayRequestId`, so it had already been reshaped
+toward this design.
+
+| Component | Lines | Verdict |
+|---|---|---|
+| `RecordWorkTracker` | 254 | **refactor, minimal.** Already `§8` to the letter — `register`/`associate`/`relabel`, `openForNewAssociations`, `completionEmitted`, and a `recordsByAssociation` reverse index that is exactly what `§8.3`'s "remove only that request's association from each contributing record" requires. The change is the identity import. |
+| `Accumulation` | 237 | **refactor.** Is `§9`'s `SourceConnectionState` in all but name: per-connection `State`, `RequestResponsePacketPair`, `hasBeenExpired`, source-request ordinal. |
+| `RequestResponsePacketPair`, `RawPackets`, `IRequestResponsePacketPair` | 154 + 47 + 18 | **keep.** `§9.2`'s "bytes remain in replay intake until the response is complete" is this buffer. |
+| `ExpiringTrafficStreamMap` + `ExpiringKeyQueue`, `AccumulatorMap`, `EpochMillis`, `ScopedConnectionIdKey`, `BehavioralPolicy` | 239 + 150 + 20 + 55 + 24 + 131 | **keep.** The expiry machinery `§9`'s `expired` state and `§7` step 5 need. The owner flagged this set earlier in the rebuild and was right to. |
+| `CapturedTrafficToHttpTransactionAccumulator` | 962 | **refactor, and the one real reshaping.** Holds both `§7`'s apply order and `§9`'s assembly; the design splits them. `§9` assembly is extracted into `SourceConnectionState`, the apply order stays. Approved explicitly. |
+| `PartitionIntakeState` | — | **build.** Does not exist; `§6` lists twelve fields the accumulator currently holds loose. |
+| `ReplayIntakeOwner`'s input family — `StartSourceRead`, `SourceReadCompleted`, `SourceReadFailed`, `StopReading`, `CloseAccumulator` | of 588 | **dead.** `§3` pushes `PartitionRecordBatch` to intake; it no longer pulls from a traffic source. Its owner-thread discipline and `validateKafkaAssociations` survive. |
+| `ReplayIdentity` | 199 | **dead**, deleted in unit 3 once nothing marked references it. |
+
+### Deferred out of G3, with the owner's agreement
+
+**`ChannelContextManager` and the accumulator's tracing stay out of G3 entirely.** It carries the
+non-atomic refcount defect already open against G5, and unit 1 needs no tracing to prove record accounting.
+`AGENTS.md` §4 makes observability a deliverable of the milestone that creates a component, so this is a
+real deferral and is in the ledger below with G5 as its receiver — not an omission.
+
 ## Deferral ledger — work moved between milestones
 
 The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
@@ -456,6 +614,20 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 |---|---|---|---|---|
 | `dump-http` and `dump-both` CLI modes, and the file-input dump path | G1 | G3 | HTTP transaction reconstruction is the legacy accumulator's job, whose closure is `ChannelContextManager` → `RootReplayerContext` → the `IReplayContexts` identity chain. Rebuilding that inside G1 is the lateral expansion `AGENTS.md` §6 forbids. G3 rebuilds source assembly, so the modes return there as that milestone's cheapest evidence. Mode names stay in the CLI (§2.3 contract); invoking them fails with a message naming G3 | open |
 | Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G3 | Recorded in `TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` note as a G1 blocker. It is not one: with G1 scoped to Kafka, no file path is promoted, so nothing forces the answer yet. It must be settled when the file dump path returns | open |
+| Tracing for replay intake and source assembly — `ChannelContextManager` and the accumulator's instrumentation contexts | G3 | G5 | `ChannelContextManager` carries the non-atomic refcount defect already open against G5 (`:39-43` reached from `:73-83`), and repairing it inside G3 would mean fixing a G5 defect to add observability G3's own evidence does not need. Record accounting is provable without it. `AGENTS.md` §4 otherwise makes observability a deliverable of the creating milestone, which is why this is recorded rather than simply left out | open |
+| `§17.4` case 1 — demand requests another batch while fewer than `N` requests have resolved retry input and unfinished target turns | G2 | G7 | `N = P * T_threads` and the supply count are `kafkaLLD §13`, which G7 builds. No symbol in §13 exists in the module | open |
+| `§17.4` case 2 — request reconstitution with unresolved retry input does not increment supply | G2 | G7 | §13 transition 1, per-request intake bookkeeping created at reconstitution. Needs G3's reconstitution first | open |
+| `§17.4` case 3 — a fast complete response may increment supply before `B + W` | G2 | G7 | `B` and `W` are the retry boundary, which G6 builds; G7 then counts against them | open |
+| `§17.4` case 4 — a slow or missing response keeps demand open until complete or explicitly unavailable | G2 | G7 | "Explicitly unavailable" has no representation until G6 introduces `SourceResponseUnavailableForRetry` | open |
+| `§17.4` case 5 — a finished or cancelled request is removed exactly once | G2 | G7 | §13 transition 3 requires `ConnectionRequestFinished` reaching intake, which G5 emits | open |
+| `§17.4` case 6 — retry-input resolution after finish or cancellation does not re-add supply | G2 | G7 | §13's `countedAsRetryReadySupply` and `targetSupplyState = finishedOrCancelled` idempotence | open |
+| `§17.4` case 7, intake half — at most one outstanding batch request per generation, enforced at intake | G2 | G7 | Source-side enforcement is proved in `PartitionSourceStateTest`; intake's own `partitionBatchState` is G7's | open |
+| `§17.4` case 11 — intake cannot request the next batch until it fully applies the current one | G2 | G7 | §13's `applying` → `idle` transition, over G3's record application | open |
+| `§17.4` case 12 — one batch can overshoot `N` without loss or reordering | G2 | G7 | Requires a supply count that can exceed `N` to exist at all | open |
+| `§17.4` case 14 — no hard record or byte cap blocks heartbeat, close, retry, or expiration evidence | G2 | G7 | No cap exists to saturate (`KafkaRecordOwnershipBudget` was not carried), but the property is about the four evidence kinds, which G6/G7 introduce. Already tracked as R18 against G7 | open |
+| G0's shells for `ConnectionAdmissionEntry`, `TargetChannelPort`, `RequestPreparationResult`, `RetryDecision` | G0 | G5 | G0 required the named component and sealed result types as shells "cheap precisely because nothing depends on them yet". Six of seven are absent from `main`. That cheapness has expired — each now lands with the milestone that gives it a consumer, which is where its shape is decided | open |
+| G0's shells for `TupleWriter` and `TupleWriteResult` | G0 | G9 | Same clause. The tuple-writing path is G9's; see the `TupleWriter` threading-contract row above for what must survive | open |
+| G0's shell for `PartitionIntakeState` | G0 | G3 | Same clause, and G3 unit 1 already lists it as its one **build** item, so it lands as that milestone's own evidence rather than as an errand | open |
 
 ## Named scaffolding — every row needs a removal milestone
 
