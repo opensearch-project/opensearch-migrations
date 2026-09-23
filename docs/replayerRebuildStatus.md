@@ -30,20 +30,22 @@ Short names in the citation columns, all under `docs/captureAndReplay/`: `replay
 
 ## Operational state
 
-Verified 2026-09-22. This changes; correct it rather than trusting it blind.
+Re-verified 2026-09-22 during the G0 pull-over pass. This changes; correct it rather than trusting it blind.
+Rows marked **[corrected]** replaced a claim in the previous revision that measurement disproved.
 
 | Item | State |
 |---|---|
 | Branch | `stableAndScalableLiveReplay` |
 | Remote | `origin` = `github.com/gregschohn/opensearch-migrations` (a fork, **not** `opensearch-project`) |
-| Local vs origin | Local is **2 commits ahead**: `822abde4e` (S6b) and the plan reset are both unpushed. A prior handoff note claiming origin is at `822abde4e` is stale — `origin/stableAndScalableLiveReplay` is at `2c4f305f3` |
-| Pull request | #3394, open and blocked. Failing categories: inherited DCO, Spotless, Gradle shards, macOS build, Sonar, several E2E jobs |
-| DCO debt | **24 of the 48 commits** since `origin/integrating3231` lack `Signed-off-by`. A prior note named only seven (`5150f20ed`, `d7aa795405`, `34d2861545`, `68cf954449`, `997a6c44f0`, `139853523e`, `6fb2cb040c`) — all seven confirmed missing it, but the real debt is larger. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
-| Test compilation | **Broken** at four stale fixture API errors: `ActorRequestTestUtils` still references `AsyncPermitPool`, and `ReplayEngineFactory` constructs `RequestSenderOrchestrator` without the permit-provider argument. More stale callers are expected behind them |
+| Local vs origin | Local is **2 commits ahead**: `822abde4e` (S6b) and `d5f0ef1fb` (the plan reset) are both unpushed. `origin/stableAndScalableLiveReplay` is at `2c4f305f3` |
+| Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
+| DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
+| Test compilation | **Broken: 61 errors across 16 files**, not four. `compileTestFixturesJava` fails first with 4 errors in 2 files (`ActorRequestTestUtils` lines 12/42/55/68 on `AsyncPermitPool`; `ReplayEngineFactory:87` missing the permit-provider argument). `compileTestJava` then fails with 57 errors in 14 files: 25 on the vanished `AsyncPermitPool` type and its nested `Metrics`/`Permit`, 19 on the `RequestSenderOrchestrator` constructor's new argument 2, 4 on `scheduleRequestLifecycle` losing its permit-pool parameter, 3 on `TargetConnectionOwner`'s new constructor argument and the 4-argument `TargetExchange.execute`, 3 cascading. **[corrected]** |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
-| S6b review | Committed at the owner's direction **without** an agent review. Hotspots if reviewed later: abort racing initial or retry permit delivery, permit cleanup on rejected event-loop submission, permit-close failure and suppressed-failure preservation, off-event-loop mutation of `TargetConnectionOwner`, stale `activePermit`, duplicate acquire or release, whether queued or preparing requests can acquire, and whether a permit is held while retry policy waits on source-response input |
+| S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
+| File counts | `lifecycle/` holds **29** files (not 33), `tracing/` **16** (not 18), `kafka/` **14** (not 17), `testFixtures/` **21** (not 24). `src/main` totals 179 Java files |
 | `stash@{0}` | `09df7b9a4` — S6 pre-commit backup, redundant. Do not apply |
-| `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked |
+| `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked. **Note:** the four G0 fixtures it was thought to hold already exist on the branch in `src/testFixtures` |
 | Other checkout | `/Users/schohn/dev/replayerCommitHardening` holds an earlier copy of the docs. This repo is authoritative |
 
 ## Design obligations R1–R19
@@ -76,39 +78,473 @@ criteria, and on conflict the design's list wins.
 
 ## Defects D1–D18 — behaviors the implementation must not exhibit
 
+Re-measured against the branch on 2026-09-22. `open` means "confirmed present in the legacy module and still
+to be proved absent in the new one." **Five rows were refuted as originally worded** — the behavior described
+no longer exists, usually because an S-slice fixed it. A refuted row is *not* closed: Plan A §3 rule 2 makes
+each of these a behavior the new module must be shown not to exhibit, so the test obligation survives. What
+changes is that the *stated mechanism* must not be used as a search key, because it will not be found.
+
 | ID | Defect | Milestone | State | Notes |
 |---|---|---|---|---|
-| D1 | Replayer cannot read its own capture topic | G1 | open | Reassigned from G9 during the 2026-09-22 citation pass |
+| D1 | Replayer cannot read its own capture topic | G1 | **open, reworded** | The recorded mechanism (`TrafficStream.parseFrom(kafkaRecord.value())` at `KafkaTrafficCaptureSource.java:813`, `replayerRebuildPlan.md:144`) is **stale**. That call is now `CaptureRecord.parseFrom` at `KafkaTrafficCaptureSource.java:604`, with an exhaustive four-arm payload switch at `:609-637` including `PAYLOAD_NOT_SET -> protocolViolation`. Serializers, headers, and the continuity fields all match the proxy. **The surviving defect is "reads and discards", not "cannot read":** (a) Kafka `LogAppendTime` reaches nothing — `ConsumerRecord.timestamp()` appears exactly once in `kafka/`, at `KafkaTopicDumper.java:355`, for the `--end-time` dump filter, so `WriterPartitionTimeState`, the §10.1 backward-skew fatal check, and §10.3 expiration cannot exist and expiration still runs on wall clock; (b) heartbeats and probes are converted into fabricated connections with `connectionId = "__capture_control__:…"` (`KafkaTrafficCaptureSource.java:696-720`), one channel identity and OTEL span pair per heartbeat forever, against kafkaLLD §7.1 ("a probe creates no writer or connection state"); (c) `connectionObservationSequence` is emitted by the proxy (proto field 18) and read by **no** file in `src/main`, so proxyCaptureProtocol §4.1's sequence-regression and post-`CloseObservation` violations are undetected. G1 exit evidence must include `LogAppendTime` propagation and sequence validation, not just a successful dump |
 | D2 | A request can own zero Kafka records | G3 | open | |
 | D3 | Ordinary target failures select Retain and halt | G4 | open | |
 | D4 | Mixed records structurally unrepresentable | G3 | open | |
-| D5 | Blocking commitSync in onPartitionsRevoked with no cancellation delivered | G2 | open | "with no cancellation delivered" is load-bearing. The design has commit handling inside the callback — read procCommit §9.2 and kafkaLLD §15.1 before concluding otherwise |
-| D6 | Target-concurrency bound is a lie | G5 | open | |
-| D7 | Required cross-owner submission silently dropped | G5 | open | |
+| D5 | Blocking commitSync in onPartitionsRevoked with no cancellation delivered | G2 | **open, confirmed** | "with no cancellation delivered" is load-bearing. The design has commit handling inside the callback — read procCommit §9.2 and kafkaLLD §15.1 before concluding otherwise. Measured order inside `TrackingKafkaConsumer.onPartitionsRevoked` (`:268`): `rebalanceDuringPoll.set(true)` (`:285`) → acquire `commitDataLock` (`:288`) → **`safeCommit` → `kafkaConsumer.commitSync(nextCommitsMap)` (`:1022`, no timeout overload) as the first substantive action** (`:289-291`) → per-partition teardown (`:292-314`) → `onRevoked` listener (`:325`) → synthetic closes (`:326`). Cancellation is fire-and-forget *after* the blocking commit. No grace deadline, no force-cancellation submission, no bounded wait |
+| D6 | Target-concurrency bound is a lie | G5 | **refuted as stated; narrow residual** | The recorded mechanism is gone: the permit is now acquired only for the execution-queue head after preparation (`TargetConnectionOwner.java:1100-1160`, guarded at `:1207-1232`) and released at the raw send outcome (`RequestSenderOrchestrator.java:916-942`) before retry-policy evaluation and backoff — i.e. S6b implemented connLLD §7:311-323. Residual: `RuntimeTargetExchange.abort` releases the permit at `RequestSenderOrchestrator.java:728` after only *initiating* `packetReceiver.abort` (`:726`), while `cancelRuntimeChannel()` (`:735`) completes later, so a new attempt may start while aborted bytes are still in flight. Separately, the default bound is 10000 (`TrafficReplayer.java:252-262`), so it is non-binding in practice; the effective limiter is one-permit-per-connection-turn |
+| D7 | Required cross-owner submission silently dropped | G5 | **open, confirmed** | Drop site is `ReplayTransactionRegistry.java:283-294`: a `RejectedExecutionException` from `mailbox.execute` is caught, the command stays in `pendingCommands` forever, and **no fatal signal is raised** — unlike `RequestSenderOrchestrator.submitRequiredContinuation` (`:1095-1106`) and `executeRequired` (`:547-559`), which both call `signalFatal`. Made silent by two callers that discard the returned stage as a bare statement: `RequestSenderOrchestrator.java:2333` and `:2509`, both applying runway loss, which is commit-eligibility-relevant |
 | D8 | Truncated source response labelled COMPLETE | G3 | open | |
-| D9 | No-response retry capped at 4 | G6 | open | |
-| D10 | NoTargetResponseObtained is an exception; any exception retries | G5 | open | |
-| D11 | ReplayEngine.admitWork blocks on own-thread stage | G3 | open | Reassigned from G9 during the citation pass |
-| D12 | Poll failures become empty successes | G2 | open | |
-| D13 | Fatal path halts instead of running the supervisor ladder | G9 | open | |
-| D14 | Termination waits for orderly recovery in three places | G9 | open | |
-| D15 | Hard ownership caps deadlock by construction | G7 | open | Reassigned from G9 during the citation pass |
-| D16 | onPartitionsAssigned does not pause the resulting assignment | G2 | open | |
+| D9 | No-response retry capped at 4 | G6 | **refuted as stated** | `DefaultRetry.MAX_RETRIES = 4` is real (`:18`, applied at `:34` and `:51`) but **cannot reach the no-response path**: `RetryCollectingVisitorFactory.retryAfterNoResponse` (`:96-115`) never calls `shouldRetry` and returns `RETRY` unconditionally, and the list the cap counts (`collector.responses()`) is populated only by the `TargetResponseObtained` branch (`TransformedTargetRequestAndResponseList.addAttemptOutcome:67-72`). No-response retry is already indefinite while the generation and process remain valid, matching connLLD §9.1. **The live question is the opposite one** — whether the *response* path keeps a cap; the design is silent. See the design-gap escalation below |
+| D10 | NoTargetResponseObtained is an exception; any exception retries | G5 | **refuted as stated** | Already a sealed value: `ReplayOutcomes.java:57-109` declares `sealed interface TargetAttemptOutcome permits TargetResponseObtained, NoTargetResponseObtained` with a `NoTargetResponseKind` enum, and `RetryCollectingVisitorFactory.java:51-67` dispatches through a visitor with no default branch. Arbitrary exceptions do **not** retry — `classifyTargetAttemptOutcome` (`:1976-2010`) converts only `IOException`/`ReadTimeoutException`, rethrows everything else, and `RetrySequence.onAttemptDecision:1201-1206` terminates without retrying. Residual: the no-response value is still *derived* by inspecting a `Throwable` stored in `AggregatedRawResponse.getError()` rather than produced at the channel boundary |
+| D11 | ReplayEngine.admitWork blocks on own-thread stage | G3 | **refuted** | `ReplayEngine.java:111-117` is a two-line delegation to `progressController.admit` with no blocking call. Both call sites consume it asynchronously (`TrafficReplayerCore.java:328-336` via `thenCombine`, `:717-744` via `thenCompose`). No `get()`, `join()`, or latch on any admission stage on the intake thread |
+| D12 | Poll failures become empty successes | G2 | **open, confirmed** | `safePollWithSwallowedRuntimeExceptions:760-813` re-throws only `UnexpectedOffsetRewindException` (`:802-804`), logs everything else at **WARN** (`:805-810`), and returns an empty `ConsumerRecords` (`:811`). An auth failure, a deserialization failure, and a broker `TimeoutException` are indistinguishable from an idle topic. `:782-783` even increments `emptyPollsSinceLastHeartbeat` for the fabricated result, so the heartbeat log at `:1078-1079` reports the failure as healthy idling. Duplicated in `touch:452-458` |
+| D13 | Fatal path halts instead of running the supervisor ladder | G9 | open | `ProcessSupervisor` implements **2 of replayerLLD §8's 6 duties** (5 and 6 — the ten-minute watchdog, thread dump, and `Runtime.halt`). Duties 1 and 4 (first-signal latch, diagnostic flush) live in `ReplayProcessFatalHandler`. **Duties 2 and 3 — recording the failing owner and operation, and stopping further input to it — are implemented nowhere:** `ProcessTerminator.terminate(int exitCode)` receives only an int, so the throwable, owner identity, and operation name are discarded at the boundary, and `ReplayProcessFatalHandler`'s `fatalShutdownSignaler` defaults to `ignored -> {}` in the production constructors |
+| D14 | Termination waits for orderly recovery in three places | G9 | **open, confirmed — three sites** | (1) `TrafficReplayerTopLevel.java:552` `allWorkFuture.get(timeout)`, bounded at 2 min; (2) `:685-687` `orTimeout(ACTOR_TERMINATION_SHUTDOWN_LIMIT)`, bounded at 2 min, itself waiting on the intake fence at `:789-793`; (3) `:906-929` `finishIntakeLifecycle`'s **unbounded** `.get()` chain at `:897`, `:910`, `:911`, `:914`, `:915`, `:917`, `:922`, `:924`. Site 3 runs on the **fatal** path too, blocking unbounded on a possibly-dead intake owner, against procCommit §10.3:1394-1397 |
+| D15 | Hard ownership caps deadlock by construction | G7 | **open, confirmed** | `KafkaRecordOwnershipBudget` caps record count (default 100 000) and summed key+value bytes (default 1 GiB) per consumer, from `--max-owned-kafka-records` / `--max-owned-kafka-bytes` (`TrafficReplayer.java:265-274`). kafkaLLD §5.1 forbids both. On saturation, `applyBuilder:705-707` sets `capacityReached` and **skips and rewinds every remaining record in the poll result across all partitions**, then `kafkaConsumer.seek` (`:743`); the latch clears only via `release(key)`, reached only from `recordProcessingFinished:940-946`. So reads stop while work is outstanding and the evidence that would release that work is behind the read barrier. One saturating partition also discards the other partitions' records from the same poll. A single record larger than `maximumBytes` is an unconditional `IllegalStateException` (`tryReserve:62-71`) that kills the read |
+| D16 | onPartitionsAssigned does not pause the resulting assignment | G2 | **open, confirmed** | `onPartitionsAssigned:330-371` creates a commit queue per partition and returns at `:371` with **no `kafkaConsumer.pause(...)` anywhere in the method**. `pause()`/`resume()` (`:467-507`) operate on the whole `assignment()` in bulk, so there is no per-partition pause vocabulary for kafkaLLD §5.1's `kafkaPaused` or §9.3's per-partition read gating, and one partition blocked on cleanup cannot be held back without stopping every other partition. Backpressure is faked afterward by the seek-rewind path above |
 | D17 | Connection owner forgets a request at turn end | G5 | open | |
 | D18 | Work admitted under a fabricated partition identity | G3 | open | |
+
+### Three live commit-authority models, not two
+
+Plan A §1 records two. There are three, and the one with actual authority is the legacy one:
+
+| Model | Authority | Evidence |
+|---|---|---|
+| `ObservedRecordCommitQueue` (in `kafka/`, outside the nominal lifecycle scope) | **Real.** Produces the committed offsets | `TrackingKafkaConsumer.java:143` map, created `:345`, offsets computed `:938-953`, `kafkaConsumer.commitSync` `:1022` |
+| `RecordWorkTracker` | **Advisory only** | `RecordWorkTracker.java:31`: *"Completion is evidence only until the S4b commit-authority cutover."* The cutover never happened. Live via `TrafficReplayerTopLevel.java:331`, `ReplayIntakeOwner.java:278` |
+| `RecordDispositionLedger` | **None — dead** | 0 production and 0 test references, repo-wide. With `RecordDisposition.java` (38) and `ResolvedRecordIndex.java` (165), which only it references, that is **910 dead lines**; add `SourceRunwayLostException.java` (19, zero refs) for **929** |
+
+Separately, `ReplayTransaction` has **six** production callers (`RequestSenderOrchestrator`, `TrafficReplayerCore`, `ReplayEngine`, `IRootReplayerContext`, `ReplayTransactionMetrics`, `ReplayTransactionRegistry`) and runs a second *request-completion* model alongside `RequestReplayOwner`, under a `synchronized(stateLock)` monitor held across `command.transition.run()` (`ReplayTransaction.java:432-447`) — a second concurrency discipline layered on the mailbox discipline, with `ownerThreadGuard.requireOwnerThread()` called *inside* the lock at `:444`.
+
+### `ReplayIdentity` is further from the design than Plan A §1 records
+
+§1 says three of twelve records are design identities. Measured: **one** is in design form (`PartitionGenerationId`, `ReplayIdentity.java:14`). `KafkaRecordId` (`:145`) and `ReplayRequestId` (`:95`) are design *names* wrapped around non-design shapes — `KafkaRecordId(String topic, int partition, long offset, int sourceGeneration)` denormalizes the generation into three loose fields against kafkaLLD:68, and `ReplayRequestId(ConnectionSessionKey, int requestIndex)` takes the invented `ConnectionSessionKey` instead of `ConnectionProcessingId` and an `int` instead of a `long` ordinal. That is worse than absence: it greps as done. Five of the eight design identities are absent (`WriterPartitionId`, `CapturedConnectionId`, `ConnectionProcessingId`, `PartitionBatchRequestId`, `CancellationDeadline`), plus three sealed families the design does not have (`ReplayWorkId`, `RecordAssociationId`, `RecordId`).
+
+## S6b review findings
+
+The bounded review of `822abde4e` that the owner waived at commit time, performed 2026-09-22 against
+`connLLD §7:296-323` (target turn and permits), `§8:324-360`, `§9.1-9.2:367-405`, `§10:420-445`,
+`§19.1-19.2`, `§19.5`, and `replayerLLD §4:146-164` / `§8:236-248`. All eight registered hotspots covered.
+
+**Clean — no finding, verified against the design text:**
+
+| Hotspot | Verdict |
+|---|---|
+| Permit held across a source-response wait, backoff, or tuple write | **Correct.** A `permitReleased` stage is interposed between the raw `sendFuture` and `evaluated` (`RequestSenderOrchestrator.java:911-945`), so release happens at the raw attempt outcome before retry evaluation, source-response waiting, backoff, and tuple output. Exactly `connLLD §7:316-322` |
+| Queued or preparing requests acquiring | **Correct.** `requestAttemptPermit` requires `activeRequest == request && state == ACTIVE` (`TargetConnectionOwner.java:1207-1217`), and `RequestPreparation.admitted()` was deleted. `connLLD §7:308`, `§19.1` |
+| Retry reacquisition | **Correct.** Routed through the connection owner via `AttemptPermitRequester`, called only after backoff completes (`RequestSenderOrchestrator.java:1243`, `:1250-1282`). `connLLD §7:310-312`, `§19.2` |
+| Duplicate acquire or release | **Correct.** Acquire guarded at both ends (`pendingAttemptPermit != null` rejects; `activePermit.compareAndSet(null, permit)` rejects an overlap). Release idempotent via `OwnedPermit.released` `AtomicBoolean` |
+| Off-event-loop mutation of `TargetConnectionOwner`, stale `activePermit`, abort racing a *granted* permit | **Correct.** `deliverAttemptPermit` touches only an `AtomicReference` off-loop and then posts. I specifically checked whether the `ABORTING` early return at `TargetConnectionOwner.java:1115-1118` orphans the active request: **it does not** — the abort-completion block at `:1533-1551` settles every obligation including `activeRequest`, then clears it at `:1551`. The `undeliveredPermit` / `transitions.post`-failure pairing releases a granted-but-undelivered permit on every path |
+
+**Findings:**
+
+| # | Finding | Severity | Design authority |
+|---|---|---|---|
+| S6b-1 | **`TargetAttemptPermitProvider` has no fatal boundary.** `applyRelease` throws `IllegalStateException("released more permits than the pool owns")` — a permit-conservation violation, i.e. an impossible transition — and `apply()` runs inside `ownerInputSink`, so nothing routes it to the supervisor. `TargetConnectionOwner` takes a `@NonNull FatalHandler`; this provider takes none. `available += release.cost()` also mutates **before** the bound check (`:253-258`), so the counter is corrupt even if the throw were routed. **Survives D-1 in reshaped form:** an atomic counter still needs its bound violation to reach the supervisor, so the replacement takes an injected fatal callback and must not mutate before checking | ~~blocker~~ **no longer gating** — carried forward as a named requirement on the `G5` permit replacement | replayerLLD §4:162 (impossible transitions are process-fatal), §8:236-248, R19 |
+| S6b-2 | **`TargetAttemptPermitProvider.Input extends ReplayIntakeInput`, and permit inputs are applied on the replay-intake thread** (`ReplayIntakeOwner.java:276`). kafkaLLD §4.1 fixes `ReplayIntakeInput` to nine named record-and-lifecycle variants; connLLD §1:52 calls the provider a "global target-attempt limit" and §1's component map gives it exactly one counterparty, the connection owner. Effect: every acquire and release — at least two per target attempt, more per retry — serializes behind record decoding and source HTTP assembly on the single intake thread, and conversely permit traffic delays `PartitionRecordBatch` application and therefore demand. `ReplayIntakeInput` also permits `ReplayProgressController.Input` and `RecordWorkTracker.Input`, so four owners' input vocabularies share one sealed family and its exhaustiveness no longer means anything. **Resolved by D-1** — the counter becomes an application-owned atomic with no input family at all, so it leaves `ReplayIntakeInput` entirely. The residual work is removing `ReplayProgressController.Input` and `RecordWorkTracker.Input` from that family too, so it means what kafkaLLD §4.1 says it means | ~~blocker~~ resolved by D-1; residual `register` | connLLD §1:26,35,52; kafkaLLD §4.1:159-165; replayerLLD §2:64-70 |
+| S6b-3 | **Invariant violations returned as ordinary values.** `requestAttemptPermit` returns `CompletableFuture.failedFuture(IllegalStateException)` for "only the active connection-turn request may acquire" and "an acquisition is already pending" (`TargetConnectionOwner.java:1209-1220`). Both are impossible by construction under §7. `RetrySequence.requestRetryPermit` then turns them into `completion.completeExceptionally(...)` (`RequestSenderOrchestrator.java:1257-1259`), i.e. one failed request rather than a process-fatal signal | register | replayerLLD §4:162; connLLD §7:298,308 |
+| S6b-4 | **`pendingAttemptPermit` has no path back to `null` when the delivery post is dropped.** `OwnerTransitionRunner.runTransition` returns without running the command once `fatalTransition` is set, and `post`'s catch branch handles submission rejection; on both paths the `deliveryFailure` handler releases the permit but cannot clear `pendingAttemptPermit`, because it runs off-loop. `tryFinishTermination()` gates on `pendingAttemptPermit != null` (`TargetConnectionOwner.java:1955`), so the owner can never report clean and connLLD §16.4 / §19.4 becomes unprovable. Masked today because both drop paths raise a fatal signal; it will matter at G8 for R16 | register | connLLD §16.4:643-657, §19.4:772 |
+| S6b-5 | **Cleanup failures ride on a shared cancellation object.** `settleAttemptPermit` does `addCleanupFailure(abortCause, closePermit(permit))` → `abortCause.addSuppressed(...)` (`TargetConnectionOwner.java:1289-1298`), and `abortCause` is the single `CancellationException` that `beginAbort` then delivers as `RequestTurnResult.Cancelled<>(cause)` to every request (`:1544`). A permit-close failure — infrastructure — becomes a suppressed exception on a normal-lifecycle cancellation value, and vanishes entirely if that instance has suppression disabled | register | `AGENTS.md` §8 ("keep cancellation typed"); replayerLLD §4:163 |
+| S6b-6 | **The rename is cosmetically incomplete, which is the red-line-3 naming trigger firing.** The legacy "permit pool" concept survives in: `OwnerThreadGuard("asynchronous permit pool")` (`TargetAttemptPermitProvider.java:111`), `Metrics.NOOP`'s "non-production pool instances" comments, `tracing/AsyncPermitPoolMetrics` and its four metric names `permitPoolAvailable` / `permitPoolQueued` / `permitPoolHeldDuration` / `permitPoolCancellationCount`, `IRootReplayerContext.getPermitPoolMetrics()`, `ReplayIntakeOwner.permitPool`, `TrafficReplayerTopLevel.permitPool`, and `lifecycle/AsyncPermitPoolTest` | register | `AGENTS.md` §1 red line 3, naming trigger |
+| S6b-7 | **The `cost` parameter (1..capacity) is not in the design.** connLLD §7:303 grants exactly one permit per attempt and every call site passes `1`. It is extra state space in the one component whose whole job is an exact count | register | connLLD §7:300-308 |
+| S6b-8 | **Permit release on abort precedes channel teardown.** `RuntimeTargetExchange.abort` releases the active permit at `RequestSenderOrchestrator.java:728` after only *initiating* `packetReceiver.abort(cause)` at `:726`, while `cancelRuntimeChannel()` at `:735` completes asynchronously. A replacement attempt can therefore start while bytes from the aborted attempt are still in flight to the target. `connLLD §19.5`'s "no permit leaks" holds; this over-admission window is not covered by any §19 case | register | connLLD §7:296-298, §8:324-337 |
+
+## Plan and register discrepancies found during the G0 pass
+
+Reported, not silently fixed. `AGENTS.md`: where plan prose and a design section differ the design wins and the
+plan is the bug.
+
+| Where | Claim | Measurement |
+|---|---|---|
+| Plan A §2.3, row "OTEL metric and trace names" | The contract is the Grafana dashboard in `deployment/k8s/charts/components/k6LoadTest` | **That dashboard references zero replayer metrics.** Its 26 `expr` fields cover only k6 OTLP output, capture-proxy metrics, and a Kafka exporter; `grafanaDashboard.yaml:3-4` says so explicitly. The real contract is `capture-replay-dashboard.json`, in **three** copies (`deployment/k8s/dashboards/`, `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/files/cloudwatch-dashboards/`, `deployment/cdk/opensearch-service-migration/lib/components/`), pinning exactly **five** names: `lagBetweenSourceAndTargetRequests`, `bytesWrittenToTarget`, `bytesReadFromTarget`, `tupleComparison`, `kafkaCommitCount`. Of roughly 95 emitted names, those five are the entire red-line-2 surface, and four of them live in `ReplayContexts.java`, which is a rewrite |
+| Register, non-blocking defects table | `tracing/ChannelContextManager.java:127` | The file is **84 lines**. The defect is real but at `:39-43` (`refCount--` on a plain non-`volatile` `int`) reached from `:73-83` (bare `get()` outside any lock, then test-then-`remove`). `retain()` is safe because it runs inside `ConcurrentHashMap.compute`; the release path is not. Three consequences: lost decrement (context and `activeReplayerChannels` gauge leak), double close, and release racing a `compute`-guarded retain. Correctness also rests on `assert` (`:41`, `:76`), disabled in production |
+| Plan A §2.3, `testFixtures` rows | "Six `transformation/` modules consume it" raises the stakes on freezing the fixture API | True as a module count, but the **imported surface is three types**: `replay.TestCapturePacketToHttpHandler`, `replay.TestUtils`, `tracing.InstrumentationTest` (plus `tracing.TestContext` transitively). The other 17 fixture files have no external consumer, so the published-API constraint is far narrower than the row implies |
+| Plan A §9, row "Nine obsolete `ReplayIdentity` records" | Nine of twelve are obsolete | Eleven of twelve are, on shape. See the `ReplayIdentity` note above |
+| `replayerRebuildPlan.md` §7 and Plan A `G9` | A "deprecated parse-and-warn alias" set exists to be preserved | **No parse-and-warn adapter exists.** Every alias in `TrafficReplayer.java` is a live functional synonym; grep finds zero deprecation warnings. `--max-concurrent-requests`, `--lookaheadTimeSeconds`, `--quiescentPeriodMs`, and `--observedPacketConnectionTimeout` are all still load-bearing (consumed at `:482-489`, `:737`, `:839`, `:844`). So G9 *creates* that set rather than preserving it, and which options enter it is a red-line-2 decision |
+| Plan A §2.3, "Exit codes 80 and 89" → `ReplayProcessFatalHandlerTest` | — | Confirmed, with the real source: `ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED(80)` and `UNEXPECTED_FATAL_ERROR(89)` (`:17-26`), applied at `:190`; the 80-vs-89 classifier is the lambda at `TrafficReplayerTopLevel.java:287-289`, keyed on `RequestSenderOrchestrator.EventLoopTerminatedError`. `TrafficReplayer.java` itself produces only argument-validation codes 2, 3, and 4 |
 
 Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`):
 
 | Item | Milestone | State |
 |---|---|---|
-| Non-atomic refcount read-modify-write, `tracing/ChannelContextManager.java:127` | G5 | open |
-| `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide | G3 | open |
+| Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
+| `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
 ## Named scaffolding — every row needs a removal milestone
 
 | Scaffold | Introduced | Removal | State |
 |---|---|---|---|
-| Eight `transformation/` modules' build.gradle redirected at `:TrafficCapture:trafficReplayerLegacy` | G0 | G11 | open |
+| `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-OPEN src \| wc -l` is the count; **238 files** at G0 |
+| The `REBUILD-LIMBO` note in the module's `build.gradle` | G0 | with the last region | open |
+
+Resolved and removed on 2026-09-23, recorded because they were previously tracked here: the
+`trafficReplayerLegacy` module, its `settings.gradle` include, its `excludedProjectPaths` publication
+suppression, the `verifyReplayerModuleIsolation` build check, and the thirteen redirected dependency lines
+across eight `transformation/` modules. All became unnecessary when carried code moved to in-place marking —
+marked code does not compile, so there is no second live implementation and no classpath to keep separate.
+See Plan A §2.1.
+
+## Known-broken inherited tests — each needs a repair milestone
+
+`AGENTS.md` §4 permits leaving inherited tests broken while the old and new architectures are only partly
+connected, **provided** the reason and the intended repair milestone are recorded. This is that record.
+
+| What is broken | Since | Repair | Notes |
+|---|---|---|---|
+| `compileTestFixturesJava` — 4 errors in 2 files | `822abde4e` (S6b), **before** the G0 module move | `wontfix(G11)` unless the owner wants it sooner | `ActorRequestTestUtils` lines 12/42/55 still name `AsyncPermitPool`, and `ReplayEngineFactory:87` calls `RequestSenderOrchestrator` without the permit-provider argument. Repairing it is ~10 minutes of mechanical work **on a module scheduled for deletion**, which is the only reason it is not already done. Recommended default: leave it |
+| `compileTestJava` — 57 errors in 14 files | `822abde4e` (S6b) | `wontfix(G11)` | Cascades from the above plus the `RequestSenderOrchestrator` constructor change. Full enumeration is in the "Test compilation" row of Operational state |
+| `HttpByteBufFormatterTest` — 4 failures | pre-existing, first *observable* 2026-09-23 | `wontfix(environment)` | The directory's `.gitattributes` mandates `eol=crlf` but the blob stored at `822abde4e` already had LF, so the expectation could never have matched in this working tree. Not a regression from the categorization walk: they were unreachable before, because test compilation had been broken since S6b. Git reports "LF will be replaced by CRLF the next time Git touches it", so a fresh clone should pass — verify there before spending anything on it |
+| Test compilation for the **eight** redirected `transformation/` modules | `822abde4e` (S6b) — **not** caused by the G0 redirect | follows the two rows above | They consume the replayer's production and `testFixtures` jars, so they inherit the fixture break. Verified after the move: `:transformation:…:jsonTypeMappingsSanitizationTransformer:compileTestJava` fails at `compileTestFixturesJava` with the same 4 errors as before. The redirect preserved the pre-existing state exactly; it neither fixed nor worsened it. One incidental improvement: the break now lives in the module being deleted, so the **new** module's `testFixtures` start clean |
+
+The owner has accepted red CI for the duration (see "Branch and PR strategy"), so none of these gates work.
+They are recorded because an unrecorded broken test becomes a permanently broken test.
+
+## G0 pull-over inventory — the batched red-line-3 escalation
+
+Delivered 2026-09-22. Every file classified against Plan A §3 rule 1 — **not** "is this finished?" but
+**"is anything in here going to be deleted later?"** Coverage: 179 `src/main` files, 21 `src/testFixtures`,
+130 `src/test`.
+
+Verdict vocabulary: `CARRY_ASIS` (already in final form, no legacy structure attached) · `CARRY_STRIPPED`
+(worth moving once a *named* thing is removed) · `REWRITE` (the responsibility belongs in the new module, this
+shape does not) · `LEAVE` (does not come over).
+
+Result: **117 files carried**, 62 left behind or rewritten. Grouped into twelve decisions
+because one row per file is forty interruptions in a different shape; every group has one shared rationale
+and one shared verdict, and the owner answers `P1a, P2b, …`.
+
+| # | Group | Files | Verdict proposed | Why this is one decision |
+|---|---|---|---|---|
+| P1 | **Netty/HTTP transform pipeline and JSON codec** — `datahandlers/`, `datahandlers/http/`, `datahandlers/http/helpers/` | 34 (24 as-is, 10 stripped) | CARRY | Plan A §3 rule 1 names this the permissive archetype: substantively correct, expensive to re-derive, no legacy identity anywhere in it. `NettyJsonToByteBufHandler` also carries the original-packet-size fidelity that connLLD §8 pacing depends on. Strips are uniform and small: the `<R>` type parameter that exists only to satisfy `RequestPipelineOrchestrator<R>`, the `consumeBytes(byte[])` default that encodes an unstated refcount convention, the no-op `abort` default, and `assert`s standing in for one-shot guards |
+| P2 | **Resource-ownership datatypes** — `AttemptPayload`, `DiagnosticPayload`, `OwnedPreparedRequest` as-is; `ByteBufList`, `ByteBufListProducer`, `HttpRequestTransformationStatus` stripped | 6 | CARRY | These three are the only types in the module that already meet replayerLLD §7 (owner, transfer, release-on-accept, release-on-reject, one-shot guard) — routed through `ResourceOwnership.Tracker` with an invariant-failure path. They are the pattern the rest should copy. `ByteBufListProducer`'s javadoc names its own deletable part: *"The reference-counted base remains temporarily for compatibility with transformation code"* |
+| P3 | **Target response aggregation** — `netty/BacksideHttpWatcherHandler`, `netty/BacksideSnifferHandler`, `netty/InterimHttpResponseHandler` as-is; `AggregatedRawResponse` stripped by absorbing `AggregatedRawResult` | 4 | CARRY | connLLD §8:336 assigns response aggregation to `TargetChannelPort`; these three are its correct internals. `AggregatedRawResult` has **zero** standalone `src/main` uses and its self-typed `Builder<B extends Builder<B>>` exists for one subclass, so the two-class split is pure ceremony |
+| P4 | **Tuple content and user-facing output** — `HttpByteBufFormatter`, `ParsedHttpMessagesAsDicts`, `SourceTargetCaptureTuple`, `TransformedTargetRequestAndResponseList`, `ResultsToLogsConsumer`, `TargetResponseClassifier`, `SourceResponseNormalizer` stripped; `FilteringTransformerWrapper`, `RequestFilteredException`, `TimeShifter` as-is | 10 | CARRY | connLLD §19.3 requires "source-versus-target comparison remains in tuple and user-facing output", so this behavior is mandated, not optional, and the bulk/status comparison plus the 1xx-stripping byte scanner are expensive to re-derive. Every strip is the same shape: remove a legacy identity or accumulator from the signature and take a design value instead. `HttpByteBufFormatter` additionally loses its ambient `ThreadLocal` print style |
+| P5 | **OpenSearch retry policy** — `BulkItemErrorClassifier` as-is; `OpenSearchDefaultRetry`, `DefaultRetry` stripped | 3 | CARRY | The streaming bulk-response analyzer is 190 lines of OpenSearch-specific error classification with no replayer coupling at all. Strip is only the return type: `RequestSenderOrchestrator.RetryDirective` → the sealed `RetryDecision` of connLLD §9.2:394-397. **Per D-2, `MAX_RETRIES` is kept, not stripped** — it applies to the response path only and is lifted to a top-level config setting defaulting to 4. `IRetryVisitorFactory`, `RequestRetryEvaluator`, and `RetryCollectingVisitorFactory` are **not** in this group — every line of them names a legacy inner type, so they are REWRITE |
+| P6 | **Auth transformers** — all five `transform/` files | 5 | CARRY_ASIS | `IAuthTransformer`'s reentrant `SignatureProducer` is exactly what connLLD §8:333 requires ("signing immediately before the attempt"), and `SigV4AuthTransformerFactory` already takes an injected `Supplier<Clock>`. Zero legacy identity coupling; their only replayer dependency is `HttpJsonRequestWithFaultingPayload`, which P1 carries |
+| P7 | **Utilities** — `util/NettyUtils`, `util/RefSafeHolder`, `util/RefSafeStreamUtils`, `util/TrafficChannelKeyFormatter` as-is; `Utils` (keep only `setIfLater`), `NettyFutureBinders` stripped | 6 | CARRY | Stateless, final, no replayer types. `RefSafeHolder`/`RefSafeStreamUtils` directly serve procCommit §13.1's release-exactly-once proof. `NettyFutureBinders` is load-bearing for the event-loop-affine completion model but has one overload that schedules the same task twice (`:83-84`, no production caller) — that overload is the strip |
+| P8 | **Observability adapters for new-architecture owners** — `AsyncPermitPoolMetrics`, `ConnectionActorMetrics`, `TargetExchangeStateMetrics`, `ResourceOwnershipMetrics`, `ReplayProcessFatalMetrics`, `IKafkaConsumerContexts` as-is; `IReplayContexts`, `IRootReplayerContext`, `KafkaConsumerContexts`, `KafkaCommitStateMetrics` stripped | 10 | CARRY, with two carve-outs | All ten hold their OTEL instruments in `final` instance fields from an injected `Meter`, which is already the `AGENTS.md` "telemetry is instance-owned and injected" shape. **Carve-out 1:** `ReplayTransactionMetrics` is excluded — `ReplayTransaction` is LEAVE, so its metrics adapter has no owner. **Carve-out 2:** `ReplayContexts`/`RootReplayerContext` are REWRITE, and the rewrite must reproduce five metric strings verbatim (see design gap D-4) |
+| P9 | **Owner-discipline primitives** — `CompletionGate`, `RequestLifecycleInput` as-is; `OwnerThreadGuard`, `OwnerTransitionRunner`, `ResourceOwnership`, `RecordWorkTracker`, `ObservedRecordCommitQueue`, `ReplayIntakeInputQueue`, and the `PreparationOutcome`/`TargetAttemptOutcome` half of `ReplayOutcomes` stripped. **`ActorMailbox` and `NettyEventLoopActorMailbox` corrected to LEAVE** — see below | 10 | CARRY, minus the mailbox pair | This is the genuine yield of S0–S6b and the highest-value group. `RequestLifecycleInput` is exactly replayerLLD §5's two-milestone pair, immutable and generation-carrying. `ObservedRecordCommitQueue` satisfies kafkaLLD §5.5 and §5.6 outright — ordered deque tolerating physical offset gaps, single `RecordProcessingFinished`, head-contiguous removal, duplicate-completion and unregistered-record both invariant failures — and fails only §5.7, which is not its job. Named strips: `ActorMailbox`'s wall-clock `now()`, `OwnerThreadGuard`'s lazily-bound `guard(Runnable)` mode, `OwnerTransitionRunner.applyNowOrPost` (reentrant inline application defeats "one input applied completely before the next"), `RecordWorkTracker`'s `completedRecords` listener escape hatch and the `:31` comment deferring commit authority, `ReplayIntakeInputQueue`'s per-item `CompletableFuture` side-channel, and the permit provider's `cost` parameter. **The permit provider is reshaped rather than carried, per D-1:** an application-owned atomic number, constructed in `main()` and passed by reference into every connection owner, with no `Input` family, no owner executor, and no `ReplayIntakeInput` membership. What survives from the existing 301 lines is the one-shot `OwnedPermit.released` guard, the held-duration metric, and cancellation-withdraws-a-pending-acquisition; S6b-1's fatal boundary must be added |
+| P10 | **Dump mode — a user-facing CLI contract** — `TrafficStreamDumper` as-is; `KafkaTopicDumper`, `HttpTransactionDumper`, `CaptureRecordProtocolViolationException` stripped | 4 | CARRY | Plan A §2.3 pins `dump-raw` / `dump-http` / `dump-both`, and Plan A G1 already decided to carry them. `TrafficStreamDumper.format:38-69` is a fully exhaustive kafkaLLD §7.1 switch with no default, including `PAYLOAD_NOT_SET → protocolViolation`. Four real gaps go with it, and G1's exit evidence should name them: `dump-http` silently drops heartbeats and probes (`processHttpRecords:281-292` gates that arm on `emitRaw`); no dumped record carries broker time, so heartbeat lines print `[?-?]`; `baseEpoch` stays `-1` for every control record before the first traffic record; and the file path decodes bare base64 `TrafficStream`, not `CaptureRecord`, so its envelope branches are dead. Also strip the fabricated `new PojoKafkaCommitOffsetData(0, …)` and the per-record OTEL span it opens in a mode that never commits (`:265-279`) |
+| P11 | **CLI surface and process supervision** — `TrafficReplayer.java`'s `Parameters` block (54 options, lines 113-579), `ProcessSupervisor`, `ReplayProcessFatalHandler`, `KafkaSaslAuthHelper`, `TrafficCaptureSourceFactory` stripped | 5 | CARRY | The 54-option surface with all its aliases is red-line-2 and carries verbatim; `JsonCommandLineParser` derives the inline-JSON keys from the `@Parameter` names automatically, so the JSON contract follows for free. Strips: the `ThreadLocalTupleWriter` construction and the legacy `ResultsToLogsConsumer`/`TupleParserChainConsumer` branch out of `TrafficReplayer` (§P12 note), the `maximumOwnedKafkaRecords`/`Bytes` arguments and the already-ignored liveness-scanner argument out of `TrafficCaptureSourceFactory`, and the `RequestSenderOrchestrator.FatalReplayHandler` coupling out of `ReplayProcessFatalHandler`. Note the two supervision classes between them cover only 4 of replayerLLD §8's 6 duties (see D13) |
+| P12 | **Deterministic test fixtures** — `FakeClock`, `TestEventLoop`, `TestUtils`, `GenerateRandomNestedJsonObject`, `InstrumentationTest`, `TestContext`, `IgnoringSourcePartitionLifecycleListener` as-is; `RecordScript`, `PumpedKafkaSource`, `ActorRequestTestUtils`, `TestCapturePacketToHttpHandler`, `TestHttpServerContext`, `ArrayCursorTrafficCaptureSource`, `ArrayCursorTrafficSourceContext`, `TrafficStreamCursorKey`, **and the four exhaustive-generator files (`ExhaustiveTrafficStreamGenerator`, `TrafficStreamGenerator`, `ObservationDirective`, `OffloaderCommandType`)** stripped | 19 | CARRY | All four G0-named fixtures already exist with the exact required API — `TestEventLoop.runUntilIdle()/runNext()/advance()`, `PumpedKafkaSource.runOnce()` — with no sleeps, no polling, no unmanaged threads, no mutable statics, and instance-owned state. `RecordScript` genuinely emits `CaptureRecord` envelopes and can express all five payload cases plus partition, offset, `LogAppendTime`, and `writerNodeId`. Named strips: `RecordScript extends TrafficStreamGenerator` (which drags Netty, `InMemoryConnectionCaptureFactory`, and `TestContext` into a pure data fixture) and its private duplicate `RecordId`; `PumpedKafkaSource`'s duplicate `PartitionGenerationId`/`PartitionBatchRequestId`; `ActorRequestTestUtils`' whole `AsyncPermitPool` overload; `Thread.sleep` at `TestCapturePacketToHttpHandler:52` and `TestHttpServerContext:39`; and the `synchronized`/`AtomicInteger` scaffolding in the two array-cursor fixtures. `src/testFixtures` is **entirely Mockito-free** today — keep it that way |
+
+**Not carried.** 62 files, and the dominant reason is one sentence: they *are* the legacy correctness model.
+The largest blocks are the legacy source-assembly chain (`CapturedTrafficToHttpTransactionAccumulator` 933
+lines, `Accumulation`, `AccumulationCallbacks`, `RequestResponsePacketPair`, `HttpMessageAndTimestamp`,
+`RawPackets`), the legacy identity set (`ISourceTrafficChannelKey`, `ITrafficStreamKey`, the three `Pojo*`
+keys, `UniqueSourceRequestKey`, `UniqueReplayerRequestKey`), the connection-pool model
+(`ClientConnectionPool`, `ConnectionReplaySession`), the wall-clock expiration package (all six
+`traffic/expiration/` files, against kafkaLLD §10's broker-time rule), the pull-based source interfaces
+(`ITrafficCaptureSource` and its five satellites, `BlockingTrafficSource`, `BufferedFlowController`,
+`ReplayReadGate`, `ReplayProgressController`), the three commit-authority casualties
+(`RecordDispositionLedger`, `RecordDisposition`, `ResolvedRecordIndex`), the `ReplayTransaction` pair, the
+three `CancellationException` subclasses that replayerLLD §4:163 forbids, `KafkaRecordOwnershipBudget`
+(kafkaLLD §5.1 forbids the cap it implements), and the four coordinators being rebuilt
+(`RequestSenderOrchestrator` 2 560 lines, `TrafficReplayerCore`, `TrafficReplayerTopLevel`, `ReplayEngine`).
+
+Two individually notable `LEAVE`s:
+
+| File | Note |
+|---|---|
+| `sink/ThreadLocalTupleWriter.java` | **Forced, not chosen** — Plan A §2.1 forbids the new module declaring anything in `…replay.sink`, and `TrafficCapture/tupleSink` owns that package on the same classpath. The owner has approved discarding it **provided the two properties below are carried into `TupleWriter`**; see "TupleWriter threading contract" |
+| `utils/TrackedFutureJsonFormatter.java`, `trafficcapture/protos/TrafficStreamUtils.java` | Both squat in packages another Gradle module owns (`coreUtilities`, `captureProtobufs`), so carrying either as a source file reproduces a split package across two jars. `TrackedFutureJsonFormatter:11` also holds the module's **only** true mutable static (`static ObjectMapper objectMapper`, non-final, not a logging integration). Recommendation: relocate both into their owning modules — a cross-module change, hence a decision, not a default |
+
+### TupleWriter threading contract — carry these two properties, then `ThreadLocalTupleWriter` may be discarded
+
+Owner decision 2026-09-22. Recorded here because the design (`connLLD §12:480-514`) specifies `TupleWriter`'s
+*result* and its retry-until-durable behavior but says nothing about the threading of the tuple
+**transformation**, and that transformation is user-supplied script code of unbounded cost.
+
+**Property 1 — the transform must not run on a Netty event loop.** This is a **change, not a preservation**:
+today it does. `ThreadLocalTupleWriter.writeTuple` is documented "Called on a Netty event loop thread"
+(`:66`) and calls `tupleTransformer.transformJson(...)` **synchronously inline** at `:72`, from
+`TrafficReplayerCore.java:824` inside a `CompletableFuture` callback. A slow tuple script therefore stalls
+an event loop and every connection owner on it today. `TupleWriter` must hand the transform to a bounded
+executor and return its result asynchronously.
+
+**Property 2 — a tuple script instance is never invoked concurrently. Tuple writing is still parallel.**
+These are not in tension, and conflating them is the easy mistake: the thread-local is there precisely to
+**enable** many threads to write tuples at once, not to pin tuple writing to one thread. The guarantee owed to
+a tuple script is *non-concurrent invocation of that instance*, which is what lets it hold mutable state with
+no synchronization. Parallelism across instances is the point of the mechanism, not a concession.
+
+It is currently provided by two cooperating thread-locals, one per executing thread:
+
+- `ThreadSafeTransformerWrapper` holds a `ThreadLocal<CloseTrackingTransformer>` (`ThreadLocal.withInitial`),
+  so each executing thread gets **its own `IJsonTransformer` instance** from the supplier. N threads ⇒ N
+  independent script instances, each single-threaded.
+- `FastThreadLocal<TupleSink>` gives each executing thread **its own `TupleSink`**, allocated a monotonic
+  sink index by `sinkIndexCounter.getAndIncrement()` — i.e. sink sharding is derived from writer parallelism.
+
+The class comment gives the current justification: "Since each Netty event loop is single-threaded, the
+per-thread sink requires no synchronization."
+
+**The two properties interact, and that interaction is the thing to get right.** Property 1 moves execution off
+the event loop, which retires the *premise* quoted above — "each event loop is single-threaded" stops being the
+reason a script instance is safe. The guarantee itself does not change; what changes is which thread set it is
+keyed on. So the instance-per-thread pairing must re-key from *event loop* to *tuple-writer worker*: one
+transformer **and** its sink belong to the worker that executes the transform, never to the event loop that
+submitted it. Getting this half-right yields either concurrent invocation of a single script instance, or a
+transformer on the worker paired with a sink chosen by the submitting loop.
+
+What to promise the script, precisely: **non-concurrent invocation, and one instance per writer thread.**
+Stable thread *identity* across calls to a given instance falls out of instance-per-thread as an artifact —
+worth knowing, but do not advertise it as contract unless we decide to guarantee it, because doing so forecloses
+ever handing a script instance to a different worker.
+
+Three further details that must not be lost:
+
+- **Per-worker close is explicit.** `ThreadSafeTransformerWrapper.close()` closes only the *calling* thread's
+  transformer, with a `Cleaner` as a fallback. A worker pool must therefore close each worker's transformer on
+  that worker, or leak until the `Cleaner` fires.
+- **Writer parallelism becomes a deliberate configuration**, because the sink count is derived from it. Today
+  it is an artifact of how many event loops happen to call in; under Property 1 it is the size of the tuple
+  executor, and it sets both script-instance count and sink sharding.
+- **`writeTuple`'s current failure handling is wrong and must not be reproduced:** `:77-80` catches a
+  `RuntimeException`, completes the future exceptionally, **and rethrows**, delivering the same failure twice.
+  `close()` at `:88-91` also logs and swallows a sink-close failure, which `replayerLLD §4:161-164` makes
+  process-fatal. Neither behavior carries.
+
+### Correction: `ActorMailbox` and `NettyEventLoopActorMailbox` are LEAVE, not CARRY_STRIPPED
+
+Owner challenge 2026-09-23 — *"ActorMailboxes were a thing in the design from the beginning of this branch. I
+think it's all vestigial now — why am I reading about it on keep lists?"* Correct on all counts. Measured:
+
+- **The design never names a mailbox.** `grep -ri 'mailbox' docs/captureAndReplay/` returns **zero** hits
+  across all nine documents.
+- **The design prohibits the abstraction directly.** `connLLD §1:56-57`: *"There is no connection-owner
+  executor. Each owner is assigned to one existing Netty event loop and remains there for its lifetime."*
+  `ActorMailbox extends Executor`. It is the thing that sentence rules out.
+- **The production implementation is pure delegation.** `NettyEventLoopActorMailbox` maps `execute` →
+  `eventLoop.execute`, `inMailbox` → `eventLoop.inEventLoop`, `schedule` → `eventLoop.schedule`. All three
+  already exist on `io.netty.channel.EventLoop`, and `ScheduledTask.cancel()` is `ScheduledFuture.cancel`.
+- **Its one non-delegating method is both redundant and wrong.** `now()` is called in exactly two places
+  (`TargetConnectionOwner:944` and `:995`, both computing a scheduling delay), it returns wall-clock
+  `Clock.systemUTC()` where `connLLD §17.1` requires a monotonic clock, and `TargetConnectionOwner` **already**
+  takes an injected `LongSupplier nanoTime` (`:439`, `:515`) which is the correct monotonic seam.
+
+So the whole type reduces to nothing the design wants, and the one thing it adds is a wall-clock reading that
+has to be replaced anyway.
+
+**Why it reached a keep list — two process failures worth naming, because both will recur otherwise.**
+
+1. **I read the inventory's verdict column and not its justification column.** The row I approved said, in its
+   own words, `unassigned (LLD §2 names "one selected Netty event loop", not a mailbox abstraction)`. The
+   evidence for LEAVE was already written down next to the CARRY_STRIPPED verdict, and the verdict won because
+   it was the field I was scanning. A "design section assigning this responsibility" column that reads
+   *unassigned* should have been treated as dispositive on its own.
+2. **I bundled it into P9 because `TestEventLoop` implements it** — keeping a production abstraction because a
+   *test* type depends on it. That is `AGENTS.md` §1's red-line-3 naming trigger firing exactly as designed, and
+   me not registering it. The trigger says the first reference from new code *is* the decision; a fixture
+   reference is not an exemption from that.
+
+**Replacement:** owners take `io.netty.channel.EventLoop` directly, per the design sentence above, with
+`LongSupplier nanoTime` for time. No wrapper, no `ScheduledTask`.
+
+**One open implementation question this creates, for G0.** `TestEventLoop` currently implements `ActorMailbox`,
+a 4-method interface. Against a real `EventLoop` it must satisfy `EventLoop`/`EventLoopGroup`/
+`ScheduledExecutorService`, which is far wider, while still offering deterministic `runUntilIdle` / `runNext` /
+`advance`. Options: extend a Netty base (`SingleThreadEventLoop`, `AbstractScheduledEventExecutor`), or delegate
+to `EmbeddedChannel`'s loop, which `AGENTS.md` §4 already names as an established pattern and which is
+deterministic by construction. Reversible, so it proceeds on the `EmbeddedChannel`-based default unless vetoed —
+but it is the one real cost of this correction and the reason the mailbox looked convenient.
+
+**Adjacent audit, since the failure mode was systematic rather than specific to this type.** Re-checked every
+P9 row against its "design section assigning this responsibility" column: `ActorMailbox` and
+`NettyEventLoopActorMailbox` are the **only** two that read *unassigned*. The rest cite real sections
+(`OwnerThreadGuard` → replayerLLD §2/§4; `OwnerTransitionRunner` → §4; `ResourceOwnership` → §7 and connLLD §15;
+`RecordWorkTracker` → kafkaLLD §8.1-8.3; `ObservedRecordCommitQueue` → §5.5-5.6, a design-named component;
+`ReplayIntakeInputQueue` → §4.1; `RequestLifecycleInput` → replayerLLD §5). So this correction is bounded, not
+the tip of a larger problem.
+
+Two notes that fell out of that audit and are worth banking rather than acting on now. `CompletionGate` is a
+25-line write-once promise with a read-only view; it is **not** the design's `AsyncLink`, which packages handler
+composition and guarantees the returned stage completes only after the receiver's stage does
+(`async §2:45`, `:68-71`, `:130`). And `AsyncLink` **already exists in `coreUtilities`**
+(`utils/async/AsyncLink.java`, with tests), which the new module already depends on — so it is a shared library
+to use, not a component to build, and whether `CompletionGate` is still needed alongside it is a G5 question.
+
+### Correction: `ExhaustiveTrafficStreamGenerator` is carried, not left
+
+I had this as a `LEAVE` and the owner overruled it. The verdict was wrong and the reasoning was weak, so both
+are recorded rather than quietly amended.
+
+The rationale I relayed was "it emits legacy `TrafficStream`, not `CaptureRecord`, and depends on
+`captureOffloader` fixtures." The first half is not a legacy-structure argument at all:
+`TrafficCaptureStream.proto:100-104` declares `oneof payload { TrafficStream trafficStream = 1; … }`, so the
+envelope **carries** a `TrafficStream` — emitting one is emitting the payload, and wrapping it is a one-line
+adapter. I passed a subagent's framing through as "the most arguable call" instead of testing it against the
+proto, which is exactly the check that would have settled it.
+
+What the file is actually worth: the value is the **exhaustive classification space**, not the serialization.
+`ObservationType` / `makeClassificationValue` / `classifyTrafficStream` / `getPossibleTests` enumerate the
+observation-transition possibilities and track which remain untested, and
+`RANDOM_GENERATOR_SEEDS_FOR_SUFFICIENT_TRAFFIC_VARIANCE` is a recorded seed set chosen to cover them. That
+combinatorial machinery is envelope-independent, and it has found real bugs. `RecordScript` is the **opposite**
+tool — a hand-written script builder for one named scenario — so it does not overlap and cannot replace this.
+
+**Nothing in the repository obviates it.** The only thing that would is a replacement exhaustive generator over
+the design's observation space, which would mean re-deriving proven combinatorics; that is strictly worse than
+adapting this. So it stays until such a generator exists *and* has demonstrated equal coverage.
+
+This also corrects a dependency error in my own table: `TrafficStreamGenerator` was marked `LEAVE`, but
+`ExhaustiveTrafficStreamGenerator:303` calls `TrafficStreamGenerator.makeTrafficStream(...)`, which drives an
+`InMemoryConnectionCaptureFactory` offloader to produce correctly-segmented streams. Leaving it would have
+broken the generator the owner wants kept. All four files move together into P12 as `CARRY_STRIPPED`:
+`ExhaustiveTrafficStreamGenerator`, `TrafficStreamGenerator`, `ObservationDirective`, `OffloaderCommandType`.
+The strip is the envelope adapter plus the `PojoTrafficStreamKeyAndContext` legacy key at
+`TrafficStreamGenerator:49`; the offloader dependency stays, since `captureOffloader` is a shared module and
+driving the real serializer is the point. Carry-over count is therefore **119**, not 115.
+
+### Design gaps — all four resolved by the owner 2026-09-22
+
+| # | Gap | Owner decision | Consequences to implement |
+|---|---|---|---|
+| D-1 | **Which execution environment owns the target-attempt permit counter.** connLLD §1:52 calls it a "global target-attempt limit" and §7:304 returns completion to the connection owner's event loop, but no design text names the owner of the count | **The top-level application owns it.** `main()` constructs it and threads the reference down into every component that needs it, ending at each connection owner. Since many Netty threads vie for it, it is simply an **atomic number** with its reference passed into every connection-owner object — not an actor with an input queue | Deletes the permit provider's entire `Input` sealed family, its `ownerInputSink`, its `OwnerThreadGuard`, and its membership in `ReplayIntakeInput`. **Fully resolves S6b-2.** Reshapes S6b-1: a conservation violation on an atomic is detected by the failing CAS/bound check, and must still reach the supervisor, so the counter needs an injected fatal callback rather than a bare `throw`. See the two follow-on defaults logged below |
+| D-2 | **Whether the target-*response* retry path keeps an attempt cap** | **No response at all → indefinite retries, no cap** (matches connLLD §9.1). **Some HTTP response → `MAX_RETRIES = 4`**, and that value **should become a top-level config setting** rather than a constant | P5 no longer strips `MAX_RETRIES` from `DefaultRetry`; it keeps the cap and lifts it to configuration. The new option is **additive** — a new CLI/config key defaulting to 4, i.e. current behavior — so it is not a red-line-2 break, but it does extend the §2.3 CLI surface and belongs in the G9 option inventory. P5 is unblocked |
+| D-3 | **The terminal-disposition vocabulary for the conservation identity** | `records_read == records_replayed + records_skipped + records_failed` was written in `AGENTS.md:173-185` as an **example**, not a required identity. The premise above it — every record read reaches exactly one terminal disposition — **is true and stays**; what is not guaranteed is that the disposition gets *recorded*, because a commit can be **rejected**, and when commits stop working we do not learn exactly when they stopped. Both conditions are **non-happy-path only**. So the invariant is three tiers: **(i) always, the inequality `records_read >= records_committed`** — nothing is created; **(ii) in the happy case, the equality `records_read == records_committed`** — nothing is dropped, and this is assertable; **(iii) per partition, commit-position advancement equals the number of records committed**, which also carries sequence continuity. The final scale test **assumes the happy case** when validating metrics. A three-way terminal split is not the right shape, since `records_skipped` is not decidable at a single point | Do **not** build a three-label terminal-disposition counter. Build instead: (a) the inequality as a permanently-armed assertion, since a violation means a record was committed that was never read; (b) the happy-case equality as the scale test's metric oracle; (c) the commit-advancement identity per partition and generation, which `ObservedRecordCommitQueue` is already positioned to assert since it computes `nextCommitOffset = lastRemoved.offset() + 1` from head-contiguous removal; (d) exact expected values in the deterministic happy-case tests. Add the missing `partition`/`generation` attribute to the read counter — `kafkaRecordsRead` has none today. **Owner approved 2026-09-22: count rejected commits and cancelled records as their own metrics.** That closes the tier-1 inequality back into a balancing equality with named slack terms, which localizes a loss instead of merely detecting one: `records_read == records_committed + records_cancelled + records_abandoned_at_revocation + records_commit_ineligible + records_outstanding`. See "Conservation instruments" below |
+| D-4 | **The five dashboard-pinned metric names live in a file being rewritten** | **Keep all five, and they must match the same semantics.** If the new semantics differ even slightly, **introduce a wholly new name instead** and raise it for discussion rather than reusing the old string | Rule to apply mechanically during the `ReplayContexts` rewrite: for each of `lagBetweenSourceAndTargetRequests`, `bytesWrittenToTarget`, `bytesReadFromTarget`, `tupleComparison`, and the `kafkaCommit` span behind `kafkaCommitCount` — either reproduce the name *and* its measured quantity exactly, or pick a new name and escalate. Silent reuse under changed semantics is the failure mode this forbids, and it is worse than a rename because three dashboard copies keep rendering a plausible wrong number |
+
+### Conservation instruments — the D-3 metric set
+
+Owner-approved 2026-09-22. Every instrument is per `partition` **and** `generation`; none exists today with
+those attributes. Design authority for the outcome vocabulary is `kafkaLLD §5.7` (commit submission's five
+distinguished outcomes), `§16` (protocol violation), `replayerLLD §6` (cleanup never authorizes commit).
+
+**The equation is over read events, not distinct offsets.** This is the single most important thing to get
+right about the narrative, and it is easy to get backwards. A record instance is a `KafkaRecordId`, which
+`kafkaLLD §2:68` defines as `(PartitionGenerationId generation, long offset)` — **not** `(topic, partition,
+offset)`. So when ownership ends and a later generation rereads those offsets, each reread is a **new
+instance**: it increments `records_read` again and owes its own terminal disposition. **Double counting across
+rereads is required, not avoided.** Track it per offset instead and rerolls will make the equation fail
+legitimately, at which point someone relaxes the assertion and the loss signal is gone — which is the whole
+thing this set exists to preserve.
+
+Two consequences:
+
+- **The disposition boundary is ownership, not rejection.** A commit rejected while ownership is *retained*
+  causes no reread: the instance stays `records_outstanding`, has no terminal disposition yet, and may commit
+  on a later attempt — one instance, N attempts. A commit rejected or of unknown outcome where ownership
+  *ended* makes that instance terminal, and the offsets return as fresh instances under a new
+  `PartitionGenerationId` with their own dispositions. `records_abandoned_at_revocation` is terminal because
+  ownership ended, which is the same event that forces the reread.
+- **`(generation, offset)` is a valid read-event identity only if nothing is reread within one generation.**
+  The design satisfies this and `ObservedRecordCommitQueue.register` already enforces it by rejecting
+  `offset <= greatestObservedOffset`. The legacy ownership-budget path violates it — `rewindRejectedRecords:740-746`
+  calls `kafkaConsumer.seek()` to rewind records inside a live generation, producing two read events with an
+  identical `KafkaRecordId`. That is a further reason `KafkaRecordOwnershipBudget`'s removal (kafkaLLD §5.1) is
+  load-bearing rather than cosmetic.
+
+**Terminal counters — cumulative, mutually exclusive, exactly one per record *instance*.** These are the
+equation's terms.
+
+| Instrument | Fires when | Note |
+|---|---|---|
+| `records_committed` | the commit position advances across the record | Must equal commit-position advancement (tier iii) |
+| `records_cancelled` | graceful or force generation cancellation ended the record's work before a recorded commit | `replayerLLD §6`: cleanup completion never authorizes commit, so these are definitionally never committed |
+| `records_abandoned_at_revocation` | ownership ended and the commit was **rejected**, of **unknown** outcome, or never submitted | Split by a `cause` attribute — see the warning below. Terminal only because `kafkaLLD §17.5` forbids retrying old-generation commits |
+| `records_commit_ineligible` | `ProtocolViolationTerminator` marked the record ineligible | `kafkaLLD §16`; blocks commits at and past the offset |
+
+**Gauge — current state, not cumulative.** `records_outstanding`: read, no terminal disposition yet, including
+records blocked behind a head gap.
+
+**Scoping note for tier ii.** `records_read == records_committed` holds in the happy case *because* the happy
+case has no revocation and therefore no rereads. A run containing a rebalance breaks that equality with zero
+records lost, since the reread instances legitimately inflate `records_read`. So tier ii is asserted only where
+no rebalance occurs, and the full balancing equation is what covers a run that has one. Do not assert tier ii in
+a test that induces a rebalance.
+
+**Diagnostic event counter — deliberately NOT a term in the equation.** `commit_attempts_rejected`: one
+increment per rejected commit *attempt*. It is excluded for a unit reason, not a double-counting one — an
+**attempt** is a different unit from an **instance**, and the two cannot appear in one sum whatever rereads do.
+One instance may produce several rejected attempts before committing. It is for alerting and for watching
+commit health degrade.
+
+Three ways to get this wrong, all of which end with someone deleting the assertion rather than debugging it:
+
+1. **Treating rejection itself as the terminal event.** Ownership is the boundary: rejection with ownership
+   retained leaves the instance outstanding; rejection or unknown outcome with ownership ended is terminal and
+   is followed by fresh instances on reread. Two separate instruments, as above.
+2. **Folding rejected and unknown together.** They have opposite operational meanings: rejected means the
+   offset provably did not move; unknown means it may have and must not be assumed otherwise. These are two of
+   `§5.7`'s five outcomes, and **`commitSync` cannot express the difference** — `TrackingKafkaConsumer:1022`
+   uses the no-callback form, so distinguishing them is a change to how the commit is issued, not merely an
+   added counter. Today `safeCommit:993-1006` catches the `RuntimeException`, logs at WARN, retains the
+   offsets, and `cleanupRevokedPartitions:309-311` silently drops the staged entries on revocation, collapsing
+   "submitted, outcome unknown" into "forget it".
+3. **Mixing gauges and counters.** `records_outstanding` is the only gauge. A record instance that sits blocked
+   behind a head gap and is *then* cancelled counts exactly once, as cancelled — one disposition per instance,
+   which is not in tension with rereads, because a reread is a different instance.
+
+Owned by the milestone that owns commit authority (`G4`), with the rejected/unknown split landing in `G2`
+alongside the commit-submission rework, and asserted as an equation in `G10`/`G12` rather than read off a
+dashboard.
+
+## Standing rule: how to carry code so blame survives
+
+Owner-approved 2026-09-23, after measuring each option rather than reasoning about it. This governs every
+remaining pull-over, G1 through G11.
+
+**The rule: content arrives once, in a single commit, as a move or copy from its legacy source. Strip and edit
+it in that commit or later ones — never delete it now and restore it later.**
+
+Compiling is explicitly subordinate to this. The owner's ordering: *"I care more about the blame than having
+these individual commits be able to stand on their own as far as tests & compiles go."* An intermediate commit
+that does not compile because it carries not-yet-supported code is acceptable; a commit that restores
+previously-deleted code is not.
+
+### Why — the mechanism, and what is not doing the work
+
+Blame is **computed, not stored**. Git decides which lines are "the same" by diff and rename/copy detection at
+read time. So the only thing that matters is whether a file's content arrives in a commit where it is
+**pairable against its legacy source**. Commit count is incidental, which is why a squash is not the lever it
+appears to be.
+
+Measured on this repository:
+
+| Scenario | Plain `git blame` | `git blame -C -C -C` |
+|---|---|---|
+| Verbatim chunk copied into a new file in a later commit (a naive G9-style pull-over) | **47 of 47 lines** credited to the pull-over commit | **1 of 47** — the other 46 traced to their true 2023-era origins |
+| Same, but after the legacy module has been deleted | — | unchanged; still recovers attribution |
+| `TrafficReplayer.java` as actually carried at G0: restored at its original path, then stripped downward | **24 of 603** credited to G0; 579 keep original attribution across 58 historical commits | — |
+| Simulated monster squash: one commit from the pre-rebuild base, move plus strip to the same 58% ratio | **24** credited to the squash; the rest reach pre-rebuild history | — |
+
+Two findings from that table are the whole basis of the rule:
+
+1. **`-C -C -C` recovers attribution even after the legacy module is deleted**, because blame walks history and
+   the source existed in the parent tree at the moment of the copy. Three `-C`s are required: one detects moves
+   within files the commit touched, two extends to files created in that commit, three extends to files that
+   already existed and were *not* touched — which is exactly the pull-over shape.
+2. **But `-CCC` is local-only.** GitHub's blame view performs no cross-file copy detection; its documentation
+   covers `.git-blame-ignore-revs` and is silent on copy detection, and GitHub computes blame with its own
+   server-side implementation rather than by invoking `git blame`. So `-CCC` does not help the place most people
+   actually read blame. *This specific claim is from knowledge, not measured — verify by pushing a branch
+   containing a cross-file copy and comparing GitHub's view against local `-CCC`. If GitHub does detect copies,
+   much of this discipline becomes optional.*
+
+Because plain blame is what the UI approximates, the strip-downward carry is what produces **UI-visible**
+blame, and it is why the G0 carry of `TrafficReplayer.java` was done that way rather than as a fresh shell.
+
+### Limits that no sequencing fixes
+
+- **Git's default rename threshold is 50% similarity.** The G0 carry cleared it at 58%. A file stripped below
+  roughly half of its original will not pair, so *how aggressively to strip on first carry is constrained by
+  the threshold* — strip too hard and the pairing being preserved is lost.
+- **A file assembled from several legacy sources has no single rename to detect** and will not pair regardless.
+  Those need `-CCC` locally, or honest new blame.
+- **Anything carried after G11 deletes the legacy module loses blame irrecoverably**, because the copy's parent
+  commit no longer contains the source. This makes G11 a real deadline for the inventory, not just a cleanup
+  step.
+
+### Options considered and rejected
+
+| Option | Verdict |
+|---|---|
+| Rely on `git blame -C -C -C` | **Insufficient alone.** Costs nothing and is worth a documented alias, since nobody guesses three `-C`s and the failure mode is silent — plain blame confidently shows the wrong author. But it does not fix the GitHub UI |
+| Monster squash of the whole rebuild | **Rejected.** It does work — measured above — but it is strictly dominated: it pays the entire rebuild's narrative to buy what a reconstruction gets for free, and `AGENTS.md` §5 requires keeping detailed commit descriptions when consolidating |
+| Per-milestone squash (G0–G12 into ~13 commits) | Workable, but granularity is not the determinant. It only helps where a carried file arrives whole *inside* one milestone; a file stripped at G0 and restored at G9 is unhelped by any squash granularity |
+| Final history reconstruction front-loading each carry into one move-plus-strip commit | **Kept as the fallback**, not the plan. Same blame result as the squash while preserving the milestone narrative. Decide at the end against a finished diff, for whichever specific files turn out to need it — not speculatively |
 
 ## Reversible decisions taken on a recommended default
 
@@ -118,20 +554,26 @@ Logged per `AGENTS.md` §2 so they can be vetoed later.
 |---|---|---|---|
 | Legacy module renamed, new module takes the real name immediately | Adopted — owner's proposal 2026-09-22 | G0 | G0 |
 | `traffic_replayer` image broken during construction rather than kept alive from the legacy module | Accept | G0 | G10 |
-| Publication suppressed on `trafficReplayerLegacy` via `excludedProjectPaths` | Accept | G0 | G11 |
+| ~~Publication suppressed on `trafficReplayerLegacy`~~ | Reversed 2026-09-23 — no second module exists | G0 | — |
 | `RecordDispositionLedger` left frozen in the legacy module rather than deleted now | Leave frozen | G0 | G11 |
+| **Permit acquisition loses cross-connection FIFO ordering.** D-1 replaces the FIFO waiter deque with an application-owned atomic count plus a set of parked acquirers whose completions post back to each owner's own event loop. A release then wakes *an* acquirer, not the longest-waiting one. No design text requires fairness across connections, and the `N = P * T_threads` demand model bounds in-flight work, so starvation is bounded | Accept unordered wakeup | G5 | G9.5 |
+| **Tuple-writer parallelism becomes an explicit setting** rather than an artifact of event-loop count, because script-instance count and sink sharding both derive from it | Introduce a setting; default chosen at G5 to match today's effective parallelism | G5 | G10 |
+| Same branch and same PR (#3394) for the whole red-CI stretch | Owner's decision 2026-09-22 — keep both, ignore failing CI until the swing | G0 | — |
+| `MAX_RETRIES` lifted from a constant to a top-level config setting, default 4 | Owner's decision 2026-09-22 (D-2); additive option, no behavior change | G5 | G9 |
 
 ## Deferred and unresolved
 
 | Item | State | Notes |
 |---|---|---|
-| **Branch and PR strategy for the long red-CI stretch** | open — **blocks G0** | Plan A leaves the assembled app broken from G0 until G11 by design. Decide whether #3394 becomes a draft and CI is left red until the swing, or a fresh PR carries the greenfield work. Recommendation: draft #3394 and defer CI work — the module layout changes at G11, so most CI fixes done before then are rework |
-| **DCO rewrite timing** | open — **blocks any push** | 24 of 48 commits lack sign-off and the PR cannot merge without it. Do it now as one rebase behind a backup ref, or fold it into the end-of-project history cleanup. Recommendation: now — mechanical, independent of plan choice, and it permanently clears one red check |
-| **Pull-over inventory from S0–S6b** | open — **first G0 escalation** | Every file carried over is a red-line-3 decision. Strongest candidates: the S0 deterministic fixtures, the S6a/S6b permit semantics (which track `connLLD §7` closely), `RecordWorkTracker`, `ObservedRecordCommitQueue`, `OwnerTransitionRunner`, `ProcessSupervisor`, the dump-mode classes, the tracing/OTEL contexts, and the Netty data-handler pipeline. Bring one table, not forty interruptions |
-| Inspect `stash@{1}` for fixture material | open | ~3,000 lines of abandoned harness work may contain usable `TestEventLoop`/`FakeClock`. Inspect those files only; do not merge wholesale |
+| **Branch and PR strategy for the long red-CI stretch** | **resolved 2026-09-22 — no longer blocks G0** | Owner's decision: keep the same branch and the same PR (#3394, already a draft), and keep ignoring the failing CI until the swing. No fresh PR. Rationale stands that the module layout changes at G11, so CI fixes done before then are mostly rework |
+| **DCO rewrite timing** | **resolved 2026-09-22 — `deferred(post-G12)`, blocks nothing** | Owner's decision: do it toward the end, and make the call then on whether to compress other commits in the same pass. Facts for that pass: **7 of 126** PR commits lack sign-off — `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040` — all ancestors of `origin/integrating3231`, so one rebase from `6fb2cb040^` touches 31 commits. Merge it with the "Git history cleanup" row below, which is the compression decision |
+| **`AGENTS.md:173-185` conservation-invariant rewrite** | open — **blocks nothing**, needs one word from the owner | The passage states the three-term identity as something that "must hold" and rests it on "every record read reaches exactly one terminal disposition." Per D-3 the premise stays but the identity becomes three tiers plus the balancing equation, scoped to read events rather than offsets. A replacement paragraph is drafted and agreed in conversation; **not applied, because that file is the execution contract and editing it is not mine to assume.** Until it is applied, D-3 and "Conservation instruments" in this register are the operative statement |
+| **Pull-over inventory from S0–S6b** | **proceeding on logged defaults** — table delivered and design gaps answered 2026-09-22 | See "G0 pull-over inventory" above. 179 production files, 21 fixtures, and 130 tests classified; **117 carried in 12 decision groups**, 62 left behind. D-1 through D-4 answered by the owner. P1–P12 are reversible per `AGENTS.md` §2, so they proceed on the recommended defaults and stay vetoable through G11 rather than blocking; two were overruled already (`ExhaustiveTrafficStreamGenerator` kept, `MAX_RETRIES` kept) |
+| Inspect `stash@{1}` for fixture material | **closed — not needed** | The four G0 fixtures (`FakeClock`, `TestEventLoop`, `RecordScript`, `PumpedKafkaSource`) already exist on the branch in `src/testFixtures`. `stash@{1}` has nothing the branch lacks for this purpose; leave it unapplied |
 | Fuse and ship-gate acceptance detail | `deferred(G10)` | Owner deferred 2026-09-22; revisit at the G9 boundary |
 | Does G12 become a required acceptance condition alongside R1–R19? | `deferred(G10)` | |
 | Doc-count comparison catches loss but not ordering | open | Banked at G12; a stateful sequence replayed out of order shows as a comparison mismatch, not a count delta |
 | `testFixtures` is published to Maven, so its API is a public contract | open | Raises the stakes on the G11 decision; external consumers are not visible from this repo |
 | Git history cleanup of the 23 `S0`–`S6b` commits | `deferred(post-G12)` | Recommendation: one rebase at the end against a final diff, not speculatively now |
 | Delete `replayerRebuildExecutionLog.md` | `deferred(final cleanup)` | 945 tracked lines, superseded by this file. Owner's decision: leave it until the final sweep |
+| **Delete `AGENTS.md` and `CLAUDE.md`** | `deferred(final cleanup)` | Owner's decision 2026-09-23. Both are agent-execution scaffolding, not project documentation, and they come out in the last cleanup phase along with `replayerRebuildExecutionLog.md` and the two rebuild plans. `CLAUDE.md` is only the one-line `@AGENTS.md` include; it is tracked from 2026-09-23 so the contract loads for any checkout rather than depending on an untracked local file. Note the ordering consequence: whatever process rules still matter after the rebuild must move somewhere durable **before** this deletion, or they leave with it |
