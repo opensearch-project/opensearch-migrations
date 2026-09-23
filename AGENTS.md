@@ -78,6 +78,26 @@ that are numbered steps get done. So:
 The owner reserves the right to adjust direction at any stage boundary. Expect it. Do not treat an
 earlier decision as settled if the owner revisits it.
 
+### 2.1 Deferrals — amend the plan or the work is lost
+
+A deferral is a decision, and the record that survives is the one in the plan. Whenever a milestone
+cannot deliver part of its scope, three things happen **in the same commit as the deferral**:
+
+1. **The deferring milestone says what it no longer delivers**, in its own section and in its `Exit`
+   line. A milestone whose `Exit` still claims work it did not do cannot be closed honestly, and the
+   next agent reads that line as done.
+2. **The receiving milestone gains the obligation**, in its scope and its `Exit`. Name it in the section
+   where the work will actually happen — an obligation recorded only at the point it was deferred *from*
+   is invisible to whoever is positioned to discharge it. Prefer the milestone that already builds the
+   thing the deferred work needs, so it lands as that milestone's evidence rather than as an errand.
+3. **The register's deferral ledger gets a row**: what, from where, to where, and why. Per §6 the plan
+   states which milestone *owns* an obligation while the register states whether it is open, proved, or
+   deferred — this is that split, not a second copy.
+
+**If you cannot name the receiving milestone, the work is not deferred, it is dropped** — and that is an
+escalation, not a judgment call. Deferring into "later" or into the register alone is the failure this
+rule exists to prevent.
+
 ## 3. Reviews
 
 Three different things are called "review" and they have different rules.
