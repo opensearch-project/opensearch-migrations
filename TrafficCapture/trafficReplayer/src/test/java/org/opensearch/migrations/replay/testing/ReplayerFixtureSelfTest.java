@@ -82,9 +82,9 @@ class ReplayerFixtureSelfTest {
     }
 
     /**
-     * The reason this fixture does not extend Netty's {@code AbstractScheduledEventExecutor}: that
-     * scheduler measures deadlines against {@code System.nanoTime()}, so timers would fire on wall
-     * clock instead of on the injected clock, and the test could not hold time still.
+     * Guards the choice not to extend Netty's {@code AbstractScheduledEventExecutor}, whose scheduler
+     * measures deadlines against {@code System.nanoTime()}: timers would fire on wall clock and a test
+     * could not hold time still.
      */
     @Test
     void testEventLoopTimersFollowTheInjectedClockRatherThanWallClock() {
@@ -161,20 +161,10 @@ class ReplayerFixtureSelfTest {
     }
 
     /**
-     * Records a constraint rather than a behavior we want, and checks that hitting it is loud.
-     *
-     * <p>Netty's built-in channels gate registration on their own loop implementation, so none can
-     * register against any custom event loop, this one included. Becoming a
-     * {@code SingleThreadEventLoop} would reintroduce both the wall-clock scheduler and a real
-     * thread, so the fixture accepts the limit instead. Nothing needs the combination: target I/O
-     * reaches owners through {@code TargetChannelPort}, not through a channel a test registered to
-     * the owner's loop.
-     *
-     * <p>What is asserted is that {@code register} <strong>throws</strong>. Netty's own path calls
-     * {@code promise.setFailure} and returns, so a test that never inspects the returned future would
-     * see a channel that silently failed to register and then hang waiting for it. The message has to
-     * name the alternative, because whoever trips over this will be reading the exception rather than
-     * this test.
+     * Netty's built-in channels gate registration on their own loop implementation, so none can register
+     * against a custom event loop. Asserts that {@code register} <strong>throws</strong> rather than
+     * failing a promise the caller might not inspect, and that the message names the alternative, since
+     * whoever trips over this is reading the exception rather than this test.
      */
     @Test
     void testEventLoopRefusesToHoldChannelsWithAMessageNamingTheAlternative() {

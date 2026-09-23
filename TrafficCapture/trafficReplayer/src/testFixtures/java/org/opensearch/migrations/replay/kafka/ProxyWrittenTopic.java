@@ -36,11 +36,9 @@ import org.apache.kafka.common.config.TopicConfig;
 /**
  * A capture topic written by the real, unmodified capture proxy.
  *
- * <p>This is the supply side of G1's exit criterion, which is specifically that the replayer reads a
- * topic <em>the current proxy produced</em> — not a topic a test wrote to look like one. A
- * hand-rolled writer would encode this module's belief about the wire format, so it could not detect
- * the very drift the milestone exists to prevent. Defect {@code D1}, "the replayer cannot read its own
- * capture topic," is what happens when nothing checks that belief against the producer.
+ * <p>The point is that the topic is one the real proxy produced, not one a test wrote to look like it. A
+ * hand-rolled writer would encode this module's own belief about the wire format and so could never
+ * detect that belief drifting from the producer.
  *
  * <p>Three things start, in dependency order: a Kafka broker, an in-process destination server, and
  * {@code CaptureProxyContainer}, which runs the actual {@code CaptureProxy.main} on a thread. Traffic
@@ -121,16 +119,12 @@ public final class ProxyWrittenTopic implements AutoCloseable {
     /**
      * Creates the topic with {@code message.timestamp.type=LogAppendTime} before the proxy starts.
      *
-     * <p>This is not a tuning choice, it is the supply-side contract. The proxy runs a Kafka capability
-     * probe at startup and <strong>refuses to serve traffic</strong> if the topic does not assign broker
-     * timestamps — it fails with "the traffic topic must use message.timestamp.type=LogAppendTime" and
-     * terminates. Letting the topic auto-create gets the broker default, {@code CreateTime}, and the proxy
-     * will not start.
-     *
-     * <p>It matters well beyond making this fixture work. {@code LogAppendTime} is what makes
-     * {@code ApplicationKafkaRecord.logAppendTimeMillis} a broker-assigned time rather than a producer
-     * guess, and that field is what broker-time expiration, the backward-skew fatal check, and heartbeat
-     * baselines are all computed from. Defect {@code D-1} is what happens when it is missing.
+     * <p>Not a tuning choice. The proxy runs a Kafka capability probe at startup and <strong>refuses to
+     * serve traffic</strong> unless the topic assigns broker timestamps, so an auto-created topic — which
+     * gets the broker default of {@code CreateTime} — will not start. Beyond that,
+     * {@code LogAppendTime} is what makes {@code ApplicationKafkaRecord.logAppendTimeMillis} a
+     * broker-assigned time rather than a producer guess, and broker-time expiration, the backward-skew
+     * fatal check, and heartbeat baselines are all computed from it.
      */
     private static void createTrafficTopic(String brokers, String topic, int partitions) throws Exception {
         var adminProps = new Properties();

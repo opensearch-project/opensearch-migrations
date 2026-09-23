@@ -336,6 +336,35 @@ rather than maximum process count.
 Preferences about the *shape* of the implementation. Where the designs specify a structure, they win —
 these apply to the decisions the designs leave to the implementer.
 
+### 8.1 Comments describe the code, not how it got there
+
+The deliverable is code a developer can read and change correctly. It is not a record of the rebuild.
+
+A comment earns its place by stating something a reader needs in order to change this code safely and
+cannot see from the code itself: a constraint that is not local, an invariant the types do not carry, a
+reason the obvious simplification is wrong. Keep those, and keep them short.
+
+A comment loses its place when it narrates history: what used to be here, what was deleted, which
+milestone deleted it, what a previous attempt did, why an earlier approach failed. **Deleted code gets no
+tombstone.** Do not leave a comment naming removed options, types, or methods. The removal is in the diff,
+the reasoning is in `docs/replayerRebuildStatus.md`, and the rule it followed is in the design — three
+places a reader can already reach, none of which is the file the thing used to live in.
+
+The test is whether the comment would still make sense to someone who does not know a rebuild happened.
+"This must not inherit Netty's scheduler, which measures deadlines against `System.nanoTime()`" passes:
+it prevents a wrong change. "Carried from the pre-rebuild implementation; G3 restores the rest" fails:
+it is only meaningful as history, and it will be stale the moment G3 lands.
+
+Two deliberate exceptions, both temporary and both self-deleting:
+
+- **`REBUILD-LIMBO` region notes**, which exist to be read while the region is marked and are deleted with
+  it. §8a governs those.
+- **A workaround's removal milestone**, required by §2.1 — a flag or shim must name what deletes it,
+  because otherwise it outlives its cause. That is forward-looking: it tells a reader what to do.
+
+Explaining *why* code is shaped a certain way is not history, even when the reason is a past mistake —
+write the reason as a present-tense constraint rather than as a story about the mistake.
+
 ## 8a. Limbo is the first place to look, not a graveyard
 
 Carried-but-not-yet-refactored code stays **in place, at the path it will ship from**, marked with
