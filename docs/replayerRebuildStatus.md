@@ -173,6 +173,17 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
+## Deferral ledger — work moved between milestones
+
+The one grep-able status table for deferrals, per `AGENTS.md` §2.1. The **plan** states which milestone
+owns each obligation, in both the deferring and receiving sections; this table states whether it is open.
+A deferral with no row here, or with no receiving milestone named in the plan, is dropped work.
+
+| Deferred | From | To | Why | State |
+|---|---|---|---|---|
+| `dump-http` and `dump-both` CLI modes, and the file-input dump path | G1 | G3 | HTTP transaction reconstruction is the legacy accumulator's job, whose closure is `ChannelContextManager` → `RootReplayerContext` → the `IReplayContexts` identity chain. Rebuilding that inside G1 is the lateral expansion `AGENTS.md` §6 forbids. G3 rebuilds source assembly, so the modes return there as that milestone's cheapest evidence. Mode names stay in the CLI (§2.3 contract); invoking them fails with a message naming G3 | open |
+| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G3 | Recorded in `TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` note as a G1 blocker. It is not one: with G1 scoped to Kafka, no file path is promoted, so nothing forces the answer yet. It must be settled when the file dump path returns | open |
+
 ## Named scaffolding — every row needs a removal milestone
 
 | Scaffold | Introduced | Removal | State |
