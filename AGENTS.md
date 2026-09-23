@@ -17,7 +17,7 @@ dropping a qualifier, so a summary that reads cleanly is not evidence that it is
 | `docs/captureAndReplay/*.md` | Authoritative design. Never changed by an implementation agent. |
 | `docs/replayerRebuildPlanA-inPlace.md` | Primary plan. Default unless told otherwise. |
 | `docs/replayerRebuildPlanB-inPlace.md` | Fallback plan. Only on explicit instruction. |
-| `docs/replayerRebuildPlan.md` | Superseded for sequencing. Still authoritative for exactly three things: the D1–D18 defect inventory (§2), the R1–R19 obligation set (§6.5), and deployed-configuration compatibility (§7). |
+| `docs/replayerRebuildPlan.md` | Superseded for sequencing. Still authoritative for exactly four things: the D1–D18 defect inventory (§2), the R1–R19 obligation set (§6.5), deployed-configuration compatibility (§7), and the `PA1`–`PA3` proxy milestones (§3.2) — which Plan A puts out of its own scope, making §3.2 the only plan that owns proxy repair and therefore the receiving milestone for proxy findings under §2.1. |
 | `docs/replayerRebuildStatus.md` | Live status and debt register. Update as you go. |
 
 **Source order:** the authoritative designs, then this execution contract, then the selected rebuild
@@ -78,10 +78,12 @@ that are numbered steps get done. So:
 The owner reserves the right to adjust direction at any stage boundary. Expect it. Do not treat an
 earlier decision as settled if the owner revisits it.
 
-### 2.1 Deferrals — amend the plan or the work is lost
+### 2.1 Deferrals and out-of-scope findings — amend the plan or the work is lost
 
-A deferral is a decision, and the record that survives is the one in the plan. Whenever a milestone
-cannot deliver part of its scope, three things happen **in the same commit as the deferral**:
+A deferral is a decision, and the record that survives is the one in the plan. This applies to **both**
+shapes the same way: scope a milestone cannot deliver, and a defect or repair found while doing one
+milestone that belongs to another. The second is the easier one to lose, because it does not feel like a
+deferral — it feels like filing a note. Three things happen **in the same commit**:
 
 1. **The deferring milestone says what it no longer delivers**, in its own section and in its `Exit`
    line. A milestone whose `Exit` still claims work it did not do cannot be closed honestly, and the
@@ -96,7 +98,16 @@ cannot deliver part of its scope, three things happen **in the same commit as th
 
 **If you cannot name the receiving milestone, the work is not deferred, it is dropped** — and that is an
 escalation, not a judgment call. Deferring into "later" or into the register alone is the failure this
-rule exists to prevent.
+rule exists to prevent. A `Milestone` column holding a workstream name, a document name, or a phrase like
+"proxy workstream" is that failure wearing a milestone's clothes: **the value must be a milestone
+identifier that appears as a section in a plan**, because that section is what someone reads when they
+start the work. Proxy findings therefore go to `PA1`–`PA3` in `replayerRebuildPlan.md` §3.2, which is the
+only plan that owns proxy repair.
+
+A workaround compounds this. If a finding is worked around rather than fixed — a build flag, a disabled
+check, a skipped test — **the receiving milestone's own text must say the workaround is deleted as part of
+that repair**, and the code carrying it must name the milestone. Otherwise the workaround outlives the
+defect and silently becomes the design.
 
 ## 3. Reviews
 

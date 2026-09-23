@@ -277,6 +277,32 @@ proxy is mostly implemented. The execution log tracks three proxy checkpoints:
   proxy/replayer behavior; and
 - **PA3 — interoperate:** pass the real-Kafka scenarios in §6.6 before S15 begins.
 
+**PA2 repair backlog found from the replayer side.** These were discovered building the G1 supply-side
+fixture (`docs/replayerRebuildPlanA-inPlace.md` G1) and are recorded here because PA2 is the milestone that
+owns proxy repair — per `AGENTS.md` §2.1 a finding with no receiving milestone named in a plan is dropped
+work, not deferred work. Status for each lives in `docs/replayerRebuildStatus.md`.
+
+1. **The proxy's Kafka tests cannot start the proxy.** Every case in `KafkaConfigurationCaptureProxyTest`
+   fails because nothing creates the traffic topic with `message.timestamp.type=LogAppendTime`, so the
+   capability probe aborts startup. The repair is one `AdminClient.createTopics` call with that config,
+   naturally in `KafkaContainerTestBase`; `ProxyWrittenTopic` in the replayer already does exactly this and
+   can be copied. **Fix this first** — it masks the next item, so the two cannot be validated separately.
+2. **A stale assert blocks every assertions-enabled capture test.**
+   `StreamChannelConnectionCaptureSerializer:150` asserts `writerNodeId` and `connectionId` fit
+   `MAX_ID_SIZE = 100`, commented as "the default size of netty connectionId and kafka nodeId". Actual is
+   about 111: `ProcessHelpers.getNodeInstanceName()` returns `<base>_<uuid>`, never shorter than ~37 because
+   the UUID alone is 36, and the proxy passes Netty's `Channel.id().asLongText()`, about 60. `MAX_ID_SIZE` is
+   referenced nowhere else, so nothing sizes a buffer from it and production — which runs without `-ea` — is
+   unaffected; the premise simply went stale. Either widen the budget to the real worst case or stop asserting
+   on it. **The replayer carries a `-da:` workaround for this one class in
+   `TrafficCapture/trafficReplayer/build.gradle`, which must be deleted as part of this repair.**
+3. **`CaptureProxy` exits the JVM on a fatal capture error.** The handler calls `System.exit(78)`, which is
+   correct for the real process but destroys the test JVM when `CaptureProxyContainer` runs
+   `CaptureProxy.main` in-process — the symptom is a `SKIPPED` test and a Gradle "non-zero exit value 78"
+   with the real cause only in the log above it. Needs an injectable exit hook so a test can observe the
+   fatal transition instead of dying with it. PA3's real-Kafka scenarios will need this to assert on
+   capture-failure behavior at all.
+
 If one agent owns both proxy and replayer, these are explicit scheduled checkpoints, not fictional
 parallelism. Proxy work may be interleaved with replayer work, but PA3 cannot be deferred into final
 cleanup.

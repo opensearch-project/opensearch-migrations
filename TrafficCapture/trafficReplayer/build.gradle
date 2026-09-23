@@ -117,9 +117,9 @@ tasks.withType(Test).configureEach {
     // ProxyWrittenTopic needs to do. It stayed hidden because the proxy's own Kafka tests fail earlier,
     // at the LogAppendTime capability probe.
     //
-    // The fix belongs to the proxy module, which AGENTS.md section 7 keeps in a separate conversation, so
-    // this is scoped to the single class and recorded in docs/replayerRebuildStatus.md rather than fixed
-    // here. Remove it when that assert is corrected.
+    // DELETE THIS WITH MILESTONE PA2. The fix belongs to the proxy module, which AGENTS.md section 7 keeps
+    // in a separate conversation, so this is scoped to the single class rather than fixed here. The repair
+    // that removes it is docs/replayerRebuildPlan.md section 3.2, PA2 item 2, which names this line.
     jvmArgs '-da:org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer'
 }
 
