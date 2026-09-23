@@ -170,8 +170,77 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 
 | Item | Milestone | State |
 |---|---|---|
+| **Proxy module, escalated 2026-09-23.** `KafkaConfigurationCaptureProxyTest` fails entirely: nothing creates the traffic topic with `message.timestamp.type=LogAppendTime`, so the proxy's capability probe aborts startup. Fix is the `AdminClient` call `ProxyWrittenTopic` now makes, naturally in `KafkaContainerTestBase` | proxy workstream | open, verified by running it |
+| **Proxy module, escalated 2026-09-23.** `StreamChannelConnectionCaptureSerializer:150` asserts ids fit `MAX_ID_SIZE = 100`; actual is ~111 because `getNodeInstanceName()` is `<base>_<uuid>` and the proxy passes `asLongText()`. Assert-only, so no production impact, but it blocks every assertions-enabled capture test. Worked around with `-da:` for that class in the replayer's `build.gradle` | proxy workstream | open, worked around |
+| **Proxy module, escalated 2026-09-23.** `CaptureProxy`'s fatal handler calls `System.exit(78)`, which kills the test JVM when run in-process by `CaptureProxyContainer`. Needs an injectable exit hook to be diagnosable | proxy workstream | open |
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
+
+## G1 supply side — proven, and what proving it uncovered
+
+`ProxyWrittenTopic` (replayer `testFixtures`) starts a Kafka broker, an in-process destination, and the
+**real `CaptureProxy`**, then exposes the broker, topic, and raw record bytes.
+`ProxyWrittenTopicSelfTest` drives one request through it and asserts the records decode as
+`CaptureRecord` envelopes containing a `TrafficStream`. **It passes.** That is G1's supply side: the
+replayer reads bytes the proxy actually produced, not bytes a test wrote to look like them — which is the
+only version of the claim that can detect the drift `D1` is.
+
+It reuses `CaptureProxyContainer`, moved with `git mv` from the proxy module's `test` source set to its
+`testFixtures` so another module can consume it (9 files, blame preserved, nothing duplicated). The
+fixture stops at raw bytes deliberately: decoding is the dumper's job, so "does the proxy emit what we
+think" and "do we render it correctly" stay separate claims and a formatting change cannot mask a format
+change.
+
+Three findings, in the order they surfaced. Each was a failure that taught something:
+
+### 1. `LogAppendTime` on the traffic topic is a hard requirement, enforced by the proxy at startup
+
+The proxy runs a Kafka capability probe and **refuses to serve traffic** unless the topic assigns broker
+timestamps: *"Kafka capability probe did not receive a positive broker-assigned timestamp for
+&lt;topic&gt;/0; the traffic topic must use message.timestamp.type=LogAppendTime"*. An auto-created topic
+gets the broker default, `CreateTime`, and the proxy aborts. The fixture creates the topic explicitly with
+`message.timestamp.type=LogAppendTime` via `AdminClient`.
+
+This is load-bearing well past the fixture. `LogAppendTime` is what makes
+`ApplicationKafkaRecord.logAppendTimeMillis` a broker-assigned time rather than a producer guess, and
+broker-time expiration, the backward-skew fatal check, and heartbeat baselines are all computed from it.
+**`D-1` is what happens when it is absent**, so the proxy enforcing it at startup is the supply-side half
+of that defect's fix, and worth knowing explicitly rather than by accident.
+
+### 2. The proxy's own Kafka tests are broken, for exactly that reason — escalation, not a fix
+
+Every case in `KafkaConfigurationCaptureProxyTest` fails at the same probe, because nothing there creates
+the topic with `LogAppendTime` either. Verified directly by running it. This is pre-existing on the branch
+and sits in the **proxy module**, which `AGENTS.md` §7 keeps in a separate conversation — so it is recorded
+and escalated rather than repaired here. The one-line fix is the same `AdminClient` call
+`ProxyWrittenTopic` now makes; `KafkaContainerTestBase` would be the natural home.
+
+### 3. A stale `MAX_ID_SIZE` assert blocks *any* assertions-enabled capture test — masked until now
+
+Past the probe, capture died on a bare `assert` in
+`StreamChannelConnectionCaptureSerializer:150`, which checks that `writerNodeId` and `connectionId` fit in
+`MAX_ID_SIZE = 100`, commented as "the default size of netty connectionId and kafka nodeId". That
+assumption no longer holds: `ProcessHelpers.getNodeInstanceName()` returns `<base>_<uuid>` — 47 bytes with
+no `HOSTNAME`, and never below ~37 because the UUID alone is 36 — while the proxy passes Netty's
+`Channel.id().asLongText()`, about 60. As protobuf strings that is roughly **49 + 62 = 111 > 100**, so it
+fires on every captured connection.
+
+**Not a production defect:** `MAX_ID_SIZE` is referenced nowhere else, so nothing sizes a buffer from it,
+and production runs without `-ea`. It is a sanity check whose premise went stale. But with assertions on —
+Gradle's default — no test can capture through the real proxy, and **finding 2 is why nobody noticed**: the
+probe failure aborts first, so this code was never reached. Fixing one without the other reveals nothing.
+
+Worked around narrowly: `-da:` for that single class on the replayer's test tasks, with the reasoning in
+`build.gradle`. Remove it when the assert is corrected. Proxy module, so also escalated.
+
+### 4. The in-process proxy can take the test JVM with it
+
+`CaptureProxyContainer` runs `CaptureProxy.main` on a thread, and the proxy's fatal handler calls
+`System.exit(78)` — "Capture is compromised or the proxy is unstable". In-process that kills the Gradle
+test executor, which surfaces as `Process 'Gradle Test Executor N' finished with non-zero exit value 78`
+and a `SKIPPED` test rather than a failure with a cause. Worth knowing before debugging a future
+disappearing test run: look above the Gradle error for the proxy's own stack trace. An injectable exit hook
+would fix it, and that is proxy-module work.
 
 ## Deferral ledger — work moved between milestones
 

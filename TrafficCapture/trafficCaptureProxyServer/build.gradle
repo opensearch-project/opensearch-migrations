@@ -27,6 +27,22 @@ dependencies {
     implementation libs.slf4j.api
 
 
+    // The testcontainers rig -- CaptureProxyContainer, which runs the real CaptureProxy against a real
+    // Kafka broker -- is published as test fixtures so the replayer can produce a topic with the actual
+    // proxy rather than a hand-rolled writer. That is the supply side of G1's exit criterion in
+    // docs/replayerRebuildPlanA-inPlace.md: "a topic written by the current, unmodified proxy".
+    // `api` where a fixture's signature exposes the type to its callers: CaptureProxyContainer extends
+    // GenericContainer and its constructors take Container and KafkaContainer, and the annotations
+    // expose JUnit's.
+    testFixturesApi libs.testcontainers
+    testFixturesApi libs.testcontainers.kafka
+    testFixturesApi libs.testcontainers.toxiproxy
+    testFixturesApi libs.junit.jupiter.api
+    testFixturesApi testFixtures(project(path: ':testHelperFixtures'))
+    testFixturesImplementation libs.toxiproxy
+    testFixturesImplementation libs.testcontainers.junit.jupiter
+    testFixturesImplementation libs.slf4j.api
+
     testImplementation project(':TrafficCapture:captureProtobufs')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
