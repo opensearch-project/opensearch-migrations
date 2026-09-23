@@ -1136,9 +1136,13 @@ Kafka assigns partitions to replayer group members. Records themselves are not a
 polls records from its currently assigned partitions.
 
 For one partition, a **partition generation** is one uninterrupted period during which the replayer
-owns that partition. The replayer has one configurable cancellation grace interval, with a
-five-second default. It may be lowered, including to one second, but must remain safely below the
-Kafka poll interval.
+owns that partition. The replayer has one cancellation grace interval, set by a command-line option,
+with a **one-second default**. It may be raised, but must remain safely below the Kafka poll interval:
+that interval is also the rebalance timeout, and exceeding it fences the member, which turns a
+graceful revocation into a lost one and discards all staged progress. The default is the smallest
+useful value rather than a generous one, because the revocation callback stalls reading on every
+partition the replayer holds — not only the revoked ones — and blocks the entire consumer group's
+rebalance while it runs.
 
 When Kafka revokes the partition, the replayer stops accepting records from the revoked
 generation, immediately cancels work that has not started an external target or tuple operation,
@@ -1148,6 +1152,15 @@ returns once replay intake accepts that notification, without waiting for every 
 finish. Cancelled work requires redelivery rather than counting as successful processing, and a
 newer generation of the partition does not process records until the old generation's in-process
 work and cleanup finish.
+
+Because a revocation commits only the contiguous prefix of finished records, a partition whose
+earliest uncommitted record outlives the grace interval commits nothing, and repeated revocations
+arriving faster than that record finishes prevent the committed position from ever advancing. Every
+individual revocation looks like ordinary at-least-once redelivery, so the replayer makes the
+condition visible instead of guessing at it: each retiring generation reports how many records it
+committed and how many it read. A run of generations retiring with zero commits on the same partition
+is that stall, and the operator's levers are the grace interval and how much is admitted ahead of the
+head record. `replayerProcessingAndCommitArchitecture.md` §9.5 defines both measurements.
 [Replayer Processing and Commit Architecture §9.2](replayerProcessingAndCommitArchitecture.md#92-bounded-revocation-grace-and-scoped-cancellation)
 defines the exact sequence.
 
