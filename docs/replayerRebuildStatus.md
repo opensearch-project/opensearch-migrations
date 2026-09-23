@@ -176,6 +176,63 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
+## G1 — complete
+
+`replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
+the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
+`KafkaTopicDumperEvidenceTest`. 108 unit tests plus 2 `isolatedTest` cases, all passing.
+
+**What was promoted, by un-marking rather than rewriting** — the code lines are the carried ones, so blame
+survives: `runDumpFromKafka`, `runRawFromKafka`, `seekToStart`, `isAtEnd`, `pastEnd`, `protocolViolation`,
+`getBaseEpoch` from `KafkaTopicDumper`, and `runDumpMode`'s Kafka branch from `TrafficReplayer`. The
+exhaustive `CaptureRecord` switch G1 exists to prove was **already live** in `TrafficStreamDumper`, all four
+cases with `PAYLOAD_NOT_SET` throwing, so raw mode inherits it by delegation. 183 lines of
+HTTP-reconstruction members stay marked in the same file, retagged `G3`.
+
+Three things were not simple un-markings, and each is a decision worth finding later:
+
+1. **`buildKafkaProperties` moved to a new live class, `KafkaConsumerProperties`.** It could not be promoted
+   in place: `KafkaTrafficCaptureSource` declares `implements ISimpleTrafficCaptureSource` and every field
+   around the method is typed on legacy identities, all deferred, so promoting it would have meant
+   temporarily stripping an interface off a live class declaration. Building consumer properties is a pure
+   function of configuration, so a shared home is the honest destination — G2's rebuilt source should call
+   this rather than reach into a legacy class for a static. The marked copy is left untouched: it does not
+   compile, so it cannot be a second live implementation, and editing carried code would break the recovery
+   check. G2 deletes it.
+2. **`runDumpFromKafka` lost exactly one parameter, `RootReplayerContext`.** It cannot appear in a live
+   signature because it reaches the legacy identity chain G3 replaces.
+
+   The first version of this dropped `observedPacketConnectionTimeout` and `packetTimeoutParamName` too,
+   since only `dump-http` reads them. **Owner correction:** that churns blame for no gain, and worse, a
+   deleted parameter is a wiring connection someone has to rediscover — the path to reinventing proven
+   code. Both are restored and threaded from `runDumpMode` exactly as before, unused for now and marked
+   `@SuppressWarnings("java:S1172")` with a javadoc note telling the next reader not to "clean them up".
+   A parameter that is threaded but idle costs nothing; a deleted one costs a rediscovery.
+
+   The general rule this yields: **when a member is promoted but its consumer is deferred, keep the
+   signature and defer only what cannot compile.** Restoration should be un-marking plus wiring one
+   argument, never re-deriving an argument list.
+
+   So the restoration is now mechanical and written down where it will be read. `runDumpFromKafka`'s `else`
+   branch carries the exact call G3 reinstates, notes that `topContext` is the single argument to add, and
+   points at the marked region in `TrafficReplayer.runDumpMode` that constructs it verbatim.
+   `runHttpFromKafka` is marked with its signature untouched, so G3's edit is: add one parameter, delete the
+   throw, un-mark two methods.
+3. **`main` now dispatches to dump mode.** It was a stub exiting 70, so `isDumpMode`,
+   `validateDumpModeParams` and `runDumpMode` were live with **no caller at all** — compiled and tested but
+   not wired in `AGENTS.md` §4's sense, which is how 707 lines of `RecordDispositionLedger` previously sat
+   dead. Found by grepping for callers rather than by any test failing, which is the point: nothing fails
+   when an entry point is unreachable. The evidence test therefore goes through `main`, not through the
+   dumper directly.
+
+`validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http`,
+`dump-both`, and `-i` file input with a message naming G3, at exit code 2. The mode names stay in the CLI
+because §2.3 makes them a contract; what changed is that asking for them says when they return instead of
+producing output that does not match the mode requested.
+
+The stub's old text pointed at `TrafficCapture/trafficReplayerLegacy` for the previous implementation. That
+directory no longer exists, so the message would have sent someone to a deleted path.
+
 ## G1 supply side — proven, and what proving it uncovered
 
 `ProxyWrittenTopic` (replayer `testFixtures`) starts a Kafka broker, an in-process destination, and the
@@ -566,8 +623,8 @@ dashboard.
 
 ## State at end of the 2026-09-23 session, and what comes next
 
-One module, in place, member-level marking. **340 files, 228 marked, 108 tests passing, build green.**
-**G0 is complete.**
+One module, in place, member-level marking. **341 files, 228 marked, 108 unit tests + 2 isolatedTest passing, build green.**
+**G0 and G1 are complete.**
 
 ### Landed this session
 
@@ -580,7 +637,9 @@ One module, in place, member-level marking. **340 files, 228 marked, 108 tests p
 | Deleted provably-dead branch-added code — 6 files, 1,067 lines | `0093c38b4` |
 | Unified the marker on `START`/`END` | `71aa6ce76` |
 | `TestEventLoop` promoted to a real Netty `EventLoop`; `ReplayerFixtureSelfTest` partly promoted | `aa5461a10` |
-| `RecordScript` and `PumpedKafkaSource` on production types; G0 exit evidence; marking verifier | this commit |
+| `RecordScript` and `PumpedKafkaSource` on production types; G0 exit evidence; marking verifier | `aa54aaab6` |
+| G1 supply-side rig with the real proxy | `6c7f805fb` |
+| G1: dump-raw promoted and wired through `main` | this commit |
 
 ### Findings from the abandoned external-consumer walk
 
@@ -765,11 +824,15 @@ and it is recorded rather than repaired so that promoting the file is the moment
 
 ### Next
 
-**G0 is complete.** All four fixtures are live, their self-tests pass, and the exit evidence exists. G1 is
-next: reality contact — decode and dump a real topic, which promotes `runDumpMode` from
-`TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` region. That region's own note already records the open
-question G1 must settle first — the file source decodes bare base64 `TrafficStream` while Kafka decodes a
-`CaptureRecord` envelope, and G1 has to decide which format the file path speaks.
+**G0 and G1 are complete.** G2 is next: the Kafka source owner. It inherits two things from G1 rather than
+starting clean — `ProxyWrittenTopic.start(topic, partitions)` already takes a partition count, which is what
+G2 needs to exercise per-partition demand and revocation against a real broker; and
+`KafkaConsumerProperties` is where its consumer properties already live, so it should call that rather than
+the marked static in `KafkaTrafficCaptureSource`, then delete the marked copy.
+
+Three PA2 repairs are open against the proxy and are recorded in `replayerRebuildPlan.md` §3.2. None blocks
+G2, but the `-da:` workaround in the replayer's `build.gradle` is deleted by PA2 item 2 and will otherwise
+outlive its cause.
 
 Deferred by the owner, with reasons already recorded: the external-consumer contract (after G3), the
 `TrafficReplayer` wiring walk, and the DCO rewrite (post-G12).

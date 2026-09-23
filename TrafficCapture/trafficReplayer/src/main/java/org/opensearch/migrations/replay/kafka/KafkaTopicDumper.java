@@ -1,27 +1,10 @@
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: CapturedTrafficToHttpTransactionAccumulator ChannelContextManager ISimpleTrafficCaptureSource ITrafficStreamWithKey PojoTrafficStreamAndKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G2)
-/*
-
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
-import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
@@ -29,18 +12,39 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 
+// REBUILD-LIMBO-START(G3)
+// Imports used only by the deferred HTTP-reconstruction members below. They come back with those
+// members in G3; see docs/replayerRebuildPlanA-inPlace.md G3.
+/*
+
+import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.tracing.ChannelContextManager;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+
 */
-// REBUILD-LIMBO-END(G2)
+// REBUILD-LIMBO-END(G3)
 /**
  * Encapsulates all dump-mode logic (dump-raw, dump-http, dump-both) for both
  * Kafka and file-based sources. Keeps Kafka-specific details out of TrafficReplayer.
+ *
+ * <p>Only {@code dump-raw} against Kafka is live. {@code dump-http}, {@code dump-both}, and the file
+ * source need HTTP transaction reconstruction, whose closure is the legacy accumulator and tracing
+ * chain, so they are deferred to G3 — the milestone that rebuilds source assembly. The CLI still accepts
+ * all three mode names, because they are a published contract; it rejects the two deferred ones with a
+ * message naming G3.
+ *
+ * <p>Reading here uses a plain {@link KafkaConsumer} with {@code assign}, no consumer group, an explicit
+ * seek and no commit. That is why this milestone can precede the Kafka source owner entirely: dumping
+ * needs no ownership, no partition generations, and no commit authority.
  */
-// REBUILD-LIMBO-START(G2)
-/*
 @Slf4j
 public class KafkaTopicDumper {
 
@@ -53,15 +57,29 @@ public class KafkaTopicDumper {
         return baseEpoch;
     }
 
+    /**
+     * Reads a topic and writes one line per record to stdout.
+     *
+     * <p>Carried from the pre-rebuild implementation with its parameter list intact except for the
+     * trailing {@code RootReplayerContext}, which cannot appear in a live signature because it reaches the
+     * legacy identity chain that G3 replaces.
+     *
+     * <p>{@code observedPacketConnectionTimeout} and {@code packetTimeoutParamName} are
+     * <strong>deliberately unused right now</strong>. They feed the accumulator that {@code dump-http}
+     * builds, and they are kept because the cost of a parameter that is threaded but idle is nothing,
+     * while the cost of deleting it is that someone has to rediscover which CLI option fed it. Do not
+     * "clean them up" — {@link #runDumpFromKafka} is wired to them from {@code TrafficReplayer.runDumpMode}
+     * exactly as it was before, so that wiring is preserved rather than reconstructed.
+     */
+    @SuppressWarnings("java:S1172") // unused parameters, intentionally: see javadoc
     public void runDumpFromKafka(
         String mode, String brokers, String topic, String authType,
         String kafkaUserName, String kafkaPassword, String propertyFile,
         Long startOffset, Long startTime, Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite,
-        int observedPacketConnectionTimeout, String packetTimeoutParamName,
-        RootReplayerContext topContext
+        int observedPacketConnectionTimeout, String packetTimeoutParamName
     ) throws Exception {
-        var kafkaProps = KafkaTrafficCaptureSource.buildKafkaProperties(
+        var kafkaProps = KafkaConsumerProperties.buildKafkaProperties(
             brokers, "unused-dump-group", authType, kafkaUserName, kafkaPassword, propertyFile);
         kafkaProps.remove(ConsumerConfig.GROUP_ID_CONFIG);
 
@@ -78,14 +96,36 @@ public class KafkaTopicDumper {
                 runRawFromKafka(consumer, endOffsets, endOffset, endTime,
                     previewBytesRead, previewBytesWrite);
             } else {
-                boolean emitRaw = "dump-both".equals(mode);
-                runHttpFromKafka(consumer, endOffsets, endOffset, endTime,
-                    previewBytesRead, previewBytesWrite, emitRaw,
-                    observedPacketConnectionTimeout, packetTimeoutParamName, topContext);
+                // TrafficReplayer rejects these modes before reaching here, so this is the defensive half of
+                // that check rather than the user-facing message.
+                //
+                // G3 restores this branch by replacing this throw with the call below, which is what the
+                // pre-rebuild code did and is recorded here so it does not have to be re-derived. Every
+                // argument already exists: the two timeout parameters are threaded into this method, and
+                // topContext is the one thing to add -- built by the marked region in
+                // TrafficReplayer.runDumpMode, which carries its construction verbatim.
+                //
+                //     boolean emitRaw = "dump-both".equals(mode);
+                //     runHttpFromKafka(consumer, endOffsets, endOffset, endTime,
+                //         previewBytesRead, previewBytesWrite, emitRaw,
+                //         observedPacketConnectionTimeout, packetTimeoutParamName, topContext);
+                //
+                // runHttpFromKafka itself is marked below with its signature unchanged, so the only edits
+                // are: add the topContext parameter here, delete this throw, and un-mark that method plus
+                // processHttpRecords.
+                throw new IllegalStateException(
+                    mode + " requires HTTP transaction reconstruction, which is restored in milestone G3");
             }
         }
     }
 
+// REBUILD-LIMBO-START(G3)
+// runDumpFromSource -- the file-input dump path. Blocked on ISimpleTrafficCaptureSource and
+// ITrafficStreamWithKey (G5's source abstraction) for every mode, and additionally on the accumulator
+// for the non-raw modes. Deferred to G3 with the rest of HTTP reconstruction; the open question of
+// whether the file source speaks bare base64 TrafficStream or a CaptureRecord envelope is settled
+// there, and is listed in the deferral ledger in docs/replayerRebuildStatus.md.
+/*
     @SuppressWarnings("java:S3776")
     public void runDumpFromSource(
         String mode, ISimpleTrafficCaptureSource source,
@@ -145,6 +185,8 @@ public class KafkaTopicDumper {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G3)
     private void seekToStart(KafkaConsumer<String, byte[]> consumer,
                              java.util.List<TopicPartition> partitions,
                              Long startOffset, Long startTime) {
@@ -196,6 +238,11 @@ public class KafkaTopicDumper {
         }
     }
 
+// REBUILD-LIMBO-START(G3)
+// runHttpFromKafka -- the Kafka dump-http/dump-both driver. Blocked on
+// CapturedTrafficToHttpTransactionAccumulator, ChannelContextManager and RootReplayerContext. G3 restores
+// this together with processHttpRecords and replaces the throw in runDumpFromKafka's else branch.
+/*
     @SuppressWarnings("java:S1854")
     private void runHttpFromKafka(
         KafkaConsumer<String, byte[]> consumer,
@@ -228,7 +275,7 @@ public class KafkaTopicDumper {
     }
 
 */
-// REBUILD-LIMBO-END(G2)
+// REBUILD-LIMBO-END(G3)
     /**
      * The dump loop terminates only when every assigned partition's current
      * position has reached the endOffset snapshot taken at startup. Using
@@ -240,8 +287,6 @@ public class KafkaTopicDumper {
      * Kafka client API gives us for "I've drained the snapshot I asked for"
      * and is robust to empty intermediate polls.
      */
-// REBUILD-LIMBO-START(G2)
-/*
     private static boolean isAtEnd(KafkaConsumer<String, byte[]> consumer,
                                    Map<TopicPartition, Long> endOffsets) {
         for (var entry : endOffsets.entrySet()) {
@@ -252,6 +297,12 @@ public class KafkaTopicDumper {
         return true;
     }
 
+// REBUILD-LIMBO-START(G3)
+// processHttpRecords -- applies each record to the accumulator, and carries the exhaustive
+// CaptureRecord.payload switch for the HTTP path. Blocked on the accumulator, PojoTrafficStreamAndKey,
+// TrafficStreamKeyWithKafkaRecordId, PojoKafkaCommitOffsetData and RootReplayerContext. Note the switch
+// already matches kafkaLLD 7.1 exactly, so G3 refactors its identities rather than its shape.
+/*
     private boolean processHttpRecords(
         ConsumerRecords<String, byte[]> records,
         Long endOffset, Long endTime,
@@ -351,6 +402,8 @@ public class KafkaTopicDumper {
         );
     }
 
+*/
+// REBUILD-LIMBO-END(G3)
     private static CaptureRecordProtocolViolationException protocolViolation(
         ConsumerRecord<String, byte[]> record,
         InvalidProtocolBufferException cause
@@ -376,6 +429,3 @@ public class KafkaTopicDumper {
         return rec.offset() >= endOffsets.getOrDefault(tp, Long.MAX_VALUE);
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G2)

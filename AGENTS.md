@@ -421,6 +421,15 @@ original's, and stripping it would lose real content. The verifier therefore ign
 anything it does report is a genuinely lost, added, or altered line. This is the guard rule above failing in
 miniature on the marker's own output — worth keeping visible rather than quietly restating the claim.
 
+**When you promote a member whose consumer is still deferred, keep its signature and defer only what
+cannot compile.** A parameter that no live caller reads yet costs nothing to thread through; deleting it
+costs someone a rediscovery of which option fed it, and that is the road to reinventing proven code beside
+the original instead of restoring it. Mark such a parameter's purpose in javadoc — including that it is
+intentionally unused — so it does not get tidied away as dead. Only a type that genuinely cannot appear in
+a compiled signature is dropped, and where it was dropped, the promoted member records the exact call that
+restores it and where the missing argument comes from. **Restoration should be un-marking plus wiring one
+argument, never re-deriving an argument list.**
+
 **Mark members, never whole files as a unit.** An all-or-nothing verdict on a file hides the class, its
 history, and its existing coverage, which is what makes the failure above possible. If two of five methods
 are wanted, the file sits at its final path with the other three marked around them.
