@@ -43,20 +43,22 @@ dependencies {
     implementation libs.log4j.core
     implementation libs.log4j.slf4j2.impl
 
-    // The deterministic fixtures are production-shaped: TestEventLoop implements the production
-    // ActorMailbox contract and RecordScript emits real CaptureRecord envelopes, so the fixture source
-    // set compiles against the same protobuf and Netty types production does.
+    // The deterministic fixtures are production-shaped: TestEventLoop is a real Netty EventLoop, the
+    // only thing the design lets an owner be assigned to, and RecordScript emits real CaptureRecord
+    // envelopes, so the fixture source set compiles against the same protobuf and Netty types
+    // production does.
     testFixturesImplementation project(':TrafficCapture:captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
 
     testFixturesImplementation libs.protobuf.java
-    testFixturesImplementation libs.netty.all
     testFixturesImplementation libs.slf4j.api
     testFixturesImplementation libs.junit.jupiter.api
-    // `api` rather than `implementation` because fixture signatures expose Kafka types
-    // (TopicPartition, ConsumerRecord) to their callers.
+    // `api` rather than `implementation` because fixture signatures expose these types to their
+    // callers: Netty's EventLoop/ScheduledFuture on TestEventLoop, and Kafka's TopicPartition and
+    // ConsumerRecord on the source fixtures.
+    testFixturesApi libs.netty.all
     testFixturesApi libs.kafka.clients
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
@@ -99,4 +101,4 @@ tasks.withType(Test).configureEach {
 // path it will ship from, inside REBUILD-LIMBO regions. The build needs nothing special for it, because the
 // regions are ordinary comments and every tool sees a valid source file. See AGENTS.md section 8a.
 //
-// Outstanding work: grep -rl REBUILD-LIMBO-OPEN src | wc -l
+// Outstanding work: grep -rl REBUILD-LIMBO-START src | wc -l

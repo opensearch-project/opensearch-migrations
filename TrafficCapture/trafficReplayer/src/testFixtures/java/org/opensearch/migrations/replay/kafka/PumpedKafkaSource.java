@@ -8,14 +8,6 @@
 
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-
-// REBUILD-LIMBO-START(G11)
-/*
-
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -26,83 +18,31 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import org.opensearch.migrations.replay.traffic.generator.RecordScript;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInput.PartitionRecordBatch;
+import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 
 import org.apache.kafka.common.TopicPartition;
 
-*/
-// REBUILD-LIMBO-END(G11)
 /**
  * Deterministic Kafka-source harness driven only by explicit {@link #runOnce()} calls.
  *
  * <p>The harness owns scripts and observations, while a pluggable driver owns source state
  * transitions. S8 can connect the production Kafka-source owner through that driver without
  * rewriting record scripts or observation assertions.
+ *
+ * <p>The messages it carries are the production ones — {@link KafkaSourceInput} in,
+ * {@link PartitionRecordBatch} out, {@link ApplicationKafkaRecord} inside. It previously declared
+ * its own copies of the identities and of the input family, which meant a driver written against
+ * the fixture proved nothing about a driver written against the real types, and the real
+ * {@code CaptureProtocolViolationDetected} carried a diagnostic the copy silently dropped.
+ *
+ * <p>{@link Observation} and {@link PauseReason} are the harness's own, because they describe what
+ * a test watches rather than what the source exchanges. The design's requirement that the three
+ * pause reasons stay independent ({@code kafkaLLD §17.4}) is why the reason is recorded on each
+ * pause instead of being collapsed into a boolean.
  */
-// REBUILD-LIMBO-START(G11)
-/*
 public final class PumpedKafkaSource {
-    public record PartitionGenerationId(TopicPartition topicPartition, long localSequence) {
-        public PartitionGenerationId {
-            Objects.requireNonNull(topicPartition);
-            if (localSequence < 0) {
-                throw new IllegalArgumentException("localSequence must not be negative");
-            }
-        }
-    }
-
-    public record PartitionBatchRequestId(PartitionGenerationId generation, long localSequence) {
-        public PartitionBatchRequestId {
-            Objects.requireNonNull(generation);
-            if (localSequence < 0) {
-                throw new IllegalArgumentException("localSequence must not be negative");
-            }
-        }
-    }
-
-    public sealed interface KafkaSourceInput permits
-        RequestNextPartitionBatch,
-        RecordProcessingFinished,
-        GenerationCleanupFinished,
-        CaptureProtocolViolationDetected {}
-
-    public record RequestNextPartitionBatch(PartitionBatchRequestId requestId) implements KafkaSourceInput {
-        public RequestNextPartitionBatch {
-            Objects.requireNonNull(requestId);
-        }
-    }
-
-    public record RecordProcessingFinished(RecordScript.RecordId recordId) implements KafkaSourceInput {
-        public RecordProcessingFinished {
-            Objects.requireNonNull(recordId);
-        }
-    }
-
-    public record GenerationCleanupFinished(PartitionGenerationId generation) implements KafkaSourceInput {
-        public GenerationCleanupFinished {
-            Objects.requireNonNull(generation);
-        }
-    }
-
-    public record CaptureProtocolViolationDetected(RecordScript.RecordId recordId) implements KafkaSourceInput {
-        public CaptureProtocolViolationDetected {
-            Objects.requireNonNull(recordId);
-        }
-    }
-
-    public record PartitionRecordBatch(
-        PartitionBatchRequestId requestId,
-        List<RecordScript.ScriptedRecord> records
-    ) {
-        public PartitionRecordBatch {
-            Objects.requireNonNull(requestId);
-            records = List.copyOf(records);
-            if (records.isEmpty()) {
-                throw new IllegalArgumentException("PartitionRecordBatch must not be empty");
-            }
-        }
-    }
-
     public enum PauseReason {
         BATCH_DEMAND,
         PRIOR_GENERATION_CLEANUP,
@@ -141,7 +81,7 @@ public final class PumpedKafkaSource {
     public interface DriverPort {
         Optional<KafkaSourceInput> pollInput();
 
-        Optional<List<RecordScript.ScriptedRecord>> pollKafka();
+        Optional<List<ApplicationKafkaRecord>> pollKafka();
 
         void pause(TopicPartition topicPartition, PauseReason reason);
 
@@ -154,7 +94,7 @@ public final class PumpedKafkaSource {
 
     private final SourceOwnerDriver driver;
     private final Deque<KafkaSourceInput> inputs = new ArrayDeque<>();
-    private final Deque<List<RecordScript.ScriptedRecord>> scriptedBatches = new ArrayDeque<>();
+    private final Deque<List<ApplicationKafkaRecord>> scriptedBatches = new ArrayDeque<>();
     private final List<Observation> observations = new ArrayList<>();
     private boolean wakeupPending;
     private boolean running;
@@ -173,7 +113,7 @@ public final class PumpedKafkaSource {
         }
     }
 
-    public void scriptBatch(Collection<RecordScript.ScriptedRecord> records) {
+    public void scriptBatch(Collection<ApplicationKafkaRecord> records) {
         requireHealthy();
         var batch = List.copyOf(records);
         if (batch.isEmpty()) {
@@ -229,7 +169,7 @@ public final class PumpedKafkaSource {
         }
 
         @Override
-        public Optional<List<RecordScript.ScriptedRecord>> pollKafka() {
+        public Optional<List<ApplicationKafkaRecord>> pollKafka() {
             return Optional.ofNullable(scriptedBatches.poll());
         }
 
@@ -266,6 +206,3 @@ public final class PumpedKafkaSource {
         }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)
