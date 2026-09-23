@@ -893,8 +893,11 @@ Replay intake:
 - records every expected connection cleanup result; and
 - continues accepting completion and cleanup inputs through its input queue.
 
-Unsent requests cancel immediately. Requests already sent to the target and the tuple chain needed
-to finish those requests may continue until the deadline.
+A request cancels immediately unless its **final** request bytes are already on the wire — so both
+unsent work and work partway through sending cancel, since neither can finish without target writes
+that graceful cancellation will not start. A fully written request, and the tuple chain needed to
+finish it, may continue until the deadline. `connLLD §17.1` defines the boundary and `§8` the two
+write milestones it rests on.
 
 While the callback waits for the grace deadline, the Kafka thread processes commit-related and
 lifecycle inputs already submitted to `KafkaSourceInputQueue`. Queue submission signals the
@@ -1037,8 +1040,9 @@ the process supervisor immediately.
 
 ### 17.5 Revocation
 
-- Graceful cancellation immediately cancels unsent work.
-- Started target and tuple work may finish and commit during the grace interval.
+- Graceful cancellation immediately cancels unsent work, and work partway through sending.
+- Fully sent target work, and the tuple work it requires, may finish and commit during the grace
+  interval.
 - Successful force-cancellation queue submission allows the callback to return before cleanup
   finishes.
 - The successor generation stays paused until `GenerationCleanupFinished`.

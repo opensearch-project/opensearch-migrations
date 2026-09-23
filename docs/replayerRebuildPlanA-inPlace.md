@@ -486,8 +486,11 @@ throw is process-fatal, not an outcome value. Strike `PreparationOutcome.Filtere
 the request in the registry**; `RequestProcessingFinished` is gated on `TupleDurable` and routed through
 the connection owner. Owner removal requires an empty registry. Permits are acquired for the execution
 head immediately before the turn and released as soon as an attempt produces an outcome — never held
-across backoff, source-response waits, or tuple writes. `FirstTargetWriteSubmitted` is reported once
-per request and stays local to the connection owner. `TargetAttemptOutcome` replaces exception-carried
+across backoff, source-response waits, or tuple writes. `FirstTargetWriteSubmitted` and
+`FinalTargetWriteSubmitted` are each reported once per request and stay local to the connection owner.
+They answer different questions and both are needed: first-write decides whether a cancelled
+request's channel must be closed rather than reused, and final-write decides whether graceful
+cancellation waits on the request at all (`connLLD §8`, `§17.1`). `TargetAttemptOutcome` replaces exception-carried
 no-response. Tuple output is unconditional and retried to durability.
 
 **Exit:** every admitted request produces at most one turn completion and at most one processing

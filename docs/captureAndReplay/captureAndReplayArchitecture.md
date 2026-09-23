@@ -1145,9 +1145,11 @@ partition the replayer holds — not only the revoked ones — and blocks the en
 rebalance while it runs.
 
 When Kafka revokes the partition, the replayer stops accepting records from the revoked
-generation, immediately cancels work that has not started an external target or tuple operation,
-and gives already-started target and tuple work the grace interval to finish — completions during
-that wait may still commit. At the deadline it sends force cancellation, and `onPartitionsRevoked`
+generation and immediately cancels every request whose complete bytes are not already on the wire —
+including one partway through sending, which cannot finish without further target writes that
+graceful cancellation will not issue. A fully sent request, and the tuple work needed to finish it,
+get the grace interval — completions during that wait may still commit, and only when the response
+was obtained, no retry remains, and the tuple is durable. At the deadline it sends force cancellation, and `onPartitionsRevoked`
 returns once replay intake accepts that notification, without waiting for every forced cleanup to
 finish. Cancelled work requires redelivery rather than counting as successful processing, and a
 newer generation of the partition does not process records until the old generation's in-process

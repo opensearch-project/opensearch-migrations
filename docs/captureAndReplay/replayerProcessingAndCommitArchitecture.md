@@ -1274,8 +1274,12 @@ When revocation begins, the Kafka source submits one scoped graceful-cancellatio
 intake. That input identifies the revoked partition generation and the grace deadline.
 
 1. replay intake stops admitting new work from that partition generation;
-2. as each owner processes the cancellation, it immediately cancels work whose target request has not been sent, including work queued behind a request that is still finishing;
-3. a request already sent to the target may finish target processing and durable tuple output
+2. as each owner processes the cancellation, it immediately cancels every request whose **final**
+   request bytes have not been written to the target — work not yet begun, work queued behind a
+   request that is still finishing, and work partway through sending. A request only partly written
+   cannot finish without issuing further target writes, and graceful cancellation starts no new
+   external work, so waiting on it spends the interval on something that cannot complete;
+3. a request whose final bytes are on the wire may finish target processing and durable tuple output
    during the grace interval;
 4. a tuple write already in flight may finish during that interval;
 5. completed work may still produce commit requests and the Kafka source owner may attempt them;
