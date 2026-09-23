@@ -78,7 +78,7 @@ Three consequences worth stating, because each replaces something the earlier sh
 - **The module keeps its real Gradle path, Maven coordinates, package names and jib image mapping
   throughout.** That was the original mechanic's whole purpose, and it now holds trivially rather than by
   arrangement. There is no end-state rename to forget.
-- **Progress is measurable and falsifiable.** `grep -rl REBUILD-LIMBO-OPEN src` is the outstanding-work
+- **Progress is measurable and falsifiable.** `grep -rl REBUILD-LIMBO-START src` is the outstanding-work
   count, and the rebuild is complete when it reaches zero. That is a check, not a judgment.
 - **The assembled application is broken for most of this plan, and that is expected.** Individual milestones
   are proved in isolation. `G10` is the first that needs a working image.
@@ -567,7 +567,7 @@ no longer a distinct step: it happens when the members those consumers need are 
 
 What remains under this heading is bookkeeping that the earlier milestones produce as a side effect:
 
-- Every `REBUILD-LIMBO` region resolved, so `grep -rl REBUILD-LIMBO-OPEN src` is empty. This is the real
+- Every `REBUILD-LIMBO` region resolved, so `grep -rl REBUILD-LIMBO-START src` is empty. This is the real
   completion signal for the whole rebuild, and it is checkable.
 - The `sonar-project.properties:274` path glob updated if `ClientConnectionPool` is gone.
 - The `REBUILD-LIMBO` scaffolding note in the module's `build.gradle` removed with the last region.
@@ -665,7 +665,7 @@ un-marked wholesale without the legacy structure stripped, and the marked count 
 
 Signals to report, any one of which is worth the owner's attention:
 
-1. `grep -rl REBUILD-LIMBO-OPEN src` does not fall across a milestone that was supposed to resolve regions.
+1. `grep -rl REBUILD-LIMBO-START src` does not fall across a milestone that was supposed to resolve regions.
 2. A new class or test is added where a marked counterpart existed, without that counterpart having been read
    and its reuse explicitly rejected. This is an `../AGENTS.md` §8a violation and has already happened once.
 3. Any escape or transformation of marked code is introduced without a guard that reverses it mechanically.

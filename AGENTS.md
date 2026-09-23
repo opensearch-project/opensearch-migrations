@@ -301,7 +301,7 @@ these apply to the decisions the designs leave to the implementer.
 ## 8a. Limbo is the first place to look, not a graveyard
 
 Carried-but-not-yet-refactored code stays **in place, at the path it will ship from**, marked with
-`REBUILD-LIMBO-OPEN(<milestone>)` / `REBUILD-LIMBO-CLOSED(<milestone>)` around a `/* */` region whose
+`REBUILD-LIMBO-START(<milestone>)` / `REBUILD-LIMBO-END(<milestone>)` around a `/* */` region whose
 delimiters sit on their own lines. The code inside is verbatim, so blame survives both the carry and the
 eventual restore — un-marking is a pure deletion of the marker and delimiter lines, which never touches a
 code line. The only lines that change are inner comment delimiters, escaped so the region cannot terminate

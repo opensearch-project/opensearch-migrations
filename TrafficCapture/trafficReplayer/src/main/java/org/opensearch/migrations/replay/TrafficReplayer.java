@@ -572,7 +572,7 @@ public class TrafficReplayer {
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
         }
     }
-    // REBUILD-LIMBO-OPEN(G1)
+    // REBUILD-LIMBO-START(G1)
     // runDumpMode -- blocked on P10 (KafkaTopicDumper, TrafficStreamDumper, HttpTransactionDumper),
     // RootReplayerContext, TrafficCaptureSourceFactory.
     // Open decision: the file source decodes bare base64 TrafficStream while Kafka decodes a CaptureRecord
@@ -610,7 +610,7 @@ public class TrafficReplayer {
         }
     }
     */
-    // REBUILD-LIMBO-CLOSED(G1)
+    // REBUILD-LIMBO-END(G1)
 
     /**
      * Parse and validate the replay target URI and timing params. On invalid input this prints the
@@ -654,7 +654,7 @@ public class TrafficReplayer {
         }
         return uri;
     }
-    // REBUILD-LIMBO-OPEN(G9)
+    // REBUILD-LIMBO-START(G9)
     // runReplayMode -- blocked on TrafficReplayerTopLevel, which is replaced rather than carried.
     // Expected to be rewritten against the design's owners rather than restored, so new blame here is honest.
     // Kept verbatim anyway so the functionality it wires up is enumerable rather than remembered.
@@ -825,8 +825,8 @@ public class TrafficReplayer {
         }
     }
     */
-    // REBUILD-LIMBO-CLOSED(G9)
-    // REBUILD-LIMBO-OPEN(G5)
+    // REBUILD-LIMBO-END(G9)
+    // REBUILD-LIMBO-START(G5)
     // buildTransformerSupplier -- blocked on P4 (FilteringTransformerWrapper) and the
     // jsonMessageTransformerInterface dependency. TransformationLoader and PredicateLoader are already available.
     // Nothing here is in doubt; it returns verbatim once P4 lands.
@@ -848,8 +848,8 @@ public class TrafficReplayer {
         return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
     }
     */
-    // REBUILD-LIMBO-CLOSED(G5)
-    // REBUILD-LIMBO-OPEN(G9)
+    // REBUILD-LIMBO-END(G5)
+    // REBUILD-LIMBO-START(G9)
     // configureResponsePostProcessor -- blocked on TrafficReplayerTopLevel (it assigns
     // tr.responsePostProcessor directly). The loader call itself is final-form.
     /*
@@ -862,8 +862,8 @@ public class TrafficReplayer {
         }
     }
     */
-    // REBUILD-LIMBO-CLOSED(G9)
-    // REBUILD-LIMBO-OPEN(G5)
+    // REBUILD-LIMBO-END(G9)
+    // REBUILD-LIMBO-START(G5)
     // createS3TupleWriterIfConfigured -- blocked ONLY on the TupleWriter shape.
     // S3TupleSink is a reusable library object in :TrafficCapture:tupleSink and the S3 client construction is not
     // in question. The blocker is the return type: ThreadLocalTupleWriter declares a class in ...replay.sink,
@@ -904,8 +904,8 @@ public class TrafficReplayer {
         );
     }
     */
-    // REBUILD-LIMBO-CLOSED(G5)
-    // REBUILD-LIMBO-OPEN(G9)
+    // REBUILD-LIMBO-END(G5)
+    // REBUILD-LIMBO-START(G9)
     // setupShutdownHookForReplayer -- blocked on TrafficReplayerTopLevel.
     // This is one of D14's three unbounded waits for orderly recovery. A defect to fix at G9, not behavior to
     // reproduce -- carried so the current behavior is legible while it is being replaced.
@@ -933,15 +933,15 @@ public class TrafficReplayer {
         }));
     }
     */
-    // REBUILD-LIMBO-CLOSED(G9)
-    // REBUILD-LIMBO-OPEN(G9)
+    // REBUILD-LIMBO-END(G9)
+    // REBUILD-LIMBO-START(G9)
     // awaitReplayerShutdown -- blocked on TrafficReplayerTopLevel. See the D14 note above.
     /*
     static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
         trafficReplayer.shutdown(null);
     }
     */
-    // REBUILD-LIMBO-CLOSED(G9)
+    // REBUILD-LIMBO-END(G9)
 
     /**
      * This method returns a username:password Base64 encoded basic auth header
@@ -969,7 +969,7 @@ public class TrafficReplayer {
         );
     }
 
-    // REBUILD-LIMBO-OPEN(G9)
+    // REBUILD-LIMBO-START(G9)
     // buildAuthTransformerFactory -- blocked on P6 (the five transform/ auth factories), itself gated on
     // P1, because IAuthTransformer references HttpJsonRequestWithFaultingPayload in the datahandler layer.
     // Pure argument arbitration over the auth options; returns verbatim once P1 and P6 land. Its two helpers,
@@ -1020,7 +1020,7 @@ public class TrafficReplayer {
         }
     }
     */
-    // REBUILD-LIMBO-CLOSED(G9)
+    // REBUILD-LIMBO-END(G9)
 
     /**
      * Distinct from the exit codes G9 owns -- 80 for owner loss and 89 for an unexpected fatal error -- and

@@ -125,7 +125,7 @@ public final class ReplayIdentity {
         }
     }
 
-    // REBUILD-LIMBO-OPEN(G3)
+    // REBUILD-LIMBO-START(G3)
     // replayRequestId(UniqueReplayerRequestKey) -- the only member of this class that reaches a
     // left-behind legacy identity. UniqueReplayerRequestKey stays in trafficReplayerLegacy; this
     // adapter exists to translate it, so it goes when its 18 remaining callers move to the eight
@@ -147,7 +147,7 @@ public final class ReplayIdentity {
         );
     }
     */
-    // REBUILD-LIMBO-CLOSED(G3)
+    // REBUILD-LIMBO-END(G3)
 
     public sealed interface RecordId permits KafkaRecordId, TrafficStreamRecordId, SourceControlRecordId {}
 

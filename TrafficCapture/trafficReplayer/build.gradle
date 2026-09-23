@@ -99,4 +99,4 @@ tasks.withType(Test).configureEach {
 // path it will ship from, inside REBUILD-LIMBO regions. The build needs nothing special for it, because the
 // regions are ordinary comments and every tool sees a valid source file. See AGENTS.md section 8a.
 //
-// Outstanding work: grep -rl REBUILD-LIMBO-OPEN src | wc -l
+// Outstanding work: grep -rl REBUILD-LIMBO-START src | wc -l

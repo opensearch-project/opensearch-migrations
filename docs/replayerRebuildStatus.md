@@ -175,7 +175,7 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 
 | Scaffold | Introduced | Removal | State |
 |---|---|---|---|
-| `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-OPEN src \| wc -l` is the count; **238 files** at G0 |
+| `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-START src \| wc -l` is the count; **238 files** at G0 |
 | The `REBUILD-LIMBO` note in the module's `build.gradle` | G0 | with the last region | open |
 
 Resolved and removed on 2026-09-23, recorded because they were previously tracked here: the
