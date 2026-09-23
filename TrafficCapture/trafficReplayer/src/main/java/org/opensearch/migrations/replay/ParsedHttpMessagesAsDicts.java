@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: NettyDecodedHttpRequestConvertHandler NettyDecodedHttpResponseConvertHandler NettyJsonBodyAccumulateHandler . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -28,6 +39,8 @@ import io.netty.handler.codec.base64.Base64Dialect;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * TODO - This class will pull all bodies in as a byte[], even if that byte[] isn't
  * going to be used.  While in most cases, we'll likely want to emit all of the bytes
@@ -37,6 +50,8 @@ import lombok.extern.slf4j.Slf4j;
  * stream-like interface for bodies instead of parsing the bytes.  Just leaving the
  * ByteBufs as is might make sense, though it requires callers to understand ownership.
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
@@ -46,9 +61,12 @@ public class ParsedHttpMessagesAsDicts {
     public static final String METHOD_KEY = "Method";
     public static final String HTTP_VERSION_KEY = "HTTP-Version";
     public static final String PAYLOAD_KEY = "payload";
+    public static final String SOURCE_RESPONSE_STATUS_KEY = "sourceResponseStatus";
+    public static final String SOURCE_RESPONSE_STATUS_EXPIRED = "expired";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
+    public final Optional<String> sourceResponseStatusOp;
     public final Optional<Map<String, Object>> targetRequestOp;
     public final List<Map<String, Object>> targetResponseList;
     public final IReplayContexts.ITupleHandlingContext context;
@@ -65,6 +83,7 @@ public class ParsedHttpMessagesAsDicts {
             tuple.context,
             getSourceRequestOp(tuple.context, sourcePairOp),
             getSourceResponseOp(tuple, sourcePairOp),
+            getSourceResponseStatusOp(sourcePairOp),
             getTargetRequestOp(tuple),
             getTargetResponseOp(tuple)
         );
@@ -86,7 +105,9 @@ public class ParsedHttpMessagesAsDicts {
         SourceTargetCaptureTuple tuple,
         Optional<RequestResponsePacketPair> sourcePairOp
     ) {
-        return sourcePairOp.flatMap(
+        return sourcePairOp
+            .filter(p -> p.completionStatus != RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY)
+            .flatMap(
             p -> Optional.ofNullable(p.responseData)
                 .flatMap(d -> Optional.ofNullable(d.packetBytes))
                 .map(
@@ -101,6 +122,14 @@ public class ParsedHttpMessagesAsDicts {
                     )
                 )
         );
+    }
+
+    private static Optional<String> getSourceResponseStatusOp(
+        Optional<RequestResponsePacketPair> sourcePairOp
+    ) {
+        return sourcePairOp
+            .filter(p -> p.completionStatus == RequestResponsePacketPair.ReconstructionStatus.EXPIRED_PREMATURELY)
+            .map(p -> SOURCE_RESPONSE_STATUS_EXPIRED);
     }
 
     private static Optional<Map<String, Object>> getSourceRequestOp(
@@ -121,21 +150,45 @@ public class ParsedHttpMessagesAsDicts {
         Optional<Map<String, Object>> targetRequestOp3,
         List<Map<String, Object>> targetResponseOps4
     ) {
+        this(
+            context,
+            sourceRequestOp1,
+            sourceResponseOp2,
+            Optional.empty(),
+            targetRequestOp3,
+            targetResponseOps4
+        );
+    }
+
+    private ParsedHttpMessagesAsDicts(
+        IReplayContexts.ITupleHandlingContext context,
+        Optional<Map<String, Object>> sourceRequestOp1,
+        Optional<Map<String, Object>> sourceResponseOp2,
+        Optional<String> sourceResponseStatusOp3,
+        Optional<Map<String, Object>> targetRequestOp4,
+        List<Map<String, Object>> targetResponseOps5
+    ) {
         this.context = context;
         this.sourceRequestOp = sourceRequestOp1;
         this.sourceResponseOp = sourceResponseOp2;
-        this.targetRequestOp = targetRequestOp3;
-        this.targetResponseList = targetResponseOps4;
-        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps4);
+        this.sourceResponseStatusOp = sourceResponseStatusOp3;
+        this.targetRequestOp = targetRequestOp4;
+        this.targetResponseList = targetResponseOps5;
+        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps5);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Build the structured tuple map used by {@link org.opensearch.migrations.replay.sink.TupleSink} implementations.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public Map<String, Object> toTupleMap(SourceTargetCaptureTuple tuple) {
         var map = new LinkedHashMap<String, Object>();
         sourceRequestOp.ifPresent(r -> map.put("sourceRequest", r));
         sourceResponseOp.ifPresent(r -> map.put("sourceResponse", r));
+        sourceResponseStatusOp.ifPresent(status -> map.put(SOURCE_RESPONSE_STATUS_KEY, status));
         targetRequestOp.ifPresent(r -> map.put("targetRequest", r));
         map.put("targetResponses", targetResponseList);
         var key = tuple.getRequestKey();
@@ -273,3 +326,6 @@ public class ParsedHttpMessagesAsDicts {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

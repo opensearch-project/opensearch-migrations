@@ -87,6 +87,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 10, unit: 'MINUTES') {
                         sh 'docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s'
+                        sh 'bash TrafficCapture/dockerSolution/src/main/docker/test-multi-proxy-peer-loss.sh'
                     }
                 }
             }

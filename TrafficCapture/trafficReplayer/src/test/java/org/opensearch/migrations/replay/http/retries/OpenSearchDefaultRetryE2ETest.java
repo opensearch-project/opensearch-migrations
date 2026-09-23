@@ -1,11 +1,27 @@
 package org.opensearch.migrations.replay.http.retries;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ActorRequestTestUtils NettyPacketToHttpConsumer NettyPacketToHttpConsumerTest RequestSenderOrchestrator TargetConnectionOwner . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.ActorRequestTestUtils.RequestProcessingFixture;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformedTargetRequestAndResponseList;
@@ -14,6 +30,9 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -23,14 +42,18 @@ import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.Unpooled;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import static org.opensearch.migrations.replay.ActorRequestTestUtils.schedulePreparedRequest;
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
 public class OpenSearchDefaultRetryE2ETest {
+    private static final PartitionGenerationId TEST_GENERATION =
+        new PartitionGenerationId(new TopicPartition("opensearch-default-retry-e2e-test", 3), 11);
 
     private static final String BULK_BODY =
         "{\"index\":{\"_index\":\"test\",\"_id\":\"1\"}}\n" +
@@ -86,8 +109,17 @@ public class OpenSearchDefaultRetryE2ETest {
             httpServer.localhostEndpoint(), false, 1,
             "targetConnectionPool for OpenSearchDefaultRetryE2ETest");
         var retryFactory = new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry());
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT));
+            (replaySession, ctx, firstTargetWriteSubmitted) -> new NettyPacketToHttpConsumer(
+                replaySession,
+                ctx,
+                REGULAR_RESPONSE_TIMEOUT,
+                firstTargetWriteSubmitted
+            ),
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            acceptingLifecycleSink(),
+            fatalFailures::add);
         var requestContext = rootContext.getTestConnectionRequestContext(0);
         var sourceRequestPackets = new ByteBufList(
             Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)));
@@ -97,20 +129,101 @@ public class OpenSearchDefaultRetryE2ETest {
             new TransformedOutputAndResult<>(packetProducer, HttpRequestTransformationStatus.skipped()),
             TextTrackedFuture.completedFuture(
                 new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes), () -> "static rrp"));
-        return senderOrchestrator.scheduleRequest(
-            requestContext.getReplayerRequestKey(), requestContext,
+        var processing = new RequestProcessingFixture();
+        return schedulePreparedRequest(
+            senderOrchestrator,
+            TEST_GENERATION,
+            requestContext,
             Instant.now().plus(Duration.ofMillis(10)), Duration.ofMillis(1),
-            packetProducer, retryVisitor)
-            .whenComplete((v, t) -> {
+            packetProducer, retryVisitor,
+            processing.registration()
+        ).thenCompose(
+            result -> {
+                if (!processing.completeTupleDurable()) {
+                    return TextTrackedFuture.failedFuture(
+                        new IllegalStateException("request processing was already settled"),
+                        () -> "settle OpenSearch retry test request processing"
+                    );
+                }
+                return new TextTrackedFuture<>(
+                    processing.lifecycleHandled().toCompletableFuture(),
+                    () -> "wait for OpenSearch retry test request processing lifecycle"
+                ).thenApply(
+                    ignored -> result,
+                    () -> "preserve the retry result after request processing finishes"
+                );
+            },
+            () -> "settle OpenSearch retry test request processing after target completion"
+        ).thenCompose(
+            result -> senderOrchestrator.scheduleActorClose(
+                requestContext.getChannelKeyContext(),
+                0,
+                TEST_GENERATION,
+                Instant.now()
+            ).thenApply(ignored -> result, () -> "preserve the retry result after closing its connection actor"),
+            () -> "close the connection actor after retry processing finishes"
+        ).thenCompose(
+            result -> new TextTrackedFuture<>(
+                senderOrchestrator.shutdownActors(
+                    new CancellationException("OpenSearch retry test cleanup")
+                ).toCompletableFuture(),
+                () -> "wait for OpenSearch retry test replay actors to stop"
+            ).thenApply(ignored -> result, () -> "preserve the retry result after stopping replay actors"),
+            () -> "stop replay actors after the connection actor reaches its final state"
+        ).thenCompose(
+            result -> new TextTrackedFuture<>(
+                clientConnectionPool.shutdownNow(),
+                () -> "wait for the retry test connection pool to stop"
+            ).thenApply(ignored -> result, () -> "preserve the retry result after stopping Netty"),
+            () -> "stop Netty only after the connection actor reaches its final state"
+        ).whenComplete(
+            (ignored, failure) -> {
                 requestContext.close();
-                clientConnectionPool.shutdownNow();
-            }, () -> "cleanup");
+                if (failure == null) {
+                    assertNoFatalFailures(fatalFailures);
+                } else {
+                    fatalFailures.forEach(failure::addSuppressed);
+                }
+            },
+            () -> "close the retry test request context"
+        );
     }
 
+    private static void assertNoFatalFailures(List<Error> fatalFailures) {
+        Assertions.assertTrue(
+            fatalFailures.isEmpty(),
+            () -> "unexpected process-fatal replay failures: " + fatalFailures
+        );
+    }
+
+    private static TargetConnectionOwner.RequestLifecycleSink acceptingLifecycleSink() {
+        return new TargetConnectionOwner.RequestLifecycleSink() {
+            @Override
+            public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return CompletableFuture.completedFuture(null);
+            }
+        };
+    }
+
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Gets the result and exercises the TrackedFuture diagnostic supplier chain
      * (via toString) to ensure no exceptions in the tracing lambdas.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private TransformedTargetRequestAndResponseList getResultAndVerifyDiagnostics(
         TrackedFuture<String, TransformedTargetRequestAndResponseList> future) throws Exception
     {
@@ -390,3 +503,6 @@ public class OpenSearchDefaultRetryE2ETest {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

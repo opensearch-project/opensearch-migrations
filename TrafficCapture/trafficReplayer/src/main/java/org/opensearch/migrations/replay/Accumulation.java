@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -49,7 +60,11 @@ public class Accumulation {
     int startingSourceRequestIndex;
     private boolean hasBeenExpired;
     final int sourceGeneration;
+*/
+// REBUILD-LIMBO-END(G11)
     /** True when this connection was mid-flight during a partition reassignment (resumed). */
+// REBUILD-LIMBO-START(G11)
+/*
     final boolean isResumedConnection;
 
     public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
@@ -144,21 +159,29 @@ public class Accumulation {
         return rrPairWithCallback != null;
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * It is illegal to call this when rrPair may be equal to null.  If the caller isn't sure,
      * hasRrPair() should be called to first check.
      * @return
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public @NonNull RequestResponsePacketPair getRrPair() {
         assert rrPairWithCallback != null;
         return rrPairWithCallback.pair;
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * It is illegal to call this when rrPair may be equal to null.  If the caller isn't sure,
      * hasRrPair() should be called to first check.
      * @return
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public @NonNull RequestResponsePacketPairWithCallback getRrPairWithCallback() {
         assert rrPairWithCallback != null;
         return rrPairWithCallback;
@@ -181,6 +204,8 @@ public class Accumulation {
         return sb.toString();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Accumulations are reset for each new HttpRequest that is discovered.  This value indicates how
      * many times the object has been reset, indicating in a logical sequence of requests against this
@@ -188,6 +213,8 @@ public class Accumulation {
      * will increase this value by 1.
      * @return
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public int getIndexOfCurrentRequest() {
         return numberOfResets.get();
     }
@@ -206,3 +233,6 @@ public class Accumulation {
         this.rrPairWithCallback = null;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

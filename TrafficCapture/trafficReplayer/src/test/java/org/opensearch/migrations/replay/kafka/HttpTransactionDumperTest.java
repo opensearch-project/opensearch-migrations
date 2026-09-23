@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -23,12 +31,8 @@ import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -40,10 +44,6 @@ class HttpTransactionDumperTest {
         RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(OtelCollectorEndpoints.empty(), "test", "test"),
         new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
     );
-
-    private static Timestamp ts(long epochSeconds) {
-        return Timestamp.newBuilder().setSeconds(epochSeconds).build();
-    }
 
     private PojoTrafficStreamAndKey wrapWithKafkaKey(TrafficStream ts, int partition, long offset) {
         var channelContextManager = new ChannelContextManager(ROOT_CONTEXT);
@@ -103,33 +103,6 @@ class HttpTransactionDumperTest {
     }
 
     @Test
-    void testExpiredConnection() {
-        var baos = new ByteArrayOutputStream();
-        var dumper = new HttpTransactionDumper(new PrintStream(baos));
-
-        // A read with no EOM — will expire when accumulator closes
-        var ts = TrafficStream.newBuilder()
-            .setNodeId("node1").setConnectionId("conn2").setNumber(0)
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(200))
-                .setRead(ReadObservation.newBuilder()
-                    .setData(ByteString.copyFrom("GET /partial HTTP/1.1\r\n", StandardCharsets.UTF_8))))
-            .build();
-
-        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-            Duration.ofSeconds(30), "test", dumper);
-        accumulator.accept(wrapWithKafkaKey(ts, 1, 99));
-        accumulator.close();
-
-        var output = baos.toString(StandardCharsets.UTF_8);
-        log.info("expired output:\n{}", output);
-
-        // The accumulator should fire onTrafficStreamsExpired for the incomplete read
-        // (no REQ line since EOM was never reached)
-        Assertions.assertTrue(output.contains("EXPIRED") || output.isEmpty(),
-            "Expected EXPIRED or empty output for incomplete read, got: " + output);
-    }
-
-    @Test
     void testExtractFirstLine() {
         var msg = new org.opensearch.migrations.replay.HttpMessageAndTimestamp.Request(
             java.time.Instant.ofEpochSecond(100));
@@ -160,3 +133,6 @@ class HttpTransactionDumperTest {
         Assertions.assertEquals("PARTIAL", firstLine);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

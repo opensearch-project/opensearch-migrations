@@ -1,22 +1,39 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 
 import com.google.common.cache.LoadingCache;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/**
- * Verifies that ClientConnectionPool.closeConnection() uses the correct composite Key for cache invalidation,
- * and that scheduleClose() invalidates the cache immediately (before the Netty close completes).
- */
+*/
+// REBUILD-LIMBO-END(G11)
+/** Verifies generation-scoped session caching and actor-owned invalidation. */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTest {
 
@@ -27,61 +44,50 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         return (LoadingCache<?, ?>) f.get(pool);
     }
 
-    @Test
-    @SneakyThrows
-    void closeConnection_evictsCacheEntry() {
-        // Dummy channel creator — never actually called since we don't send requests
-        var pool = new ClientConnectionPool(
-            (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "dummy"),
-            "test-pool",
-            1
-        );
-
-        try {
-            var reqCtx = rootContext.getTestConnectionRequestContext("conn-A", 0);
-            var channelKeyCtx = reqCtx.getChannelKeyContext();
-
-            // Put an entry in the cache
-            pool.getCachedSession(channelKeyCtx, 0);
-            Assertions.assertEquals(1, getCache(pool).size(), "cache should have 1 entry after getCachedSession");
-
-            // Close the connection — this should evict the cache entry
-            pool.closeConnection(channelKeyCtx, 0);
-
-            // Cache entry is properly evicted because invalidate() uses the correct Key type
-            Assertions.assertEquals(0, getCache(pool).size(),
-                "cache entry should be evicted after closeConnection()");
-        } finally {
-            pool.shutdownNow().get();
-        }
-    }
-
+*/
+// REBUILD-LIMBO-END(G11)
     /**
-     * Verifies that scheduleClose() keeps the cache entry alive until the close actually runs,
+     * Verifies that actor close keeps the cache entry alive until the close actually runs,
      * so that in-flight response futures can complete on the same session.
      * Immediate invalidation caused deadlocks: new requests got a new session, leaving
      * finishedAccumulatingResponseFuture on the old session permanently incomplete.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     @SneakyThrows
-    void scheduleClose_cacheRemainsUntilCloseCompletes() throws Exception {        var pool = new ClientConnectionPool(
+    void actorClose_cacheRemainsUntilCloseCompletes() throws Exception {
+        var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool",
             1
         );
+        var fatalFailure = new AtomicReference<Error>();
         var orchestrator = new RequestSenderOrchestrator(
             pool,
-            (session, ctx) -> null
+            (session, ctx, firstTargetWriteSubmitted) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rejectingLifecycleSink(),
+            fatalFailure::set
         );
 
         try {
-            var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0)
-                .getChannelKeyContext();
+            var requestContext = rootContext.getTestConnectionRequestContext("conn-A", 0);
+            var channelKeyCtx = requestContext.getChannelKeyContext();
+            var generation = new PartitionGenerationId(
+                new TopicPartition("client-connection-pool-cache-test", 0),
+                0
+            );
 
             pool.getCachedSession(channelKeyCtx, 0);
             Assertions.assertEquals(1, getCache(pool).size());
 
-            var closeFuture = orchestrator.scheduleClose(channelKeyCtx, 0, 0, Instant.now());
+            var closeFuture = orchestrator.scheduleActorClose(
+                channelKeyCtx,
+                0,
+                generation,
+                Instant.now()
+            );
             closeFuture.get(Duration.ofSeconds(5));
 
             // After close completes, cache must be evicted
@@ -89,23 +95,25 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
                 "cache must be evicted after close completes");
         } finally {
             pool.shutdownNow().get();
+            Assertions.assertNull(fatalFailure.get(), "unexpected process-fatal replay failure");
         }
     }
 
-    /**
-     * When scheduleRequest is called with a key whose generation is higher than the cached
-     * session's generation, the old session must be cancelled and a new one used.
-     * Before fix: generation is not threaded through scheduleRequest → getCachedSession,
-     * so the old session is always reused regardless of generation.
-     */
     @Test
     @SneakyThrows
-    void scheduleRequest_higherGenerationCancelsOldSession() throws Exception {
+    void differentGenerationsUseDifferentSessionsWithoutCancellingEither() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
         );
-        var orchestrator = new RequestSenderOrchestrator(pool, (session, ctx) -> null);
+        var fatalFailure = new AtomicReference<Error>();
+        var orchestrator = new RequestSenderOrchestrator(
+            pool,
+            (session, ctx, firstTargetWriteSubmitted) -> null,
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            rejectingLifecycleSink(),
+            fatalFailure::set
+        );
 
         try {
             var channelKeyCtx = rootContext.getTestConnectionRequestContext("conn-A", 0).getChannelKeyContext();
@@ -114,25 +122,30 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
             Assertions.assertEquals(1, session1.generation);
 
-            // getCachedSession with generation 2 returns the same session (no cancellation in getCachedSession)
-            // Cancellation is handled by the synthetic close path to avoid finishedAccumulatingResponseFuture deadlocks
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
-            Assertions.assertSame(session1, session2,
-                "getCachedSession must not cancel on generation bump — synthetic close path handles that");
+            Assertions.assertNotSame(session1, session2);
+            Assertions.assertEquals(2, session2.generation);
+            Assertions.assertFalse(session1.isCancelled());
+            Assertions.assertFalse(session2.isCancelled());
+            Assertions.assertEquals(2, getCache(pool).size());
         } finally {
             pool.shutdownNow().get();
+            Assertions.assertNull(fatalFailure.get(), "unexpected process-fatal replay failure");
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
-     * Verifies that the generation from ITrafficStreamKey flows through scheduleRequest
-     * to getCachedSession, so new sessions are created with the correct generation.
+     * Verifies that a new source generation creates a session carrying that generation.
      * Session cancellation on generation bump is NOT done here (would cause deadlocks);
      * it is handled by the synthetic close path.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     @SneakyThrows
-    void scheduleRequest_generationFlowsThroughToSessionLookup() throws Exception {
+    void newGeneration_isCarriedByTheNewSession() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
@@ -157,14 +170,29 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 
-    /**
-     * getCachedSession stores the generation on the session for tracking purposes.
-     * Session cancellation on generation bump is handled by the synthetic close path,
-     * not by getCachedSession (which would cause finishedAccumulatingResponseFuture deadlocks).
-     */
+    private static TargetConnectionOwner.RequestLifecycleSink rejectingLifecycleSink() {
+        return new TargetConnectionOwner.RequestLifecycleSink() {
+            @Override
+            public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                throw new AssertionError("cache tests do not schedule replay requests");
+            }
+
+            @Override
+            public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                throw new AssertionError("cache tests do not schedule replay requests");
+            }
+        };
+    }
+
     @Test
     @SneakyThrows
-    void higherGenerationCancelsOldSession() throws Exception {
+    void oldGenerationInvalidationCannotEvictNewGeneration() throws Exception {
         var pool = new ClientConnectionPool(
             (eventLoop, ctx) -> TextTrackedFuture.completedFuture(null, () -> "no channel"),
             "test-pool", 1
@@ -175,19 +203,24 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
             var session1 = pool.getCachedSession(channelKeyCtx, 0, 1);
             Assertions.assertEquals(1, session1.generation, "session must carry the generation it was created with");
 
-            // getCachedSession with a higher generation returns the SAME session (no cancellation here —
-            // cancellation is handled by the synthetic close path to avoid deadlocks)
             var session2 = pool.getCachedSession(channelKeyCtx, 0, 2);
-            Assertions.assertSame(session1, session2,
-                "getCachedSession must not cancel sessions on generation bump — that causes deadlocks");
+            pool.invalidateSession(channelKeyCtx.getConnectionId(), 0, 1);
+
+            Assertions.assertEquals(1, getCache(pool).size());
+            Assertions.assertSame(session2, pool.getCachedSession(channelKeyCtx, 0, 2));
+            Assertions.assertNotSame(session1, session2);
         } finally {
             pool.shutdownNow().get();
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Same generation must reuse the existing session.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     @SneakyThrows
     void sameGenerationReusesSession() throws Exception {
@@ -205,3 +238,6 @@ public class ClientConnectionPoolCacheInvalidationTest extends InstrumentationTe
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

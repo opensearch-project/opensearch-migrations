@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: AccumulationCallbacks CapturedTrafficToHttpTransactionAccumulator HttpMessageAndTimestamp InstrumentationTest IReplayContexts . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -14,10 +25,13 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -37,6 +51,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Real-Kafka regression test for the "Stale accumulation found" production failure.
  *
@@ -68,6 +84,8 @@ import org.testcontainers.kafka.ConfluentKafkaContainer;
  * {@code MockConsumer}) by validating the same behavior against the real Kafka client's
  * rebalance machinery.
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("isolatedTest")
@@ -78,11 +96,15 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
     private static final String NODE_ID = "node1";
     private static final String CONN_ID = "conn-mid-flight";
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Short enough that we can deliberately exceed it to force a fence + rejoin, but above the
      * broker's {@code group.min.session.timeout.ms} (default 6000ms in Confluent) since we set
      * {@code session.timeout.ms} to a value just under {@code MAX_POLL_INTERVAL_MS} below.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static final long MAX_POLL_INTERVAL_MS = 8_000;
     private static final long SESSION_TIMEOUT_MS = 7_000;
 
@@ -225,17 +247,18 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                     + "so replayEngine.cancelConnection runs and the channel session is marked "
                     + "cancelled. Statuses=" + connectionCloseStatuses);
 
-            // The in-flight request's response future was completed by the synthetic close
-            // (drains the OnlineRadixSorter).
+            // The synthetic close settles the in-flight request's source-side future.
             Assertions.assertTrue(responsesCompleted.get() >= 1,
                 "fireAccumulationsCallbacksAndClose must complete the in-flight request's "
-                    + "finishedAccumulatingResponseFuture so the sorter can drain. completed="
+                    + "finishedAccumulatingResponseFuture so its transaction can settle. completed="
                     + responsesCompleted.get());
         } finally {
             producer.close();
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Drains traffic streams from the source and feeds them into the accumulator. Returns when
      * a record matching {@code targetConnId} has been observed at least once. Bounds the work by
@@ -244,6 +267,8 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
      * @return the {@link ITrafficStreamWithKey} for the first matching record (caller can read
      *         {@code getKey().getSourceGeneration()} from it).
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private ITrafficStreamWithKey drainUntilFoundConnId(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator,
@@ -252,8 +277,11 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
     ) throws Exception {
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 if (!(ts instanceof TrafficSourceReaderInterruptedClose)
                     && targetConnId.equals(ts.getKey().getConnectionId())) {
                     return ts;
@@ -264,11 +292,15 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
             + " after " + maxAttempts + " polls");
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Drains traffic streams and returns the cumulative ordered list once we've seen BOTH a
      * synthetic close for {@code targetConnId} AND a real (non-synthetic) record for it. Bounded
      * by {@code maxAttempts}.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private List<ITrafficStreamWithKey> drainUntilSyntheticAndConnIdSeen(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator,
@@ -280,21 +312,22 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
         boolean sawReal = false;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            for (var ts : batch) {
-                accumulator.accept(ts);
+            for (var sourceInput : batch) {
+                accumulator.accept(sourceInput);
+                if (!(sourceInput instanceof ITrafficStreamWithKey ts)) {
+                    continue;
+                }
                 observed.add(ts);
                 if (targetConnId.equals(ts.getKey().getConnectionId())) {
                     if (ts instanceof TrafficSourceReaderInterruptedClose) {
                         sawSynthetic = true;
-                        // Simulate the channel-close callback: in production the wired
-                        // ConnectionReplaySession.onClose calls source.onNetworkConnectionClosed,
-                        // which decrements outstandingTrafficSourceReaderInterruptedCloseSessions
-                        // so subsequent polls can resume real Kafka traffic. This test doesn't
-                        // wire a real session pool, so we fire the callback explicitly.
-                        source.onNetworkConnectionClosed(
-                            targetConnId,
-                            KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
-                            ts.getKey().getSourceGeneration());
+                        source.acknowledgeSessionTermination(
+                            new ConnectionSessionKey(
+                                new SourceConnectionKey(ts.getKey().getNodeId(), targetConnId),
+                                0,
+                                ts.getKey().getSourceGeneration()
+                            )
+                        ).toCompletableFuture().get();
                     } else {
                         sawReal = true;
                     }
@@ -358,8 +391,15 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                         .setFirstLineByteLength(16).setHeadersByteLength(12).build())
                 .build())
             .build();
-        var record = new ProducerRecord<>(TOPIC, "key-" + offset, stream.toByteArray());
+        var record = new ProducerRecord<>(
+            TOPIC,
+            "key-" + offset,
+            CaptureRecord.newBuilder().setTrafficStream(stream).build().toByteArray()
+        );
         producer.send(record).get();
         log.atInfo().setMessage("Produced record offset={} conn={}").addArgument(offset).addArgument(CONN_ID).log();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

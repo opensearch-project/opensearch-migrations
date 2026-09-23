@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.tracing;
 
+// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ISourceTrafficChannelKey ITrafficStreamKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G2)
+/*
+
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
@@ -13,11 +24,19 @@ import lombok.Getter;
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
     public static final String SCOPE_NAME = "replayer";
 
+    public final KafkaConsumerContexts.LivenessScanContext.MetricInstruments livenessScanInstruments;
     public final KafkaConsumerContexts.AsyncListeningContext.MetricInstruments asyncListeningInstruments;
     public final KafkaConsumerContexts.TouchScopeContext.MetricInstruments touchInstruments;
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
     public final KafkaConsumerContexts.CommitScopeContext.MetricInstruments commitInstruments;
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
+    public final AsyncPermitPoolMetrics permitPoolMetrics;
+    public final ConnectionActorMetrics connectionActorMetrics;
+    public final TargetExchangeStateMetrics targetExchangeStateMetrics;
+    public final ReplayTransactionMetrics replayTransactionMetrics;
+    public final KafkaCommitStateMetrics kafkaCommitStateMetrics;
+    public final ResourceOwnershipMetrics resourceOwnershipMetrics;
+    public final ReplayProcessFatalMetrics replayProcessFatalMetrics;
 
     public final TrafficSourceContexts.ReadChunkContext.MetricInstruments readChunkInstruments;
     public final TrafficSourceContexts.BackPressureBlockContext.MetricInstruments backPressureInstruments;
@@ -43,11 +62,19 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         super(SCOPE_NAME, contextTracker, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
+        livenessScanInstruments = KafkaConsumerContexts.LivenessScanContext.makeMetrics(meter);
         asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);
         touchInstruments = KafkaConsumerContexts.TouchScopeContext.makeMetrics(meter);
         pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
         commitInstruments = KafkaConsumerContexts.CommitScopeContext.makeMetrics(meter);
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
+        permitPoolMetrics = new AsyncPermitPoolMetrics(meter);
+        connectionActorMetrics = new ConnectionActorMetrics(meter);
+        targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
+        replayTransactionMetrics = new ReplayTransactionMetrics(meter);
+        kafkaCommitStateMetrics = new KafkaCommitStateMetrics(meter);
+        resourceOwnershipMetrics = new ResourceOwnershipMetrics(meter);
+        replayProcessFatalMetrics = new ReplayProcessFatalMetrics(meter);
 
         readChunkInstruments = TrafficSourceContexts.ReadChunkContext.makeMetrics(meter);
         backPressureInstruments = TrafficSourceContexts.BackPressureBlockContext.makeMetrics(meter);
@@ -98,3 +125,6 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         return new ReplayContexts.KafkaRecordContext(this, channelCtx, recordId, kafkaRecordSize);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G2)

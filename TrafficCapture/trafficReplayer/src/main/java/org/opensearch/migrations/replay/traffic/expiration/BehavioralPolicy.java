@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.traffic.expiration;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 
@@ -8,10 +19,14 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * I should look up what this is called in the Gang of Four book.
  * In my mind, this is a metaprogramming policy mixin.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class BehavioralPolicy {
     private static String formatPartitionAndConnectionIds(ITrafficStreamKey trafficStreamKey) {
@@ -112,3 +127,6 @@ public class BehavioralPolicy {
         // do nothing by default
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

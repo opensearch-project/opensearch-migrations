@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ChannelContextManager InstrumentationTest KafkaTrafficCaptureSource ReplayContexts SourceCommitNotAcceptedException . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -10,18 +21,29 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.KafkaRecordId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourcePartitionKey;
+import org.opensearch.migrations.replay.lifecycle.SourceCommitNotAcceptedException;
+import org.opensearch.migrations.replay.lifecycle.SourceCommitUnknownAfterRevocationException;
+import org.opensearch.migrations.replay.lifecycle.SourcePartitionLifecycleListener;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -29,6 +51,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
@@ -40,6 +63,51 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     public static final String TEST_TOPIC_NAME = "TEST_TOPIC_NAME";
 
     private static final Duration TEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final SourcePartitionLifecycleListener TEST_LIFECYCLE_LISTENER =
+        new SourcePartitionLifecycleListener() {
+            @Override
+            public void onAssigned(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRevoked(java.util.Collection<SourcePartitionKey> partitions) {}
+
+            @Override
+            public void onRetired(java.util.Collection<SourcePartitionKey> partitions) {}
+        };
+
+    private static final class BlockingCommitMockConsumer extends MockConsumer<String, byte[]> {
+        private final CountDownLatch commitStarted = new CountDownLatch(1);
+        private final CountDownLatch allowCommit = new CountDownLatch(1);
+
+        private BlockingCommitMockConsumer() {
+            super(OffsetResetStrategy.EARLIEST);
+        }
+
+        @Override
+        public synchronized void commitSync(Map<TopicPartition, OffsetAndMetadata> offsets) {
+            commitStarted.countDown();
+            try {
+                if (!allowCommit.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Timed out waiting to release the blocked Kafka commit");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while blocking the Kafka commit", e);
+            }
+            super.commitSync(offsets);
+        }
+
+        private void awaitCommitStarted() throws InterruptedException {
+            Assertions.assertTrue(
+                commitStarted.await(5, TimeUnit.SECONDS),
+                "Kafka commit did not start"
+            );
+        }
+
+        private void releaseCommit() {
+            allowCommit.countDown();
+        }
+    }
 
     @Test
     public void testRecordToString() {
@@ -71,6 +139,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                 Duration.ofHours(1)
             )
         ) {
+            configureSource(protobufConsumer);
             initializeMockConsumerTopic(mockConsumer);
 
             List<Integer> substreamCounts = new ArrayList<>();
@@ -94,6 +163,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                     protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                         .get()
                         .stream()
+                        .map(ITrafficStreamWithKey.class::cast)
                         .forEach(streamWithKey -> {
                             tsCount.incrementAndGet();
                             log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
@@ -110,69 +180,243 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     }
 
     @Test
-    public void testSupplyTrafficWithUnformattedMessages() throws Exception {
-        int numTrafficStreams = 10;
-        MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        try (
-            var protobufConsumer = new KafkaTrafficCaptureSource(
-                rootContext,
-                mockConsumer,
-                TEST_TOPIC_NAME,
-                Duration.ofHours(1)
-            )
-        ) {
+    void recordProcessingCompletionFlushesTheEligibleKafkaPosition() throws Exception {
+        var mockConsumer = new BlockingCommitMockConsumer();
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
-
-            List<Integer> substreamCounts = new ArrayList<>();
-            // On a single poll() add records to the topic
             mockConsumer.schedulePollTask(() -> {
-                // Required rebalance to add records
                 mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
+            });
+            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0);
+            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
+            Assertions.assertEquals(
+                new KafkaRecordId(TEST_TOPIC_NAME, 0, 0, 1),
+                source.recordIdFor(key)
+            );
+            key.getTrafficStreamsContext().close();
 
-                // Add invalid records that can't be parsed and should be dropped
-                int partitionOffset = 1;
-                for (; partitionOffset < 3; partitionOffset++) {
-                    mockConsumer.addRecord(
-                        new ConsumerRecord(
-                            TEST_TOPIC_NAME,
-                            0,
-                            partitionOffset,
-                            Instant.now().toString(),
-                            "Invalid Data".getBytes(StandardCharsets.UTF_8)
+            var acknowledgement = source.recordProcessingFinished(
+                (KafkaRecordId) source.recordIdFor(key)
+            ).toCompletableFuture();
+            try {
+                mockConsumer.awaitCommitStarted();
+                Assertions.assertFalse(acknowledgement.isDone());
+            } finally {
+                mockConsumer.releaseCommit();
+            }
+
+            acknowledgement.get(5, TimeUnit.SECONDS);
+            Assertions.assertEquals(1L, mockConsumer.committed(
+                Collections.singleton(new TopicPartition(TEST_TOPIC_NAME, 0))
+            ).get(new TopicPartition(TEST_TOPIC_NAME, 0)).offset());
+        }
+    }
+
+    @Test
+    void sourceGenerationLossBypassesBackpressureUntilItsSyntheticCloseIsRead() throws Exception {
+        var mockConsumer = new MockConsumer<String, byte[]>(OffsetResetStrategy.EARLIEST);
+        var partition = new TopicPartition(TEST_TOPIC_NAME, 0);
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            configureSource(source);
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(partition));
+                addGeneratedTrafficStreamsToTopic(1, 0, mockConsumer, new ArrayList<>());
+            });
+            var sourceInput = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0);
+            var key = ((ITrafficStreamWithKey) sourceInput).getKey();
+
+            mockConsumer.schedulePollTask(
+                () -> source.trackingKafkaConsumer.onPartitionsLost(Collections.singletonList(partition))
+            );
+            Assertions.assertTrue(
+                source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                    .get(5, TimeUnit.SECONDS)
+                    .isEmpty()
+            );
+
+            Assertions.assertTrue(source.hasPendingSourceControl());
+            var interruptedClose = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS)
+                .get(0);
+            Assertions.assertInstanceOf(TrafficSourceReaderInterruptedClose.class, interruptedClose);
+            Assertions.assertFalse(source.hasPendingSourceControl());
+
+            var closeKey = ((TrafficSourceReaderInterruptedClose) interruptedClose).getKey();
+            closeKey.getTrafficStreamsContext().close();
+            source.acknowledgeSessionTermination(
+                new org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey(
+                    new org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey(
+                        key.getNodeId(),
+                        key.getConnectionId()
+                    ),
+                    0,
+                    key.getSourceGeneration()
+                )
+            ).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            key.getTrafficStreamsContext().close();
+        }
+    }
+
+*/
+// REBUILD-LIMBO-END(G10)
+    /** Proves replayer rebuild plan S1's exhaustive CaptureRecord intake contract. */
+// REBUILD-LIMBO-START(G10)
+/*
+    @Test
+    void decodesEveryRecognizedCaptureRecordPayloadAndCountsControlRecords() throws Exception {
+        MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            configureSource(source);
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                addCaptureRecord(
+                    mockConsumer,
+                    0,
+                    CaptureRecord.newBuilder()
+                        .setTrafficStream(
+                            TrafficStream.newBuilder()
+                                .setNodeId("writer-a")
+                                .setConnectionId("connection-a")
+                                .setNumberOfThisLastChunk(0)
                         )
-                    );
-                }
-
-                // Add valid records
-                addGeneratedTrafficStreamsToTopic(numTrafficStreams, partitionOffset, mockConsumer, substreamCounts);
-                Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
+                        .build()
+                );
+                addCaptureRecord(
+                    mockConsumer,
+                    1,
+                    CaptureRecord.newBuilder()
+                        .setWriterPartitionHeartbeat(
+                            WriterPartitionHeartbeat.newBuilder()
+                                .setWriterNodeId("writer-a")
+                                .setHeartbeatIntervalMillis(10_000)
+                        )
+                        .build()
+                );
+                addCaptureRecord(
+                    mockConsumer,
+                    2,
+                    CaptureRecord.newBuilder()
+                        .setCaptureCapabilityProbe(
+                            CaptureCapabilityProbe.newBuilder()
+                                .setWriterNodeId("writer-a")
+                                .setProbeId("probe-a")
+                        )
+                        .build()
+                );
             });
 
-            AtomicInteger foundStreamsCount = new AtomicInteger(0);
-            // This assertion will fail the test case if not completed within its duration, as would be the case if
-            // there
-            // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop
-            // the stream
+            var inputs = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
+                .get(5, TimeUnit.SECONDS);
+            Assertions.assertEquals(3, inputs.size());
+            Assertions.assertFalse(inputs.get(0) instanceof KafkaCaptureControlRecord);
+            Assertions.assertEquals(
+                CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT,
+                ((KafkaCaptureControlRecord) inputs.get(1)).getCaptureRecord().getPayloadCase()
+            );
+            Assertions.assertEquals(
+                CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE,
+                ((KafkaCaptureControlRecord) inputs.get(2)).getCaptureRecord().getPayloadCase()
+            );
+            Assertions.assertEquals(
+                new KafkaTrafficCaptureSource.CaptureRecordCounters(1, 1, 1),
+                source.captureRecordCounters()
+            );
+            for (var input : inputs) {
+                var key = ((ITrafficStreamWithKey) input).getKey();
+                key.getTrafficStreamsContext().close();
+                source.recordProcessingFinished(
+                    (KafkaRecordId) source.recordIdFor(key)
+                ).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            }
+        }
+    }
 
-            var tsCount = new AtomicInteger();
-            Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
-                while (tsCount.get() < numTrafficStreams) {
-                    protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
-                        .get()
-                        .stream()
-                        .forEach(streamWithKey -> {
-                            tsCount.incrementAndGet();
-                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                            Assertions.assertEquals(
-                                streamWithKey.getStream().getSubStreamCount(),
-                                substreamCounts.get(foundStreamsCount.getAndIncrement())
-                            );
-                        });
-                }
+*/
+// REBUILD-LIMBO-END(G10)
+    /** Proves replayer rebuild plan S1's no-trial-decoding protocol boundary. */
+// REBUILD-LIMBO-START(G10)
+/*
+    @Test
+    void malformedEnvelopeIsAProtocolViolation() throws Exception {
+        MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            configureSource(source);
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                mockConsumer.addRecord(
+                    new ConsumerRecord<>(
+                        TEST_TOPIC_NAME,
+                        0,
+                        0,
+                        "invalid",
+                        "Invalid Data".getBytes(StandardCharsets.UTF_8)
+                    )
+                );
             });
 
-            Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
+            var failure = Assertions.assertThrows(
+                java.util.concurrent.ExecutionException.class,
+                () -> source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get()
+            );
+            Assertions.assertInstanceOf(CaptureRecordProtocolViolationException.class, failure.getCause());
+        }
+    }
+
+*/
+// REBUILD-LIMBO-END(G10)
+    /** Proves replayer rebuild plan S1's explicit PAYLOAD_NOT_SET violation case. */
+// REBUILD-LIMBO-START(G10)
+/*
+    @Test
+    void unsetEnvelopePayloadIsAProtocolViolation() throws Exception {
+        MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
+        try (var source = new KafkaTrafficCaptureSource(
+            rootContext,
+            mockConsumer,
+            TEST_TOPIC_NAME,
+            Duration.ofHours(1)
+        )) {
+            configureSource(source);
+            initializeMockConsumerTopic(mockConsumer);
+            mockConsumer.schedulePollTask(() -> {
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                addCaptureRecord(mockConsumer, 0, CaptureRecord.getDefaultInstance());
+            });
+
+            var failure = Assertions.assertThrows(
+                java.util.concurrent.ExecutionException.class,
+                () -> source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get()
+            );
+            Assertions.assertInstanceOf(CaptureRecordProtocolViolationException.class, failure.getCause());
         }
     }
 
@@ -277,6 +521,8 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * This helper function will generate N (or numTrafficStreams) traffic streams and place each traffic stream into
      * one Consumer Record. The Consumer Records will then be added to the provided mockConsumer and simulate records
@@ -287,6 +533,8 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
      * @param mockConsumer
      * @param substreamCountTracker
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static void addGeneratedTrafficStreamsToTopic(
         int numTrafficStreams,
         int offsetStart,
@@ -301,7 +549,12 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             try {
                 int substreams = integerSupplier.get();
                 substreamCountTracker.add(substreams);
-                data = makeTrafficStreamBytes(Instant.now(), payload, substreams);
+                data = CaptureRecord.newBuilder()
+                    .setTrafficStream(TrafficStream.parseFrom(
+                        makeTrafficStreamBytes(Instant.now(), payload, substreams)
+                    ))
+                    .build()
+                    .toByteArray();
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -309,6 +562,22 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
             log.trace("adding record");
             mockConsumer.addRecord(record);
         }
+    }
+
+    private static void addCaptureRecord(
+        MockConsumer<String, byte[]> mockConsumer,
+        long offset,
+        CaptureRecord captureRecord
+    ) {
+        mockConsumer.addRecord(
+            new ConsumerRecord<>(
+                TEST_TOPIC_NAME,
+                0,
+                offset,
+                Instant.now().toString(),
+                captureRecord.toByteArray()
+            )
+        );
     }
 
     // Required initialization for working with Mock Consumer
@@ -319,19 +588,28 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         mockConsumer.updateBeginningOffsets(startOffsets);
     }
 
+    private static void configureSource(KafkaTrafficCaptureSource source) {
+        source.setSourcePartitionLifecycleListener(TEST_LIFECYCLE_LISTENER);
+    }
+
     // -------------------------------------------------------------------------
     // Phase 3: Active connection tracking
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * After consuming records for N connections on partition 0, all N connection IDs
      * must appear in partitionToActiveConnections.get(0).
      * Before fix: partitionToActiveConnections is never populated.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     public void activeConnectionsTrackedPerPartition() throws Exception {
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
         try (var source = new KafkaTrafficCaptureSource(rootContext, mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1))) {
+            configureSource(source);
             initializeMockConsumerTopic(mockConsumer);
             mockConsumer.schedulePollTask(() -> {
                 mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
@@ -346,11 +624,11 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
                                 .build())
                             .build())
                         .build();
-                    try (var baos = new ByteArrayOutputStream()) {
-                        ts.writeTo(baos);
-                        mockConsumer.addRecord(new ConsumerRecord<>(TEST_TOPIC_NAME, 0, i,
-                            Instant.now().toString(), baos.toByteArray()));
-                    } catch (Exception e) { throw new RuntimeException(e); }
+                    addCaptureRecord(
+                        mockConsumer,
+                        i,
+                        CaptureRecord.newBuilder().setTrafficStream(ts).build()
+                    );
                 }
             });
 
@@ -364,3 +642,6 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

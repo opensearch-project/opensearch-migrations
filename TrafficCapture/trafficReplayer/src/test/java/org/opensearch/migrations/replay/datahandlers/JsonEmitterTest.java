@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: JsonEmitter ObjectMapper . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
@@ -52,7 +63,11 @@ public class JsonEmitterTest {
         return writer.toString();
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** ObjectNode / ArrayNode path — parsed JSON tree covers ObjectNode, ArrayNode, and all value types. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @WrapWithNettyLeakDetection(repetitions = 16)
     public void testObjectNodeAllTypes() throws IOException {
@@ -63,7 +78,11 @@ public class JsonEmitterTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Map / Map.Entry path — covers Map and Map.Entry branches with nested maps and null. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @WrapWithNettyLeakDetection(repetitions = 16)
     public void testMapWithNestedMapsAndNull() throws IOException {
@@ -85,7 +104,11 @@ public class JsonEmitterTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Native Java array path — covers the o.getClass().isArray() branch. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @WrapWithNettyLeakDetection(repetitions = 16)
     public void testNativeArrayBranch() throws IOException {
@@ -99,7 +122,11 @@ public class JsonEmitterTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Top-level ArrayNode with mixed element types. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @WrapWithNettyLeakDetection(repetitions = 16)
     public void testTopLevelArrayNode() throws IOException {
@@ -115,7 +142,11 @@ public class JsonEmitterTest {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /** Programmatically built ObjectNode — verifies ObjectNode properties() iteration. */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @WrapWithNettyLeakDetection(repetitions = 16)
     public void testProgrammaticObjectNode() throws IOException {
@@ -134,3 +165,6 @@ public class JsonEmitterTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

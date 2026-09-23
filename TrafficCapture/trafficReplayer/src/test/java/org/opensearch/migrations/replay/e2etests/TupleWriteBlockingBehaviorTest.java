@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.e2etests;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ArrayCursorTrafficSourceContext InstrumentationTest ReplayProcessFatalHandler RootReplayerConstructorExtensions TupleSink . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -10,10 +21,13 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
+import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
@@ -41,6 +55,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+*/
+// REBUILD-LIMBO-END(G10)
 /**
  * Verifies that the ThreadLocalTupleWriter architecture correctly:
  * <ol>
@@ -48,16 +64,22 @@ import org.junit.jupiter.api.Timeout;
  *   <li>Does NOT block subsequent requests while tuple writes are pending</li>
  * </ol>
  */
+// REBUILD-LIMBO-START(G10)
+/*
 @Slf4j
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
 
     private static final int NUM_REQUESTS = 3;
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * A TupleSink that holds futures without completing them until explicitly released.
      * This lets us observe whether offset commits are gated on future completion.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     static class LatchedTupleSink implements TupleSink {
         final List<CompletableFuture<Void>> heldFutures = Collections.synchronizedList(new ArrayList<>());
         final CountDownLatch allAccepted;
@@ -91,15 +113,11 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
     }
 
     static class FailingTupleSink implements TupleSink {
-        final CountDownLatch allAccepted;
-
-        FailingTupleSink(int expectedCount) {
-            this.allAccepted = new CountDownLatch(expectedCount);
-        }
+        final CountDownLatch failureInjected = new CountDownLatch(1);
 
         @Override
         public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
-            allAccepted.countDown();
+            failureInjected.countDown();
             future.completeExceptionally(new RuntimeException("tuple write failed"));
         }
 
@@ -141,6 +159,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         return tsb.build();
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Verifies that offset commits are blocked until tuple futures complete.
      *
@@ -151,6 +171,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
      * method-level {@code @Timeout} and the {@link #awaitCursorAdvance} safety net —
      * no tight inner deadline depends on CI scheduling fairness.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     public void tupleWriteBlocksOffsetCommit() throws Throwable {
@@ -162,16 +184,18 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 response -> TestHttpServerContext.makeResponse(random, response))) {
 
             var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
-            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0);
             var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
 
             var serverUri = httpServer.localhostEndpoint();
+            var processExitCodes = new CopyOnWriteArrayList<Integer>();
             try (var tr = new RootReplayerConstructorExtensions(
                     rootContext, serverUri,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024);
+                    10 * 1024,
+                    processExitCodes::add);
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
@@ -214,13 +238,17 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 // Wait for the replay loop to exit cleanly. Surface any exception
                 // that occurred inside the thread.
                 replayDone.get(1, TimeUnit.MINUTES);
+                replayThread.join(TimeUnit.SECONDS.toMillis(5));
                 Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
 
                 tr.shutdown(null).get();
             }
+            assertNoProcessTermination(processExitCodes);
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Verifies that subsequent requests on the same connection are NOT blocked
      * while tuple writes are pending.
@@ -231,6 +259,8 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
      * {@code await()} relies on the method-level {@code @Timeout} as the upper bound
      * rather than picking a number that has to absorb cold-JVM and CI-scheduling jitter.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     @Test
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     public void tupleWriteDoesNotBlockNextRequest() throws Throwable {
@@ -242,16 +272,18 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 response -> TestHttpServerContext.makeResponse(random, response))) {
 
             var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
-            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0);
             var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
 
             var serverUri = httpServer.localhostEndpoint();
+            var processExitCodes = new CopyOnWriteArrayList<Integer>();
             try (var tr = new RootReplayerConstructorExtensions(
                     rootContext, serverUri,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024);
+                    10 * 1024,
+                    processExitCodes::add);
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
                  var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
@@ -283,14 +315,19 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 replayDone.get(1, TimeUnit.MINUTES);
                 tr.shutdown(null).get();
             }
+            assertNoProcessTermination(processExitCodes);
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G10)
     /**
      * Polls a signal the production code controls — the commit cursor — until it
      * reaches the expected value. Deadline-bounded so a real hang fails the test
      * rather than tying up the CI runner.
      */
+// REBUILD-LIMBO-START(G10)
+/*
     private static void awaitCursorAdvance(
             ArrayCursorTrafficSourceContext ctx, int target, Duration deadline)
             throws InterruptedException {
@@ -307,59 +344,91 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
     @Test
     public void tupleWriteFailureStopsReplayWithoutCommittingOffset() throws Throwable {
         var random = new Random(1);
-        var failingSink = new FailingTupleSink(NUM_REQUESTS);
+        var failingSink = new FailingTupleSink();
 
         try (var httpServer = SimpleNettyHttpServer.makeServer(
                 false, Duration.ofMinutes(10),
                 response -> TestHttpServerContext.makeResponse(random, response))) {
 
             var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
-            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream), 0);
             var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
 
             var serverUri = httpServer.localhostEndpoint();
-            try (var tr = new RootReplayerConstructorExtensions(
-                    rootContext, serverUri,
-                    new StaticAuthTransformerFactory("TEST"),
-                    new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
-                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
-                    10 * 1024);
-                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
-                 var tupleWriter = new ThreadLocalTupleWriter(i -> failingSink)) {
+            var processExitCodes = new CopyOnWriteArrayList<Integer>();
+            var expectedFatal = new AtomicReference<Error>();
+            var shutdownFailure = Assertions.assertThrows(ExecutionException.class, () -> {
+                try (var tr = new RootReplayerConstructorExtensions(
+                        rootContext, serverUri,
+                        new StaticAuthTransformerFactory("TEST"),
+                        new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
+                        RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
+                        10 * 1024,
+                        processExitCodes::add);
+                     var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
+                     var tupleWriter = new ThreadLocalTupleWriter(i -> failingSink)) {
 
-                var replayFailure = new AtomicReference<Throwable>();
-                var replayThread = new Thread(() -> {
-                    try {
-                        tr.setupRunAndWaitForReplayWithShutdownChecks(
-                            Duration.ofSeconds(70), Duration.ofSeconds(30),
-                            blockingTrafficSource, new TimeShifter(10 * 1000),
-                            tupleWriter, Duration.ofSeconds(5));
-                    } catch (Throwable t) {
-                        replayFailure.set(t);
-                        log.atError().setCause(t).setMessage("Replay thread exception").log();
-                    }
-                });
-                replayThread.start();
+                    var replayFailure = new AtomicReference<Throwable>();
+                    var replayThread = new Thread(() -> {
+                        try {
+                            tr.setupRunAndWaitForReplayWithShutdownChecks(
+                                Duration.ofSeconds(70), Duration.ofSeconds(30),
+                                blockingTrafficSource, new TimeShifter(10 * 1000),
+                                tupleWriter, Duration.ofSeconds(5));
+                        } catch (Throwable t) {
+                            replayFailure.set(t);
+                            log.atError().setCause(t).setMessage("Replay thread exception").log();
+                        }
+                    });
+                    replayThread.start();
 
-                Assertions.assertTrue(
-                    failingSink.allAccepted.await(30, TimeUnit.SECONDS),
-                    "Timed out waiting for failing sink to accept all tuples"
-                );
+                    Assertions.assertTrue(
+                        failingSink.failureInjected.await(30, TimeUnit.SECONDS),
+                        "Timed out waiting for the sink to inject its tuple write failure"
+                    );
 
-                replayThread.join(30_000);
-                Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
-                Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
-                    "Offsets should not be committed after tuple write failure");
-                Assertions.assertInstanceOf(TrafficReplayer.TerminationException.class, replayFailure.get());
-                var termination = (TrafficReplayer.TerminationException) replayFailure.get();
-                Assertions.assertInstanceOf(Error.class, termination.originalCause);
-                Assertions.assertTrue(
-                    termination.originalCause.getMessage().contains("Fatal tuple write failure"),
-                    "Fatal shutdown should explain that tuple output was not durably written"
-                );
-
-                tr.shutdown(null).get();
-            }
+                    replayThread.join(30_000);
+                    Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
+                    Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
+                        "Offsets should not be committed after tuple write failure");
+                    Assertions.assertInstanceOf(TrafficReplayer.TerminationException.class, replayFailure.get());
+                    var termination = (TrafficReplayer.TerminationException) replayFailure.get();
+                    Assertions.assertInstanceOf(Error.class, termination.originalCause);
+                    Assertions.assertTrue(
+                        termination.originalCause.getMessage().contains("Fatal tuple write failure"),
+                        "Fatal shutdown should explain that tuple output was not durably written"
+                    );
+                    expectedFatal.set((Error) termination.originalCause);
+                }
+            });
+            Assertions.assertSame(expectedFatal.get(), shutdownFailure.getCause());
+            awaitProcessTermination(
+                processExitCodes,
+                ReplayProcessFatalHandler.Reason.UNEXPECTED_FATAL_ERROR.exitCode(),
+                Duration.ofSeconds(5)
+            );
         }
     }
+
+    private static void awaitProcessTermination(
+        List<Integer> processExitCodes,
+        int expectedExitCode,
+        Duration deadline
+    ) throws InterruptedException {
+        var endNanos = System.nanoTime() + deadline.toNanos();
+        while (processExitCodes.isEmpty() && System.nanoTime() < endNanos) {
+            Thread.sleep(10);
+        }
+        Assertions.assertEquals(List.of(expectedExitCode), processExitCodes);
+    }
+
+    private static void assertNoProcessTermination(List<Integer> processExitCodes) {
+        Assertions.assertTrue(
+            processExitCodes.isEmpty(),
+            () -> "Unexpected process termination with exit codes " + processExitCodes
+        );
+    }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

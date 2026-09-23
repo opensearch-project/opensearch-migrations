@@ -8,9 +8,17 @@
 
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G3) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G3)
+/*
+
 import java.io.PrintStream;
 import java.time.Instant;
-import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.AccumulationCallbacks;
@@ -18,16 +26,21 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TerminalSourceConnectionId;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G3)
 /**
  * AccumulationCallbacks implementation for dump-http mode.
  * Prints one line per request and one line per response to the given PrintStream.
  */
+// REBUILD-LIMBO-START(G3)
+/*
 @Slf4j
 public class HttpTransactionDumper implements AccumulationCallbacks {
 
@@ -66,9 +79,9 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     public void onTrafficStreamsExpired(
         RequestResponsePacketPair.ReconstructionStatus status,
         @NonNull IReplayContexts.IChannelKeyContext ctx,
-        @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        @NonNull ITrafficStreamKey connectionKey
     ) {
-        out.println(linePrefix + buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx)
+        out.println(linePrefix + buildPrefix(connectionKey, Instant.EPOCH, Instant.EPOCH)
             + " EXPIRED (" + status + ")");
     }
 
@@ -79,15 +92,11 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         int channelSessionNumber,
         RequestResponsePacketPair.ReconstructionStatus status,
         @NonNull Instant timestamp,
-        @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        @NonNull ITrafficStreamKey connectionKey,
+        @NonNull Optional<TerminalSourceConnectionId> terminalAssociation
     ) {
-        out.println(linePrefix + buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx, timestamp)
+        out.println(linePrefix + buildPrefix(connectionKey, timestamp, timestamp)
             + " CLOSED (" + channelInteractionNum + " requests completed)");
-    }
-
-    @Override
-    public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
-        // no-op
     }
 
     // Dynamic column widths — start with reasonable defaults, grow as needed
@@ -109,9 +118,13 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         return String.format("%6d.0s %3d.0s", offset, duration);
     }
 
+*/
+// REBUILD-LIMBO-END(G3)
     /**
      * All lines share the same column layout: [ts-ts] p:N o:N s:N nc:node.conn:
      */
+// REBUILD-LIMBO-START(G3)
+/*
     private String buildPrefix(ISourceTrafficChannelKey channelKey, Instant first, Instant last) {
         var sb = new StringBuilder();
         long startEpoch = first != null ? first.getEpochSecond() : 0;
@@ -157,35 +170,6 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         return " ".repeat(width);
     }
 
-    private String buildPrefixFromKeysAndCtx(
-        List<ITrafficStreamKey> keys, IReplayContexts.IChannelKeyContext ctx
-    ) {
-        return buildPrefixFromKeysAndCtx(keys, ctx, null);
-    }
-
-    private String buildPrefixFromKeysAndCtx(
-        List<ITrafficStreamKey> keys, IReplayContexts.IChannelKeyContext ctx, Instant timestamp
-    ) {
-        if (!keys.isEmpty()) {
-            var tsk = keys.get(0);
-            Instant ts = timestamp != null ? timestamp : Instant.EPOCH;
-            return buildPrefix(tsk, ts, ts);
-        }
-        // Fallback when no keys are held — still emit consistent columns with space padding
-        var sb = new StringBuilder();
-        long epoch = timestamp != null ? timestamp.getEpochSecond() : 0;
-        var epochStr = String.valueOf(epoch);
-        tsWidth = Math.max(tsWidth, epochStr.length());
-        sb.append('[').append(pad(epochStr, tsWidth)).append('-').append(pad(epochStr, tsWidth)).append(']');
-        sb.append(' ').append(relativeTime(epoch, epoch));
-        sb.append(" p:").append(dashPad(pWidth));
-        sb.append(" o:").append(dashPad(oWidth));
-        sb.append(" s:").append(dashPad(sWidth));
-        sb.append(" nc:").append(TrafficChannelKeyFormatter.format(
-            ctx.getNodeId(), ctx.getConnectionId())).append(':');
-        return sb.toString();
-    }
-
     private static long messageSize(HttpMessageAndTimestamp msg) {
         if (msg == null || msg.packetBytes == null) return 0;
         return msg.packetBytes.stream().mapToLong(b -> b.length).sum();
@@ -207,3 +191,6 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         return sb.toString();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G3)

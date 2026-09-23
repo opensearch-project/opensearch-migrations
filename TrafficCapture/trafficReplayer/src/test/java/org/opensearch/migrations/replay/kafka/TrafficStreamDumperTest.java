@@ -10,6 +10,8 @@ package org.opensearch.migrations.replay.kafka;
 
 import java.nio.charset.StandardCharsets;
 
+import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -20,6 +22,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
+import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -270,6 +273,51 @@ class TrafficStreamDumperTest {
         // Should have R[size] but no preview text after it
         Assertions.assertTrue(result.contains("R[18]"));
         Assertions.assertFalse(result.contains("GET"));
+    }
+
+    /** Proves replayer rebuild plan S1 dump-tool handling for WriterPartitionHeartbeat. */
+    @Test
+    void formatsHeartbeatEnvelope() {
+        var record = CaptureRecord.newBuilder()
+            .setWriterPartitionHeartbeat(
+                WriterPartitionHeartbeat.newBuilder()
+                    .setWriterNodeId("writer-a")
+                    .setHeartbeatIntervalMillis(10_000)
+                    .setEmittedAtMillis(123_456)
+            )
+            .build();
+
+        var result = TrafficStreamDumper.format(record, 2, 17, 64, 64, -1);
+
+        Assertions.assertEquals(
+            "[?-?] p:2 o:    17 HEARTBEAT writer:writer-a intervalMillis:10000 emittedAtMillis:123456",
+            result
+        );
+    }
+
+    /** Proves replayer rebuild plan S1 dump-tool handling for CaptureCapabilityProbe. */
+    @Test
+    void formatsCapabilityProbeEnvelope() {
+        var record = CaptureRecord.newBuilder()
+            .setCaptureCapabilityProbe(
+                CaptureCapabilityProbe.newBuilder()
+                    .setWriterNodeId("writer-b")
+                    .setProbeId("probe-9")
+            )
+            .build();
+
+        var result = TrafficStreamDumper.format(record, 3, 21, 64, 64, -1);
+
+        Assertions.assertEquals("[?-?] p:3 o:    21 PROBE writer:writer-b id:probe-9", result);
+    }
+
+    /** Proves replayer rebuild plan S1 dump-tool handling for PAYLOAD_NOT_SET. */
+    @Test
+    void rejectsEnvelopeWithoutPayload() {
+        Assertions.assertThrows(
+            CaptureRecordProtocolViolationException.class,
+            () -> TrafficStreamDumper.format(CaptureRecord.getDefaultInstance(), 1, 4, 64, 64, -1)
+        );
     }
 
     private static int countOccurrences(String str, String sub) {

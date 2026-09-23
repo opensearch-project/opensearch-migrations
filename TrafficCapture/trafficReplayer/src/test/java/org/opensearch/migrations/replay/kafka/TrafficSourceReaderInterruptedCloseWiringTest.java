@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -18,11 +29,14 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.SourceConnectionPartitionGenerationKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -34,9 +48,13 @@ import lombok.NonNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Phase A failing tests for synthetic close wiring.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 public class TrafficSourceReaderInterruptedCloseWiringTest extends InstrumentationTest {
 
     @Override
@@ -44,15 +62,19 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
         return TestContext.withTracking(false, true);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * When a TrafficSourceReaderInterruptedClose fires for a connection in ACCUMULATING_WRITES
      * state, fireAccumulationsCallbacksAndClose must be called BEFORE onConnectionClose, so that
-     * finishedAccumulatingResponseFuture is completed and the OnlineRadixSorter can drain.
+     * finishedAccumulatingResponseFuture receives its terminal source outcome before actor abort.
      *
      * Before fix: accumulator bypasses state machine for synthetic closes — no
      * fireAccumulationsCallbacksAndClose is called, so onTrafficStreamsExpired/handleEndOfResponse
      * is never invoked for the in-flight request.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void trafficSourceReaderInterruptedClose_completesFinishedAccumulatingResponseFuture() {
         var responseAccumulatedCallbackFired = new AtomicBoolean(false);
@@ -144,8 +166,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
                 .findFirst().orElse(null),
             "status must be TRAFFIC_SOURCE_READER_INTERRUPTED");
 
-        // The response callback (finishedAccumulatingResponseFuture completion) must fire
-        // before onConnectionClose so the sorter can drain
+        // The response callback must settle source state before connection abort is admitted.
         Assertions.assertTrue(responseAccumulatedCallbackFired.get(),
             "fireAccumulationsCallbacksAndClose must complete finishedAccumulatingResponseFuture " +
             "before onConnectionClose fires");
@@ -158,6 +179,8 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
             "response callback must fire before onConnectionClose, but order was: " + orderTracker);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) must call replayEngine.closeConnection() — currently skipped.
      * We verify this indirectly: the TRAFFIC_SOURCE_READER_INTERRUPTED path must NOT return early before scheduling
@@ -166,6 +189,8 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
      * This test is a placeholder — the full verification requires integration with ReplayEngine.
      * The key assertion: TRAFFIC_SOURCE_READER_INTERRUPTED status does NOT skip replayEngine.closeConnection().
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
     void trafficSourceReaderInterruptedClose_doesNotSkipReplayEngineClose() {
         var reassignedCloseCallCount = new AtomicInteger(0);
@@ -222,24 +247,33 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
     }
 
     // -------------------------------------------------------------------------
-    // Phase A: outstandingTrafficSourceReaderInterruptedCloseSessions counter tests
+    // Source termination obligation tests
     // -------------------------------------------------------------------------
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
-     * After draining trafficSourceReaderInterruptedCloseQueue, readNextTrafficStreamSynchronously must return
-     * empty list while outstandingTrafficSourceReaderInterruptedCloseSessions > 0.
-     * Before fix: counter doesn't exist, real records returned immediately.
+     * After draining trafficSourceReaderInterruptedCloseQueue, reads remain gated while an
+     * attributable source termination obligation is unresolved.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     @Test
-    void emptyBatchReturnedWhileCounterPositive() throws Exception {
+    void emptyBatchReturnedWhileTerminationObligationIsPending() throws Exception {
         var mc = new org.apache.kafka.clients.consumer.MockConsumer<String, byte[]>(
             org.apache.kafka.clients.consumer.OffsetResetStrategy.EARLIEST);
         var tp = new org.apache.kafka.common.TopicPartition("test", 0);
         mc.updateBeginningOffsets(new HashMap<>(Collections.singletonMap(tp, 0L)));
 
         try (var source = new KafkaTrafficCaptureSource(rootContext, mc, "test", Duration.ofHours(1))) {
-            // Simulate counter > 0
-            source.outstandingTrafficSourceReaderInterruptedCloseSessions.set(1);
+            source.pendingSessionTerminationObligations.put(
+                new SourceConnectionPartitionGenerationKey(
+                    new SourceConnectionKey("n", "c"),
+                    0,
+                    1
+                ),
+                new KafkaTrafficCaptureSource.SessionTerminationObligation(0)
+            );
 
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.singletonList(tp));
@@ -253,7 +287,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
                             .build()).build())
                     .build();
                 try (var baos = new ByteArrayOutputStream()) {
-                    ts.writeTo(baos);
+                    CaptureRecord.newBuilder().setTrafficStream(ts).build().writeTo(baos);
                     mc.addRecord(new org.apache.kafka.clients.consumer.ConsumerRecord<>(
                         "test", 0, 0, "k", baos.toByteArray()));
                 } catch (Exception e) { throw new RuntimeException(e); }
@@ -262,7 +296,7 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
             var result = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
 
             Assertions.assertTrue(result.isEmpty(),
-                "must return empty batch while outstandingTrafficSourceReaderInterruptedCloseSessions > 0, got: " + result.size());
+                "must return an empty batch while a source termination obligation remains, got: " + result.size());
         }
     }
 
@@ -281,3 +315,6 @@ public class TrafficSourceReaderInterruptedCloseWiringTest extends Instrumentati
         );
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

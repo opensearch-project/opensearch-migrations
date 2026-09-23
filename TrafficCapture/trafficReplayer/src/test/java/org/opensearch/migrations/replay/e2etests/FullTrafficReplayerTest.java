@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.e2etests;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: CapturedTrafficToHttpTransactionAccumulator ExhaustiveTrafficStreamGenerator InstrumentationTest IRootReplayerContext ITrafficSourceContexts . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import javax.net.ssl.SSLException;
 
 import java.io.EOFException;
@@ -9,15 +20,18 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
 import org.opensearch.migrations.replay.ReplayEngine;
+import org.opensearch.migrations.replay.ReplayProcessFatalHandler;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
@@ -25,6 +39,8 @@ import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.traffic.generator.ExhaustiveTrafficStreamGenerator;
@@ -32,7 +48,6 @@ import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceC
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamCursorKey;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -56,6 +71,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.slf4j.event.Level;
 
 @Slf4j
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()
@@ -71,9 +87,35 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     public static final String TEST_CONNECTION_ID = "testConnectionId";
     public static final String DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED = "http://localhost:9999/";
 
+    private static final class RecordingProcessTerminator
+        implements ReplayProcessFatalHandler.ProcessTerminator {
+        private final List<Integer> exitCodes = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void terminate(int exitCode) {
+            exitCodes.add(exitCode);
+        }
+
+        private void assertNotTerminated() {
+            Assertions.assertTrue(
+                exitCodes.isEmpty(),
+                () -> "Unexpected process termination with exit codes " + exitCodes
+            );
+        }
+
+        private void attachFailure(Throwable failure) {
+            if (!exitCodes.isEmpty()) {
+                failure.addSuppressed(new AssertionError(
+                    "Unexpected process termination with exit codes " + exitCodes
+                ));
+            }
+        }
+    }
+
     protected static class TrafficReplayerWithWaitOnClose extends TrafficReplayerTopLevel {
 
         private final Duration maxWaitTime;
+        private final RecordingProcessTerminator processTerminator;
 
         public TrafficReplayerWithWaitOnClose(
             Duration maxWaitTime,
@@ -86,6 +128,32 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             IJsonTransformer jsonTransformer,
             String targetConnectionPoolName
         ) throws SSLException {
+            this(
+                maxWaitTime,
+                context,
+                serverUri,
+                authTransformerFactory,
+                allowInsecureConnections,
+                numSendingThreads,
+                maxConcurrentOutstandingRequests,
+                jsonTransformer,
+                targetConnectionPoolName,
+                new RecordingProcessTerminator()
+            );
+        }
+
+        private TrafficReplayerWithWaitOnClose(
+            Duration maxWaitTime,
+            IRootReplayerContext context,
+            URI serverUri,
+            IAuthTransformerFactory authTransformerFactory,
+            boolean allowInsecureConnections,
+            int numSendingThreads,
+            int maxConcurrentOutstandingRequests,
+            IJsonTransformer jsonTransformer,
+            String targetConnectionPoolName,
+            RecordingProcessTerminator processTerminator
+        ) throws SSLException {
             super(
                 context,
                 serverUri,
@@ -97,10 +165,14 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     numSendingThreads,
                     targetConnectionPoolName
                 ),
-                new TrafficStreamLimiter(maxConcurrentOutstandingRequests),
-                new OrderedWorkerTracker<>()
+                maxConcurrentOutstandingRequests,
+                new OrderedWorkerTracker<>(),
+                new BulkItemErrorClassifier(),
+                ExceptionTypeAllowlist.empty(),
+                processTerminator
             );
             this.maxWaitTime = maxWaitTime;
+            this.processTerminator = processTerminator;
         }
 
         @Override
@@ -109,26 +181,26 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             ReplayEngine replayEngine,
             CapturedTrafficToHttpTransactionAccumulator accumulator
         ) {
-            var startTime = System.nanoTime();
-            for (Duration waitTime = Duration.ofMillis(10); replayEngine.isWorkOutstanding(); waitTime = waitTime
-                .multipliedBy(2)) {
-                var totalDurationSpent = Duration.ofNanos(System.nanoTime() - startTime);
-                if (maxWaitTime.minus(totalDurationSpent).isNegative()) {
-                    throw new TimeoutException(
-                        "Spent too long "
-                            + totalDurationSpent
-                            + " waiting for the ReplayEngine ("
-                            + replayEngine
-                            + ") to complete its outstanding work."
-                    );
-                }
-                Thread.sleep(waitTime.toMillis());
+            waitForRemainingWork(Level.INFO, maxWaitTime);
+            if (replayEngine.isWorkOutstanding()) {
+                throw new IllegalStateException("ReplayEngine reported quiescence with work still outstanding");
             }
             super.wrapUpWorkAndEmitSummary(replayEngine, accumulator);
         }
 
         public void setResponsePostProcessor(IJsonTransformer postProcessor) {
             this.responsePostProcessor = postProcessor;
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                super.close();
+            } catch (Exception | Error failure) {
+                processTerminator.attachFailure(failure);
+                throw failure;
+            }
+            processTerminator.assertNotTerminated();
         }
     }
 
@@ -168,7 +240,10 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 .setConnectionId(TEST_CONNECTION_ID)
                 .addSubStream(TrafficObservation.newBuilder().setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(trafficStreamWithJustClose));
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(
+                List.of(trafficStreamWithJustClose),
+                0
+            );
             TrafficReplayerRunner.runReplayer(0, (rc, threadPrefix) -> {
                 try {
                     return new TrafficReplayerWithWaitOnClose(
@@ -212,7 +287,10 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 .setConnectionId(TEST_CONNECTION_ID)
                 .addSubStream(TrafficObservation.newBuilder().setClose(CloseObservation.newBuilder().build()).build())
                 .build();
-            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(List.of(trafficStreamWithJustClose));
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(
+                List.of(trafficStreamWithJustClose),
+                0
+            );
 
             TrafficReplayerRunner.runReplayer(0, (rc, threadPrefix) -> {
                 try {
@@ -267,7 +345,8 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     boolean isDone = false;
 
                     @Override
-                    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+                    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+                    readNextTrafficStreamChunk(
                         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
                     ) {
                         if (isDone) {
@@ -292,8 +371,15 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                     }
 
                     @Override
-                    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException {
-                        return null;
+                    public CompletionStage<Void> acknowledgeSessionTermination(
+                        ConnectionSessionKey sessionKey
+                    ) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+
+                    @Override
+                    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+                        // This fixture has no per-connection source registry.
                     }
                 };
 
@@ -340,7 +426,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         new URI(DUMMY_URL_THAT_WILL_NEVER_BE_CONTACTED),
                         new IndexWatchingListenerFactory(),
                         () -> TestContext.noOtelTracking(),
-                        new ArrayCursorTrafficSourceContext(List.of())
+                        new ArrayCursorTrafficSourceContext(List.of(), 0)
                     );
                 } catch (Throwable e) {
                     throw Lombok.sneakyThrow(e);
@@ -385,7 +471,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         .collect(Collectors.joining("\n"))
                 )
                 .log();
-            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(trafficStreams);
+            var trafficSourceSupplier = new ArrayCursorTrafficSourceContext(trafficStreams, 0);
             TrafficReplayerRunner.runReplayer(
                 numExpectedRequests,
                 httpServer.localhostEndpoint(),
@@ -401,3 +487,6 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

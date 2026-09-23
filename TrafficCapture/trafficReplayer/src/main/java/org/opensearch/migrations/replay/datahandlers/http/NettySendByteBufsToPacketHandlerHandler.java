@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: IReplayContexts . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -16,6 +27,8 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G5)
 /**
  * This class is responsible for sending the ByteBufs to the downstream packet receiver,
  * which in many cases will be the thing that sends the request over the network.
@@ -23,6 +36,8 @@ import lombok.extern.slf4j.Slf4j;
  * Most of the logic within this class is to convert between ChannelFutures (netty's
  * futures) and CompletableFutures (Java's construct that came after).
  */
+// REBUILD-LIMBO-START(G5)
+/*
 @Slf4j
 public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHandlerAdapter {
     final IPacketFinalizingConsumer<R> packetReceiver;
@@ -209,3 +224,6 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

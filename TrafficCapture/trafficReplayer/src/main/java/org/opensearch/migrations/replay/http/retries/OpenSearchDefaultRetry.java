@@ -1,7 +1,20 @@
 package org.opensearch.migrations.replay.http.retries;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ByteBufferFeeder IRequestResponsePacketPair JsonParser JsonToken RequestSenderOrchestrator . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.io.IOException;
+import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -24,6 +37,8 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.Value;
+import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -40,20 +55,43 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         this.errorClassifier = errorClassifier;
     }
 
-    enum BulkResponseAnalysis {
+    public enum BulkResponseAnalysis {
+*/
+// REBUILD-LIMBO-END(G5)
         /** No errors at all */
+// REBUILD-LIMBO-START(G5)
+/*
         NO_ERRORS,
+*/
+// REBUILD-LIMBO-END(G5)
         /** Has errors, but at least one is retryable */
+// REBUILD-LIMBO-START(G5)
+/*
         HAS_RETRYABLE_ERRORS,
+*/
+// REBUILD-LIMBO-END(G5)
         /** Has errors, but ALL are non-retryable */
+// REBUILD-LIMBO-START(G5)
+/*
         ONLY_NON_RETRYABLE_ERRORS
     }
 
+    @Value
+    @Accessors(fluent = true)
+    public static class BulkResponseInspection {
+        BulkResponseAnalysis analysis;
+        Set<String> errorTypes;
+    }
+
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Streaming JSON analyzer that processes bulk response chunks as they arrive.
      * Uses Jackson's non-blocking parser to avoid buffering the entire response body.
      * Short-circuits as soon as a determination can be made (e.g. "errors":false).
      */
+// REBUILD-LIMBO-START(G5)
+/*
     static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
         private final JsonParser parser;
         private final ByteBufferFeeder feeder;
@@ -72,6 +110,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         private boolean parseFailed = false;
 
         private boolean foundTypeInCurrentError = false;
+        private final Set<String> errorTypes = new LinkedHashSet<>();
 
         @SneakyThrows
         public BulkResponseAnalyzer(BulkItemErrorClassifier errorClassifier) {
@@ -83,6 +122,10 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         BulkResponseAnalysis getAnalysis() {
             return result;
+        }
+
+        Set<String> getErrorTypes() {
+            return Set.copyOf(errorTypes);
         }
 
         @Override
@@ -186,6 +229,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 hasAnyError = true;
                 foundTypeInCurrentError = true;
                 var errorType = parser.getValueAsString();
+                errorTypes.add(errorType);
                 if (!errorClassifier.isNonRetryable(errorType)) {
                     log.atDebug().setMessage("Found retryable bulk item error type: {}")
                         .addArgument(errorType).log();
@@ -221,10 +265,24 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     }
 
     BulkResponseAnalysis analyzeBulkResponse(ByteBuf responseByteBuf) {
+        return inspectBulkResponse(responseByteBuf).analysis();
+    }
+
+    public BulkResponseInspection inspectBulkResponse(ByteBuf responseByteBuf) {
+        return inspectBulkResponse(responseByteBuf, errorClassifier);
+    }
+
+    public static BulkResponseInspection inspectBulkResponse(
+        ByteBuf responseByteBuf,
+        BulkItemErrorClassifier errorClassifier
+    ) {
         var analyzer = new BulkResponseAnalyzer(errorClassifier);
-        HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-            Stream.of(responseByteBuf), analyzer);
-        return analyzer.getAnalysis();
+        HttpByteBufFormatter.processHttpMessageFromBufs(
+            HttpByteBufFormatter.HttpMessageType.RESPONSE,
+            Stream.of(responseByteBuf),
+            analyzer
+        );
+        return new BulkResponseInspection(analyzer.getAnalysis(), analyzer.getErrorTypes());
     }
 
 
@@ -269,3 +327,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

@@ -9,6 +9,18 @@
  * GitHub history for details.
  */
 
+/*
+ * The traffic replayer. See docs/replayerRebuildPlanA-inPlace.md.
+ *
+ * The rebuild happens in this module, in place. Code that has not yet been refactored sits at the path it
+ * will ship from inside REBUILD-LIMBO regions, so it cannot compile and cannot become a second live
+ * implementation, but is unavoidable when the file is next opened. There is no second module and no swing at
+ * the end; the rebuild finishes when the last marked region is resolved.
+ *
+ * Dependencies are added as milestones need them rather than carried forward wholesale, so this file records
+ * what the module actually uses. Anything absent is absent because nothing live needs it yet.
+ */
+
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
@@ -18,65 +30,61 @@ plugins {
 
 dependencies {
     implementation project(':TrafficCapture:captureProtobufs')
-    implementation project(':TrafficCapture:tupleSink')
     implementation project(':coreUtilities')
-    implementation project(':awsUtilities')
+    // TransformerParams, for the two transformer-config parameter delegates on the CLI surface.
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+
+    implementation libs.jcommander
+    implementation libs.protobuf.java
+    implementation libs.netty.all
+    implementation libs.kafka.clients
+    implementation libs.slf4j.api
+    implementation libs.log4j.api
+    implementation libs.log4j.core
+    implementation libs.log4j.slf4j2.impl
+
+    // The deterministic fixtures are production-shaped: TestEventLoop is a real Netty EventLoop, the
+    // only thing the design lets an owner be assigned to, and RecordScript emits real CaptureRecord
+    // envelopes, so the fixture source set compiles against the same protobuf and Netty types
+    // production does.
+    testFixturesImplementation project(':TrafficCapture:captureProtobufs')
+    testFixturesImplementation project(':coreUtilities')
+    testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
+    testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
+
+    testFixturesImplementation libs.protobuf.java
+    testFixturesImplementation libs.slf4j.api
+    testFixturesImplementation libs.junit.jupiter.api
+    // `api` rather than `implementation` because fixture signatures expose these types to their
+    // callers: Netty's EventLoop/ScheduledFuture on TestEventLoop, and Kafka's TopicPartition and
+    // ConsumerRecord on the source fixtures.
+    testFixturesApi libs.netty.all
+    testFixturesApi libs.kafka.clients
+
+    // The supply side of G1's exit criterion: "a topic written by the current, unmodified proxy". This
+    // brings CaptureProxyContainer, which runs the real CaptureProxy in-process against a real broker, so
+    // the replayer reads bytes the proxy actually produced rather than bytes a test wrote to look like it.
+    // Extracted to the proxy module's test fixtures for this; nothing is duplicated here.
+    testFixturesImplementation testFixtures(project(path: ':TrafficCapture:trafficCaptureProxyServer'))
+
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
+
+    // Transformer providers are resolved by name at runtime through TransformationLoader's
+    // ServiceLoader lookup, so they are runtime/test dependencies with no compile-time reference. Their
+    // absence does not fail compilation -- it fails a test with "Could not find a provider named", which
+    // is why they are easy to drop during a module move and worth calling out here.
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
 
-    implementation libs.jcommander
-    implementation libs.jackson.databind
-    implementation libs.guava
-    implementation libs.protobuf.java
-    implementation libs.netty.all
-    implementation libs.kafka.clients
-    implementation libs.log4j.api
-    implementation libs.log4j.core
-    implementation libs.log4j.slf4j2.impl
-    implementation libs.slf4j.api
-    implementation libs.disruptor
-    implementation libs.aws.auth
-    implementation libs.aws.sdk.core
-    implementation libs.aws.s3
-    implementation libs.aws.crt
-    implementation libs.aws.msk.iam.auth
-    implementation libs.commons.compress
-
-    testFixturesImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    testFixturesImplementation project(':TrafficCapture:captureOffloader')
-    testFixturesImplementation testFixtures(project(':TrafficCapture:captureOffloader'))
-    testFixturesImplementation project(':TrafficCapture:captureProtobufs')
-    testFixturesImplementation project(':coreUtilities')
-    testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
-    testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
-
-    testFixturesImplementation libs.slf4j.api
-    testFixturesImplementation libs.jackson.databind
-    testFixturesImplementation libs.netty.all
-    testFixturesImplementation libs.junit.jupiter.api
-
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
-    testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
-    testImplementation libs.httpclient5
     testImplementation libs.junit.jupiter.api
-    testImplementation libs.testcontainers.junit.jupiter
-    testImplementation libs.testcontainers.kafka
-    testImplementation libs.testcontainers.localstack
-    testImplementation libs.testcontainers.toxiproxy
-    testImplementation libs.toxiproxy
-    testImplementation libs.testcontainers
-
-    testImplementation libs.mockito.core
-    testImplementation libs.mockito.junit.jupiter
     testRuntimeOnly libs.junit.jupiter.engine
 }
 
@@ -93,4 +101,17 @@ jar {
 tasks.withType(Test).configureEach {
     // Allow lenient line parsing for compatibility with older clients and tests
     systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
+
+    // DELETE WITH MILESTONE PA2 (docs/replayerRebuildPlan.md section 3.2, item 2, which names this line).
+    // StreamChannelConnectionCaptureSerializer asserts its ids fit MAX_ID_SIZE = 100; real ids total about
+    // 111, so the assert fires on every captured connection and no test can capture through the real proxy.
+    // MAX_ID_SIZE is used nowhere else and production runs without -ea, so only tests are affected. The fix
+    // is the proxy module's, which AGENTS.md section 7 keeps in a separate conversation.
+    jvmArgs '-da:org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer'
 }
+
+// Scaffolding for the replayer rebuild: carried-but-not-yet-refactored code is marked in place, at the
+// path it will ship from, inside REBUILD-LIMBO regions. The build needs nothing special for it, because the
+// regions are ordinary comments and every tool sees a valid source file. See AGENTS.md section 8a.
+//
+// Outstanding work: grep -rl REBUILD-LIMBO-START src | wc -l

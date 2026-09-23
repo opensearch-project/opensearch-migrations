@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: IReplayContexts RequestResponsePacketPair UniqueReplayerRequestKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.List;
@@ -9,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.DiagnosticPayload;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -55,30 +67,44 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public final IReplayContexts.ITupleHandlingContext context;
     public final List<Response> responseList;
     public final Throwable topLevelErrorCause;
+    private final DiagnosticPayload targetRequestPayload;
 
     public SourceTargetCaptureTuple(
         @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
         RequestResponsePacketPair sourcePair,
         TransformedTargetRequestAndResponseList transformedTargetRequestAndResponseList,
-        Exception topLevelErrorCause
+        Throwable topLevelErrorCause
     ) {
         this.context = tupleHandlingContext;
         this.sourcePair = sourcePair;
-        this.targetRequestData = transformedTargetRequestAndResponseList == null ? null :
-            transformedTargetRequestAndResponseList.requestPackets;
-        this.transformationStatus = transformedTargetRequestAndResponseList == null ? null :
+        var resolvedTransformationStatus = transformedTargetRequestAndResponseList == null ? null :
             transformedTargetRequestAndResponseList.getTransformationStatus();
-        this.responseList = transformedTargetRequestAndResponseList == null ? List.of() :
+        var resolvedResponses = transformedTargetRequestAndResponseList == null ? List.<Response>of() :
             transformedTargetRequestAndResponseList.responses().stream()
             .map(arr -> new Response(arr.packets.stream().map(AbstractMap.SimpleEntry::getValue)
                 .collect(Collectors.toList()), arr.error, arr.duration))
             .collect(Collectors.toList());
+        var claimedTargetRequestPayload = transformedTargetRequestAndResponseList == null ? null :
+            transformedTargetRequestAndResponseList.claimDiagnosticPayload();
+        ByteBufList resolvedTargetRequestData;
+        try {
+            resolvedTargetRequestData = claimedTargetRequestPayload == null ? null : claimedTargetRequestPayload.packets();
+        } catch (Throwable t) {
+            if (claimedTargetRequestPayload != null) {
+                claimedTargetRequestPayload.close();
+            }
+            throw t;
+        }
+        this.targetRequestPayload = claimedTargetRequestPayload;
+        this.targetRequestData = resolvedTargetRequestData;
+        this.transformationStatus = resolvedTransformationStatus;
+        this.responseList = resolvedResponses;
         this.topLevelErrorCause = topLevelErrorCause;
     }
 
     @Override
     public void close() {
-        Optional.ofNullable(targetRequestData).ifPresent(ByteBufList::release);
+        Optional.ofNullable(targetRequestPayload).ifPresent(DiagnosticPayload::close);
     }
 
     @Override
@@ -113,3 +139,6 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
         return context.getLogicalEnclosingScope().getReplayerRequestKey();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

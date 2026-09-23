@@ -1,16 +1,29 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: InputStreamOfTraffic ISimpleTrafficCaptureSource ITrafficSourceContexts ITrafficStreamKey ITrafficStreamWithKey . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.EOFException;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ConnectionSessionKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -34,20 +47,29 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     }
 
     @Override
-    public CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        // do nothing
-        return CommitResult.IMMEDIATE;
+    public CompletionStage<Void> acknowledgeSessionTermination(ConnectionSessionKey sessionKey) {
+        return trafficSource.acknowledgeSessionTermination(sessionKey);
     }
 
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+    public void onConnectionAccumulationComplete(ITrafficStreamKey trafficStreamKey) {
+        trafficSource.onConnectionAccumulationComplete(trafficStreamKey);
+    }
+
+    @Override
+    public CompletableFuture<List<org.opensearch.migrations.replay.traffic.source.SourceInput>>
+    readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
     ) {
         if (numberOfTrafficStreamsToRead.get() <= 0) {
             return CompletableFuture.failedFuture(new EOFException());
         }
         return trafficSource.readNextTrafficStreamChunk(readChunkContextSupplier).thenApply(ltswk -> {
-            var transformedTrafficStream = ltswk.stream().map(this::modifyTrafficStream).collect(Collectors.toList());
+            var transformedTrafficStream = ltswk.stream()
+                .map(input -> input instanceof ITrafficStreamWithKey traffic
+                    ? modifyTrafficStream(traffic)
+                    : input)
+                .collect(Collectors.toList());
             var oldValue = numberOfTrafficStreamsToRead.get();
             var newValue = oldValue - transformedTrafficStream.size();
             var exchangeResult = numberOfTrafficStreamsToRead.compareAndExchange(oldValue, newValue);
@@ -64,3 +86,6 @@ public abstract class CompressedFileTrafficCaptureSource implements ISimpleTraff
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

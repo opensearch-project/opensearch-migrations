@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: AsyncPermitPool BufferedFlowController ClientConnectionPool ConnectionReplaySession InstrumentationTest . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -8,23 +19,38 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.replay.ActorRequestTestUtils.RequestProcessingFixture;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
+import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.ReplayEngineFactory;
 import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.RequestTransformerAndSender;
+import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
+import org.opensearch.migrations.replay.lifecycle.AsyncPermitPool;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayProgressController;
+import org.opensearch.migrations.replay.lifecycle.ReplayReadGate;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -45,12 +71,14 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
 
 @Slf4j
 @WrapWithNettyLeakDetection
@@ -77,6 +105,10 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         + "I should be decrypted tester!\n"
         + "\r\n"
         + "0\r\n"
+        + "\r\n";
+    private static final String HEAD_REQUEST_STRING = "HEAD /geonames HTTP/1.1\r\n"
+        + "Host: localhost\r\n"
+        + "Connection: Keep-Alive\r\n"
         + "\r\n";
 
     @Override
@@ -172,7 +204,12 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     NettyPacketToHttpConsumer.createClientConnectionFactory(
                         sslContext,
                         testServer.localhostEndpoint()));
-                var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext, REGULAR_RESPONSE_TIMEOUT);
+                var nphc = new NettyPacketToHttpConsumer(
+                    replaySession,
+                    httpContext,
+                    REGULAR_RESPONSE_TIMEOUT,
+                    () -> {}
+                );
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
                 var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -186,6 +223,96 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                     );
 
                 }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void headResponseWithContentLengthAndNoBodyCompletes(boolean fragmentMethod) throws Exception {
+        var responseTimeout = Duration.ofMillis(250);
+        try (
+            var testServer = SimpleNettyHttpServer.makeServer(false, request -> {
+                Assertions.assertEquals("HEAD", request.getVerb());
+                return new SimpleHttpResponse(
+                    Map.of(HttpHeaderNames.CONTENT_LENGTH.toString(), "377"),
+                    new byte[0],
+                    "Not Found",
+                    404
+                );
+            })
+        ) {
+            var clientConnectionPool = new ClientConnectionPool(
+                NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint()),
+                "targetPool for headResponseWithContentLengthAndNoBodyCompletes",
+                1
+            );
+            try {
+                var requestContext = rootContext.getTestConnectionRequestContext(0);
+                var consumer = new NettyPacketToHttpConsumer(
+                    clientConnectionPool.buildConnectionReplaySession(requestContext.getChannelKeyContext()),
+                    requestContext,
+                    responseTimeout,
+                    () -> {}
+                );
+                if (fragmentMethod) {
+                    consumer.consumeBytes("HE".getBytes(StandardCharsets.US_ASCII)).get();
+                    consumer.consumeBytes(
+                        HEAD_REQUEST_STRING.substring(2).getBytes(StandardCharsets.US_ASCII)
+                    ).get();
+                } else {
+                    consumer.consumeBytes(HEAD_REQUEST_STRING.getBytes(StandardCharsets.US_ASCII)).get();
+                }
+
+                var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);
+
+                Assertions.assertNull(response.getError());
+                Assertions.assertNotNull(response.getRawResponse());
+                Assertions.assertEquals(404, response.getRawResponse().status().code());
+                Assertions.assertEquals("377", response.getRawResponse().headers().get(HttpHeaderNames.CONTENT_LENGTH));
+            } finally {
+                clientConnectionPool.shutdownNow().get();
+            }
+        }
+    }
+
+    @Test
+    void targetResponseTimeoutStartsAfterRequestWriteCompletes() throws Exception {
+        // Long enough that a loaded machine can still get a response inside the window once the timeout is
+        // armed; a tighter budget makes this fail for scheduling reasons rather than for the behavior tested.
+        var responseTimeout = Duration.ofMillis(500);
+        try (
+            var testServer = SimpleNettyHttpServer.makeServer(
+                false,
+                NettyPacketToHttpConsumerTest::makeResponseContext
+            )
+        ) {
+            var clientConnectionPool = new ClientConnectionPool(
+                NettyPacketToHttpConsumer.createClientConnectionFactory(null, testServer.localhostEndpoint()),
+                "targetPool for targetResponseTimeoutStartsAfterRequestWriteCompletes",
+                1
+            );
+            try {
+                var requestContext = rootContext.getTestConnectionRequestContext(0);
+                var consumer = new NettyPacketToHttpConsumer(
+                    clientConnectionPool.buildConnectionReplaySession(requestContext.getChannelKeyContext()),
+                    requestContext,
+                    responseTimeout,
+                    () -> {}
+                );
+                consumer.activeChannelFuture.get(REGULAR_RESPONSE_TIMEOUT);
+
+                // Idle well past the response timeout.  If the timeout handler were armed at construction
+                // rather than after the write, the exchange below would already have failed.
+                parkForAtLeast(responseTimeout.multipliedBy(3));
+
+                consumer.consumeBytes(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)).get();
+                var response = consumer.finalizeRequest().get(REGULAR_RESPONSE_TIMEOUT);
+
+                Assertions.assertNull(response.getError());
+                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, getResponsePacketsAsString(response));
+            } finally {
+                clientConnectionPool.shutdownNow().get();
             }
         }
     }
@@ -243,7 +370,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var nphc = new NettyPacketToHttpConsumer(
                 clientConnectionPool.buildConnectionReplaySession(reqCtx.getChannelKeyContext()),
                 reqCtx,
-                readTimeout
+                readTimeout,
+                () -> {}
             );
             // purposefully send ONLY the beginning of a request
             nphc.consumeBytes("GET ".getBytes(StandardCharsets.UTF_8));
@@ -308,40 +436,53 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 "targetPool for testThatConnectionsAreKeptAliveAndShared",
                 1
             );
-            var replayEngineFactory = new ReplayEngineFactory(REGULAR_RESPONSE_TIMEOUT,
-                new TestFlowController(), timeShifter);
-            for (int j = 0; j < 2; ++j) {
-                for (int i = 0; i < 2; ++i) {
-                    var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
+            var replayOwner = new ReplayOwnerFixture();
+            var replayEngine = new ReplayEngineFactory(
+                REGULAR_RESPONSE_TIMEOUT,
+                replayOwner.flowController,
+                timeShifter,
+                replayOwner.dependencies
+            ).apply(clientConnectionPool);
+            try (var cleanup = new ReplayCleanup(
+                    replayEngine,
+                    clientConnectionPool,
+                    replayOwner)) {
+                for (int j = 0; j < 2; ++j) {
+                    for (int i = 0; i < 2; ++i) {
+                        var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
 
-                    var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+                        var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+                        var processing = new RequestProcessingFixture();
 
-                    var requestFinishFuture = tr.transformAndSendRequest(
-                        transformingHttpHandlerFactory,
-                        replayEngineFactory.apply(clientConnectionPool),
-                        TextTrackedFuture.completedFuture(null, () -> "do nothing"),
-                        ctx,
-                        Instant.now(),
-                        Instant.now(),
-                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-                    log.info("requestFinishFuture=" + requestFinishFuture);
-                    var aggregatedResponse = requestFinishFuture.get();
-                    log.debug("Got aggregated response=" + aggregatedResponse);
-                    Assertions.assertNull(aggregatedResponse.getError());
-                    var responseAsString = getResponsePacketsAsString(aggregatedResponse);
-                    if (!largeResponse) {
-                        Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
-                    } else {
-                        Assertions.assertEquals(
-                            LARGE_RESPONSE_LENGTH,
-                            responseAsString.getBytes(StandardCharsets.UTF_8).length
-                        );
+                        var requestFinishFuture = tr.transformAndSendRequest(
+                            transformingHttpHandlerFactory,
+                            replayEngine,
+                            replayOwner.partitionGeneration(ctx),
+                            TextTrackedFuture.completedFuture(null, () -> "do nothing"),
+                            ctx,
+                            Instant.now(),
+                            Instant.now(),
+                            () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                            null,
+                            new AsyncPermitPool(1, Runnable::run),
+                            processing.registration());
+                        log.info("requestFinishFuture=" + requestFinishFuture);
+                        var aggregatedResponse = requestFinishFuture.get();
+                        log.debug("Got aggregated response=" + aggregatedResponse);
+                        Assertions.assertNull(aggregatedResponse.getError());
+                        var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+                        if (!largeResponse) {
+                            Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+                        } else {
+                            Assertions.assertEquals(
+                                LARGE_RESPONSE_LENGTH,
+                                responseAsString.getBytes(StandardCharsets.UTF_8).length
+                            );
+                        }
+                        replayOwner.completeProcessing(processing, ctx);
                     }
                 }
             }
-            var stopFuture = clientConnectionPool.shutdownNow();
-            log.info("waiting for factory to shutdown: " + stopFuture);
-            stopFuture.get();
         }
     }
 
@@ -423,25 +564,39 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             timeShifter.setFirstTimestamp(firstRequestTime);
             log.atInfo().setMessage("Initial Timestamp: {}").addArgument(firstRequestTime).log();
 
-            var replayEngineFactory = new ReplayEngineFactory(responseTimeout,
-                new TestFlowController(),
-                timeShifter
-            );
+            var replayOwner = new ReplayOwnerFixture();
+            var replayEngine = new ReplayEngineFactory(
+                responseTimeout,
+                replayOwner.flowController,
+                timeShifter,
+                replayOwner.dependencies
+            ).apply(clientConnectionPool);
 
-            var ctx = rootContext.getTestConnectionRequestContext("TEST", 0);
-            var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
-            var requestFinishFuture = tr.transformAndSendRequest(
-                transformingHttpHandlerFactory,
-                replayEngineFactory.apply(clientConnectionPool),
-                TextTrackedFuture.completedFuture(null, () -> "do nothing"),
-                ctx,
-                Instant.now(),
-                Instant.now(),
-                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-            var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
-            var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
-            log.atInfo().setMessage("RequestFinishFuture finished").log();
-            Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
+            try (var cleanup = new ReplayCleanup(
+                    replayEngine,
+                    clientConnectionPool,
+                    replayOwner)) {
+                var ctx = rootContext.getTestConnectionRequestContext("TEST", 0);
+                var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+                var processing = new RequestProcessingFixture();
+                var requestFinishFuture = tr.transformAndSendRequest(
+                    transformingHttpHandlerFactory,
+                    replayEngine,
+                    replayOwner.partitionGeneration(ctx),
+                    TextTrackedFuture.completedFuture(null, () -> "do nothing"),
+                    ctx,
+                    Instant.now(),
+                    Instant.now(),
+                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                    null,
+                    new AsyncPermitPool(1, Runnable::run),
+                    processing.registration());
+                var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
+                var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
+                log.atInfo().setMessage("RequestFinishFuture finished").log();
+                Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
+                replayOwner.completeProcessing(processing, ctx);
+            }
         }
     }
 
@@ -481,35 +636,113 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var firstRequestTime = Instant.now();
             timeShifter.setFirstTimestamp(firstRequestTime);
             log.atInfo().setMessage("Initial Timestamp: {}").addArgument(firstRequestTime).log();
-            var replayEngineFactory = new ReplayEngineFactory(responseTimeout,
-                new TestFlowController(),
-                timeShifter
-            );
-            int i = 0;
-            while (true) {
-                var ctx = rootContext.getTestConnectionRequestContext("TEST", i);
-                log.atInfo().setMessage("Starting transformAndSendRequest for request {}").addArgument(i).log();
+            var replayOwner = new ReplayOwnerFixture();
+            var replayEngine = new ReplayEngineFactory(
+                responseTimeout,
+                replayOwner.flowController,
+                timeShifter,
+                replayOwner.dependencies
+            ).apply(clientConnectionPool);
+            try (var cleanup = new ReplayCleanup(
+                    replayEngine,
+                    clientConnectionPool,
+                    replayOwner)) {
+                int i = 0;
+                while (true) {
+                    var ctx = rootContext.getTestConnectionRequestContext("TEST", i);
+                    log.atInfo().setMessage("Starting transformAndSendRequest for request {}").addArgument(i).log();
 
-                var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
-                var requestFinishFuture = tr.transformAndSendRequest(
-                    transformingHttpHandlerFactory,
-                    replayEngineFactory.apply(clientConnectionPool),
-                    TextTrackedFuture.completedFuture(null, () -> "do nothing"),
-                    ctx,
-                    Instant.now(),
-                    Instant.now(),
-                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-                var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
-                var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
-                log.atInfo().setMessage("RequestFinishFuture finished for request {}").addArgument(i).log();
-                Assertions.assertNull(aggregatedResponse.getError());
-                var responseAsString = getResponsePacketsAsString(aggregatedResponse);
-                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
-                if (i > 1) {
-                    break;
+                    var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+                    var processing = new RequestProcessingFixture();
+                    var requestFinishFuture = tr.transformAndSendRequest(
+                        transformingHttpHandlerFactory,
+                        replayEngine,
+                        replayOwner.partitionGeneration(ctx),
+                        TextTrackedFuture.completedFuture(null, () -> "do nothing"),
+                        ctx,
+                        Instant.now(),
+                        Instant.now(),
+                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)),
+                        null,
+                        new AsyncPermitPool(1, Runnable::run),
+                        processing.registration());
+                    var maxTimeToWaitForTimeoutOrResponse = REGULAR_RESPONSE_TIMEOUT;
+                    var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
+                    log.atInfo().setMessage("RequestFinishFuture finished for request {}").addArgument(i).log();
+                    Assertions.assertNull(aggregatedResponse.getError());
+                    var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+                    Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+                    replayOwner.completeProcessing(processing, ctx);
+                    if (i > 1) {
+                        break;
+                    }
+                    parkForAtLeast(timeBetweenRequests);
+                    i++;
                 }
-                parkForAtLeast(timeBetweenRequests);
-                i++;
+            }
+        }
+    }
+
+    private static void shutdownReplayEngine(ReplayEngine replayEngine) throws Exception {
+        replayEngine.shutdownConnections(new CancellationException("test replay is complete"))
+            .toCompletableFuture()
+            .get(REGULAR_RESPONSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+    }
+
+    private class ReplayCleanup implements AutoCloseable {
+        private final ReplayEngine replayEngine;
+        private final ClientConnectionPool clientConnectionPool;
+        private final ReplayOwnerFixture replayOwner;
+
+        private ReplayCleanup(
+            ReplayEngine replayEngine,
+            ClientConnectionPool clientConnectionPool,
+            ReplayOwnerFixture replayOwner
+        ) {
+            this.replayEngine = replayEngine;
+            this.clientConnectionPool = clientConnectionPool;
+            this.replayOwner = replayOwner;
+        }
+
+        @Override
+        public void close() throws Exception {
+            Throwable failure = null;
+            try {
+                shutdownReplayEngine(replayEngine);
+            } catch (Throwable t) {
+                failure = t;
+            }
+
+            try {
+                clientConnectionPool.shutdownNow().get(
+                    REGULAR_RESPONSE_TIMEOUT.toMillis(),
+                    TimeUnit.MILLISECONDS
+                );
+            } catch (Throwable t) {
+                if (failure == null) {
+                    failure = t;
+                } else if (failure != t) {
+                    failure.addSuppressed(t);
+                }
+            }
+
+            var fatalFailure = replayOwner.unexpectedFatalFailure();
+            if (fatalFailure != null) {
+                if (failure == null) {
+                    failure = fatalFailure;
+                } else {
+                    failure.addSuppressed(fatalFailure);
+                }
+            }
+
+            if (failure instanceof Exception exception) {
+                throw exception;
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+            if (failure != null) {
+                throw new RuntimeException(failure);
             }
         }
     }
@@ -518,6 +751,105 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         var responseTime = Instant.now().toEpochMilli() + waitDuration.toMillis();
         while (Instant.now().toEpochMilli() < responseTime) {
             LockSupport.parkUntil(responseTime);
+        }
+    }
+
+    private enum Milestone {
+        CONNECTION_TURN,
+        PROCESSING
+    }
+
+    private record LifecycleEvent(
+        PartitionGenerationId generation,
+        ReplayIdentity.ReplayRequestId requestId,
+        Milestone milestone
+    ) {}
+
+    private class ReplayOwnerFixture {
+        private final TestFlowController flowController = new TestFlowController();
+        private final PartitionGenerationId generation = new PartitionGenerationId(
+            new TopicPartition("netty-packet-to-http-consumer-test", 4),
+            9
+        );
+        private final List<LifecycleEvent> lifecycleEvents = new CopyOnWriteArrayList<>();
+        private final List<Error> fatalFailures = new CopyOnWriteArrayList<>();
+        private final TargetConnectionOwner.RequestLifecycleSink lifecycleSink =
+            new TargetConnectionOwner.RequestLifecycleSink() {
+                @Override
+                public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                    PartitionGenerationId partitionGenerationId,
+                    ReplayIdentity.ReplayRequestId requestId
+                ) {
+                    lifecycleEvents.add(new LifecycleEvent(
+                        partitionGenerationId,
+                        requestId,
+                        Milestone.CONNECTION_TURN
+                    ));
+                    return CompletableFuture.completedFuture(null);
+                }
+
+                @Override
+                public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                    PartitionGenerationId partitionGenerationId,
+                    ReplayIdentity.ReplayRequestId requestId
+                ) {
+                    lifecycleEvents.add(new LifecycleEvent(
+                        partitionGenerationId,
+                        requestId,
+                        Milestone.PROCESSING
+                    ));
+                    return CompletableFuture.completedFuture(null);
+                }
+            };
+        private final ReplayProgressController progressController = new ReplayProgressController(
+            Runnable::run,
+            new ReplayReadGate(flowController.getBufferTimeWindow(), flowController)
+        );
+        private final ReplayEngineFactory.Dependencies dependencies = new ReplayEngineFactory.Dependencies(
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            lifecycleSink,
+            fatalFailures::add,
+            progressController
+        );
+
+        private PartitionGenerationId partitionGeneration(
+            IReplayContexts.IReplayerHttpTransactionContext context
+        ) {
+            return generation;
+        }
+
+        private void completeProcessing(
+            RequestProcessingFixture processing,
+            IReplayContexts.IReplayerHttpTransactionContext context
+        ) throws Exception {
+            Assertions.assertTrue(
+                processing.completeTupleDurable(),
+                "tuple durability must win exactly once"
+            );
+            processing.lifecycleHandled().toCompletableFuture().get(
+                REGULAR_RESPONSE_TIMEOUT.toMillis(),
+                TimeUnit.MILLISECONDS
+            );
+            var requestId = ReplayIdentity.replayRequestId(context.getReplayerRequestKey());
+            var requestEvents = lifecycleEvents.stream()
+                .filter(event -> event.requestId().equals(requestId))
+                .toList();
+            Assertions.assertEquals(
+                List.of(Milestone.CONNECTION_TURN, Milestone.PROCESSING),
+                requestEvents.stream().map(LifecycleEvent::milestone).toList()
+            );
+            Assertions.assertTrue(
+                requestEvents.stream().allMatch(event -> event.generation().equals(generation)),
+                () -> "lifecycle milestones must retain " + generation + ": " + requestEvents
+            );
+        }
+
+        private AssertionError unexpectedFatalFailure() {
+            return fatalFailures.isEmpty()
+                ? null
+                : new AssertionError(
+                    "expected no process-fatal failures, but received " + fatalFailures
+                );
         }
     }
 
@@ -531,3 +863,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

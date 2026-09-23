@@ -28,8 +28,8 @@ class CodedOutputStreamSizeUtilTest {
         Instant timestamp = Instant.parse("2024-01-01T00:00:00Z");
         ByteBuf buf = Unpooled.buffer(100);
         buf.writeCharSequence("Test", StandardCharsets.UTF_8);
-        int result = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp, 1, 2, buf);
-        Assertions.assertEquals(24, result);
+        int result = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp, 1, 2, buf, 1);
+        Assertions.assertEquals(27, result);
     }
 
     @Test

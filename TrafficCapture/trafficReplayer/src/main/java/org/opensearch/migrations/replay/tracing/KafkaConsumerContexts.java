@@ -1,24 +1,100 @@
 package org.opensearch.migrations.replay.tracing;
 
-import java.util.Collection;
-
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
-import org.opensearch.migrations.tracing.CommonMetricInstruments;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
-import lombok.Getter;
 import lombok.NonNull;
-import lombok.Setter;
-import org.apache.kafka.common.TopicPartition;
 
 public class KafkaConsumerContexts {
 
     private KafkaConsumerContexts() {}
+
+// REBUILD-LIMBO-START(G3)
+// LivenessScanContext: dead. Nothing measures a liveness scan.
+// AsyncListeningContext, TouchScopeContext: blocked on RootReplayerContext. TouchScopeContext also belongs to
+// the back-pressure model G5 replaces. To restore either, retarget its root as the live contexts below are.
+/*
+    public static class LivenessScanContext implements IKafkaConsumerContexts.ILivenessScanContext {
+        public static final AttributeKey<String> VERDICT_ATTRIBUTE = AttributeKey.stringKey("verdict");
+
+        @Getter
+        @NonNull
+        public final RootReplayerContext enclosingScope;
+        @Getter
+        @Setter
+        Exception observedExceptionToIncludeInMetrics;
+
+        public static class MetricInstruments extends CommonMetricInstruments {
+            public final LongCounter scanCounter;
+            public final LongHistogram distance;
+            public final DoubleHistogram latency;
+            public final LongCounter bytesDiscarded;
+            public final LongCounter verdictCounter;
+            public final LongCounter supersededTrafficDiscarded;
+
+            private MetricInstruments(Meter meter) {
+                super(meter, "livenessScan");
+                scanCounter = meter.counterBuilder(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_COUNT)
+                    .setUnit("scans")
+                    .build();
+                distance = meter.histogramBuilder(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_DISTANCE)
+                    .ofLongs()
+                    .setUnit("records")
+                    .build();
+                latency = meter.histogramBuilder(IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_LATENCY)
+                    .setUnit("ms")
+                    .build();
+                bytesDiscarded = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_BYTES_DISCARDED
+                ).setUnit("By").build();
+                verdictCounter = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.LIVENESS_SCAN_VERDICT_COUNT
+                ).setUnit("verdicts").build();
+                supersededTrafficDiscarded = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.SUPERSEDED_TRAFFIC_RECORDS_DISCARDED
+                ).setUnit("records").build();
+            }
+        }
+
+        public LivenessScanContext(@NonNull RootReplayerContext enclosingScope) {
+            this.enclosingScope = enclosingScope;
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter);
+        }
+
+        @Override
+        public @NonNull MetricInstruments getMetrics() {
+            return enclosingScope.livenessScanInstruments;
+        }
+
+        @Override
+        public void recordCycle(int recordsScanned, long discardedBytes, Duration duration) {
+            meterIncrementEvent(getMetrics().scanCounter);
+            meterHistogram(getMetrics().distance, recordsScanned);
+            meterHistogramMillis(getMetrics().latency, duration);
+            meterIncrementEvent(getMetrics().bytesDiscarded, discardedBytes);
+        }
+
+        @Override
+        public void recordVerdict(@NonNull IKafkaConsumerContexts.LivenessScanVerdict verdict) {
+            meterIncrementEvent(
+                getMetrics().verdictCounter,
+                1,
+                Attributes.builder().put(VERDICT_ATTRIBUTE, verdict.metricLabel())
+            );
+        }
+
+        @Override
+        public void recordSupersededTrafficDiscarded() {
+            meterIncrementEvent(getMetrics().supersededTrafficDiscarded);
+        }
+    }
 
     public static class AsyncListeningContext implements IKafkaConsumerContexts.IAsyncListeningContext {
         @Getter
@@ -104,12 +180,35 @@ public class KafkaConsumerContexts {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G3)
+    // REBUILD-LIMBO-NOTE(G3): root type stands in for RootReplayerContext, which already declares
+    // pollInstruments, commitInstruments and kafkaCommitInstruments under these names.
     public static class PollScopeContext extends BaseNestedSpanContext<
-        RootReplayerContext,
+        KafkaSourceRootContext,
         IScopedInstrumentationAttributes> implements IKafkaConsumerContexts.IPollScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public final LongCounter pollsEntered;
+            public final LongCounter pollsWokenByQueuedInput;
+            public final LongCounter wakeupsIssued;
+            public final LongCounter wakeupsCoalesced;
+            public final LongCounter wakeupsDeferred;
+
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
+                // Counted as the context opens, so another thread can see that a poll is in progress; a span
+                // is only exported once it ends.
+                pollsEntered = meter.counterBuilder(IKafkaConsumerContexts.MetricNames.POLLS_ENTERED).build();
+                pollsWokenByQueuedInput = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.POLLS_WOKEN_BY_QUEUED_INPUT).build();
+                // The wakeup counters live on the poll scope because every wakeup exists to affect a poll,
+                // whichever phase the submission arrived in.
+                wakeupsIssued = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED).build();
+                wakeupsCoalesced = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.WAKEUPS_COALESCED).build();
+                wakeupsDeferred = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED).build();
             }
         }
 
@@ -123,16 +222,58 @@ public class KafkaConsumerContexts {
         }
 
         public PollScopeContext(
-            @NonNull RootReplayerContext rootScope,
-            @NonNull IScopedInstrumentationAttributes enclosingScope
+            @NonNull KafkaSourceRootContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
         ) {
             super(rootScope, enclosingScope);
             initializeSpan();
+            meterIncrementEvent(getMetrics().pollsEntered);
+        }
+
+        @Override
+        public void onWokenByQueuedInput() {
+            meterIncrementEvent(getMetrics().pollsWokenByQueuedInput);
         }
     }
 
+    // REBUILD-LIMBO-NOTE(G3): root type; RootReplayerContext also needs a rebalanceCallbackInstruments field.
+    public static class RebalanceCallbackScopeContext extends BaseNestedSpanContext<
+        KafkaSourceRootContext,
+        IScopedInstrumentationAttributes> implements IKafkaConsumerContexts.IRebalanceCallbackScopeContext {
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public final LongCounter deferredWakeupsIssuedOnExit;
+
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
+                deferredWakeupsIssuedOnExit = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT).build();
+            }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        @Override
+        public @NonNull MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().rebalanceCallbackInstruments;
+        }
+
+        public RebalanceCallbackScopeContext(@NonNull KafkaSourceRootContext rootScope) {
+            super(rootScope, null);
+            initializeSpan();
+        }
+
+        @Override
+        public void onIssuedDeferredWakeupOnExit() {
+            meterIncrementEvent(getMetrics().deferredWakeupsIssuedOnExit);
+        }
+    }
+
+    // REBUILD-LIMBO-NOTE(G3): root type stands in for RootReplayerContext.
     public static class CommitScopeContext extends BaseNestedSpanContext<
-        RootReplayerContext,
+        KafkaSourceRootContext,
         IScopedInstrumentationAttributes> implements IKafkaConsumerContexts.ICommitScopeContext {
 
         @Override
@@ -156,7 +297,7 @@ public class KafkaConsumerContexts {
         }
 
         public CommitScopeContext(
-            @NonNull RootReplayerContext rootScope,
+            @NonNull KafkaSourceRootContext rootScope,
             IScopedInstrumentationAttributes enclosingScope
         ) {
             super(rootScope, enclosingScope);
@@ -164,8 +305,9 @@ public class KafkaConsumerContexts {
         }
     }
 
+    // REBUILD-LIMBO-NOTE(G3): root type stands in for RootReplayerContext.
     public static class KafkaCommitScopeContext extends DirectNestedSpanContext<
-        RootReplayerContext,
+        KafkaSourceRootContext,
         KafkaConsumerContexts.CommitScopeContext,
         IKafkaConsumerContexts.ICommitScopeContext> implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {

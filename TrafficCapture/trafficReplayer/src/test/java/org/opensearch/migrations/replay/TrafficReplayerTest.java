@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: InstrumentationTest IReplayContexts ITrafficStreamKey . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -13,6 +24,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,6 +33,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
@@ -47,9 +60,9 @@ import org.slf4j.event.Level;
 class TrafficReplayerTest extends InstrumentationTest {
 
     public static final String TEST_NODE_ID_STRING = "test_node_id";
-    private static String TEST_TRAFFIC_STREAM_ID_STRING = "testId";
-    private static String FAKE_READ_PACKET_DATA = "Useless packet data for test";
-    private static String FAKE_EXCEPTION_DATA = "Mock Exception Message for testing";
+    private static final String TEST_TRAFFIC_STREAM_ID_STRING = "testId";
+    private static final String FAKE_READ_PACKET_DATA = "Useless packet data for test";
+    private static final String FAKE_EXCEPTION_DATA = "Mock Exception Message for testing";
 
     private static TrafficStream makeTrafficStream(Instant t, int trafficChunkNumber) {
         Timestamp fixedTimestamp = getProtobufTimestamp(t);
@@ -132,6 +145,12 @@ class TrafficReplayerTest extends InstrumentationTest {
                     .setWrite(WriteObservation.newBuilder().build())
                     .build()
             )
+            .addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setClose(CloseObservation.newBuilder().build())
+                    .build()
+            )
             // Don't need to add more because this gets looped multiple times (with the same connectionId)
             .build();
     }
@@ -153,6 +172,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                     trafficProducer.readNextTrafficStreamChunk(rootContext::createReadChunkContext)
                         .get()
                         .stream()
+                        .map(ITrafficStreamWithKey.class::cast)
                         .forEach(ts -> {
                             var i = counter.incrementAndGet();
                             var expectedStream = makeTrafficStream(timestamp.plus(i - 1, ChronoUnit.SECONDS), i);
@@ -193,13 +213,15 @@ class TrafficReplayerTest extends InstrumentationTest {
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testReader() throws Exception {
         var uri = new URI("http://localhost:9200");
+        var processExitCodes = new CopyOnWriteArrayList<Integer>();
         try (
             var tr = new RootReplayerConstructorExtensions(
                 rootContext,
                 uri,
                 null,
                 null,
-                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri),
+                processExitCodes::add
             )
         ) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
@@ -261,6 +283,7 @@ class TrafficReplayerTest extends InstrumentationTest {
             Assertions.assertEquals(1, byteArrays.size());
             Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));
         }
+        assertNoProcessTermination(processExitCodes);
     }
 
     @Test
@@ -268,13 +291,15 @@ class TrafficReplayerTest extends InstrumentationTest {
     @WrapWithNettyLeakDetection(repetitions = 2)
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
         var uri = new URI("http://localhost:9200");
+        var processExitCodes = new CopyOnWriteArrayList<Integer>();
         try (
             var tr = new RootReplayerConstructorExtensions(
                 rootContext,
                 uri,
                 null,
                 new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
-                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri),
+                processExitCodes::add
             )
         ) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
@@ -352,6 +377,7 @@ class TrafficReplayerTest extends InstrumentationTest {
             Assertions.assertTrue(byteArrays.stream().allMatch(ba -> ba.size() == 2));
             Assertions.assertEquals(0, remainingAccumulations.get());
         }
+        assertNoProcessTermination(processExitCodes);
     }
 
     @Test
@@ -367,4 +393,14 @@ class TrafficReplayerTest extends InstrumentationTest {
     private static String collectBytesToUtf8String(List<byte[]> bytesList) {
         return bytesList.stream().map(ba -> new String(ba, StandardCharsets.UTF_8)).collect(Collectors.joining());
     }
+
+    private static void assertNoProcessTermination(List<Integer> processExitCodes) {
+        Assertions.assertTrue(
+            processExitCodes.isEmpty(),
+            () -> "Unexpected process termination with exit codes " + processExitCodes
+        );
+    }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

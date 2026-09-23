@@ -28,4 +28,5 @@ dependencies {
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
 }

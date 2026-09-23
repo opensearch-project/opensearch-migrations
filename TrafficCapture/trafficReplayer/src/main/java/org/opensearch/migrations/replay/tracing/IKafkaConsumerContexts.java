@@ -1,9 +1,27 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.time.Duration;
+
 import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface IKafkaConsumerContexts {
+
+    enum LivenessScanVerdict {
+        FOLLOW_UP_FOUND("follow_up_found"),
+        CONFIRMED_ABSENT("confirmed_absent"),
+        INCONCLUSIVE("inconclusive");
+
+        private final String metricLabel;
+
+        LivenessScanVerdict(String metricLabel) {
+            this.metricLabel = metricLabel;
+        }
+
+        public String metricLabel() {
+            return metricLabel;
+        }
+    }
 
     class ScopeNames {
         private ScopeNames() {}
@@ -18,6 +36,7 @@ public interface IKafkaConsumerContexts {
         public static final String KAFKA_POLL = "kafkaPoll";
         public static final String COMMIT = "commit";
         public static final String KAFKA_COMMIT = "kafkaCommit";
+        public static final String REBALANCE_CALLBACK = "rebalanceCallback";
     }
 
     class MetricNames {
@@ -26,9 +45,32 @@ public interface IKafkaConsumerContexts {
         public static final String PARTITIONS_ASSIGNED_EVENT_COUNT = "partitionsAssigned";
         public static final String PARTITIONS_REVOKED_EVENT_COUNT = "partitionsRevoked";
         public static final String ACTIVE_PARTITIONS_ASSIGNED_COUNT = "numPartitionsAssigned";
+        public static final String LIVENESS_SCAN_COUNT = "livenessScanCount";
+        public static final String LIVENESS_SCAN_DISTANCE = "livenessScanDistance";
+        public static final String LIVENESS_SCAN_LATENCY = "livenessScanLatency";
+        public static final String LIVENESS_SCAN_BYTES_DISCARDED = "livenessScanBytesDiscarded";
+        public static final String LIVENESS_SCAN_VERDICT_COUNT = "livenessScanVerdictCount";
+        public static final String SUPERSEDED_TRAFFIC_RECORDS_DISCARDED =
+            "supersededTrafficRecordsDiscarded";
+
+        public static final String POLLS_ENTERED = "kafkaSourcePollsEntered";
+        public static final String POLLS_WOKEN_BY_QUEUED_INPUT = "kafkaSourcePollsWokenByQueuedInput";
+        public static final String WAKEUPS_ISSUED = "kafkaSourceWakeupsIssued";
+        public static final String WAKEUPS_COALESCED = "kafkaSourceWakeupsCoalesced";
+        public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
+        public static final String DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT =
+            "kafkaSourceDeferredWakeupsIssuedOnCallbackExit";
     }
 
     interface IAsyncListeningContext extends IInstrumentationAttributes {}
+
+    interface ILivenessScanContext extends IInstrumentationAttributes {
+        void recordCycle(int recordsScanned, long bytesDiscarded, Duration latency);
+
+        void recordVerdict(LivenessScanVerdict verdict);
+
+        void recordSupersededTrafficDiscarded();
+    }
 
     interface IKafkaConsumerScope extends IScopedInstrumentationAttributes {}
 
@@ -50,6 +92,25 @@ public interface IKafkaConsumerContexts {
         default String getActivityName() {
             return ACTIVITY_NAME;
         }
+
+        /** Records that this poll ended because a queued input woke it rather than by reaching its timeout. */
+        void onWokenByQueuedInput();
+    }
+
+    /**
+     * A rebalance callback as a scope of its own. Nothing measured this before, and it is the window during
+     * which a wakeup must not be delivered, so its duration is what shows a deferral actually spanned it.
+     */
+    interface IRebalanceCallbackScopeContext extends IKafkaConsumerScope {
+        String ACTIVITY_NAME = ActivityNames.REBALANCE_CALLBACK;
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
+        /** Records that a wakeup deferred during the callback was issued as it returned. */
+        void onIssuedDeferredWakeupOnExit();
     }
 
     /**

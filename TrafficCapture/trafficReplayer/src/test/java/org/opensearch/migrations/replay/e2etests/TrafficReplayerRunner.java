@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.e2etests;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: IRootReplayerContext ISimpleTrafficCaptureSource ISourceTrafficChannelKey RootReplayerConstructorExtensions SourceTargetCaptureTuple . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import javax.net.ssl.SSLException;
 
 import java.net.URI;
@@ -9,6 +20,7 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -73,6 +85,7 @@ public class TrafficReplayerRunner {
         Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
         TimeShifter timeShifter
     ) throws Throwable {
+        var processExitCodes = new CopyOnWriteArrayList<Integer>();
         runReplayer(numExpectedRequests, (rootContext, targetConnectionPoolPrefix) -> {
             try {
                 return new RootReplayerConstructorExtensions(
@@ -80,12 +93,20 @@ public class TrafficReplayerRunner {
                     endpoint,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(endpoint.getHost()),
-                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(endpoint, targetConnectionPoolPrefix)
+                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(
+                        endpoint,
+                        targetConnectionPoolPrefix
+                    ),
+                    processExitCodes::add
                 );
             } catch (SSLException e) {
                 throw new RuntimeException(e);
             }
         }, tupleListenerSupplier, rootContextSupplier, trafficSourceFactory, timeShifter);
+        Assertions.assertTrue(
+            processExitCodes.isEmpty(),
+            () -> "Unexpected process termination with exit codes " + processExitCodes
+        );
     }
 
     public static void runReplayer(
@@ -142,7 +163,8 @@ public class TrafficReplayerRunner {
                 // if this finished running without an exception, we need to stop the loop
                 break;
             } catch (TrafficReplayer.TerminationException e) {
-                log.atLevel(e.originalCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
+                var killSignalError = findKillSignal(e.originalCause, e.immediateCause);
+                log.atLevel(killSignalError != null ? Level.INFO : Level.ERROR)
                     .setCause(e.originalCause)
                     .setMessage("broke out of the replayer, with this shutdown reason")
                     .log();
@@ -151,12 +173,6 @@ public class TrafficReplayerRunner {
                     .setMessage("broke out of the replayer, with the shutdown cause={} and this immediate reason")
                     .addArgument(e.originalCause)
                     .log();
-                FabricatedErrorToKillTheReplayer killSignalError =
-                    e.originalCause instanceof FabricatedErrorToKillTheReplayer
-                        ? (FabricatedErrorToKillTheReplayer) e.originalCause
-                        : (e.immediateCause instanceof FabricatedErrorToKillTheReplayer
-                            ? (FabricatedErrorToKillTheReplayer) e.immediateCause
-                            : null);
                 if (killSignalError == null) {
                     skipFinally = true;
                     throw e.immediateCause;
@@ -236,6 +252,20 @@ public class TrafficReplayerRunner {
         }
     }
 
+    private static FabricatedErrorToKillTheReplayer findKillSignal(Throwable... causes) {
+        for (var cause : causes) {
+            for (var current = cause; current != null; current = current.getCause()) {
+                if (current instanceof FabricatedErrorToKillTheReplayer) {
+                    return (FabricatedErrorToKillTheReplayer) current;
+                }
+                if (current == current.getCause()) {
+                    break;
+                }
+            }
+        }
+        return null;
+    }
+
     private static void waitForWorkerThreadsToStop(String targetConnectionPoolName) throws InterruptedException {
         var sleepMs = 2;
         final var MAX_SLEEP_MS = 100;
@@ -285,3 +315,6 @@ public class TrafficReplayerRunner {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

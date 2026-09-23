@@ -1,14 +1,30 @@
 package org.opensearch.migrations.replay.http.retries;
 
+// REBUILD-LIMBO(G10) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Test carried byte-identical. Unresolved: ActorRequestTestUtils ClientConnectionPool IReplayContexts NettyPacketToHttpConsumer NettyPacketToHttpConsumerTest . Per AGENTS.md section 4 an inherited test may stay broken while the architectures are partly connected; this one is restored by the milestone that rebuilds its subject, keeping its assertions conceptually stable while changing the mechanics.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G10)
+/*
+
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.ActorRequestTestUtils.RequestProcessingFixture;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TestHttpServerContext;
@@ -19,6 +35,11 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.SessionOutcome.AbortReason;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
@@ -33,6 +54,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
@@ -41,11 +63,23 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
 
+import static org.opensearch.migrations.replay.ActorRequestTestUtils.schedulePreparedRequest;
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
 public class HttpRetryTest {
+    private static final PartitionGenerationId TEST_GENERATION =
+        new PartitionGenerationId(new TopicPartition("http-retry-test", 2), 7);
+
+    private record ScheduledRequest(
+        TrackedFuture<String, TransformedTargetRequestAndResponseList> completion,
+        RequestSenderOrchestrator orchestrator,
+        IReplayContexts.IReplayerHttpTransactionContext context,
+        RequestProcessingFixture processing,
+        List<Error> fatalFailures
+    ) {}
+
     private ByteBufList makeRequest() {
         return new ByteBufList(Unpooled.wrappedBuffer(TestHttpServerContext.getRequestStringForSimpleGet("/")
             .getBytes(StandardCharsets.UTF_8)));
@@ -69,16 +103,74 @@ public class HttpRetryTest {
             1,
             "targetConnectionPool for testTransientRequestFailuresAreRetried"
         );
-        return scheduleSingleRequest(clientConnectionPool, rootContext)
-            .whenComplete((v,t) -> clientConnectionPool.shutdownNow(), () -> "cleaning up connection pool");
+        var scheduled = scheduleSingleRequest(clientConnectionPool, rootContext);
+        return scheduled.completion().thenCompose(
+            result -> {
+                if (!scheduled.processing().completeTupleDurable()) {
+                    return TextTrackedFuture.failedFuture(
+                        new IllegalStateException("request processing was already settled"),
+                        () -> "settle retry test request processing"
+                    );
+                }
+                return new TextTrackedFuture<>(
+                    scheduled.processing().lifecycleHandled().toCompletableFuture(),
+                    () -> "wait for retry test request processing lifecycle"
+                ).thenApply(
+                    ignored -> result,
+                    () -> "preserve the retry result after request processing finishes"
+                );
+            },
+            () -> "settle retry test request processing after target completion"
+        ).thenCompose(
+            result -> scheduled.orchestrator().scheduleActorClose(
+                scheduled.context().getChannelKeyContext(),
+                0,
+                TEST_GENERATION,
+                Instant.now()
+            ).thenApply(ignored -> result, () -> "preserve the retry result after closing its connection actor"),
+            () -> "close the connection actor after retry processing finishes"
+        ).thenCompose(
+            result -> new TextTrackedFuture<>(
+                scheduled.orchestrator().shutdownActors(
+                    new CancellationException("retry test cleanup")
+                ).toCompletableFuture(),
+                () -> "wait for retry test replay actors to stop"
+            ).thenApply(ignored -> result, () -> "preserve the retry result after stopping replay actors"),
+            () -> "stop replay actors after the connection actor reaches its final state"
+        ).thenCompose(
+            result -> new TextTrackedFuture<>(
+                clientConnectionPool.shutdownNow(),
+                () -> "wait for the retry test connection pool to stop"
+            ).thenApply(ignored -> result, () -> "preserve the retry result after stopping Netty"),
+            () -> "stop Netty only after the connection actor reaches its final state"
+        ).whenComplete(
+            (ignored, failure) -> {
+                scheduled.context().close();
+                if (failure == null) {
+                    assertNoFatalFailures(scheduled.fatalFailures());
+                } else {
+                    scheduled.fatalFailures().forEach(failure::addSuppressed);
+                }
+            },
+            () -> "close the retry test request context"
+        );
     }
 
-    private TrackedFuture<String, TransformedTargetRequestAndResponseList>
+    private ScheduledRequest
     scheduleSingleRequest(ClientConnectionPool clientConnectionPool, TestContext rootContext) {
         var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
+        var fatalFailures = new CopyOnWriteArrayList<Error>();
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT)
+            (replaySession, ctx, firstTargetWriteSubmitted) -> new NettyPacketToHttpConsumer(
+                replaySession,
+                ctx,
+                REGULAR_RESPONSE_TIMEOUT,
+                firstTargetWriteSubmitted
+            ),
+            RequestSenderOrchestrator.noSourceTerminationObligations(),
+            acceptingLifecycleSink(),
+            fatalFailures::add
         );
         var baseTime = Instant.now();
         var requestContext = rootContext.getTestConnectionRequestContext(0);
@@ -90,15 +182,24 @@ public class HttpRetryTest {
             new TransformedOutputAndResult<>(sourceRequestProducer, HttpRequestTransformationStatus.skipped()),
             TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes),
                 () -> "static rrp"));
+        var processing = new RequestProcessingFixture();
         log.info("Scheduling item to run at " + startTimeForThisRequest);
-        return senderOrchestrator.scheduleRequest(
-            requestContext.getReplayerRequestKey(),
+        return new ScheduledRequest(
+            schedulePreparedRequest(
+                senderOrchestrator,
+                TEST_GENERATION,
+                requestContext,
+                startTimeForThisRequest,
+                Duration.ofMillis(1),
+                sourceRequestProducer,
+                retryVisitor,
+                processing.registration()
+            ),
+            senderOrchestrator,
             requestContext,
-            startTimeForThisRequest,
-            Duration.ofMillis(1),
-            sourceRequestProducer,
-            retryVisitor
-        ).whenComplete((v,t) -> requestContext.close(), () -> "test request context closure");
+            processing,
+            fatalFailures
+        );
     }
 
     private TransformedTargetRequestAndResponseList
@@ -167,7 +268,8 @@ public class HttpRetryTest {
             "targetConnectionPool for testTransientRequestFailuresAreRetried"
         );
         try (var rootContext = TestContext.withAllTracking()) {
-            var f = executor.submit(() -> scheduleSingleRequest(clientConnectionPool, rootContext).get());
+            var scheduled = scheduleSingleRequest(clientConnectionPool, rootContext);
+            var f = executor.submit(() -> scheduled.completion().get());
 
             // Wait until multiple connection attempts have been made instead of sleeping a fixed duration
             var deadline = System.currentTimeMillis() + 10_000;
@@ -178,14 +280,29 @@ public class HttpRetryTest {
                 }
                 Thread.sleep(10);
             }
+            scheduled.orchestrator().abortActor(
+                scheduled.context().getChannelKeyContext(),
+                0,
+                AbortReason.SHUTDOWN,
+                new CancellationException("test requested retry shutdown")
+            ).get(Duration.ofSeconds(5));
+            scheduled.orchestrator().shutdownActors(
+                new CancellationException("retry test cleanup")
+            ).toCompletableFuture().get(5, TimeUnit.SECONDS);
             var ccpShutdownFuture = clientConnectionPool.shutdownNow();
 
             var e = Assertions.assertThrows(Exception.class, f::get);
             var shutdownResult = ccpShutdownFuture.get();
+            scheduled.context().close();
             log.atInfo().setCause(e).setMessage("exception: ").log();
             // doubly-nested ExecutionException.  Once for the get() call here and once for the work done in submit,
-            // which wraps the scheduled request's future
-            Assertions.assertInstanceOf(IllegalStateException.class, e.getCause().getCause());
+            // which wraps the scheduled request's future.  Which exception surfaces depends on where the
+            // shutdown lands: IllegalStateException when a connection attempt was in flight,
+            // CancellationException when a retry delay was pending and the event loop cancelled it.
+            var rootFailure = e.getCause().getCause();
+            Assertions.assertTrue(
+                rootFailure instanceof IllegalStateException || rootFailure instanceof CancellationException,
+                "expected the shutdown to fail the request, but got: " + rootFailure);
             executor.shutdown();
 
             // connection issues won't count as retries since they aren't related to resending the data.
@@ -196,16 +313,50 @@ public class HttpRetryTest {
             Assertions.assertTrue(InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingCount") > 1);
             Assertions.assertTrue(InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingExceptionCount") > 1);
             Assertions.assertEquals(0, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "nonRetryableConnectionFailures"));
+            assertNoFatalFailures(scheduled.fatalFailures());
         }
+    }
+
+    private static void assertNoFatalFailures(List<Error> fatalFailures) {
+        Assertions.assertTrue(
+            fatalFailures.isEmpty(),
+            () -> "unexpected process-fatal replay failures: " + fatalFailures
+        );
+    }
+
+    private static TargetConnectionOwner.RequestLifecycleSink acceptingLifecycleSink() {
+        return new TargetConnectionOwner.RequestLifecycleSink() {
+            @Override
+            public java.util.concurrent.CompletionStage<Void> connectionRequestFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public java.util.concurrent.CompletionStage<Void> requestProcessingFinished(
+                PartitionGenerationId partitionGenerationId,
+                ReplayRequestId requestId
+            ) {
+                return CompletableFuture.completedFuture(null);
+            }
+        };
     }
 
     static long checkHttpRetryConsistency(TestContext rootContext) {
         var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         final var retryMetricCount =
             InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "numRetriedRequests");
-        Assertions.assertEquals(retryMetricCount,
-            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "targetTransactionCount")
-                - InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "httpTransactionCount"));
+        final var targetTransactions =
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "targetTransactionCount");
+        final var httpTransactions =
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "httpTransactionCount");
+        Assertions.assertEquals(retryMetricCount, targetTransactions - httpTransactions,
+            "every http transaction should have one closed target transaction span per attempt, so the "
+                + "surplus of target spans is exactly the retry count; got numRetriedRequests="
+                + retryMetricCount + " targetTransactionCount=" + targetTransactions
+                + " httpTransactionCount=" + httpTransactions);
         return retryMetricCount;
     }
 
@@ -249,3 +400,6 @@ public class HttpRetryTest {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G10)

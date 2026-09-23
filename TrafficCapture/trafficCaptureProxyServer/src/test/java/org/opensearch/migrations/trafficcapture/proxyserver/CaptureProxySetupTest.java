@@ -2,8 +2,22 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureReadiness;
+import org.opensearch.migrations.trafficcapture.netty.CaptureFailurePolicy;
+import org.opensearch.migrations.trafficcapture.netty.CaptureProcessState;
+import org.opensearch.migrations.trafficcapture.netty.IncompleteRequestLimits;
+
+import com.beust.jcommander.ParameterException;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
@@ -16,6 +30,111 @@ import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfi
 public class CaptureProxySetupTest {
 
     public static final String kafkaBrokerString = "invalid:9092";
+
+    @Test
+    void captureFailuresDefaultToFailClosedAndCanBeConfiguredFailOpen() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var failOpen = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--capture-failure-policy", "fail-open"
+        });
+
+        Assertions.assertEquals(CaptureFailurePolicy.FAIL_CLOSED, defaults.captureFailurePolicy);
+        Assertions.assertEquals(CaptureFailurePolicy.FAIL_OPEN, failOpen.captureFailurePolicy);
+        Assertions.assertThrows(
+            ParameterException.class,
+            () -> new CaptureProxy.CaptureFailurePolicyConverter().convert("sometimes")
+        );
+    }
+
+    @Test
+    void incompleteRequestLimitsHaveSafeDefaultsAndAreConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--max-request-assembly-duration-seconds", "17",
+            "--max-connection-duration-seconds", "19",
+            "--max-incomplete-request-header-bytes", "4096",
+            "--max-incomplete-request-total-bytes", "8192"
+        });
+
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_ASSEMBLY_DURATION,
+            Duration.ofSeconds(defaults.maximumRequestAssemblyDurationSeconds)
+        );
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_HEADER_BYTES,
+            defaults.maximumIncompleteRequestHeaderBytes
+        );
+        Assertions.assertEquals(
+            IncompleteRequestLimits.DEFAULT_MAXIMUM_TOTAL_BYTES,
+            defaults.maximumIncompleteRequestTotalBytes
+        );
+        Assertions.assertEquals(
+            Duration.ofMinutes(60),
+            Duration.ofSeconds(defaults.maximumConnectionDurationSeconds)
+        );
+        Assertions.assertEquals(17, configured.maximumRequestAssemblyDurationSeconds);
+        Assertions.assertEquals(19, configured.maximumConnectionDurationSeconds);
+        Assertions.assertEquals(4096, configured.maximumIncompleteRequestHeaderBytes);
+        Assertions.assertEquals(8192, configured.maximumIncompleteRequestTotalBytes);
+    }
+
+    @Test
+    void captureProtocolTimingDefaultsToFiveTenAndThirtySecondsAndIsConfigurable() {
+        var defaults = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture"
+        });
+        var configured = CaptureProxy.parseArgs(new String[] {
+            "--destinationUri", "invalid:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--traffic-stream-flush-interval-seconds", "7",
+            "--heartbeat-interval-seconds", "11",
+            "--heartbeat-expiration-interval-seconds", "31"
+        });
+
+        Assertions.assertEquals(5, defaults.trafficStreamFlushIntervalSeconds);
+        Assertions.assertEquals(10, defaults.heartbeatIntervalSeconds);
+        Assertions.assertEquals(30, defaults.heartbeatExpirationIntervalSeconds);
+        Assertions.assertEquals(7, configured.trafficStreamFlushIntervalSeconds);
+        Assertions.assertEquals(11, configured.heartbeatIntervalSeconds);
+        Assertions.assertEquals(31, configured.heartbeatExpirationIntervalSeconds);
+    }
+
+    @Test
+    void firstUsableAssignmentBlocksStartupUntilCaptureIsReady() throws Exception {
+        var captureFactory = new ReadinessCaptureFactory();
+        var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var startupBarrier = executor.submit(
+                () -> CaptureProxy.awaitCaptureReadiness(captureFactory, captureProcessState)
+            );
+
+            Assertions.assertTrue(captureFactory.readinessRequested.await(1, TimeUnit.SECONDS));
+            Assertions.assertFalse(startupBarrier.isDone());
+
+            captureFactory.ready.complete(null);
+            startupBarrier.get(1, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {
@@ -172,5 +291,23 @@ public class CaptureProxySetupTest {
     public void testConvertStringToUriExplicit443() {
         URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:443");
         Assertions.assertEquals(443, uri.getPort());
+    }
+
+    private static class ReadinessCaptureFactory
+        implements IConnectionCaptureFactory<Void>, IConnectionCaptureReadiness {
+        private final CountDownLatch readinessRequested = new CountDownLatch(1);
+        private final CompletableFuture<Void> ready = new CompletableFuture<>();
+
+        @Override
+        public IChannelConnectionCaptureSerializer<Void> createOffloader(IConnectionContext ctx)
+            throws IOException {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
+        public CompletableFuture<Void> readyForConnections() {
+            readinessRequested.countDown();
+            return ready;
+        }
     }
 }

@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: IReplayContexts ReplayEngine RequestResponsePacketPair . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Consumer;
@@ -11,6 +22,9 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.PartitionGenerationId;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome;
+import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -32,46 +46,59 @@ public class RequestTransformerAndSender<T> {
                          Consumer<AggregatedRawResponse> resultsConsumer) {
         var perRequestStatefulVisitor =
             retryVisitorFactory.getRetryCheckVisitor(transformedResult, finishedAccumulatingResponseFuture);
-        return (requestBytes, aggResponse, t) -> {
-            resultsConsumer.accept(aggResponse);
-            if (!shouldRetry()) {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.DONE,
-                        null),
-                    () -> "Returning a future to NOT retry because the class is currently prohibiting retries" +
-                        "");
+        return new RequestSenderOrchestrator.RetryVisitor<>() {
+            @Override
+            public TrackedFuture<String, RequestSenderOrchestrator.DeterminedTransformedResponse<T>> visit(
+                io.netty.buffer.ByteBuf requestBytes,
+                TargetAttemptOutcome<AggregatedRawResponse> outcome
+            ) {
+                outcome.visit(new TargetAttemptOutcome.Visitor<
+                    AggregatedRawResponse,
+                    Void>() {
+                    @Override
+                    public Void onTargetResponseObtained(
+                        TargetAttemptOutcome.TargetResponseObtained<AggregatedRawResponse> obtained
+                    ) {
+                        resultsConsumer.accept(obtained.response());
+                        return null;
+                    }
+
+                    @Override
+                    public Void onNoTargetResponseObtained(
+                        TargetAttemptOutcome.NoTargetResponseObtained<AggregatedRawResponse> notObtained
+                    ) {
+                        return null;
+                    }
+                });
+                return perRequestStatefulVisitor.visit(requestBytes, outcome);
             }
-            if (t != null) {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.RETRY,
-                        null),
-                    () -> "Returning a future to retry due to a connection exception");
-            } else {
-                assert (aggResponse != null);
+
+            @Override
+            public void close() {
+                perRequestStatefulVisitor.close();
             }
-            return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
         };
     }
 
-    /**
-     * This is called by before passing the response through the visitor returned by the retryVisitorFactory.
-     * This is used to suppress retrying when the system is being shut down.
-     */
-    protected boolean shouldRetry() {
-        return true;
-    }
-
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Do nothing but give subclasses the opportunity to do more.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
-        /* only present for extension purposes */
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-LIMBO-ESCAPED-LINE(G5):         /* only present for extension purposes */
+// REBUILD-LIMBO-START(G5)
+/*
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Take a source request and transform it (on the work thread that we'll also SEND the transformed
      * request).  If an exception happens during transformation, the returned TrackedFuture will have
@@ -89,68 +116,47 @@ public class RequestTransformerAndSender<T> {
      * will NOT be included as responses since that's independent of the outgoing request (since bytes
      * hadn't begun to be sent).
      */
+// REBUILD-LIMBO-START(G5)
+/*
     public TrackedFuture<String, T> transformAndSendRequest(
         PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
         ReplayEngine replayEngine,
-        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx,
-        @NonNull Instant start,
-        @NonNull Instant end,
-        Supplier<Stream<byte[]>> packetsSupplier) {
-        return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
-            finishedAccumulatingResponseFuture, ctx, start, end, packetsSupplier, null);
-    }
-
-    public TrackedFuture<String, T> transformAndSendRequest(
-        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-        ReplayEngine replayEngine,
+        PartitionGenerationId partitionGenerationId,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         @NonNull Instant start,
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier,
-        Duration quiescentDurationForRequest) {
+        Duration quiescentDurationForRequest,
+        @NonNull TargetConnectionOwner.RequestProcessingRegistration processingRegistration
+    ) {
         try {
-            var requestReadyFuture = replayEngine.scheduleTransformationWork(
+            return replayEngine.scheduleRequestLifecycle(
+                partitionGenerationId,
                 ctx,
                 start,
-                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
-            );
-            log.atDebug().setMessage("request transform future for {} = {}")
-                .addArgument(ctx)
-                .addArgument(requestReadyFuture)
-                .log();
-            final Duration effectiveQuiescentDuration = quiescentDurationForRequest;
-            // It might be safer to chain this work directly inside the scheduleWork call above so that the
-            // read buffer horizons aren't set after the transformation work finishes, but after the packets
-            // are fully handled
-            return requestReadyFuture.thenCompose(
-                transformedRequest -> {
-                    if (transformedRequest.transformedOutput == null) {
-                        @SuppressWarnings("unchecked")
-                        var filtered = (TrackedFuture<String, T>) TextTrackedFuture.completedFuture(
-                            (T) new TransformedTargetRequestAndResponseList(
-                                null, transformedRequest.transformationStatus),
-                            () -> "request filtered - skipping target send"
-                        );
-                        return filtered;
-                    }
-                    return replayEngine.scheduleRequest(
-                        ctx,
-                        start,
-                        end,
-                        transformedRequest.transformedOutput.numByteBufs(),
-                        transformedRequest.transformedOutput,
-                        getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                            arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                        effectiveQuiescentDuration
-                    );
+                end,
+                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier),
+                transformedRequest -> getRetryCheckVisitor(
+                    transformedRequest,
+                    finishedAccumulatingResponseFuture,
+                    response -> perResponseConsumer(
+                        response,
+                        transformedRequest.transformationStatus,
+                        ctx
+                    )
+                ),
+                transformationStatus -> {
+                    @SuppressWarnings("unchecked")
+                    var filtered = (T) new TransformedTargetRequestAndResponseList(null, transformationStatus);
+                    return filtered;
                 },
-                () -> "transitioning transformed packets onto the wire"
+                quiescentDurationForRequest,
+                processingRegistration
             );
         } catch (Exception e) {
-            log.debug("Caught exception in transformAndSendRequest, so failing future");
-            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.writeToSocketAndClose");
+            log.debug("Caught exception while admitting the request lifecycle", e);
+            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.requestLifecycle");
         }
     }
 
@@ -187,3 +193,6 @@ public class RequestTransformerAndSender<T> {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

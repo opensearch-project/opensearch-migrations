@@ -1,10 +1,18 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
@@ -23,9 +31,14 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
 
     public enum ReconstructionStatus {
         COMPLETE,
+        CONFIRMED_DEAD,
         EXPIRED_PREMATURELY,
         CLOSED_PREMATURELY,
+*/
+// REBUILD-LIMBO-END(G11)
         /** Connection closed due to Kafka partition reassignment — not a source-side close. */
+// REBUILD-LIMBO-START(G11)
+/*
         TRAFFIC_SOURCE_READER_INTERRUPTED
     }
 
@@ -35,8 +48,8 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     HttpMessageAndTimestamp responseData;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
-    List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
     ReconstructionStatus completionStatus;
+    String structuralProofId;
     // switch between RequestAccumulation/ResponseAccumulation objects when we're parsing,
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
     private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;
@@ -113,37 +126,18 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         responseData.setLastPacketTimestamp(packetTimeStamp);
     }
 
-    public void holdTrafficStream(ITrafficStreamKey trafficStreamKey) {
-        if (trafficStreamKeysBeingHeld == null) {
-            trafficStreamKeysBeingHeld = new ArrayList<>();
-        }
-        if (trafficStreamKeysBeingHeld.isEmpty()
-            || trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size() - 1)) {
-            trafficStreamKeysBeingHeld.add(trafficStreamKey);
-        }
-    }
-
-    private static final List<ITrafficStreamKey> emptyUnmodifiableList = List.of();
-
-    public List<ITrafficStreamKey> getTrafficStreamsHeld() {
-        return (trafficStreamKeysBeingHeld == null)
-            ? emptyUnmodifiableList
-            : Collections.unmodifiableList(trafficStreamKeysBeingHeld);
-    }
-
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         RequestResponsePacketPair that = (RequestResponsePacketPair) o;
         return Objects.equal(requestData, that.requestData)
-            && Objects.equal(responseData, that.responseData)
-            && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
+            && Objects.equal(responseData, that.responseData);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(requestData, responseData, trafficStreamKeysBeingHeld);
+        return Objects.hashCode(requestData, responseData);
     }
 
     @Override
@@ -156,3 +150,6 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

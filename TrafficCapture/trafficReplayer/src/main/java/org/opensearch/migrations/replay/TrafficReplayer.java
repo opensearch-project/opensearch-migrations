@@ -1,60 +1,24 @@
 package org.opensearch.migrations.replay;
 
-import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.Charset;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
-import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
-import org.opensearch.migrations.replay.sink.S3TupleSink;
-import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
-import org.opensearch.migrations.replay.util.ActiveContextMonitor;
-import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
-import org.opensearch.migrations.tracing.ActiveContextTracker;
-import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
-import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
-import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.transform.IAuthTransformerFactory;
-import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.PredicateLoader;
-import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
-import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
-import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
-import org.opensearch.migrations.transform.TransformationLoader;
-import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.utils.ProcessHelpers;
-import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
 import org.opensearch.migrations.utils.URIHelper;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.LoggerFactory;
-import org.slf4j.event.Level;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class TrafficReplayer {
@@ -68,6 +32,8 @@ public class TrafficReplayer {
     public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
+    static final int DEFAULT_KAFKA_LOOKAHEAD_SECONDS = 30;
+    static final int DEFAULT_LEGACY_LOOKAHEAD_SECONDS = 400;
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
@@ -242,14 +208,20 @@ public class TrafficReplayer {
             required = false,
             names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow", "--lookaheadTimeSeconds" },
             arity = 1,
-            description = "Number of seconds of data that will be buffered.")
-        int lookaheadTimeSeconds = 400;
+            description = "Number of seconds of data that will be buffered. Defaults to 30 for Kafka "
+                + "structural expiration and 400 for legacy stream input.")
+        Integer lookaheadTimeSeconds;
         @Parameter(
             required = false,
-            names = { "--max-concurrent-requests", "--maxConcurrentRequests" },
+            names = {
+                "--max-concurrent-target-attempts",
+                "--maxConcurrentTargetAttempts",
+                "--max-concurrent-requests",
+                "--maxConcurrentRequests"
+            },
             arity = 1,
-            description = "Maximum number of requests at a time that can be outstanding")
-        int maxConcurrentRequests = 10000;
+            description = "Maximum number of target attempts that can be in flight")
+        int maxConcurrentTargetAttempts = 10000;
         @Parameter(
             required = false,
             names = { "--num-client-threads", "--numClientThreads" },
@@ -415,6 +387,13 @@ public class TrafficReplayer {
                 + "Example: --non-retryable-doc-exception-types version_conflict_engine_exception")
         List<String> nonRetryableDocExceptionTypes;
 
+        @Parameter(
+            required = false,
+            names = { "--poison-doc-exception-types", "--poisonDocExceptionTypes" },
+            description = "Optional, default empty. Comma-separated bulk item exception types that may be "
+                + "committed as deliberate skips after retries stop and tuple evidence is durable.")
+        List<String> poisonDocExceptionTypes;
+
         void validateKafkaAuthFlags() {
             if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
                 if (Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth)
@@ -433,6 +412,19 @@ public class TrafficReplayer {
 
         boolean isKafkaTrafficEnableMSKAuth() {
             return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
+        }
+
+        int getEffectiveLookaheadTimeSeconds() {
+            if (lookaheadTimeSeconds != null) {
+                return lookaheadTimeSeconds;
+            }
+            return kafkaTrafficBrokers != null
+                ? DEFAULT_KAFKA_LOOKAHEAD_SECONDS
+                : DEFAULT_LEGACY_LOOKAHEAD_SECONDS;
+        }
+
+        boolean usesKafkaTrafficSource() {
+            return kafkaTrafficBrokers != null;
         }
 
         String getEffectiveKafkaAuthType() {
@@ -550,31 +542,47 @@ public class TrafficReplayer {
             throw new ParameterException(
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
         }
-    }
-
-    public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
-        final var workerId = ProcessHelpers.getNodeInstanceName();
-        log.info("Starting Traffic Replayer with id=" + workerId);
-
-        var params = parseArgs(args);
-
-        if (isDumpMode(params)) {
-            validateDumpModeParams(params);
-            runDumpMode(params);
-            return;
+        // All three mode names stay accepted by the parser because they are a published CLI contract, but
+        // dump-http and dump-both need HTTP transaction reconstruction, which milestone G3 rebuilds. Failing
+        // here with the milestone named beats emitting raw-shaped output for a mode that asked for parsed
+        // output. See docs/replayerRebuildPlanA-inPlace.md G1 and the deferral ledger in
+        // docs/replayerRebuildStatus.md.
+        if (MODE_DUMP_HTTP.equals(params.mode) || MODE_DUMP_BOTH.equals(params.mode)) {
+            throw new ParameterException(
+                params.mode
+                    + " is not available yet: HTTP transaction reconstruction is restored in milestone G3."
+                    + " "
+                    + MODE_DUMP_RAW
+                    + " is available and decodes every CaptureRecord envelope case.");
         }
-
-        // replay mode — targetUriString is required
-        if (params.targetUriString == null) {
-            System.err.println("Target URI is required for replay mode");
-            System.exit(2);
-            return;
+        if (params.inputFilename != null) {
+            throw new ParameterException(
+                "dump modes read from Kafka only for now; file input is restored with the source"
+                    + " abstraction in milestone G3. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
         }
-        runReplayMode(params);
     }
-
+    /** Runs a dump mode against a Kafka topic. */
     private static void runDumpMode(Parameters params) throws Exception {
+        var runner = new KafkaTopicDumper();
+
+        if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
+            runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
+                params.getEffectiveKafkaAuthType(), params.kafkaTrafficUserName, params.kafkaTrafficPassword,
+                params.kafkaTrafficPropertyFile,
+                params.startOffset, params.startTime, params.endOffset, params.endTime,
+                params.previewBytesRead, params.previewBytesWrite,
+                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME);
+        } else {
+            System.err.println("Dump modes require --kafka-traffic-brokers and --kafka-traffic-topic");
+            System.exit(2);
+        }
+    }
+// REBUILD-LIMBO-START(G3)
+// The file-input branch of runDumpMode, and the tracing context it needs. Blocked on
+// TrafficCaptureSourceFactory and RootReplayerContext; returns with runDumpFromSource in G3, which is also
+// where the open question in the ledger is settled -- whether the file source speaks bare base64
+// TrafficStream or a CaptureRecord envelope.
+/*
         var topContext = new RootReplayerContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
                 OtelCollectorEndpoints.empty(),
@@ -583,8 +591,6 @@ public class TrafficReplayer {
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
-        var runner = new KafkaTopicDumper();
-
         if (params.inputFilename != null) {
             try (var source = TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource(topContext, params)) {
                 runner.runDumpFromSource(params.mode, source,
@@ -592,19 +598,9 @@ public class TrafficReplayer {
                     params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
                     topContext);
             }
-        } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
-            runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
-                params.getEffectiveKafkaAuthType(), params.kafkaTrafficUserName, params.kafkaTrafficPassword,
-                params.kafkaTrafficPropertyFile,
-                params.startOffset, params.startTime, params.endOffset, params.endTime,
-                params.previewBytesRead, params.previewBytesWrite,
-                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
-                topContext);
-        } else {
-            System.err.println("Dump modes require either -i (file input) or --kafka-traffic-brokers and --kafka-traffic-topic");
-            System.exit(2);
         }
-    }
+*/
+// REBUILD-LIMBO-END(G3)
 
     /**
      * Parse and validate the replay target URI and timing params. On invalid input this prints the
@@ -623,10 +619,19 @@ public class TrafficReplayer {
             System.exit(3);
             return null;
         }
-        if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
+        int lookaheadTimeSeconds = params.getEffectiveLookaheadTimeSeconds();
+        if (lookaheadTimeSeconds <= 0) {
+            String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME + " must be positive";
+            System.err.println(msg);
+            log.error(msg);
+            System.exit(4);
+            return null;
+        }
+        if (!params.usesKafkaTrafficSource()
+            && lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
             String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
                 + "("
-                + params.lookaheadTimeSeconds
+                + lookaheadTimeSeconds
                 + ") must be > "
                 + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME
                 + "("
@@ -639,7 +644,11 @@ public class TrafficReplayer {
         }
         return uri;
     }
-
+    // REBUILD-LIMBO-START(G9)
+    // runReplayMode -- blocked on TrafficReplayerTopLevel, which is replaced rather than carried.
+    // Expected to be rewritten against the design's owners rather than restored, so new blame here is honest.
+    // Kept verbatim anyway so the functionality it wires up is enumerable rather than remembered.
+    /*
     private static void runReplayMode(Parameters params) throws Exception {
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         URI uri = parseAndValidateReplayTarget(params);
@@ -667,10 +676,9 @@ public class TrafficReplayer {
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
                 params,
-                Duration.ofSeconds(params.lookaheadTimeSeconds)
+                Duration.ofSeconds(params.getEffectiveLookaheadTimeSeconds())
             );
-            var authTransformer = buildAuthTransformerFactory(params);
-            var trafficStreamLimiter = new TrafficStreamLimiter(params.maxConcurrentRequests)
+            var authTransformer = buildAuthTransformerFactory(params)
         ) {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
@@ -693,6 +701,9 @@ public class TrafficReplayer {
             var errorClassifier = params.nonRetryableDocExceptionTypes != null
                 ? new BulkItemErrorClassifier(new java.util.HashSet<>(params.nonRetryableDocExceptionTypes))
                 : new BulkItemErrorClassifier();
+            var poisonAllowlist = params.poisonDocExceptionTypes == null
+                ? ExceptionTypeAllowlist.empty()
+                : new ExceptionTypeAllowlist(params.poisonDocExceptionTypes);
 
             var transformationLoader = new TransformationLoader();
             var effectiveTransformerSupplier = buildTransformerSupplier(
@@ -705,19 +716,23 @@ public class TrafficReplayer {
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
-                    params.numClientThreads
+                    params.numClientThreads,
+                    null,
+                    topContext.getTargetExchangeStateMetrics()
                 ),
-                trafficStreamLimiter,
+                params.maxConcurrentTargetAttempts,
                 orderedRequestTracker,
-                errorClassifier
+                errorClassifier,
+                poisonAllowlist,
+                new ProcessSupervisor()
             );
             configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
-                .addArgument(params.lookaheadTimeSeconds)
+                .addArgument(params.getEffectiveLookaheadTimeSeconds())
                 .addArgument(params.speedupFactor)
-                .addArgument(params.maxConcurrentRequests)
+                .addArgument(params.maxConcurrentTargetAttempts)
                 .addArgument(params.targetServerResponseTimeoutSeconds)
                 .addArgument(params.observedPacketConnectionTimeout)
                 .addArgument(uri)
@@ -794,7 +809,13 @@ public class TrafficReplayer {
             }
         }
     }
-
+    */
+    // REBUILD-LIMBO-END(G9)
+    // REBUILD-LIMBO-START(G5)
+    // buildTransformerSupplier -- blocked on P4 (FilteringTransformerWrapper) and the
+    // jsonMessageTransformerInterface dependency. TransformationLoader and PredicateLoader are already available.
+    // Nothing here is in doubt; it returns verbatim once P4 lands.
+    /*
     static Supplier<IJsonTransformer> buildTransformerSupplier(
         TransformationLoader transformationLoader,
         String hostname,
@@ -811,7 +832,12 @@ public class TrafficReplayer {
         log.atInfo().setMessage("Request filter configured").log();
         return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
     }
-
+    */
+    // REBUILD-LIMBO-END(G5)
+    // REBUILD-LIMBO-START(G9)
+    // configureResponsePostProcessor -- blocked on TrafficReplayerTopLevel (it assigns
+    // tr.responsePostProcessor directly). The loader call itself is final-form.
+    /*
     static void configureResponsePostProcessor(
         TrafficReplayerTopLevel tr, TransformationLoader loader, String config
     ) {
@@ -820,7 +846,14 @@ public class TrafficReplayer {
             log.atInfo().setMessage("Response post-processor configured").log();
         }
     }
-
+    */
+    // REBUILD-LIMBO-END(G9)
+    // REBUILD-LIMBO-START(G5)
+    // createS3TupleWriterIfConfigured -- blocked ONLY on the TupleWriter shape.
+    // S3TupleSink is a reusable library object in :TrafficCapture:tupleSink and the S3 client construction is not
+    // in question. The blocker is the return type: ThreadLocalTupleWriter declares a class in ...replay.sink,
+    // a package tupleSink already owns on the same classpath. Roughly 30 of these 34 lines should survive G5.
+    /*
     private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
         Parameters params,
         Supplier<IJsonTransformer> tupleTransformerSupplier
@@ -855,7 +888,13 @@ public class TrafficReplayer {
             tupleTransformerSupplier
         );
     }
-
+    */
+    // REBUILD-LIMBO-END(G5)
+    // REBUILD-LIMBO-START(G9)
+    // setupShutdownHookForReplayer -- blocked on TrafficReplayerTopLevel.
+    // This is one of D14's three unbounded waits for orderly recovery. A defect to fix at G9, not behavior to
+    // reproduce -- carried so the current behavior is legible while it is being replaced.
+    /*
     private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {
         var weakTrafficReplayer = new WeakReference<>(tr);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -869,7 +908,7 @@ public class TrafficReplayer {
                     log.atWarn().setMessage(beforeMsg).log();
                     System.err.println(beforeMsg);
                 });
-            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(o -> o.shutdown(null));
+            Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(TrafficReplayer::awaitReplayerShutdown);
             Optional.of("Done shutting down TrafficReplayer (due to Runtime shutdown).  "
                     + "Logs may be missing for events that have happened after the Shutdown event was received.")
                 .ifPresent(afterMsg -> {
@@ -878,6 +917,16 @@ public class TrafficReplayer {
                 });
         }));
     }
+    */
+    // REBUILD-LIMBO-END(G9)
+    // REBUILD-LIMBO-START(G9)
+    // awaitReplayerShutdown -- blocked on TrafficReplayerTopLevel. See the D14 note above.
+    /*
+    static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
+        trafficReplayer.shutdown(null);
+    }
+    */
+    // REBUILD-LIMBO-END(G9)
 
     /**
      * This method returns a username:password Base64 encoded basic auth header
@@ -905,6 +954,12 @@ public class TrafficReplayer {
         );
     }
 
+    // REBUILD-LIMBO-START(G9)
+    // buildAuthTransformerFactory -- blocked on P6 (the five transform/ auth factories), itself gated on
+    // P1, because IAuthTransformer references HttpJsonRequestWithFaultingPayload in the datahandler layer.
+    // Pure argument arbitration over the auth options; returns verbatim once P1 and P6 land. Its two helpers,
+    // getBasicAuthHeader and formatAuthArgFlagsAsString, are live above -- they needed no new dependency.
+    /*
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
         long authOptionsSpecified = Stream.of(
             params.removeAuthHeader,
@@ -948,5 +1003,55 @@ public class TrafficReplayer {
         } else {
             return null; // default is to do nothing to auth headers
         }
+    }
+    */
+    // REBUILD-LIMBO-END(G9)
+
+    /**
+     * Distinct from the exit codes G9 owns -- 80 for owner loss and 89 for an unexpected fatal error -- and
+     * from the argument-validation codes 2, 3, and 4 that {@link #parseArgs} and
+     * {@link #parseAndValidateReplayTarget} still produce, so that "ran the unfinished module" can never be
+     * confused with a real replay failure or a bad invocation.
+     */
+    static final int NOT_IMPLEMENTED_EXIT_CODE = 70;
+
+    /**
+     * <strong>The one member of this class deliberately not carried.</strong> The original {@code main} was
+     * mode dispatch over {@code runDumpMode} and {@code runReplayMode}, both of which are in REBUILD-LIMBO
+     * regions above; restoring it would mean restoring a dispatcher to two absent destinations.
+     *
+     * <p>It fails rather than doing nothing. This module already owns the {@code traffic_replayer} image
+     * name, so a silent no-op entry point is something a deployment could run without noticing. The
+     * assembled application not working during reconstruction is expected and accepted; failing quietly is
+     * not.</p>
+     */
+    public static void main(String[] args) throws Exception {
+        var params = parseArgs(args);
+
+        // Dump mode is the one reachable path as of G1. Without this dispatch the dumper would be live,
+        // compiled and tested but with no production caller -- which AGENTS.md section 4 does not count as
+        // wired, and is how 707 lines of RecordDispositionLedger previously sat dead.
+        if (isDumpMode(params)) {
+            try {
+                validateDumpModeParams(params);
+            } catch (ParameterException badDumpArgs) {
+                // Exit code 2 is the existing convention for argument validation here, alongside 3 and 4 from
+                // parseAndValidateReplayTarget. parseArgs has already returned by now, so its handler cannot
+                // cover this.
+                System.err.println(badDumpArgs.getMessage());
+                System.exit(2);
+                return;
+            }
+            runDumpMode(params);
+            return;
+        }
+
+        System.err.println(
+            "Replay mode is under reconstruction and has no runnable entry point yet.\n"
+                + "Available now: --mode dump-raw, which reads a capture topic and prints one line per\n"
+                + "record. --mode dump-http and --mode dump-both are restored at milestone G3, and the\n"
+                + "full replay path and supervision at G9.\n"
+                + "See docs/replayerRebuildPlanA-inPlace.md and docs/replayerRebuildStatus.md.");
+        System.exit(NOT_IMPLEMENTED_EXIT_CODE);
     }
 }
