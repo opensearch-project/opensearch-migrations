@@ -190,6 +190,13 @@ are trustworthy evidence at 200 MB/s where per-record comparison is not affordab
   repository's established patterns instead — `SimpleHttpServer` / `SimpleNettyHttpServer`,
   `LocalChannel` / `EmbeddedChannel`, injected `TestEventLoop` and `FakeClock`, and immutable scripts
   configured at fixture construction rather than mutable runtime stubbing.
+- **Those patterns are two tiers and do not compose on one event loop.** No test can have both
+  deterministic time and a real channel: every Netty channel validates the loop's concrete type, so
+  `LocalChannel`, `EmbeddedChannel`, and anything connecting to `SimpleNettyHttpServer` all reject
+  `TestEventLoop`. Pick one — injected `TestEventLoop` and `FakeClock` with a fake `TargetChannelPort`
+  for owner logic, ordering, timers and cancellation; or a real channel on a real `NioEventLoopGroup`
+  with real time for integration. `TestEventLoop.register` throws and says so, because Netty's own path
+  merely fails a promise, which a test that ignores the returned future experiences as a hang.
 - **No mutable static state**, with a single possible exception for a logging integration that cannot
   reasonably be injected. Telemetry, clocks, coordination counters, event loops, and termination
   behavior are instance-owned and injected. A test must be able to stall only the event loop it owns.

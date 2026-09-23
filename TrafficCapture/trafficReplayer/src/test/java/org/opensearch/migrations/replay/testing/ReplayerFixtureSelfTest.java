@@ -161,24 +161,34 @@ class ReplayerFixtureSelfTest {
     }
 
     /**
-     * Records a constraint rather than a behavior we want. Netty's built-in channels gate
-     * registration on their own loop implementation -- {@code LocalChannel} requires
-     * {@code SingleThreadEventLoop} and {@code AbstractNioChannel} requires {@code NioEventLoop} --
-     * so no real channel can register against any custom event loop, this one included. Becoming a
+     * Records a constraint rather than a behavior we want, and checks that hitting it is loud.
+     *
+     * <p>Netty's built-in channels gate registration on their own loop implementation, so none can
+     * register against any custom event loop, this one included. Becoming a
      * {@code SingleThreadEventLoop} would reintroduce both the wall-clock scheduler and a real
      * thread, so the fixture accepts the limit instead. Nothing needs the combination: target I/O
      * reaches owners through {@code TargetChannelPort}, not through a channel a test registered to
-     * the owner's loop. This test exists so that limit is discovered here and not in a later
-     * milestone, where it surfaces as an opaque "incompatible event loop type".
+     * the owner's loop.
+     *
+     * <p>What is asserted is that {@code register} <strong>throws</strong>. Netty's own path calls
+     * {@code promise.setFailure} and returns, so a test that never inspects the returned future would
+     * see a channel that silently failed to register and then hang waiting for it. The message has to
+     * name the alternative, because whoever trips over this will be reading the exception rather than
+     * this test.
      */
     @Test
-    void testEventLoopCannotRegisterNettyBuiltInChannels() {
+    void testEventLoopRefusesToHoldChannelsWithAMessageNamingTheAlternative() {
         var eventLoop = new TestEventLoop();
+        var channel = new LocalChannel();
 
-        var registration = eventLoop.register(new LocalChannel());
+        var thrown = Assertions.assertThrows(
+            UnsupportedOperationException.class,
+            () -> eventLoop.register(channel)
+        );
 
-        Assertions.assertInstanceOf(IllegalStateException.class, registration.cause());
-        Assertions.assertTrue(registration.cause().getMessage().contains("incompatible event loop type"));
+        Assertions.assertTrue(thrown.getMessage().contains("TargetChannelPort"));
+        Assertions.assertTrue(thrown.getMessage().contains("NioEventLoopGroup"));
+        Assertions.assertFalse(channel.isRegistered());
         Assertions.assertEquals(0, eventLoop.pendingTasks());
     }
 

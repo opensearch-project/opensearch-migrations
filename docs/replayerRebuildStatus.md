@@ -565,11 +565,23 @@ Choose a tier: deterministic time plus a fake `TargetChannelPort` for owner logi
 cancellation; or a real channel on a real `NioEventLoopGroup` with real time for integration. That is the
 split `AGENTS.md` §4 already draws between the implementation loop and confirmation, so no coverage is lost.
 
-**The trap to avoid:** `AGENTS.md` §4 lists `SimpleHttpServer`/`SimpleNettyHttpServer`,
-`LocalChannel`/`EmbeddedChannel`, and injected `TestEventLoop`/`FakeClock` in one sentence, which reads like
-a set of patterns that compose. Those two halves do **not** compose on one loop.
-`testEventLoopCannotRegisterNettyBuiltInChannels` pins the constraint so it is found here rather than
-surfacing in G6 as a message that looks like a defect in `TestEventLoop` instead of a designed boundary.
+**The trap, and why a pinning test alone did not close it.** `AGENTS.md` §4 listed
+`SimpleHttpServer`/`SimpleNettyHttpServer`, `LocalChannel`/`EmbeddedChannel`, and injected
+`TestEventLoop`/`FakeClock` in one sentence, reading like patterns that compose. Those two halves do **not**
+compose on one loop. A test that pins the constraint only helps someone who already went looking for it, and
+the owner asked the right question: *how will I remember?* You would not — and the failure was worse than
+"an opaque message," because Netty's incompatibility path calls `promise.setFailure` and **returns**. A test
+that does not inspect the returned `ChannelFuture` gets a channel that silently never registered, then hangs.
+No exception, no message, nothing pointing at the cause.
+
+So the constraint is now enforced at all three points where someone would pass through it:
+
+1. **`AGENTS.md` §4** names the two tiers explicitly, where the decision is made.
+2. **`TestEventLoop.register` throws** `UnsupportedOperationException` naming both alternatives, instead of
+   delegating to Netty's silent promise failure. Loud, at the responsible line, impossible to ignore.
+3. **`testEventLoopRefusesToHoldChannelsWithAMessageNamingTheAlternative`** asserts that it throws *and*
+   that the message still names `TargetChannelPort` and `NioEventLoopGroup`, so the guidance cannot rot
+   into a bare "unsupported".
 
 `ActorMailbox` and `NettyEventLoopActorMailbox` now have **zero live references** — every remaining mention is
 inside a marked region. They are not deleted yet: their dependents (`TargetConnectionOwner`,

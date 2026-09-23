@@ -261,30 +261,40 @@ public final class TestEventLoop extends AbstractEventExecutor implements EventL
     }
 
     /**
-     * Implemented the way {@code SingleThreadEventLoop} does, but every channel Netty ships checks
-     * the loop's concrete type in {@code isCompatible} and so fails this promise with "incompatible
-     * event loop type". It stays because the interface requires it and because a channel written
-     * against this fixture would work; it is not a path production uses.
+     * Throws, and the throwing is the feature. Every channel Netty ships checks the loop's concrete
+     * type in {@code isCompatible} and rejects this one, but it does so by calling
+     * {@code promise.setFailure} and returning — so a test that does not inspect the returned future
+     * sees a channel that silently never registered, and then hangs. Failing loudly at the call turns
+     * that into a message at the line responsible.
      */
     @Override
     public ChannelFuture register(Channel channel) {
-        return register(new DefaultChannelPromise(channel, this));
+        throw cannotHoldChannels();
     }
 
     @Override
     public ChannelFuture register(ChannelPromise promise) {
-        Objects.requireNonNull(promise);
-        promise.channel().unsafe().register(this, promise);
-        return promise;
+        throw cannotHoldChannels();
     }
 
     @Override
     @Deprecated
     public ChannelFuture register(Channel channel, ChannelPromise promise) {
-        Objects.requireNonNull(channel);
-        Objects.requireNonNull(promise);
-        channel.unsafe().register(this, promise);
-        return promise;
+        throw cannotHoldChannels();
+    }
+
+    private static UnsupportedOperationException cannotHoldChannels() {
+        return new UnsupportedOperationException(
+            "TestEventLoop cannot hold a Netty channel, and no built-in channel can register to any"
+                + " custom EventLoop: LocalChannel and SimpleNettyHttpServer clients require"
+                + " SingleThreadEventLoop, NIO channels require NioEventLoop, EmbeddedChannel requires"
+                + " EmbeddedEventLoop. Becoming one of those would restore the wall-clock scheduler and"
+                + " the real thread this fixture exists to avoid, so deterministic time and a real"
+                + " channel cannot be combined in one test. Pick a tier: TestEventLoop + FakeClock with"
+                + " a fake TargetChannelPort for owner logic, ordering, timers and cancellation; or a"
+                + " real channel on a real NioEventLoopGroup with real time for integration."
+                + " See AGENTS.md section 4."
+        );
     }
 
     private <V> ScheduledFuture<V> addTimer(Duration delay, Callable<V> command) {
