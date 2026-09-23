@@ -231,6 +231,18 @@ are trustworthy evidence at 200 MB/s where per-record comparison is not affordab
 - **No mutable static state**, with a single possible exception for a logging integration that cannot
   reasonably be injected. Telemetry, clocks, coordination counters, event loops, and termination
   behavior are instance-owned and injected. A test must be able to stall only the event loop it owns.
+- **Never sleep to wait for something to happen.** Wait on the signal instead: a latch, a future, an
+  injected clock you advance, or a counter you poll until it reaches the expected value. A comment of the
+  form "long enough that X has certainly happened" is a race with a note attached — it passes on a quiet
+  machine and fails in CI, and when it fails it accuses the wrong code. If nothing observable marks the
+  moment you need, **add the instrumentation**; a counter incremented on entry to a phase is visible while
+  that phase is still running, whereas a span is only exported once it ends.
+
+  One narrow exception, and only because it inverts the logic: a deliberate dwell whose duration is then
+  **asserted on** is a measurement, not a wait. Sleeping 400 ms and then requiring the observed operation to
+  have lasted at least 400 ms proves the thing was genuinely in progress; if it was not, the assertion
+  fails loudly instead of the test passing for the wrong reason. Sleeping 400 ms and then hoping is the
+  banned form. The test is whether a failure of your assumption breaks the test or hides in it.
 - Never run two tests concurrently when they share an event loop, port, static state, Gradle output, or
   external process. Note `@IsolatedTest`.
 - When replacing a test, keep the assertions conceptually stable while changing the mechanics. Do not
@@ -458,6 +470,15 @@ intentionally unused — so it does not get tidied away as dead. Only a type tha
 a compiled signature is dropped, and where it was dropped, the promoted member records the exact call that
 restores it and where the missing argument comes from. **Restoration should be un-marking plus wiring one
 argument, never re-deriving an argument list.**
+
+**Mark live code that a later milestone must still change with
+`REBUILD-LIMBO-NOTE(<milestone>)`.** A promotion often leaves a stand-in behind — a temporary root type, a
+signature missing a parameter whose type is still marked, a field that moves once its real home compiles.
+None of that is marked code, so none of it appears in the region count, and a reader has no way to find it
+unless they already know which type name to grep for. A `NOTE` makes the set enumerable:
+`grep -rn 'REBUILD-LIMBO-NOTE(G3)' src` is the list of places that milestone has to touch. Write what it
+becomes, not how it got there. `tools/unmark-limbo.awk` drops these lines like any other scaffolding and the
+verifier counts them as markers, so a stale one cannot survive un-marking.
 
 **Mark members, never whole files as a unit.** An all-or-nothing verdict on a file hides the class, its
 history, and its existing coverage, which is what makes the failure above possible. If two of five methods

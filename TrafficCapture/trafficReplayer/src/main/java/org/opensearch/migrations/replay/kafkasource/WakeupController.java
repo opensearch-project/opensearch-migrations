@@ -11,10 +11,9 @@ package org.opensearch.migrations.replay.kafkasource;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-import io.opentelemetry.api.OpenTelemetry;
-import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.Tracer;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 
 /**
  * Decides when {@code KafkaConsumer.wakeup()} may be issued.
@@ -39,11 +38,12 @@ import io.opentelemetry.api.trace.Tracer;
  * owner state it cannot be confined to one thread. It is guarded by this object's monitor, held only for
  * the state transition itself.
  *
- * <p>Every phase is a span and every decision a counter, because the properties that matter here are about
- * <em>timing</em> and cannot be read off the final state: that a wakeup actually shortened a long poll, that
- * one never landed during a rebalance callback, that repeated submissions produced one wakeup rather than
- * several. The {@code kafkaSourcePoll} span's duration is the observable form of "a queued input wakes a long
- * poll promptly", which is otherwise only visible as a test that takes as long as its poll timeout.
+ * <p>Every phase is a scoped instrumentation context and every decision a counter, because the properties
+ * that matter here are about <em>timing</em> and cannot be read off the final state: that a wakeup actually
+ * shortened a long poll, that one never landed during a rebalance callback, that repeated submissions
+ * produced one wakeup rather than several. The {@code kafkaPoll} span's duration is the observable form of
+ * "a queued input wakes a long poll promptly", which is otherwise only visible as a test that takes as long
+ * as its poll timeout.
  */
 public final class WakeupController {
 
@@ -59,46 +59,26 @@ public final class WakeupController {
         PROTECTED_OPERATION
     }
 
-    /** Span and metric names, referenced by tests, so a rename cannot silently break their assertions. */
-    public static final String POLL_SPAN = "kafkaSourcePoll";
-    public static final String REBALANCE_CALLBACK_SPAN = "kafkaSourceRebalanceCallback";
-    public static final String PROTECTED_OPERATION_SPAN = "kafkaSourceProtectedOperation";
-    public static final String WAKEUPS_ISSUED = "kafkaSourceWakeupsIssued";
-    public static final String WAKEUPS_COALESCED = "kafkaSourceWakeupsCoalesced";
-    public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
-
     private final Consumer<Void> issueWakeup;
-    private final Tracer tracer;
-    private final LongCounter wakeupsIssued;
-    private final LongCounter wakeupsCoalesced;
-    private final LongCounter wakeupsDeferred;
+    // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
+    private final KafkaSourceRootContext rootContext;
 
     private Phase phase = Phase.RUNNING;
     private boolean wakeupPending;
     private boolean wakeupOutstanding;
-    private Span phaseSpan;
-    private Span callbackSpan;
+    private IKafkaConsumerContexts.IPollScopeContext pollContext;
+    private IKafkaConsumerContexts.ICommitScopeContext commitContext;
+    private IKafkaConsumerContexts.IRebalanceCallbackScopeContext callbackContext;
 
     /**
      * @param issueWakeup normally {@code consumer::wakeup}; injected so a test can observe issuance without
      *                    a broker, and because the controller must not depend on the consumer itself
+     * @param rootContext the scope its phase contexts hang off, which is where the instruments live
      */
-    public WakeupController(Runnable issueWakeup) {
-        this(issueWakeup, OpenTelemetry.noop());
-    }
-
-    public WakeupController(Runnable issueWakeup, OpenTelemetry telemetry) {
+    public WakeupController(Runnable issueWakeup, KafkaSourceRootContext rootContext) {
         Objects.requireNonNull(issueWakeup, "issueWakeup");
-        Objects.requireNonNull(telemetry, "telemetry");
         this.issueWakeup = ignored -> issueWakeup.run();
-        this.tracer = telemetry.getTracer("org.opensearch.migrations.replay.kafkasource");
-        var meter = telemetry.getMeter("org.opensearch.migrations.replay.kafkasource");
-        this.wakeupsIssued = meter.counterBuilder(WAKEUPS_ISSUED)
-            .setDescription("Kafka consumer wakeups actually issued").build();
-        this.wakeupsCoalesced = meter.counterBuilder(WAKEUPS_COALESCED)
-            .setDescription("Submissions that found a wakeup already outstanding").build();
-        this.wakeupsDeferred = meter.counterBuilder(WAKEUPS_DEFERRED)
-            .setDescription("Submissions during a phase a wakeup must not interrupt").build();
+        this.rootContext = Objects.requireNonNull(rootContext, "rootContext");
     }
 
     /**
@@ -115,7 +95,7 @@ public final class WakeupController {
         // interrupted, so remember the need and issue it when the phase ends.
         if (phase != Phase.RUNNING) {
             wakeupPending = true;
-            wakeupsDeferred.add(1);
+            pollInstruments().wakeupsDeferred.add(1);
         }
         return false;
     }
@@ -123,7 +103,8 @@ public final class WakeupController {
     public synchronized void enterPoll() {
         requirePhase(Phase.RUNNING, "enterPoll");
         phase = Phase.POLLING;
-        phaseSpan = tracer.spanBuilder(POLL_SPAN).startSpan();
+        // The context counts pollsEntered as it opens, so a poll in progress is observable to other threads.
+        pollContext = rootContext.createPollContext();
         // A submission that arrived while the loop was RUNNING left nothing to issue, but one that arrived
         // during a protected phase may still be pending; poll must not wait on it.
         if (wakeupPending) {
@@ -139,7 +120,11 @@ public final class WakeupController {
     public synchronized void leavePollAndConsumeWakeup() {
         requirePhase(Phase.POLLING, "leavePollAndConsumeWakeup");
         phase = Phase.RUNNING;
-        endPhaseSpan("wokenByQueuedInput", wakeupOutstanding);
+        if (wakeupOutstanding) {
+            pollContext.onWokenByQueuedInput();
+        }
+        pollContext.close();
+        pollContext = null;
         wakeupOutstanding = false;
     }
 
@@ -151,9 +136,8 @@ public final class WakeupController {
     public synchronized void enterRebalanceCallback() {
         requirePhase(Phase.POLLING, "enterRebalanceCallback");
         phase = Phase.REBALANCE_CALLBACK;
-        // The poll span stays open underneath: the callback runs inside poll(), and nesting would claim
-        // otherwise. A separate span measures the callback itself.
-        callbackSpan = tracer.spanBuilder(REBALANCE_CALLBACK_SPAN).startSpan();
+        // The poll context stays open underneath, because the callback really does run inside poll().
+        callbackContext = rootContext.createRebalanceCallbackContext();
     }
 
     /**
@@ -167,16 +151,14 @@ public final class WakeupController {
     public synchronized void leaveRebalanceCallback() {
         requirePhase(Phase.REBALANCE_CALLBACK, "leaveRebalanceCallback");
         phase = Phase.POLLING;
-        var issuedOnExit = false;
         if (wakeupPending) {
             wakeupPending = false;
-            issuedOnExit = issueUnlessOutstanding();
+            if (issueUnlessOutstanding()) {
+                callbackContext.onIssuedDeferredWakeupOnExit();
+            }
         }
-        if (callbackSpan != null) {
-            callbackSpan.setAttribute("issuedDeferredWakeupOnExit", issuedOnExit);
-            callbackSpan.end();
-            callbackSpan = null;
-        }
+        callbackContext.close();
+        callbackContext = null;
     }
 
     /**
@@ -196,33 +178,35 @@ public final class WakeupController {
             );
         }
         phase = Phase.PROTECTED_OPERATION;
-        phaseSpan = tracer.spanBuilder(PROTECTED_OPERATION_SPAN).startSpan();
+        commitContext = rootContext.createCommitContext();
     }
 
     public synchronized void leaveProtectedOperation() {
         requirePhase(Phase.PROTECTED_OPERATION, "leaveProtectedOperation");
         phase = Phase.RUNNING;
-        endPhaseSpan("wakeupDeferredDuringOperation", wakeupPending);
+        commitContext.close();
+        commitContext = null;
         // Left pending rather than issued: there is no poll to interrupt, and the loop will reach the queue.
     }
 
     private boolean issueUnlessOutstanding() {
         if (wakeupOutstanding) {
-            wakeupsCoalesced.add(1);
+            pollInstruments().wakeupsCoalesced.add(1);
             return false;
         }
         wakeupOutstanding = true;
-        wakeupsIssued.add(1);
+        pollInstruments().wakeupsIssued.add(1);
         issueWakeup.accept(null);
         return true;
     }
 
-    private void endPhaseSpan(String attributeName, boolean attributeValue) {
-        if (phaseSpan != null) {
-            phaseSpan.setAttribute(attributeName, attributeValue);
-            phaseSpan.end();
-            phaseSpan = null;
-        }
+    /**
+     * The wakeup counters live on the poll scope's instruments because every wakeup exists to affect a poll,
+     * whichever phase the submission arrived in. Read from the root rather than from the current context, so
+     * a deferral counted while no poll is open still lands on the same series.
+     */
+    private KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments() {
+        return rootContext.pollInstruments;
     }
 
     private void requirePhase(Phase expected, String operation) {

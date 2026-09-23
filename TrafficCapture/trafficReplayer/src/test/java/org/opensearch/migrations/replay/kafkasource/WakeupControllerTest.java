@@ -10,6 +10,10 @@ package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +21,17 @@ import org.junit.jupiter.api.Test;
 class WakeupControllerTest {
 
     private final AtomicInteger wakeups = new AtomicInteger();
-    private final WakeupController controller = new WakeupController(wakeups::incrementAndGet);
+    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(true, true);
+    private final WakeupController controller = new WakeupController(
+        wakeups::incrementAndGet,
+        // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
+        new KafkaSourceRootContext(telemetry.openTelemetrySdk)
+    );
+
+    @AfterEach
+    void closeTelemetry() {
+        telemetry.close();
+    }
 
     @Test
     void aQueuedInputWakesALongPollAndRepeatSubmissionsCoalesce() {

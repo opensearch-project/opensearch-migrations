@@ -84,11 +84,11 @@ for file in $marked; do
     # Property 2a: reconstruction leaves no marker behind. Matches marker syntax rather than any mention
     # of the word, because live prose legitimately refers to REBUILD-LIMBO and must survive.
     left=$(awk -f "$AWK" "$file" \
-        | grep -c '^[[:space:]]*// REBUILD-LIMBO\(-START\|-END\|-ESCAPED-LINE\)\?(')
+        | grep -c '^[[:space:]]*// REBUILD-LIMBO\(-START\|-END\|-ESCAPED-LINE\|-NOTE\)\?(')
     if [ "$left" -ne 0 ]; then
         echo "RESIDUE: $file leaves $left marker line(s) after reconstruction"
         awk -f "$AWK" "$file" \
-            | grep -n '^[[:space:]]*// REBUILD-LIMBO\(-START\|-END\|-ESCAPED-LINE\)\?(' | sed 's/^/  /'
+            | grep -n '^[[:space:]]*// REBUILD-LIMBO\(-START\|-END\|-ESCAPED-LINE\|-NOTE\)\?(' | sed 's/^/  /'
         residue=$((residue + 1))
     fi
 

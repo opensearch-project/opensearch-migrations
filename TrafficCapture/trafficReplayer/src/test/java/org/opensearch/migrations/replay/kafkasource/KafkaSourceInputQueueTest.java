@@ -17,12 +17,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class KafkaSourceInputQueueTest {
 
@@ -30,8 +35,14 @@ class KafkaSourceInputQueueTest {
         new PartitionGenerationId(new TopicPartition("traffic", 0), 1);
 
     private final AtomicInteger wakeups = new AtomicInteger();
-    private final WakeupController wakeupController = new WakeupController(wakeups::incrementAndGet);
+    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, false);
+    private final WakeupController wakeupController = newController(wakeups::incrementAndGet);
     private final KafkaSourceInputQueue queue = new KafkaSourceInputQueue(wakeupController);
+
+    private WakeupController newController(Runnable issueWakeup) {
+        // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
+        return new WakeupController(issueWakeup, new KafkaSourceRootContext(telemetry.openTelemetrySdk));
+    }
 
     private static KafkaSourceInput request(long sequence) {
         return new KafkaSourceInput.RequestNextPartitionBatch(
@@ -48,7 +59,7 @@ class KafkaSourceInputQueueTest {
     void theInputIsVisibleInTheQueueBeforeTheWakeupIsIssued() {
         var queueHolder = new AtomicReference<KafkaSourceInputQueue>();
         var sizeWhenWoken = new ArrayList<Integer>();
-        var controller = new WakeupController(() -> sizeWhenWoken.add(queueHolder.get().size()));
+        var controller = newController(() -> sizeWhenWoken.add(queueHolder.get().size()));
         var observedQueue = new KafkaSourceInputQueue(controller);
         queueHolder.set(observedQueue);
 
@@ -121,6 +132,44 @@ class KafkaSourceInputQueueTest {
     void awaitInputReturnsFalseOnceTheDeadlineHasPassed() throws Exception {
         Assertions.assertFalse(queue.awaitInput(System.nanoTime() - 1));
         Assertions.assertTrue(queue.isEmpty());
+    }
+
+    /**
+     * Answers whether the choice of input variant matters anywhere in the wakeup path: it does not. Neither
+     * the queue nor the controller looks inside an input, so every variant must produce exactly the same
+     * wakeup. Checked over all four rather than stated, so a future variant that somehow needed different
+     * handling would fail here instead of being assumed equivalent.
+     */
+    @ParameterizedTest
+    @MethodSource("everyInputVariant")
+    void everyInputVariantWakesAPollingConsumerIdentically(KafkaSourceInput input) {
+        var wakeups = new AtomicInteger();
+        var controller = newController(wakeups::incrementAndGet);
+        var variantQueue = new KafkaSourceInputQueue(controller);
+
+        controller.enterPoll();
+        variantQueue.submit(input);
+
+        Assertions.assertEquals(1, wakeups.get(), () -> input.getClass().getSimpleName() + " issued no wakeup");
+        Assertions.assertEquals(1, variantQueue.size());
+        Assertions.assertTrue(controller.isWakeupOutstanding());
+    }
+
+    static List<KafkaSourceInput> everyInputVariant() {
+        var recordId = new KafkaRecordId(GENERATION, 0);
+        var variants = List.<KafkaSourceInput>of(
+            new KafkaSourceInput.RequestNextPartitionBatch(new PartitionBatchRequestId(GENERATION, 1)),
+            new KafkaSourceInput.RecordProcessingFinished(recordId),
+            new KafkaSourceInput.GenerationCleanupFinished(GENERATION),
+            new KafkaSourceInput.CaptureProtocolViolationDetected(recordId, "malformed envelope")
+        );
+        // Fails if a variant is added without being covered here, rather than silently testing a subset.
+        Assertions.assertEquals(
+            KafkaSourceInput.class.getPermittedSubclasses().length,
+            variants.size(),
+            "KafkaSourceInput gained a variant that this test does not cover"
+        );
+        return variants;
     }
 
     /** A refused submission must fail its caller rather than disappear: a lost input is a stuck record. */

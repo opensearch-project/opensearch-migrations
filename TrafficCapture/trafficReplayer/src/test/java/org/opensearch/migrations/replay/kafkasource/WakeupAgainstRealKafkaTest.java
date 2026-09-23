@@ -20,6 +20,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
+import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
@@ -62,6 +64,12 @@ class WakeupAgainstRealKafkaTest {
      * distinguish "woken" from "timed out"; it is not a performance assertion.
      */
     private static final Duration PROMPT = Duration.ofSeconds(5);
+    /**
+     * How long the submitter stays out of the way after the poll has demonstrably begun. It is asserted as a
+     * lower bound on the poll span, so it is a measured interval rather than an assumption: if the poll were
+     * not actually blocked for it, the assertion fails.
+     */
+    private static final Duration BLOCKED_DWELL = Duration.ofMillis(400);
 
     private ConfluentKafkaContainer kafka;
     private InMemoryInstrumentationBundle telemetry;
@@ -111,14 +119,23 @@ class WakeupAgainstRealKafkaTest {
     }
 
     private WakeupController controllerFor(KafkaConsumer<String, byte[]> target) {
-        return new WakeupController(target::wakeup, telemetry.openTelemetrySdk);
+        return new WakeupController(
+            target::wakeup,
+            // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
+            new KafkaSourceRootContext(telemetry.openTelemetrySdk)
+        );
     }
 
     private KafkaSourceInputQueue queueFor(WakeupController controller) {
         return new KafkaSourceInputQueue(controller);
     }
 
-    private static KafkaSourceInput anInput(TopicPartition topicPartition) {
+    /**
+     * Any variant would do: neither the queue nor the controller inspects the input, so the wakeup decision
+     * depends on the phase alone. {@code KafkaSourceInputQueueTest} proves that over all four variants, which
+     * is why these tests can use one concrete message without that being a hidden assumption.
+     */
+    private static KafkaSourceInput generationCleanupFinished(TopicPartition topicPartition) {
         return new KafkaSourceInput.GenerationCleanupFinished(
             new PartitionGenerationId(topicPartition, 0)
         );
@@ -137,9 +154,12 @@ class WakeupAgainstRealKafkaTest {
         var submitted = new CountDownLatch(1);
         var submitter = new Thread(() -> {
             try {
-                // Long enough that the consumer is certainly inside poll(), short enough to keep the test brisk.
-                Thread.sleep(500);
-                queue.submit(anInput(topicPartition));
+                // Wait for the poll to have begun rather than sleeping a guessed interval, then stay out of
+                // the way for BLOCKED_DWELL. The poll span's lower bound below turns that dwell into a
+                // checked claim that the poll really was blocked when the wakeup arrived.
+                awaitCounter(IKafkaConsumerContexts.MetricNames.POLLS_ENTERED, 1);
+                Thread.sleep(BLOCKED_DWELL.toMillis());
+                queue.submit(generationCleanupFinished(topicPartition));
                 submitted.countDown();
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -162,7 +182,7 @@ class WakeupAgainstRealKafkaTest {
         Assertions.assertTrue(pollThrew.get(), "poll returned normally, so the wakeup never reached it");
         Assertions.assertFalse(queue.isEmpty(), "the input must be queued before the wakeup is issued");
 
-        var pollDuration = reportAndReturnSingleSpanDuration(WakeupController.POLL_SPAN);
+        var pollDuration = reportAndReturnSingleSpanDuration(IKafkaConsumerContexts.ActivityNames.KAFKA_POLL);
         Assertions.assertTrue(
             pollDuration.compareTo(PROMPT) < 0,
             () -> "poll ran for "
@@ -171,9 +191,19 @@ class WakeupAgainstRealKafkaTest {
                 + LONG_POLL.toSeconds()
                 + "s timeout, so the wakeup did not shorten it"
         );
-        assertCounter(WakeupController.WAKEUPS_ISSUED, 1);
-        assertCounter(WakeupController.WAKEUPS_COALESCED, 0);
-        assertCounter(WakeupController.WAKEUPS_DEFERRED, 0);
+        // Without this, the test would also pass if the wakeup had landed before poll() even started -- the
+        // poll would return instantly and the upper bound would hold for the wrong reason.
+        Assertions.assertTrue(
+            pollDuration.compareTo(BLOCKED_DWELL) >= 0,
+            () -> "poll returned after only "
+                + pollDuration.toMillis()
+                + "ms, less than the "
+                + BLOCKED_DWELL.toMillis()
+                + "ms the submitter waited, so it was not blocked when the wakeup arrived"
+        );
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 1);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_COALESCED, 0);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED, 0);
     }
 
     /** Several submissions during one poll must produce one wakeup, not one each. */
@@ -184,9 +214,10 @@ class WakeupAgainstRealKafkaTest {
 
         var submitter = new Thread(() -> {
             try {
-                Thread.sleep(500);
+                awaitCounter(IKafkaConsumerContexts.MetricNames.POLLS_ENTERED, 1);
+                Thread.sleep(BLOCKED_DWELL.toMillis());
                 for (var i = 0; i < 5; i++) {
-                    queue.submit(anInput(topicPartition));
+                    queue.submit(generationCleanupFinished(topicPartition));
                 }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -206,10 +237,11 @@ class WakeupAgainstRealKafkaTest {
         submitter.join();
 
         Assertions.assertEquals(5, queue.size(), "all five inputs must be queued");
-        var pollDuration = reportAndReturnSingleSpanDuration(WakeupController.POLL_SPAN);
+        var pollDuration = reportAndReturnSingleSpanDuration(IKafkaConsumerContexts.ActivityNames.KAFKA_POLL);
         Assertions.assertTrue(pollDuration.compareTo(PROMPT) < 0);
-        assertCounter(WakeupController.WAKEUPS_ISSUED, 1);
-        assertCounter(WakeupController.WAKEUPS_COALESCED, 4);
+        Assertions.assertTrue(pollDuration.compareTo(BLOCKED_DWELL) >= 0);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 1);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_COALESCED, 4);
     }
 
     /**
@@ -229,25 +261,28 @@ class WakeupAgainstRealKafkaTest {
         var submitterRan = new CountDownLatch(1);
         var submitter = new Thread(() -> {
             try {
-                Thread.sleep(250);
-                queue.submit(anInput(topicPartition));
+                // The callback is already entered on this thread before the submitter starts, so there is no
+                // phase to wait for; the dwell only places the submission inside the callback's lifetime,
+                // which the span-nesting assertions below then verify.
+                Thread.sleep(BLOCKED_DWELL.toMillis());
+                queue.submit(generationCleanupFinished(topicPartition));
                 submitterRan.countDown();
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
         });
         submitter.start();
+        Assertions.assertTrue(submitterRan.await(20, TimeUnit.SECONDS));
         Thread.sleep(callbackWork.toMillis());
 
-        Assertions.assertTrue(submitterRan.await(10, TimeUnit.SECONDS));
-        assertCounter(WakeupController.WAKEUPS_DEFERRED, 1);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED, 1);
         assertCounter(
-            WakeupController.WAKEUPS_ISSUED,
+            IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED,
             0
         );
 
         controller.leaveRebalanceCallback();
-        assertCounter(WakeupController.WAKEUPS_ISSUED, 1);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 1);
 
         // The poll is now woken, so it returns promptly even though its timeout is 30 seconds.
         try {
@@ -260,21 +295,15 @@ class WakeupAgainstRealKafkaTest {
         }
         submitter.join();
 
-        var callbackSpan = singleSpan(WakeupController.REBALANCE_CALLBACK_SPAN);
-        var pollSpan = singleSpan(WakeupController.POLL_SPAN);
+        var callbackSpan = singleSpan(IKafkaConsumerContexts.ActivityNames.REBALANCE_CALLBACK);
+        var pollSpan = singleSpan(IKafkaConsumerContexts.ActivityNames.KAFKA_POLL);
         reportSpans();
 
         Assertions.assertTrue(
             durationOf(callbackSpan).compareTo(Duration.ofMillis(500)) > 0,
             "the callback did not actually span the submission, so nothing was deferred across it"
         );
-        Assertions.assertTrue(
-            Boolean.TRUE.equals(
-                callbackSpan.getAttributes().get(io.opentelemetry.api.common.AttributeKey.booleanKey(
-                    "issuedDeferredWakeupOnExit"))
-            ),
-            "the callback span should record that it issued the deferred wakeup as it left"
-        );
+        assertCounter(IKafkaConsumerContexts.MetricNames.DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT, 1);
         Assertions.assertTrue(
             callbackSpan.getEndEpochNanos() <= pollSpan.getEndEpochNanos(),
             "the callback must finish inside the poll it ran within"
@@ -295,9 +324,9 @@ class WakeupAgainstRealKafkaTest {
         controller.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
         try {
-            queue.submit(anInput(topicPartition));
-            assertCounter(WakeupController.WAKEUPS_DEFERRED, 1);
-            assertCounter(WakeupController.WAKEUPS_ISSUED, 0);
+            queue.submit(generationCleanupFinished(topicPartition));
+            assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED, 1);
+            assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 0);
             outcome = port.commit(Map.of(topicPartition, 0L));
         } finally {
             controller.leaveProtectedOperation();
@@ -308,7 +337,7 @@ class WakeupAgainstRealKafkaTest {
             outcome,
             "the commit was disturbed, which is what deferring the wakeup exists to prevent"
         );
-        assertCounter(WakeupController.WAKEUPS_ISSUED, 0);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 0);
 
         // The deferred wakeup is issued when the next poll starts, so that poll does not wait on it.
         controller.enterPoll();
@@ -321,8 +350,8 @@ class WakeupAgainstRealKafkaTest {
             controller.leavePollAndConsumeWakeup();
         }
 
-        assertCounter(WakeupController.WAKEUPS_ISSUED, 1);
-        var pollDuration = reportAndReturnSingleSpanDuration(WakeupController.POLL_SPAN);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 1);
+        var pollDuration = reportAndReturnSingleSpanDuration(IKafkaConsumerContexts.ActivityNames.KAFKA_POLL);
         Assertions.assertTrue(pollDuration.compareTo(PROMPT) < 0);
     }
 
@@ -339,13 +368,13 @@ class WakeupAgainstRealKafkaTest {
             controller.leavePollAndConsumeWakeup();
         }
 
-        var pollDuration = reportAndReturnSingleSpanDuration(WakeupController.POLL_SPAN);
+        var pollDuration = reportAndReturnSingleSpanDuration(IKafkaConsumerContexts.ActivityNames.KAFKA_POLL);
         Assertions.assertTrue(
             pollDuration.compareTo(shortTimeout.minusMillis(250)) >= 0,
             () -> "poll returned after " + pollDuration.toMillis() + "ms without being woken, so a wakeup"
                 + " assertion elsewhere could pass for the wrong reason"
         );
-        assertCounter(WakeupController.WAKEUPS_ISSUED, 0);
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 0);
     }
 
     // ------------------------------------------------------------------ span and metric helpers
@@ -379,13 +408,34 @@ class WakeupAgainstRealKafkaTest {
         }
         report.append("\n  counters:");
         for (var metric : List.of(
-            WakeupController.WAKEUPS_ISSUED,
-            WakeupController.WAKEUPS_COALESCED,
-            WakeupController.WAKEUPS_DEFERRED
+            IKafkaConsumerContexts.MetricNames.POLLS_ENTERED,
+            IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED,
+            IKafkaConsumerContexts.MetricNames.WAKEUPS_COALESCED,
+            IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED,
+            IKafkaConsumerContexts.MetricNames.POLLS_WOKEN_BY_QUEUED_INPUT,
+            IKafkaConsumerContexts.MetricNames.DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT
         )) {
             report.append(String.format("%n    %-32s %d", metric, counter(metric)));
         }
         log.info(report.toString());
+    }
+
+    /**
+     * Blocks until a counter reaches {@code atLeast}, which is how one thread learns the Kafka thread has
+     * reached a phase. Reading the in-memory reader collects current values, so a counter incremented on
+     * entry is visible while that phase is still running -- unlike a span, which is only exported when it
+     * ends.
+     */
+    private void awaitCounter(String metricName, long atLeast) throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (counter(metricName) < atLeast) {
+            if (System.nanoTime() > deadline) {
+                Assertions.fail(
+                    metricName + " never reached " + atLeast + "; last saw " + counter(metricName)
+                );
+            }
+            Thread.sleep(10);
+        }
     }
 
     private long counter(String metricName) {
