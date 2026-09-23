@@ -310,9 +310,11 @@ express `kafkaLLD §17:939-1005` and `connLLD §19:727-788`; fixture strategy
   deliberately wrong expected-association set and prove the fixture rejects it.
 - Start the status table.
 
-**Exit:** module compiles; the dependency prohibition is proved by a failing build when violated;
-fixture self-tests pass; a mixed traffic/heartbeat/probe script pumps through with exact broker
-timestamps and observable pause, wakeup, and commit events.
+**Exit:** module compiles; carried code is proved uncompilable rather than merely unused, which is what
+§2.1 replaced the two-module dependency prohibition with — this clause previously asked for that
+prohibition to fail a build, and the check it named no longer exists; fixture self-tests pass; a mixed
+traffic/heartbeat/probe script pumps through with exact broker timestamps and observable pause, wakeup,
+and commit events.
 
 ### G1 — Reality contact: decode and dump a real topic
 

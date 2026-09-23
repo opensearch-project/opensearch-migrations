@@ -8,14 +8,6 @@
 
 package org.opensearch.migrations.replay.traffic.generator;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-
-// REBUILD-LIMBO-START(G11)
-/*
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -26,6 +18,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.WriterPartitionId;
+import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import org.opensearch.migrations.trafficcapture.protos.CaptureCapabilityProbe;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -33,60 +29,54 @@ import org.opensearch.migrations.trafficcapture.protos.WriterPartitionHeartbeat;
 
 import org.apache.kafka.common.TopicPartition;
 
-*/
-// REBUILD-LIMBO-END(G11)
 /**
  * Deterministic Kafka application-record script for replay tests.
  *
  * <p>Expected work associations are supplied literally by the test. The fixture never derives them
  * from source-assembly transitions, so they remain an independent oracle for record accounting.
+ *
+ * <p>It emits {@link ApplicationKafkaRecord} — the production boundary type — so a scripted batch
+ * drops straight into {@code ReplayIntakeInput.PartitionRecordBatch} with no adapter in between. A
+ * fixture record type would let the fixture and production disagree about what crosses that
+ * boundary, and the broker timestamp is exactly the field that disagreement would lose.
+ *
+ * <p>Association expectations and writer identity stay on the script rather than on the record,
+ * because neither belongs on the production type: associations are test-supplied and
+ * {@code PAYLOAD_NOT_SET} records have no envelope to read a writer from.
+ *
+ * <p>One script covers one partition generation, identified by {@code generationSequence}, across
+ * however many partitions of {@code topic} the test scripts.
  */
-// REBUILD-LIMBO-START(G11)
-/*
-public final class RecordScript extends TrafficStreamGenerator {
-    public record RecordId(TopicPartition topicPartition, long offset) {
-        public RecordId {
-            Objects.requireNonNull(topicPartition);
-            if (offset < 0) {
-                throw new IllegalArgumentException("offset must not be negative");
-            }
-        }
-    }
-
-    public record ScriptedRecord(
-        RecordId id,
-        long logAppendTimeMillis,
-        String writerNodeId,
-        CaptureRecord envelope,
-        Set<String> expectedAssociations
-    ) {
-        public ScriptedRecord {
-            Objects.requireNonNull(id);
-            Objects.requireNonNull(writerNodeId);
-            Objects.requireNonNull(envelope);
-            expectedAssociations = Set.copyOf(expectedAssociations);
-        }
-
-        public CaptureRecord.PayloadCase payloadCase() {
-            return envelope.getPayloadCase();
-        }
-
-        public byte[] value() {
-            return envelope.toByteArray();
-        }
-    }
-
+public final class RecordScript {
     private final String topic;
-    private final List<ScriptedRecord> records = new ArrayList<>();
+    private final long generationSequence;
+    private final List<ApplicationKafkaRecord> records = new ArrayList<>();
     private final Map<TopicPartition, Long> latestOffsetByPartition = new HashMap<>();
-    private final Map<RecordId, Set<String>> associationsByRecord = new HashMap<>();
+    private final Map<KafkaRecordId, Set<String>> associationsByRecord = new HashMap<>();
+    private final Map<KafkaRecordId, WriterPartitionId> writerByRecord = new HashMap<>();
     private int cursor;
 
     public RecordScript(String topic) {
+        this(topic, 0);
+    }
+
+    public RecordScript(String topic, long generationSequence) {
         if (Objects.requireNonNull(topic).isBlank()) {
             throw new IllegalArgumentException("topic must not be blank");
         }
+        if (generationSequence < 0) {
+            throw new IllegalArgumentException("generationSequence must not be negative");
+        }
         this.topic = topic;
+        this.generationSequence = generationSequence;
+    }
+
+    /** The generation every record scripted for {@code partition} belongs to. */
+    public PartitionGenerationId generation(int partition) {
+        if (partition < 0) {
+            throw new IllegalArgumentException("partition must not be negative");
+        }
+        return new PartitionGenerationId(new TopicPartition(topic, partition), generationSequence);
     }
 
     public RecordScript addTraffic(
@@ -186,30 +176,31 @@ public final class RecordScript extends TrafficStreamGenerator {
         if (Objects.requireNonNull(writerNodeId).isBlank()) {
             throw new IllegalArgumentException("writerNodeId must not be blank");
         }
-        var topicPartition = new TopicPartition(topic, partition);
+        var generation = generation(partition);
+        var topicPartition = generation.topicPartition();
         var previousOffset = latestOffsetByPartition.put(topicPartition, offset);
         if (previousOffset != null && offset <= previousOffset) {
             throw new IllegalArgumentException(
                 "Offsets must increase within " + topicPartition + ": " + previousOffset + " then " + offset
             );
         }
-        var id = new RecordId(topicPartition, offset);
+        var id = new KafkaRecordId(generation, offset);
         if (associationsByRecord.containsKey(id)) {
             throw new IllegalArgumentException("Duplicate scripted record " + id);
         }
         var associations = Set.copyOf(List.of(expectedAssociations));
         associationsByRecord.put(id, associations);
-        records.add(new ScriptedRecord(
+        writerByRecord.put(id, new WriterPartitionId(writerNodeId, topicPartition));
+        records.add(new ApplicationKafkaRecord(
             id,
             logAppendTime.toEpochMilli(),
-            writerNodeId,
-            envelope,
-            associations
+            envelope.getSerializedSize(),
+            envelope
         ));
         return this;
     }
 
-    public List<ScriptedRecord> records() {
+    public List<ApplicationKafkaRecord> records() {
         return List.copyOf(records);
     }
 
@@ -217,7 +208,7 @@ public final class RecordScript extends TrafficStreamGenerator {
         return cursor < records.size();
     }
 
-    public ScriptedRecord next() {
+    public ApplicationKafkaRecord next() {
         if (!hasNext()) {
             throw new AssertionError("RecordScript exhausted after " + cursor + " records");
         }
@@ -232,7 +223,19 @@ public final class RecordScript extends TrafficStreamGenerator {
         }
     }
 
-    public void assertAssociations(RecordId recordId, Collection<String> actualAssociations) {
+    /**
+     * The writer the test scripted this record for. Read from the script rather than the envelope so
+     * it is also available for a {@code PAYLOAD_NOT_SET} record, which has no writer field to read.
+     */
+    public WriterPartitionId writerOf(KafkaRecordId recordId) {
+        var writer = writerByRecord.get(Objects.requireNonNull(recordId));
+        if (writer == null) {
+            throw new AssertionError("No scripted record " + recordId);
+        }
+        return writer;
+    }
+
+    public void assertAssociations(KafkaRecordId recordId, Collection<String> actualAssociations) {
         var expected = associationsByRecord.get(Objects.requireNonNull(recordId));
         if (expected == null) {
             throw new AssertionError("No association expectation for " + recordId);
@@ -245,6 +248,3 @@ public final class RecordScript extends TrafficStreamGenerator {
         }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)

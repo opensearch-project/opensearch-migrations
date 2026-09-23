@@ -370,9 +370,18 @@ prefix, so reconstruction stays mechanical. **Never invent an ad-hoc escape with
 rewrite cannot be reversed reliably, because the rewritten form is indistinguishable from code that was
 always written that way.
 
-`TrafficCapture/trafficReplayer/tools/unmark-limbo.awk` reconstructs a marked file, and every marked file in
-the module is verified to round-trip byte-identically through it. That check is the point — carried code is
-only safe to mark if getting it back is mechanical.
+`TrafficCapture/trafficReplayer/tools/unmark-limbo.awk` reconstructs a marked file, and
+`tools/verify-limbo-markers.sh` checks every marked file in the module: that each region's delimiters are
+well-formed, so the marked code is inert rather than merely unused, and that reconstruction recovers every
+code line, compared against the content the marking commit replaced. **Run it after any marking change.**
+That check is the point — carried code is only safe to mark if getting it back is mechanical.
+
+The recovery is exact on code and **not** byte-exact, which this file previously claimed. Marking pads each
+region with a blank line inside its delimiters, and that padding is unguarded: the blank before a mid-file
+`*/` is usually the blank that separated two members, so no rule can tell the marker's blank from the
+original's, and stripping it would lose real content. The verifier therefore ignores blank lines, and
+anything it does report is a genuinely lost, added, or altered line. This is the guard rule above failing in
+miniature on the marker's own output — worth keeping visible rather than quietly restating the claim.
 
 **Mark members, never whole files as a unit.** An all-or-nothing verdict on a file hides the class, its
 history, and its existing coverage, which is what makes the failure above possible. If two of five methods

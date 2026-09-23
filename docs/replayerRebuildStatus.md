@@ -40,10 +40,11 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 | Local vs origin | Local is **2 commits ahead**: `822abde4e` (S6b) and `d5f0ef1fb` (the plan reset) are both unpushed. `origin/stableAndScalableLiveReplay` is at `2c4f305f3` |
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
-| Test compilation | **Green.** 103 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 when `ReplayerFixtureSelfTest` was partly promoted |
+| Test compilation | **Green.** 108 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 as `ReplayerFixtureSelfTest` was promoted |
+| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 228 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 226 whole-file-marked ones. Run it after any marking change |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
-| File counts | One module. **340 files** under `TrafficCapture/trafficReplayer/src` (**327** Java); **231** carry `REBUILD-LIMBO` regions, of which **3** are partial — `TrafficReplayer` (8 regions), `ReplayerFixtureSelfTest` (2), `ReplayIdentity` (1). `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. The earlier "333 files / 232 marked" figures were measured differently; use the command, not the number |
+| File counts | One module. **340 files** under `TrafficCapture/trafficReplayer/src` (**327** Java); **228** carry `REBUILD-LIMBO` regions, of which **2** are partial — `TrafficReplayer` (8 regions) and `ReplayIdentity` (1). `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. The earlier "333 files / 232 marked" figures were measured differently; use the command, not the number |
 | `stash@{0}` | `09df7b9a4` — S6 pre-commit backup, redundant. Do not apply |
 | `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked. **Note:** the four G0 fixtures it was thought to hold already exist on the branch in `src/testFixtures` |
 | Other checkout | `/Users/schohn/dev/replayerCommitHardening` holds an earlier copy of the docs. This repo is authoritative |
@@ -162,6 +163,7 @@ plan is the bug.
 | Plan A §2.3, `testFixtures` rows | "Six `transformation/` modules consume it" raises the stakes on freezing the fixture API | True as a module count, but the **imported surface is three types**: `replay.TestCapturePacketToHttpHandler`, `replay.TestUtils`, `tracing.InstrumentationTest` (plus `tracing.TestContext` transitively). The other 17 fixture files have no external consumer, so the published-API constraint is far narrower than the row implies |
 | Plan A §9, row "Nine obsolete `ReplayIdentity` records" | Nine of twelve are obsolete | Eleven of twelve are, on shape. See the `ReplayIdentity` note above |
 | `replayerRebuildPlan.md` §7 and Plan A `G9` | A "deprecated parse-and-warn alias" set exists to be preserved | **No parse-and-warn adapter exists.** Every alias in `TrafficReplayer.java` is a live functional synonym; grep finds zero deprecation warnings. `--max-concurrent-requests`, `--lookaheadTimeSeconds`, `--quiescentPeriodMs`, and `--observedPacketConnectionTimeout` are all still load-bearing (consumed at `:482-489`, `:737`, `:839`, `:844`). So G9 *creates* that set rather than preserving it, and which options enter it is a red-line-2 decision |
+| Plan A `G0` **Exit**, clause 2 | "the dependency prohibition is proved by a failing build when violated" | **The prohibition it names was deleted by §2.1 on the same day.** §2.1 removed the two-module split along with `verifyReplayerModuleIsolation`, the check that was the failing build. The clause is a stale reference the §2.1 rewrite did not propagate to, and left as written G0 could never be closed. The property it was protecting — no second live correctness model — now holds structurally instead: marked code sits inside `/* */`, so javac never sees it. That is stronger than the check, since it cannot be satisfied by a passing build that simply never exercised the violation. Rewritten to name the mechanism that actually provides it, and `tools/verify-limbo-markers.sh` is the evidence |
 | Plan A §2.3, "Exit codes 80 and 89" → `ReplayProcessFatalHandlerTest` | — | Confirmed, with the real source: `ReplayProcessFatalHandler.Reason.EVENT_LOOP_TERMINATED(80)` and `UNEXPECTED_FATAL_ERROR(89)` (`:17-26`), applied at `:190`; the 80-vs-89 classifier is the lambda at `TrafficReplayerTopLevel.java:287-289`, keyed on `RequestSenderOrchestrator.EventLoopTerminatedError`. `TrafficReplayer.java` itself produces only argument-validation codes 2, 3, and 4 |
 
 Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`):
@@ -484,7 +486,8 @@ dashboard.
 
 ## State at end of the 2026-09-23 session, and what comes next
 
-One module, in place, member-level marking. **340 files, 231 marked, 103 tests passing, build green.**
+One module, in place, member-level marking. **340 files, 228 marked, 108 tests passing, build green.**
+**G0 is complete.**
 
 ### Landed this session
 
@@ -496,7 +499,8 @@ One module, in place, member-level marking. **340 files, 231 marked, 103 tests p
 | Plan A rewritten for one module; mainline-preservation rule added as §2.2a; renamed to `replayerRebuildPlanA-inPlace.md` | `7446721c6` |
 | Deleted provably-dead branch-added code — 6 files, 1,067 lines | `0093c38b4` |
 | Unified the marker on `START`/`END` | `71aa6ce76` |
-| `TestEventLoop` promoted to a real Netty `EventLoop`; `ReplayerFixtureSelfTest` partly promoted | this commit |
+| `TestEventLoop` promoted to a real Netty `EventLoop`; `ReplayerFixtureSelfTest` partly promoted | `aa5461a10` |
+| `RecordScript` and `PumpedKafkaSource` on production types; G0 exit evidence; marking verifier | this commit |
 
 ### Findings from the abandoned external-consumer walk
 
@@ -575,18 +579,95 @@ replayer run logs, of which nothing is unique but the logs. Harmless to the buil
 session. Left in place because the run logs may be wanted evidence; deleting it is a one-line `rm -rf` when
 the owner says so.
 
+### The fixtures speak production types now, and that was the point of redoing them
+
+`RecordScript` and `PumpedKafkaSource` are live, and between them they dropped **nine duplicate type
+declarations** for the production ones that already existed: `PartitionGenerationId`,
+`PartitionBatchRequestId`, `RecordScript.RecordId`, `RecordScript.ScriptedRecord`, a private copy of the
+`KafkaSourceInput` family with its four variants, and `PartitionRecordBatch`. Every replacement was already
+declared and live — the identities in `replay/identity/`, `KafkaSourceInput` and `ApplicationKafkaRecord` in
+`kafkasource/`, and `ReplayIntakeInput.PartitionRecordBatch`, which matches the design's declaration at
+`kafkaLLD §5.5:318` exactly.
+
+Two of those copies were not merely redundant. The fixture's `CaptureProtocolViolationDetected` carried only
+a record id, silently dropping the `diagnostic` the real one requires — so a driver written against the
+fixture could not have implemented the diagnostic path at all. And `ScriptedRecord` was a parallel boundary
+type; the field a parallel type most easily loses is exactly `logAppendTimeMillis`, whose absence from the
+old intake boundary is defect **D-1**'s root. The script now emits `ApplicationKafkaRecord` itself, so a
+scripted batch goes straight into `PartitionRecordBatch` with no adapter that could drop a field.
+
+`RecordScript extends TrafficStreamGenerator` is gone. Every member of that class is `static`, so the
+`extends` inherited no behavior and `RecordScript` called none of it — it was decoration.
+
+What moved onto the script rather than the record: expected associations (test-supplied, so they must stay an
+independent oracle) and `WriterPartitionId` via `writerOf`, which also puts the eighth identity to work for
+the first time. A `PAYLOAD_NOT_SET` record has no envelope field to read a writer from, which is the concrete
+reason writer identity cannot live on the record.
+
+One API change: `RecordScript` takes an optional generation sequence (`new RecordScript(topic, 3)`) because
+`KafkaRecordId` is `(generation, offset)` and a script must therefore know its generation. Without it a
+script's record ids could not match the generation a test requested a batch for, and `RecordProcessingFinished`
+would route to the wrong generation.
+
+### G0 exit evidence
+
+`mixedScriptPumpsThroughWithExactBrokerTimestampsAndObservableTransitions` in `ReplayerFixtureSelfTest` is
+the mixed traffic/heartbeat/probe pump the milestone asks for. It asserts the whole transition history as an
+ordered list rather than counting events, which makes two required properties positional: the partition is
+paused **before** its batch is delivered, and three record completions submitted back to back produce **one**
+wakeup, not three (`kafkaLLD §17.4`). The commit is one contiguous-prefix commit computed after every input
+is drained, because commit authority belongs to the source alone (`kafkaLLD §4.2`).
+
+Exact broker timestamps survive the round trip: `1_700_000_000_000`, `+5s`, `+10s` are asserted on the
+delivered batch, not on the script.
+
+### Marking integrity is now checked, and checking it found two real tool bugs
+
+`tools/verify-limbo-markers.sh` is new and passes on all 228 marked files. `AGENTS.md` §8a already asserted
+that every marked file was "verified to round-trip byte-identically," but **no runnable check existed** —
+only the prose. Writing it exposed two defects in `unmark-limbo.awk`, both confined to partially-marked files,
+which is the member-level mode §8a calls primary:
+
+1. **Markers were anchored at column 0.** A member-level region is indented to its member, so the awk did not
+   recognise the markers in `TrafficReplayer` or `ReplayIdentity` at all and reconstructed them with every
+   marker still in place. Anchors now allow leading whitespace, and a `*/` counts as a region closer only
+   while a region is open — otherwise an indented javadoc closer, which looks identical at line start, would
+   be mistaken for one.
+2. **Per-region notes were emitted as code.** A member-level region carries a `//` note between its `START`
+   and its `/*` naming what blocks that member; the awk printed those notes into the reconstruction. They are
+   now dropped like the whole-file header.
+
+**And the byte-identical claim itself was false.** Marking pads each region with a blank line inside its
+delimiters, and that padding is *unguarded* — the blank before a mid-file `*/` is usually the blank that
+separated two members, so no rule can distinguish the marker's blank from the original's, and a heuristic
+that stripped it would lose real content. Recovery is therefore exact on code and approximate on blank lines;
+the verifier ignores blank lines and `AGENTS.md` §8a is corrected. This is §8a's own "never invent an ad-hoc
+escape without a guard" rule failing in miniature on the marker's own output, which is why it is recorded
+rather than quietly restated. Making it byte-exact would mean re-marking 228 files to guard the padding —
+not worth it, since no code line is at risk.
+
+### One marked file now references types that no longer exist
+
+`RecordAssociationAccumulatorTest` (whole-file marked, so inert and not a build problem) calls
+`RecordScript.RecordId` and a **four-argument** `KafkaRecordId(TOPIC, 0, 0, 0)` — a third shape of that
+identity, distinct from both the deleted fixture copy and the design's two-component
+`(generation, offset)`. Whoever promotes it rewires both to `replay/identity/KafkaRecordId`. Same status as
+the `ActorMailbox` dependents: a dangling reference inside a marked region is expected during the rebuild,
+and it is recorded rather than repaired so that promoting the file is the moment the decision gets made.
+
+### Stale note to fix in G3
+
+`ReplayIdentity.java`'s marked-region note says `UniqueReplayerRequestKey` "stays in
+`trafficReplayerLegacy`." There is no such module. The note predates the one-module collapse; its substance
+(that this adapter goes when its 18 callers move to `replay/identity/`) still holds.
+
 ### Next
 
-G0's remaining work is the fixtures and the exit evidence, in this order:
-
-1. ~~`TestEventLoop`~~ — **done**, see above.
-2. **`RecordScript` and `PumpedKafkaSource`** — rewire to the eight identities in `replay/identity/` and the
-   real `KafkaSourceInput`, dropping their duplicate identity records and `RecordScript`'s
-   `TrafficStreamGenerator` inheritance. Their three cases in `ReplayerFixtureSelfTest` are still marked and
-   are the specification to restore them against.
-3. **G0 exit evidence** — a mixed traffic/heartbeat/probe script pumping through with exact broker timestamps
-   and observable pause, wakeup and commit events. No single test does all of this yet. Fold it into
-   `ReplayerFixtureSelfTest` rather than beside it (`AGENTS.md` §8a).
+**G0 is complete.** All four fixtures are live, their self-tests pass, and the exit evidence exists. G1 is
+next: reality contact — decode and dump a real topic, which promotes `runDumpMode` from
+`TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` region. That region's own note already records the open
+question G1 must settle first — the file source decodes bare base64 `TrafficStream` while Kafka decodes a
+`CaptureRecord` envelope, and G1 has to decide which format the file path speaks.
 
 Deferred by the owner, with reasons already recorded: the external-consumer contract (after G3), the
 `TrafficReplayer` wiring walk, and the DCO rewrite (post-G12).
