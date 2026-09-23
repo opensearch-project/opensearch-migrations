@@ -1,4 +1,6 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.e2etests;
+
+import javax.net.ssl.SSLException;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -6,26 +8,30 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
-import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.replay.ParsedHttpMessagesAsDicts;
+import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
+import org.opensearch.migrations.testutils.TrafficStreamFixtures;
+import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.channel.nio.NioEventLoopGroup;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.testcontainers.lifecycle.Startables;
 
 @Tag("isolatedTest")
-class OpenSearch37ReplayTest extends InstrumentationTest {
+class OpenSearch37ReplayTest {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String TRANSFORMER_CONFIG = """
@@ -42,9 +48,11 @@ class OpenSearch37ReplayTest extends InstrumentationTest {
         """;
 
     private record Request(String method, String path, String body, int expectedStatus) {}
+    private record ReplayResult(boolean transformed, JsonNode tuple) {}
 
     @Test
-    void replayElasticsearch68TypedRequestsToOpenSearch37() throws Exception {
+    @ResourceLock("TrafficReplayerRunner")
+    void replayElasticsearch68TypedRequestsToOpenSearch37() throws Throwable {
         try (
             var source = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
             var target = new SearchClusterContainer(SearchClusterContainer.OS_V3_7_0);
@@ -52,7 +60,6 @@ class OpenSearch37ReplayTest extends InstrumentationTest {
         ) {
             Startables.deepStart(source, target).join();
             var targetUri = URI.create(target.getUrl());
-            var eventLoops = new NioEventLoopGroup(1);
             try (var transformer = new TransformationLoader().getTransformerFactoryLoader(
                 targetUri.getAuthority(), null, TRANSFORMER_CONFIG
             )) {
@@ -67,12 +74,61 @@ class OpenSearch37ReplayTest extends InstrumentationTest {
                         {"message":"bulk"}
                         {"update":{"_index":"replay-test","_type":"legacy","_id":"1"}}
                         {"doc":{"message":"updated"}}
-                        """, 200)
+                        """, 200),
+                    new Request("GET", "/replay-test/legacy/2", "", 200),
+                    new Request("DELETE", "/replay-test/legacy/2", "", 200)
                 );
-                int requestId = 0;
-                for (var request : requests) {
-                    sendAndReplay(client, source, targetUri, eventLoops, transformer, requestId++, request);
+                var streams = new ArrayList<TrafficStream>();
+                for (int i = 0; i < requests.size(); i++) {
+                    streams.add(sendAndRecord(client, source, i, requests.get(i)));
                 }
+                var trafficSource = new ArrayCursorTrafficSourceContext(streams);
+                // Materialize tuple responses while their buffers and instrumentation contexts are still live.
+                var results = new ConcurrentHashMap<Integer, ReplayResult>();
+                TrafficReplayerRunner.runReplayer(
+                    requests.size(),
+                    (rootContext, threadPrefix) -> {
+                        try {
+                            // One outstanding request preserves create/index/update/delete dependencies across connections.
+                            return new FullTrafficReplayerTest.TrafficReplayerWithWaitOnClose(
+                                REQUEST_TIMEOUT, rootContext, targetUri, null, true, 1, 1, transformer, threadPrefix
+                            );
+                        } catch (SSLException e) {
+                            throw new IllegalStateException(e);
+                        }
+                    },
+                    () -> tuple -> {
+                        var id = Integer.parseInt(tuple.getRequestKey().getTrafficStreamKey().getConnectionId());
+                        results.put(id, new ReplayResult(
+                            tuple.transformationStatus != null && tuple.transformationStatus.isCompleted(),
+                            MAPPER.valueToTree(new ParsedHttpMessagesAsDicts(tuple).toTupleMap(tuple))
+                        ));
+                    },
+                    TestContext::noOtelTracking,
+                    trafficSource,
+                    new TimeShifter(10_000, Duration.ofMillis(100))
+                );
+                Assertions.assertEquals(requests.size(), results.size());
+                Assertions.assertEquals(streams.size(), trafficSource.nextReadCursor.get(), "committed traffic records");
+                var responses = new ArrayList<JsonNode>();
+                for (int i = 0; i < requests.size(); i++) {
+                    var result = results.get(i);
+                    Assertions.assertNotNull(result, "Missing replay result for request " + i);
+                    var tuple = result.tuple();
+                    Assertions.assertTrue(result.transformed(), tuple::toString);
+                    Assertions.assertFalse(tuple.has("error"), tuple::toString);
+                    Assertions.assertEquals(0, tuple.path("numErrors").asInt(), tuple::toString);
+                    Assertions.assertEquals(1, tuple.path("numRequests").asInt(), tuple::toString);
+                    var response = tuple.path("targetResponses").get(0);
+                    Assertions.assertEquals(requests.get(i).expectedStatus(),
+                        response.path(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY).asInt(), tuple::toString);
+                    responses.add(response.path(ParsedHttpMessagesAsDicts.PAYLOAD_KEY)
+                        .path(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+                }
+                Assertions.assertEquals(MAPPER.valueToTree(false), responses.get(2).path("errors"),
+                    "Bulk HTTP 200 must not hide individual item failures");
+                Assertions.assertEquals("bulk", responses.get(3).path("_source").path("message").asText());
+                Assertions.assertEquals("deleted", responses.get(4).path("result").asText());
 
                 var mapping = getJson(client, targetUri, "/replay-test/_mapping");
                 Assertions.assertEquals("keyword",
@@ -80,28 +136,18 @@ class OpenSearch37ReplayTest extends InstrumentationTest {
                 Assertions.assertFalse(mapping.path("replay-test").path("mappings").has("legacy"));
                 Assertions.assertEquals("updated",
                     getJson(client, targetUri, "/replay-test/_doc/1").path("_source").path("message").asText());
-                Assertions.assertEquals("bulk",
-                    getJson(client, targetUri, "/replay-test/_doc/2").path("_source").path("message").asText());
-
-                sendAndReplay(client, source, targetUri, eventLoops, transformer, requestId,
-                    new Request("DELETE", "/replay-test/legacy/2", "", 200));
                 var refresh = client.send(HttpRequest.newBuilder(targetUri.resolve("/replay-test/_refresh"))
                     .timeout(REQUEST_TIMEOUT).POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString());
                 Assertions.assertEquals(200, refresh.statusCode(), refresh.body());
                 Assertions.assertEquals(1, getJson(client, targetUri, "/replay-test/_count").path("count").asInt());
-            } finally {
-                eventLoops.shutdownGracefully().sync();
             }
         }
     }
 
-    private void sendAndReplay(
+    private static TrafficStream sendAndRecord(
         HttpClient client,
         SearchClusterContainer source,
-        URI targetUri,
-        NioEventLoopGroup eventLoops,
-        IJsonTransformer transformer,
         int requestId,
         Request request
     ) throws Exception {
@@ -117,25 +163,19 @@ class OpenSearch37ReplayTest extends InstrumentationTest {
                 sourceResponse.body());
         }
 
-        var requestBytes = (request.method() + " " + request.path() + " HTTP/1.1\r\n"
+        var requestText = request.method() + " " + request.path() + " HTTP/1.1\r\n"
             + "Host: " + URI.create(source.getUrl()).getAuthority() + "\r\n"
             + "Content-Type: application/json\r\n"
             + "Connection: close\r\n"
             + "Content-Length: " + request.body().getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n"
-            + request.body()).getBytes(StandardCharsets.UTF_8);
-        try (var context = rootContext.getTestConnectionRequestContext("replay-" + requestId, 0)) {
-            var session = new ConnectionReplaySession(eventLoops.next(), context.getChannelKeyContext(),
-                NettyPacketToHttpConsumer.createClientConnectionFactory(null, targetUri));
-            var sender = new NettyPacketToHttpConsumer(session, context, REQUEST_TIMEOUT);
-            var consumer = new HttpJsonTransformingConsumer<>(transformer, null, sender, context);
-            consumer.consumeBytes(requestBytes).get(REQUEST_TIMEOUT);
-            var result = consumer.finalizeRequest().get(REQUEST_TIMEOUT);
-            Assertions.assertTrue(result.transformationStatus.isCompleted());
-            Assertions.assertNotNull(result.transformedOutput);
-            Assertions.assertNull(result.transformedOutput.getError());
-            Assertions.assertNotNull(result.transformedOutput.getRawResponse());
-            Assertions.assertEquals(request.expectedStatus(), result.transformedOutput.getRawResponse().status().code());
-        }
+            + request.body();
+        var responseText = "HTTP/1.1 " + sourceResponse.statusCode() + " OK\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: " + sourceResponse.body().getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n"
+            + sourceResponse.body();
+        return TrafficStreamFixtures.makeHttpRequestResponseTrafficStream(
+            "es68-replay", Integer.toString(requestId), requestText, responseText
+        );
     }
 
     private static JsonNode getJson(HttpClient client, URI cluster, String path) throws Exception {
