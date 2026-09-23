@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: ISimpleTrafficCaptureSource ITrafficSourceContexts ITrafficStreamKey PojoTrafficStreamAndKey PojoTrafficStreamKeyAndContext . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G2)
+/*
+
 import java.io.BufferedReader;
 import java.io.EOFException;
 import java.io.IOException;
@@ -59,10 +70,14 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * Returns a CompletableFuture to a TrafficStream object or sets the cause exception to an
      * EOFException if the input has been exhausted.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     @Override
     public CompletableFuture<List<SourceInput>> readNextTrafficStreamChunk(
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
@@ -110,3 +125,6 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCl
         bufferedReader.close();
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G2)

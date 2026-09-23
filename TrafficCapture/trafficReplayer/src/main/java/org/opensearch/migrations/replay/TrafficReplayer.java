@@ -1,60 +1,23 @@
 package org.opensearch.migrations.replay;
 
-import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.Charset;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
-import java.util.stream.Stream;
 
-import org.opensearch.migrations.ExceptionTypeAllowlist;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
-import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
-import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
-import org.opensearch.migrations.replay.sink.S3TupleSink;
-import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.replay.util.ActiveContextMonitor;
-import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
-import org.opensearch.migrations.tracing.ActiveContextTracker;
-import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
-import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
-import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.transform.IAuthTransformerFactory;
-import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.PredicateLoader;
-import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
-import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
-import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
-import org.opensearch.migrations.transform.TransformationLoader;
-import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.utils.ProcessHelpers;
-import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
 import org.opensearch.migrations.utils.URIHelper;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.LoggerFactory;
-import org.slf4j.event.Level;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class TrafficReplayer {
@@ -609,29 +572,12 @@ public class TrafficReplayer {
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
         }
     }
-
-    public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
-        final var workerId = ProcessHelpers.getNodeInstanceName();
-        log.info("Starting Traffic Replayer with id=" + workerId);
-
-        var params = parseArgs(args);
-
-        if (isDumpMode(params)) {
-            validateDumpModeParams(params);
-            runDumpMode(params);
-            return;
-        }
-
-        // replay mode — targetUriString is required
-        if (params.targetUriString == null) {
-            System.err.println("Target URI is required for replay mode");
-            System.exit(2);
-            return;
-        }
-        runReplayMode(params);
-    }
-
+    // REBUILD-LIMBO-OPEN(G1)
+    // runDumpMode -- blocked on P10 (KafkaTopicDumper, TrafficStreamDumper, HttpTransactionDumper),
+    // RootReplayerContext, TrafficCaptureSourceFactory.
+    // Open decision: the file source decodes bare base64 TrafficStream while Kafka decodes a CaptureRecord
+    // envelope. G1 must settle which format the file path speaks before this returns unchanged.
+    /*
     private static void runDumpMode(Parameters params) throws Exception {
         var topContext = new RootReplayerContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
@@ -663,6 +609,8 @@ public class TrafficReplayer {
             System.exit(2);
         }
     }
+    */
+    // REBUILD-LIMBO-CLOSED(G1)
 
     /**
      * Parse and validate the replay target URI and timing params. On invalid input this prints the
@@ -706,7 +654,11 @@ public class TrafficReplayer {
         }
         return uri;
     }
-
+    // REBUILD-LIMBO-OPEN(G9)
+    // runReplayMode -- blocked on TrafficReplayerTopLevel, which is replaced rather than carried.
+    // Expected to be rewritten against the design's owners rather than restored, so new blame here is honest.
+    // Kept verbatim anyway so the functionality it wires up is enumerable rather than remembered.
+    /*
     private static void runReplayMode(Parameters params) throws Exception {
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         URI uri = parseAndValidateReplayTarget(params);
@@ -872,7 +824,13 @@ public class TrafficReplayer {
             }
         }
     }
-
+    */
+    // REBUILD-LIMBO-CLOSED(G9)
+    // REBUILD-LIMBO-OPEN(G5)
+    // buildTransformerSupplier -- blocked on P4 (FilteringTransformerWrapper) and the
+    // jsonMessageTransformerInterface dependency. TransformationLoader and PredicateLoader are already available.
+    // Nothing here is in doubt; it returns verbatim once P4 lands.
+    /*
     static Supplier<IJsonTransformer> buildTransformerSupplier(
         TransformationLoader transformationLoader,
         String hostname,
@@ -889,7 +847,12 @@ public class TrafficReplayer {
         log.atInfo().setMessage("Request filter configured").log();
         return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
     }
-
+    */
+    // REBUILD-LIMBO-CLOSED(G5)
+    // REBUILD-LIMBO-OPEN(G9)
+    // configureResponsePostProcessor -- blocked on TrafficReplayerTopLevel (it assigns
+    // tr.responsePostProcessor directly). The loader call itself is final-form.
+    /*
     static void configureResponsePostProcessor(
         TrafficReplayerTopLevel tr, TransformationLoader loader, String config
     ) {
@@ -898,7 +861,14 @@ public class TrafficReplayer {
             log.atInfo().setMessage("Response post-processor configured").log();
         }
     }
-
+    */
+    // REBUILD-LIMBO-CLOSED(G9)
+    // REBUILD-LIMBO-OPEN(G5)
+    // createS3TupleWriterIfConfigured -- blocked ONLY on the TupleWriter shape.
+    // S3TupleSink is a reusable library object in :TrafficCapture:tupleSink and the S3 client construction is not
+    // in question. The blocker is the return type: ThreadLocalTupleWriter declares a class in ...replay.sink,
+    // a package tupleSink already owns on the same classpath. Roughly 30 of these 34 lines should survive G5.
+    /*
     private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
         Parameters params,
         Supplier<IJsonTransformer> tupleTransformerSupplier
@@ -933,7 +903,13 @@ public class TrafficReplayer {
             tupleTransformerSupplier
         );
     }
-
+    */
+    // REBUILD-LIMBO-CLOSED(G5)
+    // REBUILD-LIMBO-OPEN(G9)
+    // setupShutdownHookForReplayer -- blocked on TrafficReplayerTopLevel.
+    // This is one of D14's three unbounded waits for orderly recovery. A defect to fix at G9, not behavior to
+    // reproduce -- carried so the current behavior is legible while it is being replaced.
+    /*
     private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {
         var weakTrafficReplayer = new WeakReference<>(tr);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -956,10 +932,16 @@ public class TrafficReplayer {
                 });
         }));
     }
-
+    */
+    // REBUILD-LIMBO-CLOSED(G9)
+    // REBUILD-LIMBO-OPEN(G9)
+    // awaitReplayerShutdown -- blocked on TrafficReplayerTopLevel. See the D14 note above.
+    /*
     static void awaitReplayerShutdown(TrafficReplayerTopLevel trafficReplayer) {
         trafficReplayer.shutdown(null);
     }
+    */
+    // REBUILD-LIMBO-CLOSED(G9)
 
     /**
      * This method returns a username:password Base64 encoded basic auth header
@@ -987,6 +969,12 @@ public class TrafficReplayer {
         );
     }
 
+    // REBUILD-LIMBO-OPEN(G9)
+    // buildAuthTransformerFactory -- blocked on P6 (the five transform/ auth factories), itself gated on
+    // P1, because IAuthTransformer references HttpJsonRequestWithFaultingPayload in the datahandler layer.
+    // Pure argument arbitration over the auth options; returns verbatim once P1 and P6 land. Its two helpers,
+    // getBasicAuthHeader and formatAuthArgFlagsAsString, are live above -- they needed no new dependency.
+    /*
     private static IAuthTransformerFactory buildAuthTransformerFactory(Parameters params) {
         long authOptionsSpecified = Stream.of(
             params.removeAuthHeader,
@@ -1030,5 +1018,34 @@ public class TrafficReplayer {
         } else {
             return null; // default is to do nothing to auth headers
         }
+    }
+    */
+    // REBUILD-LIMBO-CLOSED(G9)
+
+    /**
+     * Distinct from the exit codes G9 owns -- 80 for owner loss and 89 for an unexpected fatal error -- and
+     * from the argument-validation codes 2, 3, and 4 that {@link #parseArgs} and
+     * {@link #parseAndValidateReplayTarget} still produce, so that "ran the unfinished module" can never be
+     * confused with a real replay failure or a bad invocation.
+     */
+    static final int NOT_IMPLEMENTED_EXIT_CODE = 70;
+
+    /**
+     * <strong>The one member of this class deliberately not carried.</strong> The original {@code main} was
+     * mode dispatch over {@code runDumpMode} and {@code runReplayMode}, both of which are in REBUILD-LIMBO
+     * regions above; restoring it would mean restoring a dispatcher to two absent destinations.
+     *
+     * <p>It fails rather than doing nothing. This module already owns the {@code traffic_replayer} image
+     * name, so a silent no-op entry point is something a deployment could run without noticing. The
+     * assembled application not working during reconstruction is expected and accepted; failing quietly is
+     * not.</p>
+     */
+    public static void main(String[] args) {
+        System.err.println(
+            "This traffic replayer is under reconstruction and has no runnable entry point yet.\n"
+                + "Reading a topic lands at milestone G1; the full replay path and supervision at G9.\n"
+                + "See docs/replayerRebuildPlanA-newModule.md and docs/replayerRebuildStatus.md.\n"
+                + "The previous implementation remains in TrafficCapture/trafficReplayerLegacy for reference.");
+        System.exit(NOT_IMPLEMENTED_EXIT_CODE);
     }
 }

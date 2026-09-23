@@ -8,6 +8,14 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.io.EOFException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,9 +40,13 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * Sole owner of replay-intake mutable state and source-record application.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public final class ReplayIntakeOwner {
     @FunctionalInterface
@@ -185,10 +197,14 @@ public final class ReplayIntakeOwner {
         return completion.minimalCompletionStage();
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Completes after every replay-intake input already queued by the caller or by an earlier
      * owner transition has been applied.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public CompletionStage<Void> fence() {
         return submitRequiredHandled(new Fence());
     }
@@ -568,3 +584,6 @@ public final class ReplayIntakeOwner {
     }
 
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

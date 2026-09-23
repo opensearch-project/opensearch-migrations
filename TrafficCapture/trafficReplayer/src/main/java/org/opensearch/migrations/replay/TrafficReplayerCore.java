@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay;
 
+// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: CapturedTrafficToHttpTransactionAccumulator IReplayContexts IRetryVisitorFactory IRootReplayerContext ITrafficCaptureSource . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G5)
+/*
+
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -198,12 +209,20 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
         private final ReplayEngine replayEngine;
         private final ThreadLocalTupleWriter tupleWriter;
+*/
+// REBUILD-LIMBO-END(G5)
         /** Legacy synchronous tuple consumer (Log4J path). Mutually exclusive with tupleWriter. */
+// REBUILD-LIMBO-START(G5)
+/*
         private final Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         @lombok.Setter
         private Consumer<SourceTargetCaptureTuple> tupleObserver;
         private ITrafficCaptureSource trafficCaptureSource;
+*/
+// REBUILD-LIMBO-END(G5)
         /** How long to delay the first request on a resumed connection. Configurable via CLI. */
+// REBUILD-LIMBO-START(G5)
+/*
         private final Duration quiescentDuration;
         private final RecordWorkTracker recordWorkTracker;
         private final SourceReconstructionPolicy sourceReconstructionPolicy;
@@ -625,9 +644,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             return TrackedFuture.unwindPossibleCompletionException(throwable);
         }
 
+*/
+// REBUILD-LIMBO-END(G5)
         /**
          * @see RequestTransformerAndSender#transformAndSendRequest
          */
+// REBUILD-LIMBO-START(G5)
+/*
         private TrackedFuture<String, TransformedTargetRequestAndResponseList> sendRequestAfterGoingThroughWorkQueue(
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
@@ -877,9 +900,13 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Test-facing source drain that uses the same dedicated, typed replay-intake owner as bootstrap.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     @SneakyThrows
     public void pullCaptureFromSourceToAccumulator(
         ITrafficCaptureSource trafficSource,
@@ -920,10 +947,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
     /**
      * Apply a response post-processor to all target responses in the parsed messages.
      * Package-private static for testability.
      */
+// REBUILD-LIMBO-START(G5)
+/*
     @SuppressWarnings("unchecked")
     static void applyResponsePostProcessor(IJsonTransformer postProcessor, ParsedHttpMessagesAsDicts parsedMsgs) {
         var responses = parsedMsgs.targetResponseList;
@@ -943,3 +974,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G5)

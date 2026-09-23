@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.kafka;
 
+// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Cascade from the left-behind legacy set. Unresolved: CapturedTrafficToHttpTransactionAccumulator ChannelContextManager ISimpleTrafficCaptureSource ITrafficStreamWithKey PojoTrafficStreamAndKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
+// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
+// code between them is verbatim, so blame survives. Read this before writing anything new
+
+// REBUILD-LIMBO-START(G2)
+/*
+
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
@@ -22,10 +33,14 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 
+*/
+// REBUILD-LIMBO-END(G2)
 /**
  * Encapsulates all dump-mode logic (dump-raw, dump-http, dump-both) for both
  * Kafka and file-based sources. Keeps Kafka-specific details out of TrafficReplayer.
  */
+// REBUILD-LIMBO-START(G2)
+/*
 @Slf4j
 public class KafkaTopicDumper {
 
@@ -212,6 +227,8 @@ public class KafkaTopicDumper {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G2)
     /**
      * The dump loop terminates only when every assigned partition's current
      * position has reached the endOffset snapshot taken at startup. Using
@@ -223,6 +240,8 @@ public class KafkaTopicDumper {
      * Kafka client API gives us for "I've drained the snapshot I asked for"
      * and is robust to empty intermediate polls.
      */
+// REBUILD-LIMBO-START(G2)
+/*
     private static boolean isAtEnd(KafkaConsumer<String, byte[]> consumer,
                                    Map<TopicPartition, Long> endOffsets) {
         for (var entry : endOffsets.entrySet()) {
@@ -357,3 +376,6 @@ public class KafkaTopicDumper {
         return rec.offset() >= endOffsets.getOrDefault(tp, Long.MAX_VALUE);
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G2)

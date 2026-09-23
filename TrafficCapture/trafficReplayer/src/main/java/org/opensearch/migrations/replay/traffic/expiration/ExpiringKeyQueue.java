@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.traffic.expiration;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -9,12 +20,16 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * This is a sequence of (concurrent) hashmaps segmented by time.  The hashmaps are really just sets,
  * the boolean value is just a dummy because there isn't a concurrent set class.  Each element in the
  * sequence is composed of a timestamp and a map.  The timestamp at each element is guaranteed to be
  * greater than all items within all maps that preceded it.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 @EqualsAndHashCode(callSuper = true)
 class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHashMap<ScopedConnectionIdKey, Boolean>> {
@@ -35,6 +50,8 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
         return accumulatorMap;
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Returns null if the requested timestamp is in the expired range of timestamps,
      * otherwise this returns the appropriate bucket.  It either finds it within the map
@@ -43,6 +60,8 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
      * @param timestamp
      * @return
      */
+// REBUILD-LIMBO-START(G11)
+/*
     ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestamp(EpochMillis timestamp) {
         return Optional.ofNullable(this.floorEntry(timestamp)).map(kvp -> {
             var shiftedKey = kvp.getKey().toInstant().plus(granularity);
@@ -53,6 +72,8 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
         }).orElse(null); // floorEntry could be null if the entry was too old
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * We don't want to have a race condition where many nearby keys could be created.  This could happen
      * if many requests come in with slightly different timestamps, but were being processed before the
@@ -63,6 +84,8 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
      * That allows us to put a new entry ONLY IF it isn't already there, which results in a uniqueness
      * invariant that makes a lot of other things easier to reason with.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> createNewSlot(EpochMillis timestamp, EpochMillis referenceKey) {
         var granularityMs = granularity.toMillis();
         var quantizedDifference = (timestamp.millis - referenceKey.millis) / granularityMs;
@@ -123,3 +146,6 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
         return survivorCount;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

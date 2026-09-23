@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay.lifecycle;
 
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 
 import org.apache.kafka.common.TopicPartition;
 
@@ -126,6 +125,14 @@ public final class ReplayIdentity {
         }
     }
 
+    // REBUILD-LIMBO-OPEN(G3)
+    // replayRequestId(UniqueReplayerRequestKey) -- the only member of this class that reaches a
+    // left-behind legacy identity. UniqueReplayerRequestKey stays in trafficReplayerLegacy; this
+    // adapter exists to translate it, so it goes when its 18 remaining callers move to the eight
+    // design identities in replay/identity/. The rest of ReplayIdentity stays live because those
+    // callers still need it, which is itself the transitional state G3 and G5 resolve.
+    /*
+    import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;  // hoist on un-comment
     public static ReplayRequestId replayRequestId(@NonNull UniqueReplayerRequestKey requestKey) {
         return new ReplayRequestId(
             new ConnectionSessionKey(
@@ -139,6 +146,8 @@ public final class ReplayIdentity {
             requestKey.getReplayerRequestIndex()
         );
     }
+    */
+    // REBUILD-LIMBO-CLOSED(G3)
 
     public sealed interface RecordId permits KafkaRecordId, TrafficStreamRecordId, SourceControlRecordId {}
 

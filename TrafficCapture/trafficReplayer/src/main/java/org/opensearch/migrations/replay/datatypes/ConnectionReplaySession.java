@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.datatypes;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.concurrent.CancellationException;
 import java.util.function.BiFunction;
 
@@ -16,6 +27,8 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
+*/
+// REBUILD-LIMBO-END(G11)
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
  * ConnectionClientPool and RequestSenderOrchestrator manage the data within these objects.
@@ -23,6 +36,8 @@ import lombok.extern.slf4j.Slf4j;
  * RequestSenderOrchestrator handles scheduling writes and requisite activities (prep, close)
  * that will go out on the channel.
  */
+// REBUILD-LIMBO-START(G11)
+/*
 @Slf4j
 public class ConnectionReplaySession {
 
@@ -90,12 +105,16 @@ public class ConnectionReplaySession {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
      * vended by a CompletableFuture (e.g. possibly a rate limiter).  If the ChannelFuture hasn't
      * been created yet, there's nothing to hold the channel, nor the eventLoop.  We _need_ the
      * EventLoop so that we can route all calls for this object into that loop/thread.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public final EventLoop eventLoop;
     @Getter
     private final ChannelFutureFactory channelFutureFutureFactory;
@@ -108,13 +127,21 @@ public class ConnectionReplaySession {
     private TargetExchangeState.ChannelState channelState;
     private boolean metricsRetired;
     private TextTrackedFuture<ChannelFuture> activeAcquisitionResult;
+*/
+// REBUILD-LIMBO-END(G11)
     /** Generation of the Kafka consumer assignment when this session was created. */
+// REBUILD-LIMBO-START(G11)
+/*
     public final int generation;
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * When non-null, this session has been cancelled due to a traffic source reader interruption.
      * {@link #getChannelFutureInActiveState} will return a failed future rather than reconnecting,
      * preventing self-healing reconnects after a partition reassignment cancel.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     private CancellationException cancellationCause;
 
     public ConnectionReplaySession(
@@ -213,10 +240,14 @@ public class ConnectionReplaySession {
         return cancellationCause != null;
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Cancels this session and closes the channel currently owned by it. An acquisition that
      * completes after this stage settles is rejected and its channel is closed on the event loop.
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public TrackedFuture<String, Channel> cancelAndClose(@NonNull CancellationException cause) {
         TextTrackedFuture<Channel> completion = new TextTrackedFuture<>("cancelling and closing a replay session");
         runOnEventLoop(() -> cancelAndCloseOnOwner(cause, completion));
@@ -423,3 +454,6 @@ public class ConnectionReplaySession {
         }
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)

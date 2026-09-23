@@ -1,5 +1,16 @@
 package org.opensearch.migrations.replay.lifecycle;
 
+// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
+// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
+// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
+// javadoc with it. See AGENTS.md section 8a.
+// Carried verbatim. This was the pre-rebuild implementation of a responsibility the design
+// reassigns, so it is the input to that refactor rather than something to re-derive. Resolve it to
+// dead, keep, or refactor deliberately -- see AGENTS.md section 8a, and read this before writing
+
+// REBUILD-LIMBO-START(G11)
+/*
+
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Collections;
@@ -360,6 +371,8 @@ public final class ReplayTransaction<R> {
         return enqueueCommand(command);
     }
 
+*/
+// REBUILD-LIMBO-END(G11)
     /**
      * Requests cancellation and reports which terminal path had already won the transaction.
      *
@@ -367,6 +380,8 @@ public final class ReplayTransaction<R> {
      * cancellation decision and this transaction's mailbox. Infrastructure failures while
      * admitting or applying the cancellation remain exceptional.</p>
      */
+// REBUILD-LIMBO-START(G11)
+/*
     public CompletionStage<ProcessingCancellationResult> requestCancellation(
         @NonNull java.util.concurrent.CancellationException cause
     ) {
@@ -715,3 +730,6 @@ public final class ReplayTransaction<R> {
         return current;
     }
 }
+
+*/
+// REBUILD-LIMBO-END(G11)
