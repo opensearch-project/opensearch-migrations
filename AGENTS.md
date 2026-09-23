@@ -15,7 +15,7 @@ dropping a qualifier, so a summary that reads cleanly is not evidence that it is
 | Document | Role |
 |---|---|
 | `docs/captureAndReplay/*.md` | Authoritative design. Never changed by an implementation agent. |
-| `docs/replayerRebuildPlanA-newModule.md` | Primary plan. Default unless told otherwise. |
+| `docs/replayerRebuildPlanA-inPlace.md` | Primary plan. Default unless told otherwise. |
 | `docs/replayerRebuildPlanB-inPlace.md` | Fallback plan. Only on explicit instruction. |
 | `docs/replayerRebuildPlan.md` | Superseded for sequencing. Still authoritative for exactly three things: the D1–D18 defect inventory (§2), the R1–R19 obligation set (§6.5), and deployed-configuration compatibility (§7). |
 | `docs/replayerRebuildStatus.md` | Live status and debt register. Update as you go. |
