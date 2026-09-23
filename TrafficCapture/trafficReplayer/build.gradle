@@ -10,7 +10,7 @@
  */
 
 /*
- * The traffic replayer. See docs/replayerRebuildPlanA-newModule.md.
+ * The traffic replayer. See docs/replayerRebuildPlanA-inPlace.md.
  *
  * The rebuild happens in this module, in place. Code that has not yet been refactored sits at the path it
  * will ship from inside REBUILD-LIMBO regions, so it cannot compile and cannot become a second live

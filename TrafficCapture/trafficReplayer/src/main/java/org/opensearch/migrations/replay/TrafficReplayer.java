@@ -1044,7 +1044,7 @@ public class TrafficReplayer {
         System.err.println(
             "This traffic replayer is under reconstruction and has no runnable entry point yet.\n"
                 + "Reading a topic lands at milestone G1; the full replay path and supervision at G9.\n"
-                + "See docs/replayerRebuildPlanA-newModule.md and docs/replayerRebuildStatus.md.\n"
+                + "See docs/replayerRebuildPlanA-inPlace.md and docs/replayerRebuildStatus.md.\n"
                 + "The previous implementation remains in TrafficCapture/trafficReplayerLegacy for reference.");
         System.exit(NOT_IMPLEMENTED_EXIT_CODE);
     }
