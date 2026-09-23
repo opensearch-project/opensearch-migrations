@@ -1,0 +1,100 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
+package org.opensearch.migrations.replay.kafkasource;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+
+import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+class KafkaSourceInputQueueTest {
+
+    private static final PartitionGenerationId GENERATION =
+        new PartitionGenerationId(new TopicPartition("traffic", 0), 1);
+
+    private final AtomicInteger wakeups = new AtomicInteger();
+    private final WakeupController wakeupController = new WakeupController(wakeups::incrementAndGet);
+    private final KafkaSourceInputQueue queue = new KafkaSourceInputQueue(wakeupController);
+
+    private static KafkaSourceInput request(long sequence) {
+        return new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(GENERATION, sequence)
+        );
+    }
+
+    /**
+     * The value must be queued before the wakeup is issued, so a wakeup can never point at work the Kafka
+     * thread cannot yet see. Observed by having the wakeup callback read the very queue being submitted to,
+     * which requires a holder only because the queue and its controller are mutually referential.
+     */
+    @Test
+    void theInputIsVisibleInTheQueueBeforeTheWakeupIsIssued() {
+        var queueHolder = new AtomicReference<KafkaSourceInputQueue>();
+        var sizeWhenWoken = new ArrayList<Integer>();
+        var controller = new WakeupController(() -> sizeWhenWoken.add(queueHolder.get().size()));
+        var observedQueue = new KafkaSourceInputQueue(controller);
+        queueHolder.set(observedQueue);
+
+        controller.enterPoll();
+        observedQueue.submit(request(1));
+
+        Assertions.assertEquals(
+            List.of(1),
+            sizeWhenWoken,
+            "the wakeup fired while the queue was still empty, so it pointed at nothing"
+        );
+    }
+
+    @Test
+    void submissionWakesAPollingConsumerAndDrainingIsBoundedToWhatWasQueued() {
+        wakeupController.enterPoll();
+        queue.submit(request(1));
+        queue.submit(request(2));
+
+        Assertions.assertEquals(1, wakeups.get(), "coalesced to one wakeup for the single poll");
+        Assertions.assertEquals(2, queue.size());
+
+        var drained = queue.drain();
+
+        Assertions.assertEquals(2, drained.size());
+        Assertions.assertTrue(queue.isEmpty());
+        Assertions.assertTrue(queue.drain().isEmpty());
+    }
+
+    @Test
+    void pollRemovesInFifoOrder() {
+        queue.submit(request(1));
+        queue.submit(request(2));
+
+        Assertions.assertEquals(request(1), queue.poll().orElseThrow());
+        Assertions.assertEquals(request(2), queue.poll().orElseThrow());
+        Assertions.assertTrue(queue.poll().isEmpty());
+    }
+
+    /** A refused submission must fail its caller rather than disappear: a lost input is a stuck record. */
+    @Test
+    void aClosedQueueRefusesSubmissionInsteadOfDroppingIt() {
+        queue.submit(request(1));
+        queue.close();
+
+        Assertions.assertThrows(IllegalStateException.class, () -> queue.submit(request(2)));
+        Assertions.assertEquals(
+            1,
+            queue.drain().size(),
+            "already-queued inputs stay drainable so shutdown can finish them"
+        );
+    }
+}
