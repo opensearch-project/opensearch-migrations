@@ -423,18 +423,51 @@ Only `KafkaSourceOwner` invokes the Kafka commit API.
 For each partition generation it stages at most one next contiguous commit position. It may batch
 positions for several partitions in one Kafka operation.
 
+**Two submission modes, chosen by where the commit happens.**
+
+In the ordinary loop the owner submits **asynchronously** and handles the completion callback, which
+`procCommit §5.1` already lists among its Kafka operations. A synchronous commit in the loop blocks for
+as long as the client retries internally — up to its configured API timeout — and the owner does not
+poll while it blocks, which is the same mechanism that makes a blocking commit inside a rebalance
+callback dangerous. The loop polls every iteration and a poll is what delivers the callback, so
+asynchronous submission needs nothing extra to make progress.
+
+Inside `onPartitionsRevoked` the owner submits **synchronously**, bounded by the time remaining before
+the grace deadline, and does not submit at all when less than a configured floor remains. Asynchronous
+submission cannot be used there: its callback is delivered by a later poll, and the generation is gone
+before that poll happens. A commit that cannot finish within the remaining grace must not be started,
+because the rest of the interval belongs to force-cancellation delivery (§15.2).
+
+**At most one commit operation is in flight at a time.** Positions submitted and not yet resolved are
+held apart from staged positions, so a partition whose contiguous prefix advances again while its
+commit is outstanding stages the newer position rather than racing a second operation for the same
+partition. This is also what keeps the source from spamming the broker (`procCommit §9.4`).
+
 Commit handling distinguishes:
 
-- the Kafka client accepted and acknowledged the operation;
-- the operation was rejected;
-- ownership ended before submission;
-- ownership ended with a submitted operation whose broker outcome is unknown; and
-- a late callback arrived after local cleanup.
+- **acknowledged** — the client recorded the operation;
+- **retriable** — the client reports a failure it expects the caller to retry, and the generation is
+  intact. Asynchronous submission surfaces these to the caller rather than absorbing them, which
+  synchronous submission does not;
+- **the generation is stale** — the client reports that this member's generation or membership is no
+  longer valid. The broker validates generation per *request*, not per partition, so this applies to
+  every partition in the operation and singles out none of them;
+- **the outcome is unknown** — a bounded synchronous commit ran out of time, or a wakeup interrupted
+  one. The operation may already have reached the broker;
+- **a late callback** — the callback's generation is no longer held locally. Diagnostic only.
+
+A **structurally invalid** commit is not in this list and is not an outcome. Authorization failure,
+oversized offset metadata, an invalid commit offset size, and any unrecognized commit failure are
+process-fatal per `replayerLLD §4`: retrying cannot fix them, and continuing to read while never
+committing loses data on the next restart without saying so.
 
 These outcomes describe the operation, not individual partitions. A batched operation may be applied
 for some of its partitions and not others, and the Kafka client reports one result for the whole
-operation without identifying which positions were recorded. A failed operation is therefore not
-evidence that nothing was committed, and the source never treats it as such.
+operation without identifying which positions were recorded — the per-partition error codes exist on
+the wire and the client discards them. A failed operation is therefore not evidence that nothing was
+committed, and the source never treats it as such. **The source never infers which partition failed**;
+where it must distinguish partitions it uses what it already knows about its own assignment, never the
+operation's result.
 
 None of these outcomes returns a Kafka-record disposition to replay intake. Replay intake already
 finished its record-processing decision before sending `RecordProcessingFinished`.
@@ -449,6 +482,14 @@ bound.
 
 After revocation, the old generation does not retry or wait indefinitely for a commit. Its staged
 position is discarded rather than re-offered. The next assigned Kafka position determines redelivery.
+
+Revocation begins when `onPartitionsRevoked` is entered, not when it returns. Within the callback the
+owner knows which partitions it is losing, because Kafka handed it that collection, so the decision to
+discard needs no inference from an outcome. A first synchronous attempt during the grace interval is
+still permitted (`procCommit §9.2` step 5); what the discard rule forbids is offering the same position
+again after that attempt did not succeed. Re-offering cannot succeed — a stale generation's commit is
+rejected identically however many times it is sent — and it consumes the interval that force
+cancellation needs.
 
 ## 6. Replay-intake partition state
 
@@ -1037,6 +1078,14 @@ the process supervisor immediately.
   losing the callback.
 - A wakeup prompted by replay intake never escapes the poll boundary into commit or another
   protected Kafka operation.
+- An ordinary-loop commit is submitted asynchronously and does not block the loop; the loop reaches its
+  next poll before the commit resolves.
+- At most one commit operation is in flight; a position advancing while a commit is outstanding is
+  staged rather than submitted as a second operation for the same partition.
+- A retriable asynchronous commit failure re-stages its positions; an acknowledged one clears them.
+- A commit callback for a generation no longer held locally is recorded and changes no state.
+- A structurally invalid commit — authorization, oversized metadata, invalid offset size — reaches the
+  process-failure path rather than becoming an outcome.
 
 ### 17.5 Revocation
 
