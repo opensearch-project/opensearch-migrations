@@ -36,6 +36,7 @@ public interface IKafkaConsumerContexts {
         public static final String KAFKA_POLL = "kafkaPoll";
         public static final String COMMIT = "commit";
         public static final String KAFKA_COMMIT = "kafkaCommit";
+        public static final String REBALANCE_CALLBACK = "rebalanceCallback";
     }
 
     class MetricNames {
@@ -51,6 +52,14 @@ public interface IKafkaConsumerContexts {
         public static final String LIVENESS_SCAN_VERDICT_COUNT = "livenessScanVerdictCount";
         public static final String SUPERSEDED_TRAFFIC_RECORDS_DISCARDED =
             "supersededTrafficRecordsDiscarded";
+
+        public static final String POLLS_ENTERED = "kafkaSourcePollsEntered";
+        public static final String POLLS_WOKEN_BY_QUEUED_INPUT = "kafkaSourcePollsWokenByQueuedInput";
+        public static final String WAKEUPS_ISSUED = "kafkaSourceWakeupsIssued";
+        public static final String WAKEUPS_COALESCED = "kafkaSourceWakeupsCoalesced";
+        public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
+        public static final String DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT =
+            "kafkaSourceDeferredWakeupsIssuedOnCallbackExit";
     }
 
     interface IAsyncListeningContext extends IInstrumentationAttributes {}
@@ -83,6 +92,25 @@ public interface IKafkaConsumerContexts {
         default String getActivityName() {
             return ACTIVITY_NAME;
         }
+
+        /** Records that this poll ended because a queued input woke it rather than by reaching its timeout. */
+        void onWokenByQueuedInput();
+    }
+
+    /**
+     * A rebalance callback as a scope of its own. Nothing measured this before, and it is the window during
+     * which a wakeup must not be delivered, so its duration is what shows a deferral actually spanned it.
+     */
+    interface IRebalanceCallbackScopeContext extends IKafkaConsumerScope {
+        String ACTIVITY_NAME = ActivityNames.REBALANCE_CALLBACK;
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
+        /** Records that a wakeup deferred during the callback was issued as it returned. */
+        void onIssuedDeferredWakeupOnExit();
     }
 
     /**

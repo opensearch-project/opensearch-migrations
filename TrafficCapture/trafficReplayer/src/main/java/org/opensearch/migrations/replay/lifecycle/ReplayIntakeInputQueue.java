@@ -8,41 +8,57 @@
 
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-
-// REBUILD-LIMBO-START(G11)
-/*
-
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
+
+import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 
 import lombok.NonNull;
 
-*/
-// REBUILD-LIMBO-END(G11)
 /**
  * Thread-safe submission boundary for immutable replay-intake inputs.
  *
- * <p>The queue owns no replay state. Only {@link ReplayIntakeOwner} removes inputs.
+ * <p>The queue owns no replay state. Only the replay-intake owner removes inputs.
+ *
+ * <p>{@link #submit} reports whether the input was accepted, and that return value is load-bearing rather
+ * than advisory: {@code procCommit §9.2} has {@code onPartitionsRevoked} wait "only until replay intake
+ * accepts that force-cancellation input and then return". Acceptance proves intake will observe the
+ * notification unless the process fails; it does not mean intake has acted on it.
  */
-// REBUILD-LIMBO-START(G11)
-/*
 public final class ReplayIntakeInputQueue {
+
+    private final LinkedBlockingQueue<ReplayIntakeInput> inputs = new LinkedBlockingQueue<>();
+    private boolean accepting = true;
+
+    public synchronized boolean submit(@NonNull ReplayIntakeInput input) {
+        if (!accepting) {
+            return false;
+        }
+        return inputs.offer(input);
+    }
+
+    public ReplayIntakeInput take() throws InterruptedException {
+        return inputs.take();
+    }
+
+    public int size() {
+        return inputs.size();
+    }
+
+    public synchronized void close() {
+        accepting = false;
+        inputs.clear();
+    }
+}
+// REBUILD-LIMBO-START(G3)
+// The QueuedInput wrapper and its CompletableFuture<Void> handled, which let a submitter observe that
+// intake finished applying one input, and the close() path that fails those futures with
+// RejectedExecutionException. G2 needs only acceptance, so the queue carries bare inputs; G3 restores this
+// when the intake owner has something to signal back.
+/*
     record QueuedInput(
         @NonNull ReplayIntakeInput input,
         CompletableFuture<Void> handled
     ) {}
-
-    private final LinkedBlockingQueue<QueuedInput> inputs = new LinkedBlockingQueue<>();
-    private boolean accepting = true;
-
-    public synchronized boolean submit(@NonNull ReplayIntakeInput input) {
-        return submit(input, null);
-    }
 
     synchronized boolean submit(
         @NonNull ReplayIntakeInput input,
@@ -52,10 +68,6 @@ public final class ReplayIntakeInputQueue {
             return false;
         }
         return inputs.offer(new QueuedInput(input, handled));
-    }
-
-    QueuedInput take() throws InterruptedException {
-        return inputs.take();
     }
 
     synchronized void close() {
@@ -76,7 +88,5 @@ public final class ReplayIntakeInputQueue {
             }
         }
     }
-}
-
 */
-// REBUILD-LIMBO-END(G11)
+// REBUILD-LIMBO-END(G3)

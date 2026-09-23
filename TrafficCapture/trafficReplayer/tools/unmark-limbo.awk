@@ -20,6 +20,11 @@
 # markers around it and leaving the rest marked, which keeps blame on every line. This script is for
 # the whole-file case and for verifying that nothing was lost in the marking.
 #
+# Four marker kinds: START/END delimit a region, ESCAPED-LINE guards a comment delimiter inside one, and
+# NOTE marks live code a later milestone must change -- a stand-in type, a temporary root, a signature that
+# loses a parameter. A NOTE is not a region and hides nothing; it exists so `grep -rn REBUILD-LIMBO-NOTE(Gn)`
+# enumerates what that milestone has to touch, which a type name alone does not.
+#
 # Markers may be indented, because a member-level region sits at the indentation of the member it
 # wraps. A `*/` is treated as a region closer only while a region is open, so an indented javadoc
 # closer -- which looks identical at the start of a line -- is never mistaken for one.
@@ -43,6 +48,10 @@ expect_open && /^[[:space:]]*\/\//               { next }
 inregion && /^[[:space:]]*\*\/[[:space:]]*$/     { inregion = 0; pending_close = $0; next }
 /^[[:space:]]*\/\/ REBUILD-LIMBO-END\(/          { pending_close = ""; next }
 pending_close != ""                              { print pending_close; pending_close = "" }
+
+# A NOTE annotates live code that a milestone must still change -- most often a type that stands in for one
+# still in limbo. It is scaffolding, so it goes on reconstruction like the region headers do.
+/^[[:space:]]*\/\/ REBUILD-LIMBO-NOTE\(/              { next }
 
 /^[[:space:]]*\/\/ REBUILD-LIMBO-ESCAPED-LINE\(/ {
     sub(/\/\/ REBUILD-LIMBO-ESCAPED-LINE\(G[0-9]+\): /, "")
