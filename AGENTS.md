@@ -298,6 +298,86 @@ rather than maximum process count.
 Preferences about the *shape* of the implementation. Where the designs specify a structure, they win —
 these apply to the decisions the designs leave to the implementer.
 
+## 8a. Limbo is the first place to look, not a graveyard
+
+Carried-but-not-yet-refactored code stays **in place, at the path it will ship from**, marked with
+`REBUILD-LIMBO-OPEN(<milestone>)` / `REBUILD-LIMBO-CLOSED(<milestone>)` around a `/* */` region whose
+delimiters sit on their own lines. The code inside is verbatim, so blame survives both the carry and the
+eventual restore — un-marking is a pure deletion of the marker and delimiter lines, which never touches a
+code line. The only lines that change are inner comment delimiters, escaped so the region cannot terminate
+early.
+
+**In place is not a cosmetic choice; it is what makes the rest of this section work.** Code you do not see
+is code you reinvent. Inline, the existing implementation is unavoidable — you cannot open the file you are
+about to add a method to without reading what is already there. Anything that separates carried code from
+the place it will ship from reintroduces that gap, so nothing may.
+
+A file therefore appears in a compiled source set whenever *any* part of it is wanted, with the rest marked
+around it. There is **one** replayer module: everything lives at the path it will ship from, and nothing is
+held anywhere else. Abandonment is a per-member decision that deletes the member, not a decision to file the
+whole thing somewhere else.
+
+**The unit of categorization is the member, not the file.** Fields, methods, and nested classes are
+categorized individually; a file is merely where they live. Thinking in files is the error that produced
+both of the mistakes this section exists to prevent — it forces an all-or-nothing verdict on a file that
+almost always contains some of each kind.
+
+A file is present in a compiled source set because **some part of its functionality belongs in the final
+deliverable** — not because the file is "in final form," and not necessarily because any of its current
+*code* survives. Its remaining members are marked in place. `TrafficReplayer.java` is the worked example:
+the CLI surface is live because the owner decided that functionality ships, and the seven wiring functions
+around it are marked, in the same file, at their final path.
+
+**Everything starts marked. Being live requires a decision about that member**, recorded by the milestone
+that makes it — never a side effect of happening to compile. The first walk got this backwards: it promoted
+75 whole files because javac accepted them, which is the "cheapest correct move is to add" failure in a new
+costume, since nothing had to justify being live.
+
+As the rebuild proceeds every marked member resolves to exactly one of three: **dead** (deleted), **keep**
+(promoted as-is), or **refactor** (rewritten into the component the design assigns it to). The marked set
+shrinking monotonically toward zero is the progress measure. **This system is only worth having if it is
+trusted, which means it has to be exhaustive**: a member that is neither live nor marked is a silent loss,
+and one wrong verdict discovered late costs more than the whole walk saved.
+
+**Before writing any new class, method, or test, look in limbo for the thing you are about to create.** If
+it is there, restore and refactor it. Do not invent a parallel implementation beside it. Inventing loses the
+original's history, duplicates coverage that already exists, and — worst — discards the evidence the
+original carries about intended behavior. This rule was written because an agent rewrote a fixture,
+reported four "defects" in it, and asked the owner to explain them, while the owner's own test for that
+fixture sat in limbo unread. That test showed the four were self-inflicted by the rewrite. The cost of not
+looking is not lost time; it is a confidently wrong report.
+
+Because "remember to check" is a rule that never fires, it gets observable triggers instead:
+
+1. **Creation trigger.** Before creating any file under `src/`, `grep -rl REBUILD-LIMBO src` for the
+   simple name you are about to use, and grep the marked regions for the responsibility in words. A hit
+   means restore-and-refactor is the default and creating something new is a decision to record.
+2. **New-test trigger.** Before writing a test, grep limbo for tests of the same subject. A pre-existing
+   test is the specification of the behavior you are about to assert on, and reading it comes first.
+3. **Debugging trigger.** When new code fails and a limbo counterpart exists, read the counterpart before
+   forming a theory. A passing predecessor is evidence; a theory formed without it is a guess.
+
+**Javadoc stays outside the region; only implementation goes inside.** The shape is: javadoc, then
+`REBUILD-LIMBO-START`, then the implementation, then `REBUILD-LIMBO-END`. Java does not nest block comments,
+so a javadoc block inside a region would terminate it early — and escaping it to survive is both lossy to
+reverse and destroys the blame on the most informative lines in the file, which are the ones stating what the
+code was *for*. Keeping it outside needs no escaping at all. When a member is resolved to dead, delete its
+javadoc with it.
+
+The residue is non-javadoc block comments inside implementation, which are rare — five in this module. Each
+is lifted out verbatim behind `REBUILD-LIMBO-ESCAPED-LINE`, a guard reversed by stripping exactly one known
+prefix, so reconstruction stays mechanical. **Never invent an ad-hoc escape without a guard**: an unguarded
+rewrite cannot be reversed reliably, because the rewritten form is indistinguishable from code that was
+always written that way.
+
+`TrafficCapture/trafficReplayer/tools/unmark-limbo.awk` reconstructs a marked file, and every marked file in
+the module is verified to round-trip byte-identically through it. That check is the point — carried code is
+only safe to mark if getting it back is mechanical.
+
+**Mark members, never whole files as a unit.** An all-or-nothing verdict on a file hides the class, its
+history, and its existing coverage, which is what makes the failure above possible. If two of five methods
+are wanted, the file sits at its final path with the other three marked around them.
+
 **Replace rather than bridge.** When new code replaces old code, remove the old production path as soon
 as the new end-to-end path is viable. Do not put temporary legacy concepts into core owner state, public
 contracts, or switches — the in-place attempt did this with `LegacySourceTeardown` and

@@ -75,77 +75,66 @@ coordinate or image change.
 It is expected and acceptable that the assembled application does not work for most of this plan.
 Individual milestones are proved in isolation.
 
-### 2.1 Module mechanics
+### 2.1 Module mechanics — superseded 2026-09-23
 
-- **Rename the old module out of the way; the new module takes the real name from its first commit.**
-  `git mv TrafficCapture/trafficReplayer TrafficCapture/trafficReplayerLegacy`, and build the new module
-  at `TrafficCapture/trafficReplayer/`. Both are registered in `settings.gradle`; the existing
-  `include 'TrafficCapture:trafficReplayer'` line is never touched, and a line for the legacy module is
-  added now and deleted at `G11`.
+**There is one replayer module and no swing.** This section previously specified renaming the existing module
+to `trafficReplayerLegacy`, starting a new module at the real path, forbidding dependencies between them,
+suppressing publication on the legacy one, and redirecting eight `transformation/` modules at it for the
+duration. None of that exists, and none of it is needed.
 
-  This is better than giving the new module a temporary name, and the reason is the asymmetry of failure.
-  With a temporary name, the risky work — restoring the right Gradle path, the right Maven coordinates,
-  the right directory name, re-enabling publication — all happens at the **end**, under time pressure,
-  and forgetting any part of it ships something wrong. With the legacy rename, the new module holds its
-  final name, final Maven coordinates, final Gradle path, and final jib mapping from day one, and the
-  only end-state action is **deleting a directory**. Deletions are safe; renames under pressure are not.
-  There is no `2`, no `v2`, and no rename commit anywhere in the plan.
-- Package names are the final ones: `org.opensearch.migrations.replay…`.
-- **The build must forbid any dependency on `:TrafficCapture:trafficReplayerLegacy`.** Not a convention —
-  a check that fails. This converts "no second correctness model" from a rule an agent must remember into
-  something the compiler enforces. Without this, Plan A degrades into Plan B silently.
-- The new module may depend on `captureProtobufs`, `coreUtilities`, `testHelperFixtures`, and the other
-  shared libraries exactly as the current module does.
-- **Suppress Maven publication on the legacy module.** Every subproject except `:TrafficCapture` and
-  `:TrafficCapture:dockerSolution` gets a `mavenJava` publication from the root `build.gradle`
-  (jar + javadoc + sources, and the `testFixtures` jar separately), and Gradle derives the artifactId
-  from the **project name**. So add `:TrafficCapture:trafficReplayerLegacy` to the existing
-  `excludedProjectPaths` list, and no `trafficReplayerLegacy` artifact is ever published. The
-  `trafficReplayer` coordinates keep publishing throughout, from the new module, unchanged — which is the
-  main reason this arrangement beats a temporarily-named module. Suppressing publication on code that is
-  about to be deleted is obviously safe; suppressing it on the arriving module means remembering to turn
-  it back on. **Publication is a red-line-2 surface and the most externally visible one in this plan.**
+The mechanic it was protecting against is gone. Its purpose was to stop the old implementation from staying
+compiled beside the new one, which is what produced two live correctness models in the in-place attempt.
+In-place marking gets that property directly: carried code sits inside `REBUILD-LIMBO` regions, so it does
+not compile and cannot be depended on, while remaining visible at the path it will ship from. One module,
+one live implementation, no classpath to keep separate.
 
-Two consequences of the new module owning the real name from day one. Both are acceptable, and both are
-better surfaced early than at the swing:
+What that removes, all of it now deleted rather than deferred to `G11`: the second Gradle module and its
+`settings.gradle` entry, the `excludedProjectPaths` publication suppression, the
+`verifyReplayerModuleIsolation` build check, and the thirteen redirected dependency lines across eight
+`transformation/` modules, which point at the real module again.
 
-- **The `traffic_replayer` image builds from an incomplete module immediately**, because the jib mapping
-  keys on `TrafficCapture:trafficReplayer` and that path now resolves to the new module. The legacy module
-  gets no jib entry at all, so `buildImages/build.gradle` is never edited — not now, not at `G11`. The
-  assembled application is therefore broken from the first commit until the new module can run, which the
-  owner has already accepted ("It would be ok for the overall main app to not work at all while we built
-  the pieces out in isolation"). `G10` is the first milestone that needs a working image.
-- **The eight `transformation/` modules of §2.3 retarget to the new module immediately**, and their test
-  compilation breaks until the new `testFixtures` surface exists. Recommended handling: point those
-  `build.gradle` lines at `:TrafficCapture:trafficReplayerLegacy` for the duration — one line per module,
-  mechanical, reverted at `G11` — with a status-table row naming `G11` as the removal milestone. This is
-  named scaffolding on code scheduled for deletion, not a bridge between the two correctness models, so it
-  does not weaken the prohibition above.
-- **One package is off-limits.** `TrafficCapture/tupleSink` declares production classes in
-  `org.opensearch.migrations.replay.sink` (`TupleSink`, `CallbackTupleSink`, `GzipJsonLinesSink`,
-  `S3TupleSink`) and is a real dependency of the replayer, so it *is* on the same classpath. The new
-  module must declare nothing in `…replay.sink`. Every other `…replay*` package is safe to duplicate
-  because the two replayer modules are never on one classpath — which is exactly what the §2.1
-  dependency prohibition guarantees.
+What it preserves unchanged, and the reason the original mechanic was designed at all: the module keeps its
+real Gradle path, Maven coordinates, package names, and jib image mapping throughout, so there is never a
+rename under time pressure. That was the point, and it is now true trivially rather than by arrangement.
 
 ### 2.2 What comes over, and on what terms
 
-Nothing is ported because it exists. A file moves only if it is already in final form, and moving it is
-a decision recorded in the status table.
+**Revised 2026-09-23 by the owner.** The original text here said a file moves only if it is already in
+final form, and that history must not be preserved at the cost of sequencing. Both were reversed in
+practice, and this section records what replaced them. The `G0` walk is the authority on the result; this
+is the rule it followed.
 
-`../AGENTS.md` §1 red line 3 applies with full force here: **choosing to bring a legacy type forward is
-an escalated decision**, not a default. The temptation to reuse is the failure mode this plan exists to
-prevent.
+**Everything comes over. Nothing is judged in advance.** The whole legacy tree is carried into the new
+module as one up-front categorization, because the question "are we preserving the functionality?" is only
+answerable if the answer is in the tree rather than in a document.
 
-The previous plan's §5.4 "keep as-is" list is the honest candidate set (`CompletionGate`,
-`ActorMailbox`, `OwnerThreadGuard`, `ByteBufList`, `NettyUtils`, `RefSafeHolder`, the Netty
-data-handler pipeline, the tracing contexts, `SourceTargetCaptureTuple`, and similar). Each is
-evaluated when first needed, not in advance.
+**The unit is the member, not the file** — fields, methods, nested classes. A file sits at the path it will
+ship from whenever *any* part of it is wanted, and its other members are marked in place with
+`REBUILD-LIMBO` regions. Two locations, and the second is small:
 
-**Do not preserve git history at the cost of sequencing.** Use `git mv` where a file genuinely moves
-nearly intact; accept fresh history for anything rewritten. `git log --follow` covers the renames that
-matter. Blame on rewritten code is worth very little and the process gymnastics to preserve it are not
-free.
+| Location | Means |
+|---|---|
+| its final path under `src/`, unmarked | live: this functionality ships |
+| its final path under `src/`, inside a `REBUILD-LIMBO` region | carried; resolves later to dead, keep, or refactor |
+| deleted | affirmatively abandoned, per member, once that decision is made |
+
+**Default to marked. Being live requires a decision about that member**, recorded by the milestone that
+makes it, never a consequence of happening to compile. Marking in place rather than parking files elsewhere
+is deliberate: inline, the existing implementation is unavoidable when you next open the file, which is what
+stops it being reinvented. See `../AGENTS.md` §8a.
+
+The abandoned set is reserved for code that is provably dead, that the design positively forbids, or that
+duplicates something the new module already has — *not* for code whose responsibility the design merely
+reassigns. That distinction was got wrong once: reassignment means refactor, and refactoring needs the code.
+
+**`git mv`, always.** Blame is preserved on carry and on restore, with no dependence on copy detection —
+which matters because GitHub's blame performs none. This inverts the original guidance: the process cost is
+one `git mv` and the benefit is that every surviving line keeps its author. See the measured basis and the
+three limits in `docs/replayerRebuildStatus.md`.
+
+`../AGENTS.md` §1 red line 3 still applies, but its target moved. Carrying a file into limbo is not the
+decision — **promoting one to live is**, and so is writing something new when a limbo counterpart exists.
+`../AGENTS.md` §8a governs the second, and it exists because it was violated.
 
 ### 2.3 The external contract surface
 
@@ -194,13 +183,22 @@ makes this plan viable rather than ambitious.
 
 Beyond `../AGENTS.md`:
 
-1. **Nothing comes over carrying code that is going to be discarded.** Partial work is fine. Work that
-   is close to final is fine — the Netty pacing code is the archetype: substantively correct, expensive
-   to re-derive, and worth bringing over to finish in place. What must not come over is anything with
-   legacy structure still attached, because that is what silently reinstalls the old shape. The question
-   at the moment of moving a file is not "is this finished?" but **"is anything in here going to be
-   deleted later?"** If yes, strip it before the move or leave the file behind. This replaces the previous
-   plan's §5.1–§5.3 — three sections of per-class disposition bookkeeping — with one question.
+1. **Nothing goes *live* carrying code that is going to be discarded.** Revised 2026-09-23: the original
+   rule applied this test at the moment of *moving* a file, which conflated two decisions and caused code
+   to be abandoned that we still wanted. Everything moves (§2.2); the test applies at **promotion** into a
+   compiled source set.
+
+   Partial work is fine in limbo. Work close to final is fine — the Netty pacing code is the archetype:
+   substantively correct, expensive to re-derive, worth finishing in place. What must not go **live** is
+   anything with legacy structure still attached, because that is what silently reinstalls the old shape.
+   So the question at promotion is not "is this finished?" but **"is anything in here going to be deleted
+   later?"** If yes, it stays in limbo, or comes back live with the doomed parts in in-file limbo regions.
+
+   Two corollaries, both learned the hard way. A file whose responsibility the design *reassigns* still
+   comes over, because reassignment is a refactor and the code is the input to it. And per `../AGENTS.md`
+   §8a, if a limbo counterpart exists you refactor it rather than writing something new beside it — the
+   limbo set is the first place to look, not a graveyard. This still replaces the previous plan's
+   §5.1–§5.3 per-class bookkeeping, now with two questions instead of one.
 2. **`D1`–`D18` are now a test list, not a work list.** There are no defects to repair in a module that
    does not exist yet. Each of the eighteen becomes a behavior the new implementation must be shown
    *not* to exhibit. The analysis keeps all of its value; it simply stops driving the sequencing.
@@ -248,10 +246,9 @@ evidence-starvation window. There are no caps to delete here, so `G6` and `G7` a
 express `kafkaLLD §17:939-1005` and `connLLD §19:727-788`; fixture strategy
 `procCommit §13.1-13.2:1533-1616`.
 
-- `git mv` the existing module to `TrafficCapture/trafficReplayerLegacy`, create the new module at
-  `TrafficCapture/trafficReplayer`, add the build rule forbidding any dependency on the legacy module, add
-  the legacy module to `excludedProjectPaths`, and redirect the eight `transformation/` modules at the
-  legacy module with a status row naming `G11` (§2.1).
+- Bring every legacy member to the path it will ship from in `TrafficCapture/trafficReplayer`, marking
+  everything not yet decided with `REBUILD-LIMBO` regions (§2.1, §2.2). No second module, no rename, no
+  redirects: the module keeps its real path, coordinates, packages and image mapping throughout.
 - Start `docs/replayerRebuildStatus.md`. Traceability from `R1`–`R19` into the designs lives in its
   `Defined in` and `Required tests` columns. **There is no derived digest or summary document** — the
   per-milestone `Design refs:` lines below plus `grep docs/captureAndReplay/` are the whole mechanism,
@@ -518,28 +515,21 @@ on counters at 200 MB/s.
 
 **Exit:** deliberately underspecified. Settled at the `G9` boundary with the human.
 
-### G11 — The swing
+### G11 — Formerly the swing; now the last marked region
 
-**Design refs:** none — this milestone touches no designed behavior. Its authority is the external
-contract surface in §2.3 of this document, and `replayerRebuildPlan.md` §7 for the CLI surface.
+**Largely dissolved 2026-09-23.** There is no module to delete, nothing to point anywhere, and no rename —
+see §2.1. The external contract surface in §2.3 is unchanged and still must not break, but satisfying it is
+no longer a distinct step: it happens when the members those consumers need are promoted.
 
-Nothing to point anywhere and nothing to rename — the new module has been at the real Gradle path, Maven
-coordinates, and image mapping since `G0`. The swing is subtraction:
+What remains under this heading is bookkeeping that the earlier milestones produce as a side effect:
 
-- Revert the eight `transformation/` modules' `build.gradle` lines from `trafficReplayerLegacy` back to
-  `:TrafficCapture:trafficReplayer`, which now means the new module. Satisfying that compile surface — six
-  via `testFixtures`, six via a direct dependency, four via both — or changing those modules instead is a
-  red-line-2 decision taken at this boundary, not assumed. All of it is test scope, so it is cheaper than
-  it looks; the awkward one is `jsonTypeMappingsSanitizationTransformer`, whose own `testFixtures` compile
-  against replayer production types.
-- Update the four external test files that import `org.opensearch.migrations.replay` if their imports
-  moved, and the `sonar-project.properties:274` path glob if `ClientConnectionPool` is gone.
-- Delete `TrafficCapture/trafficReplayerLegacy/` wholesale, and its `settings.gradle` include, and its
-  `excludedProjectPaths` entry. Its entire contents were dispositioned by a single rule (§3, rule 1), so
-  there is nothing to argue about file by file.
+- Every `REBUILD-LIMBO` region resolved, so `grep -rl REBUILD-LIMBO-OPEN src` is empty. This is the real
+  completion signal for the whole rebuild, and it is checkable.
+- The `sonar-project.properties:274` path glob updated if `ClientConnectionPool` is gone.
+- The `REBUILD-LIMBO` scaffolding note in the module's `build.gradle` removed with the last region.
 
-**Exit:** the assembled application runs from the new module; the §2.3 contract surface is unchanged;
-the old module is gone.
+**Exit:** the assembled application runs, the §2.3 contract surface is unchanged, and no marked region
+remains.
 
 ### G12 — Ship gate
 
@@ -609,7 +599,7 @@ Escalated per `../AGENTS.md` §2. Blocking items first.
 
 | Item | Decision needed | Reversible? | Recommendation |
 |---|---|---|---|
-| Module naming | Rename the existing module to `trafficReplayerLegacy` and give the new module the real name immediately (§2.1) | Yes | **Owner's call, adopted 2026-09-22.** Removes the end-state rename entirely and keeps `trafficReplayer` Maven coordinates publishing throughout |
+| Module naming | ~~Rename the existing module to `trafficReplayerLegacy`~~ | — | **Reversed 2026-09-23.** One module, marked in place; see §2.1. The goal it served — no end-state rename, coordinates publishing throughout — holds trivially now |
 | Broken `traffic_replayer` image during construction | Accept it, or keep the image building from the legacy module until `G10`? | Yes | Accept. Keeping it alive means a jib edit at `G11`, and the owner has already accepted a non-working app during construction |
 | Eight `transformation/` modules redirected at the legacy module | Named scaffolding removed at `G11`, or break their tests for the duration? | Yes | Redirect. One line per module, mechanical, on code scheduled for deletion — not a bridge between correctness models |
 | `RecordDispositionLedger` (707 lines, 0 refs) | Delete from the legacy module now, or leave it frozen? | Yes | Leave frozen — the legacy module is reference and gets deleted whole at `G11` |
