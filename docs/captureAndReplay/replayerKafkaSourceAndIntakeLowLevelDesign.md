@@ -676,9 +676,18 @@ For every source-response observation:
 
 - the containing record is associated with the applicable `ReplayRequestId`;
 - bytes remain in replay intake until the response is complete or becomes incomplete;
-- a complete immutable response is sent as `SourceResponseComplete`;
-- expiration or captured close sends `SourceResponseIncomplete` without partial bytes represented
-  as complete; and
+- source-response assembly ends at a terminal boundary: the first read observation of the next
+  request on that connection, a captured close, or a connection exception. All three send
+  `SourceResponseComplete`;
+- only expiration and generation cancellation send `SourceResponseIncomplete`. "Incomplete" states
+  that replay intake stopped assembling, not that the captured bytes are partial;
+- `SourceResponseComplete` carries `keptAlive`: true when the next request's read observation on the
+  same connection ended the response, which proves the source finished it, and false when a close or
+  connection exception ended it, where completion is unproven. Nothing else can prove it. The capture
+  protocol carries no end-of-message indication for a response — only for a request — and the
+  replayer deliberately does not parse response framing, because the proxy's request parser is
+  optimized for memory footprint and a second parser for responses would cost more than the
+  distinction is worth. A consumer that needs certainty uses `keptAlive`; and
 - the request's record associations remain until `RequestProcessingFinished`.
 
 `SourceResponseUnavailableForRetry` is separate. It freezes only retry-policy input and does not
