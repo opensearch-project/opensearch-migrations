@@ -424,6 +424,14 @@ can know: `kafkaLLD §9.2` makes a following request on the same connection the 
 finished a response, so every other completion is marked unproven rather than presented as whole, and
 `SourceResponseIncomplete` is reserved for expiry and cancellation — the replayer's own doing.
 
+Source interim responses use only PA2 item 5's typed whole or segmented interim-response observations. G3
+preserves those source bytes and their record associations while leaving the current request open until its
+request end marker. It does not infer an interim response from an ordinary `Write`, and it provides no
+compatibility path for captures produced before the typed protocol. PA2 owns the proxy producer and its direct
+tests; G3 owns decoding, source assembly, the intake queues and owner, the dump consumer, observability, and
+real-topic evidence. G3 cannot close its interim-response criterion until the PA2 producer interoperates with
+that complete consumer chain.
+
 **Complete usable G3 chain.** `KafkaTopicDumper` is the bounded producer and construction path for this
 milestone: Kafka records enter `ReplayIntakeInputQueue`, the real `ReplayIntakeOwner` removes and applies them
 on its owner thread, and `HttpTransactionDumper` consumes source-assembly output. A FIFO queue-control marker
@@ -449,9 +457,17 @@ the proxy producer currently emits the marker without incrementing the `eomsSoFa
 `TrafficStream.priorRequestsReceived`. Repairing that proxy-side protocol mismatch is PA2 item 4 in
 `docs/replayerRebuildPlan.md`; it is not delivered by G3.
 
+**Deferred to PA2 — typed source-interim producer.** G3 does not deliver the proxy half of source-interim
+capture. PA2 item 5 adds the typed whole and segmented observations and classifies source `1xx` responses other
+than `101`; G3 consumes only that protocol. This is a protocol break with no decoder or fallback for captures
+written before PA2.
+
 **Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* has exactly both
 associations, matching the `RecordScript` oracle; no record emits completion while an expected
-association remains; a source connection that dies mid-response produces a tuple that says so. No owner
+association remains; a source connection that dies mid-response produces source-assembly output that marks
+completion unproven. Typed whole and segmented source-interim observations preserve their bytes and record
+associations without ending request assembly, and an ordinary `Write` is never accepted as a compatibility
+encoding for them. No owner
 blocks on a stage only its own thread can complete. The producer → queue → owner-thread → consumer path is
 constructed by `KafkaTopicDumper`, terminates through its FIFO stop marker, and emits its fixed-cardinality
 intake/assembly metrics. **`dump-http` and `dump-both` work again against a real topic, and a response nothing
@@ -524,13 +540,20 @@ request's channel must be closed rather than reused, and final-write decides whe
 cancellation waits on the request at all (`connLLD §8`, `§17.1`). `TargetAttemptOutcome` replaces exception-carried
 no-response. Tuple output is unconditional and retried to durability.
 
+**Deferred to POST1 — target interim-response preservation.** G5 builds the target response and tuple-input
+chain, but it does not preserve target `1xx` responses in tuples. The current target handler may continue to
+discard `1xx` responses other than `101` throughout the rewrite. POST1, after G12, owns replacing that discard
+with target aggregation and tuple serialization based on PR #3000. No target-interim state is added to the G5
+owner model as temporary scaffolding.
+
 **Exit:** every admitted request produces at most one turn completion and at most one processing
 completion, and a normal completion produces both in order with the second after tuple durability; with
 the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits;
 **preparation has exactly the two outcomes `connLLD §6` names, and an unexpected preparation throw reaches
 the process-failure boundary rather than becoming a value**. The real Kafka source → replay intake →
 connection/request path is constructed and reachable through its production queues, with no test-only caller
-standing in for a missing consumer. Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
+standing in for a missing consumer. G5 does not claim target-interim tuple preservation; POST1 receives and
+proves that obligation after the rewrite. Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
 
 ### G6 — Retry boundary and broker-time expiration
 
@@ -702,6 +725,22 @@ rather than dashboards. Settled with the human when `G10` passes.
 Known open question, banked and not acted on: doc counts catch loss but not ordering, and a stateful
 sequence replayed out of order surfaces as a silent comparison mismatch rather than a count delta.
 
+### POST1 — Preserve target interim responses in tuples
+
+**Scheduled after the G0–G12 rewrite workstream.** This milestone does not gate the rewrite or G12. It is the
+named receiver for target-side interim-response preservation deliberately excluded from G5.
+
+Use PR #3000 as the implementation starting point. Replace `InterimHttpResponseHandler`'s discard of target
+`1xx` responses other than `101` with a complete usable chain: the target channel produces typed interim
+response data, target aggregation owns it, tuple input carries it, tuple serialization writes it, construction
+wires the path, and metrics/spans plus focused tests prove it. Keep `101` on the terminal protocol-switch path.
+Do not introduce a second source of target-response truth.
+
+**Exit:** tuples preserve every target interim response in wire order before the final target response, for
+both content-free and content-bearing/segmented forms supported by the target decoder; the producer, owner,
+consumer, observability, construction path, and evidence are all present, and the POST1 TODO in
+`InterimHttpResponseHandler` is removed.
+
 ## 5. Per-milestone exit criteria
 
 Every milestone, in addition to its own exit condition:
@@ -740,9 +779,10 @@ taken on a default. This table replaces the 936-line prose execution log, which 
 ## 7. Proxy workstream
 
 `PA1`–`PA3` and previous-plan §6.6 are **out of scope for this document** and are handled in a separate
-conversation. The proxy is not modified by this plan. `G1` deliberately consumes the current proxy's
-output unchanged, which means any proxy/replayer protocol mismatch surfaces at `G1` as a decode failure
-rather than at final acceptance.
+conversation. The proxy is not modified by this plan. G1 consumes the protocol that exists before PA2; G3's
+source-interim criterion then depends on PA2 item 5's typed protocol producer and supplies its replayer
+consumer. Any other proxy/replayer protocol mismatch still surfaces at the earliest consuming milestone as a
+decode or interoperability failure rather than at final acceptance.
 
 ## 8. Reviews
 
