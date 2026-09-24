@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -11,8 +13,8 @@ import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
@@ -29,10 +31,26 @@ import reactor.core.publisher.Flux;
  * <p>Supports optional delta mode: when {@code previousSnapshotName} and {@code deltaMode}
  * are set, reads delta changes between two snapshots.
  *
+ * <h3>Cursors</h3>
+ * The two read modes count in different units, so each tags its cursor with the mode that
+ * produced it:
+ * <ul>
+ *   <li>{@code lucene:<n>} — the Lucene doc index to resume at. A regular read seeks straight to
+ *       the containing segment, and the index counts deleted docs, so it is <em>not</em> a count
+ *       of emitted documents.</li>
+ *   <li>{@code delta:<n>} — the number of delta records already emitted. The delta reader has no
+ *       seekable position, so resuming skips that many records.</li>
+ * </ul>
+ * A cursor recorded in one mode is rejected in the other rather than being silently misread as
+ * the wrong unit.
+ *
  * <p>Use {@link #builder(SnapshotExtractor, String, Path)} to construct instances.
  */
 @Slf4j
 public class LuceneSnapshotSource implements DocumentSource {
+
+    private static final String REGULAR_CURSOR_PREFIX = "lucene:";
+    private static final String DELTA_CURSOR_PREFIX = "delta:";
 
     private final SnapshotExtractor extractor;
     private final String snapshotName;
@@ -43,9 +61,10 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final DeltaMode deltaMode;
     private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
 
-    /** Cache ShardEntry lookups to avoid repeated metadata reads */
-    private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
-    private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
+    /** Cache ShardEntry lookups to avoid repeated metadata reads; concurrent because a source may
+     *  be subscribed for several partitions at once. */
+    private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new ConcurrentHashMap<>();
+    private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new ConcurrentHashMap<>();
 
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
@@ -171,6 +190,13 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
+    public Optional<Partition> findPartition(String collectionName, String partitionName) {
+        return listPartitions(collectionName).stream()
+            .filter(p -> p.name().equals(partitionName))
+            .findFirst();
+    }
+
+    @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
         var indexMeta = readEsIndexMetadata(collectionName);
         return IndexMetadataConverter.toCollectionMetadata(indexMeta);
@@ -186,7 +212,7 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+    public Flux<PositionedDocument> readDocuments(Partition partition, String startingCursor) {
         var esPartition = (EsShardPartition) partition;
         var entry = resolveShardEntry(esPartition, shardEntryCache);
         if (entry == null) {
@@ -205,27 +231,55 @@ public class LuceneSnapshotSource implements DocumentSource {
             var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
                 log.info("No previous partition for {} — treating as full read (all additions)", partition);
-                return readRegularDocuments(entry, partition, startingDocOffset);
+                return readRegularDocuments(entry, partition, startingCursor);
             }
-            log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
-            return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
-                .skip(startingDocOffset)
-                .map(luceneAdapter::fromLucene);
+            long alreadyEmitted = parseCursor(startingCursor, DELTA_CURSOR_PREFIX, partition);
+            log.info("Reading delta documents from {} (mode={}, skipping={})", partition, deltaMode, alreadyEmitted);
+            // The counter lives inside the defer so each subscription starts it over and replays
+            // the same cursors.
+            return Flux.defer(() -> {
+                var emitted = new AtomicLong(alreadyEmitted);
+                return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
+                    .skip(alreadyEmitted)
+                    .map(luceneDoc -> new PositionedDocument(
+                        luceneAdapter.fromLucene(luceneDoc),
+                        DELTA_CURSOR_PREFIX + emitted.incrementAndGet()));
+            });
         }
 
-        return readRegularDocuments(entry, partition, startingDocOffset);
+        return readRegularDocuments(entry, partition, startingCursor);
     }
 
-    private Flux<Document> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
+    private Flux<PositionedDocument> readRegularDocuments(
+        SnapshotExtractor.ShardEntry entry, Partition partition, String startingCursor
     ) {
-        log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
+        long startDocIdx = parseCursor(startingCursor, REGULAR_CURSOR_PREFIX, partition);
+        log.info("Reading documents from {} starting at docIdx {}", partition, startDocIdx);
         var esPartition = (EsShardPartition) partition;
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
-            .map(luceneAdapter::fromLucene);
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startDocIdx), mappingContext, useRecoverySource)
+            // Resume at the doc after this one; the read starts *at* the index it is given.
+            .map(luceneDoc -> new PositionedDocument(
+                luceneAdapter.fromLucene(luceneDoc),
+                REGULAR_CURSOR_PREFIX + (luceneDoc.getLuceneDocNumber() + 1L)));
+    }
+
+    private static long parseCursor(String cursor, String expectedPrefix, Partition partition) {
+        if (cursor == null || cursor.isEmpty()) {
+            return 0;
+        }
+        if (!cursor.startsWith(expectedPrefix)) {
+            throw new IllegalArgumentException("Cursor '" + cursor + "' for partition " + partition
+                + " was not produced by this read mode (expected prefix '" + expectedPrefix + "'). "
+                + "Delta and regular reads count in different units and their cursors are not interchangeable.");
+        }
+        try {
+            return Long.parseLong(cursor.substring(expectedPrefix.length()));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Malformed cursor '" + cursor + "' for partition " + partition, e);
+        }
     }
 
     private SnapshotExtractor.ShardEntry resolveShardEntry(

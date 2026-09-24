@@ -215,6 +215,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
         "source-snap1",
       ],
       "documentBackfillAllowLooseVersionMatching": true,
+      "documentBackfillAllowMissingDocumentIds": false,
       "documentBackfillAllowedDocExceptionTypes": [],
       "documentBackfillCoordinatorRetryInitialDelayMs": 1000,
       "documentBackfillCoordinatorRetryMaxDelayMs": 64000,

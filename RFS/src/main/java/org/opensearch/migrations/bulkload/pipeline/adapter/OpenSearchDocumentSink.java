@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -14,6 +15,7 @@ import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.PositionedDocument;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -32,6 +34,10 @@ import reactor.core.scheduler.Schedulers;
  *
  * <p>Supports optional document transformation via {@link IJsonTransformer} and
  * configurable exception allowlisting for idempotent migrations.
+ *
+ * <p>An operation with no {@code _id} after transformation reproduces a server-assigned write, so
+ * replaying it adds a document rather than replacing one. Skipped and reported unless
+ * {@code allowMissingDocumentIds} accepts the duplicate.
  */
 @Slf4j
 public class OpenSearchDocumentSink implements DocumentSink {
@@ -41,8 +47,10 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private final OpenSearchClient client;
     private final IJsonTransformer transformer;
     private final boolean allowServerGeneratedIds;
+    private final boolean allowMissingDocumentIds;
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
+    private final AtomicLong skippedMissingIds = new AtomicLong();
 
     public OpenSearchDocumentSink(
         OpenSearchClient client,
@@ -51,11 +59,28 @@ public class OpenSearchDocumentSink implements DocumentSink {
         DocumentExceptionAllowlist allowlist,
         Supplier<IRfsContexts.IRequestContext> requestContextSupplier
     ) {
+        this(client, transformerSupplier, allowServerGeneratedIds, false, allowlist, requestContextSupplier);
+    }
+
+    public OpenSearchDocumentSink(
+        OpenSearchClient client,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean allowServerGeneratedIds,
+        boolean allowMissingDocumentIds,
+        DocumentExceptionAllowlist allowlist,
+        Supplier<IRfsContexts.IRequestContext> requestContextSupplier
+    ) {
         this.client = client;
         this.transformer = transformerSupplier != null ? transformerSupplier.get() : null;
         this.allowServerGeneratedIds = allowServerGeneratedIds;
+        this.allowMissingDocumentIds = allowMissingDocumentIds;
         this.allowlist = allowlist != null ? allowlist : DocumentExceptionAllowlist.empty();
         this.requestContextSupplier = requestContextSupplier;
+    }
+
+    /** Operations dropped for having no document id. */
+    public long getSkippedMissingIdCount() {
+        return skippedMissingIds.get();
     }
 
     @Override
@@ -89,27 +114,68 @@ public class OpenSearchDocumentSink implements DocumentSink {
     }
 
     @Override
-    public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
+    public Mono<BatchResult> writeBatch(String collectionName, List<PositionedDocument> batch) {
         long bytesInBatch = batch.stream()
-            .mapToLong(Document::sourceLength)
+            .mapToLong(p -> p.document().sourceLength())
             .sum();
+        // The batch lands or fails as one bulk request, so the cursor we can report is its last.
+        var cursorAfter = batch.get(batch.size() - 1).cursorAfter();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (transformer == null) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(collectionName, batch,
+            var documents = dropMissingIds(batch.stream()
+                .map(PositionedDocument::document)
+                .collect(Collectors.toList()), Document::id, collectionName);
+            if (documents.isEmpty()) {
+                return Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter));
+            }
+            bulkMono = client.sendBulkRequestRaw(collectionName, documents,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
-                .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
+                .map(p -> BulkOperationConverter.fromDocument(p.document(), collectionName))
                 .collect(Collectors.toList());
-            List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
+            // Checked after transformation: a record is not an operation until then.
+            List<BulkOperationSpec> opsToSend =
+                dropMissingIds(applyTransformation(bulkOps), OpenSearchDocumentSink::documentIdOf, collectionName);
+            if (opsToSend.isEmpty()) {
+                return Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter));
+            }
             bulkMono = client.sendBulkRequest(collectionName, opsToSend,
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
-        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch)));
+        return bulkMono.then(Mono.just(new BatchResult(batch.size(), bytesInBatch, cursorAfter)));
+    }
+
+    /**
+     * Skipped, not failed: adding a duplicate is worse than leaving the document behind.
+     *
+     * <p>{@code allowServerGeneratedIds} strips every id on purpose, so it exempts this.
+     */
+    private <T> List<T> dropMissingIds(List<T> items, java.util.function.Function<T, String> idOf,
+                                       String collectionName) {
+        if (allowMissingDocumentIds || allowServerGeneratedIds) {
+            return items;
+        }
+        var kept = items.stream()
+            .filter(item -> idOf.apply(item) != null)
+            .collect(Collectors.toList());
+        long dropped = items.size() - (long) kept.size();
+        if (dropped > 0) {
+            long total = skippedMissingIds.addAndGet(dropped);
+            log.atWarn()
+                .setMessage("Skipped {} document(s) with no _id writing to '{}' ({} so far). "
+                    + "Replaying a server-assigned id would create a duplicate; pass "
+                    + "--allow-missing-document-ids to send them anyway.")
+                .addArgument(dropped)
+                .addArgument(collectionName)
+                .addArgument(total)
+                .log();
+        }
+        return kept;
     }
 
     @SuppressWarnings("unchecked")

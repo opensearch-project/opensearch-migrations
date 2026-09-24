@@ -63,13 +63,13 @@ public class WorkCoordinatorTest {
 
     /**
      * Helper that mirrors the production encoding: build a serialized work-item id from a
-     * human-readable (indexName, shardNumber, startingDocId) triple via
+     * human-readable (indexName, partitionName, cursor) triple via
      * {@link IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()}.  Use this in tests
-     * instead of hand-concatenating {@code "name__0__0"} strings so the fixtures survive
-     * changes to the serialization format (see opensearch-project/opensearch-migrations#2880).
+     * instead of hand-concatenating the serialized format so the fixtures survive changes to it.
      */
     private static String workId(String indexName, int shardNumber, long startingDocId) {
-        return new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexName, shardNumber, startingDocId).toString();
+        return new IWorkCoordinator.WorkItemAndDuration.WorkItem(
+            indexName, "shard" + shardNumber, String.valueOf(startingDocId)).toString();
     }
 
     private Supplier<AbstractedHttpClient> httpClientSupplier;
@@ -603,7 +603,7 @@ public class WorkCoordinatorTest {
             // Build a unique successor id that incorporates the parent's full identity so
             // concurrent parents don't collide; route through the production encoder rather
             // than hand-concatenating the serialized format.
-            var successorIndex = parent.getIndexName() + "-p" + parent.getStartingDocId() + "-s" + j;
+            var successorIndex = parent.getIndexName() + "-p" + parent.getCursor() + "-s" + j;
             successorWorkItems.add(workId(successorIndex, 0, j));
         }
         try (var workCoordinator = factory.get(httpClientSupplier.get(), 3600, workerName)) {
