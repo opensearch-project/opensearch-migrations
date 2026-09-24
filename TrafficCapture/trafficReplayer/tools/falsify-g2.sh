@@ -67,3 +67,29 @@ run "cleanup gate clears without matching the generation"
 # 6. Resolve commit callbacks against the partition rather than the generation (the critical finding).
 perl -pi -e 's/var currentGeneration = state != null && state\.generation\(\)\.equals\(detail\.generation\(\)\);/var currentGeneration = state != null;/' "$O"
 run "commit callbacks matched by partition, not generation"
+
+# 7. Register the cleanup obligation at retirement instead of before graceful cancellation. This is the exact
+#    shape of the critical finding: a completion arriving during the grace interval matches nothing, is
+#    discarded, and the obligation is then created for a cleanup that will never be reported again.
+perl -0pi -e 's/            generations\.forEach\(generation -> cleanupOutstanding\n                \.computeIfAbsent\(generation\.topicPartition\(\), ignored -> new LinkedHashSet<>\(\)\)\n                \.add\(generation\)\);\n//' "$O"
+perl -0pi -e 's/(        var unresolvedAtRetirement = inFlightCommitPositions\.remove\(topicPartition\) != null;\n        if \(state == null\) \{\n            return;\n        \}\n)/$1        cleanupOutstanding.computeIfAbsent(topicPartition, ignored -> new LinkedHashSet<>()).add(state.generation());\n/' "$O"
+run "cleanup obligation registered at retirement, not before the grace wait"
+
+# 8. Derive the one-commit-at-a-time rule from the per-partition map again. The map empties when a partition
+#    retires, so an operation still in flight stops being visible and a second one can be issued beside it.
+perl -pi -e 's/if \(stagedCommitPositions\.isEmpty\(\) \|\| commitOperationInFlight\) \{/if (stagedCommitPositions.isEmpty() || !inFlightCommitPositions.isEmpty()) {/' "$O"
+perl -pi -e 's/^        if \(commitOperationInFlight\) \{/        if (!inFlightCommitPositions.isEmpty()) {/' "$O"
+run "one-in-flight derived from the per-partition map"
+
+# 9. Let a commit absorb the outstanding wakeup without telling the controller (kafkaLLD §5.4 on callback exit).
+perl -pi -e 's/^            wakeupController\.onWakeupAbsorbedByProtectedOperation\(\);\n$//' "$O"
+run "absorbed wakeup not recorded"
+
+# 10. Start a revocation commit with no grace left, which §5.7 forbids.
+perl -pi -e 's/if \(remainingNanos <= 0\) \{/if (false) {/' "$O"
+run "revocation commit started with no grace remaining"
+
+# 11. Skip force cancellation when every generation reported cleanup early (procCommit §9.2 step 7).
+perl -pi -e 's/^            awaitGraceDeadlineProcessingInputs\(deadline, generations\);$/            var cleanEarly = awaitGraceDeadlineProcessingInputs(deadline, generations);/' "$O"
+perl -0pi -e 's/(            generations\.forEach\(generation -> submitRequired\(\n                new ReplayIntakeInput\.ForceGenerationCancellation\(generation\)\n            \)\);)/            if (!cleanEarly) {\n$1\n            }/' "$O"
+run "force cancellation skipped on the early-return path"

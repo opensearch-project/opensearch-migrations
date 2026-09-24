@@ -88,14 +88,25 @@ what make the output usable, and a reviewer given only the scope reverts to list
 Per `AGENTS.md` §3.2b. The repository directory is already trusted; Midway is sufficient and AWS credentials
 are not needed. Allow up to 30 minutes and poll at least every 60 seconds.
 
+Append the diff range, the milestone, its `Design refs:` line, and a note to read the already-dispositioned
+verdicts in the register first — otherwise a later pass re-raises a claim an earlier one already settled.
+
 ```bash
-claude -p "$(cat tools/review-prompt-design-conformance.md)" \
+claude -p "$(cat tools/review-prompt-design-conformance.md)
+Diff under review: <range>
+Milestone: <G-n, name>
+Design refs: <the milestone's Design refs: line>
+Prior passes are dispositioned in docs/replayerRebuildStatus.md; read those verdicts first and do not re-raise
+a claim recorded as NOT REAL without new evidence." \
   --permission-prompts none \
   --no-session-persistence \
   --output-format text \
   --tools 'Read,Grep,Glob,Bash' \
-  --allowedTools 'Read,Grep,Glob,Bash(git diff *),Bash(git status *),Bash(git show *),Bash(git log *)'
+  --allowedTools 'Read,Grep,Glob,Bash(git diff *),Bash(git status *),Bash(git show *),Bash(git log *)' \
+  < /dev/null
 ```
+
+`< /dev/null` matters: without it the CLI waits on stdin and emits a warning before proceeding.
 
 Do not use `--permission-mode plan`, `--restricted`, or `--safe-mode` here.
 

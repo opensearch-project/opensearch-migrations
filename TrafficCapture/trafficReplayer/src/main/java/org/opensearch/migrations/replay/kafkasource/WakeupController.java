@@ -240,6 +240,18 @@ public final class WakeupController {
         rootContext.commitInstruments.lateCommitCallbacks.add(1);
     }
 
+    /**
+     * Records that a Kafka call inside a protected operation consumed the outstanding wakeup.
+     *
+     * <p>A blocking commit throws {@code WakeupException} for a wakeup issued before it began, which spends
+     * that wakeup. Left marked outstanding, {@link #leaveRebalanceCallback()} would coalesce the callback's
+     * deferred wakeup into nothing and the surrounding poll would run its full timeout with inputs queued —
+     * the opposite of what {@code kafkaLLD §5.4} requires on callback exit.
+     */
+    public synchronized void onWakeupAbsorbedByProtectedOperation() {
+        wakeupOutstanding = false;
+    }
+
     private boolean issueUnlessOutstanding() {
         if (wakeupOutstanding) {
             pollInstruments().wakeupsCoalesced.add(1);

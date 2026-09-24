@@ -81,6 +81,9 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private RuntimeException pollFailure;
     private Duration commitDuration;
     private boolean wakeupNextPollAfterRebalance;
+    private boolean wakeupNextCommitSync;
+    private boolean deferAsyncResolutionOnce;
+    private boolean deferAsyncResolutionUntilReleased;
     private java.util.function.Consumer<String> observationListener = call -> {};
 
     /** A rebalance callback can throw, because {@code onPartitionsRevoked} waits and can be interrupted. */
@@ -129,6 +132,32 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     /**
+     * Holds pending asynchronous commit callbacks through the next {@link #poll()} instead of resolving them.
+     *
+     * <p>The real client resolves a callback on whichever poll the broker response has arrived by, which may be
+     * a later one than the poll that carried a rebalance. Resolving every callback in the next poll made the
+     * fixture stricter than Kafka and put "an operation still unresolved after its partitions retired" out of
+     * reach.
+     */
+    public void scriptDeferAsyncResolutionPastNextPoll() {
+        deferAsyncResolutionOnce = true;
+    }
+
+    /**
+     * Holds asynchronous commit callbacks until {@link #releaseDeferredAsyncCommits()}.
+     *
+     * <p>For scenarios that need an operation to stay unresolved across several polls — reassigning a partition
+     * takes one, and reading on it takes another. A per-poll deferral cannot express that.
+     */
+    public void scriptDeferAsyncResolutionUntilReleased() {
+        deferAsyncResolutionUntilReleased = true;
+    }
+
+    public void releaseDeferredAsyncCommits() {
+        deferAsyncResolutionUntilReleased = false;
+    }
+
+    /**
      * Interrupts the next poll with {@code WakeupException} after its scripted rebalance callbacks have run.
      *
      * <p>This is what makes {@code kafkaLLD §17.4} case 18 expressible: a rebalance that has delivered
@@ -142,6 +171,17 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
 
     public void scriptCommitOutcome(CommitOutcome outcome) {
         nextCommitOutcome = Objects.requireNonNull(outcome);
+    }
+
+    /**
+     * Interrupts the next {@link #commitSync} with {@code WakeupException}, which is what a wakeup issued
+     * before the commit began does to it.
+     *
+     * <p>The attempt is still recorded before the throw: the call was made, and a test needs to distinguish an
+     * interrupted commit from one that never happened.
+     */
+    public void scriptCommitSyncWakeup() {
+        wakeupNextCommitSync = true;
     }
 
     public void setCommittedPosition(TopicPartition topicPartition, long position) {
@@ -181,8 +221,14 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             // the remainder of that rebalance is delivered by a later poll.
             throw new WakeupException();
         }
-        while (!pendingAsyncCommits.isEmpty()) {
-            pendingAsyncCommits.removeFirst().run();
+        if (deferAsyncResolutionOnce) {
+            deferAsyncResolutionOnce = false;
+        } else if (deferAsyncResolutionUntilReleased) {
+            // held
+        } else {
+            while (!pendingAsyncCommits.isEmpty()) {
+                pendingAsyncCommits.removeFirst().run();
+            }
         }
         if (pollFailure != null) {
             var failure = pollFailure;
@@ -236,6 +282,12 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     @Override
     public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
         record(new CommitAttempted(Map.copyOf(nextPositions), bound));
+        if (wakeupNextCommitSync) {
+            wakeupNextCommitSync = false;
+            // Interrupted before the outcome is known, and before any pending async callback runs: the wakeup
+            // was issued before this call began and the call ends by throwing rather than by returning.
+            throw new WakeupException();
+        }
         // Kafka guarantees a pending commitAsync callback is invoked before the following commitSync returns,
         // so an asynchronous submission is not abandoned merely by being forgotten locally: its callback still
         // arrives, and still carries the positions and counts it was given. Modelling that here is what makes

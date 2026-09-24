@@ -58,6 +58,16 @@ public final class KafkaSourceOwner {
      */
     private final Map<TopicPartition, SubmittedPosition> inFlightCommitPositions = new LinkedHashMap<>();
     /**
+     * Whether a commit operation is outstanding, as distinct from which positions it carried.
+     *
+     * <p>{@code §5.7} states the invariant about the <em>operation</em> — "at most one commit operation is in
+     * flight at a time" — while {@link #inFlightCommitPositions} is per partition and is emptied when a
+     * partition retires. Deriving the invariant from that map let a revocation that retired every partition in
+     * an outstanding operation empty it while the operation was still unresolved, admitting a second one. Only
+     * {@link #onCommitResolved} clears this.
+     */
+    private boolean commitOperationInFlight;
+    /**
      * Generations revoked or lost whose cleanup replay intake has not yet reported.
      *
      * <p>A set per partition rather than a boolean, for two reasons. Map membership cannot answer the question:
@@ -221,11 +231,12 @@ public final class KafkaSourceOwner {
      * partition that advances mid-flight stages the newer position rather than racing the old one.
      */
     private void submitLoopCommitIfEligible() {
-        if (stagedCommitPositions.isEmpty() || !inFlightCommitPositions.isEmpty()) {
+        if (stagedCommitPositions.isEmpty() || commitOperationInFlight) {
             return;
         }
         var submitted = detachForSubmission();
         inFlightCommitPositions.putAll(submitted);
+        commitOperationInFlight = true;
         wakeupController.enterProtectedOperation();
         try {
             port.commitAsync(positionsOf(submitted), outcome -> onCommitResolved(submitted, outcome));
@@ -287,6 +298,9 @@ public final class KafkaSourceOwner {
         Map<TopicPartition, SubmittedPosition> submitted,
         KafkaSourcePort.CommitOutcome outcome
     ) {
+        // Cleared here and only here: the operation is what §5.7 bounds, and it is resolved exactly once
+        // regardless of how many of its partitions still exist locally.
+        commitOperationInFlight = false;
         submitted.forEach((topicPartition, detail) -> {
             var state = partitions.get(topicPartition);
             var currentGeneration = state != null && state.generation().equals(detail.generation());
@@ -493,15 +507,30 @@ public final class KafkaSourceOwner {
                 return;
             }
 
+            // Registered before graceful cancellation is submitted, not after the wait. Cleanup can complete
+            // *during* the grace interval -- intake sends GenerationCleanupFinished as soon as its tracker
+            // empties, which for a generation with little in flight is immediately -- and a completion arriving
+            // before its obligation was recorded used to be discarded as unmatched. The generation was then
+            // registered anyway when it retired, so a successor waited on a cleanup already reported and never
+            // sent again: a permanently paused partition.
+            generations.forEach(generation -> cleanupOutstanding
+                .computeIfAbsent(generation.topicPartition(), ignored -> new LinkedHashSet<>())
+                .add(generation));
+
             var deadlineNanos = monotonicNanos.getAsLong() + cancellationGrace.toNanos();
             var deadline = new CancellationDeadline(deadlineNanos);
             generations.forEach(generation -> submitRequired(
                 new ReplayIntakeInput.GracefulGenerationCancellation(generation, deadline)
             ));
 
-            awaitGraceDeadlineProcessingInputs(deadline);
+            awaitGraceDeadlineProcessingInputs(deadline, generations);
 
-            // Accepting force cancellation is what releases the callback (procCommit §9.2 step 7).
+            // Submitted unconditionally. procCommit:1308 states the early return -- "if the generation has no
+            // unfinished work, the callback returns immediately" -- but nothing states that the submission may
+            // then be skipped, and §9.2 step 7 makes accepting it what releases the callback. Skipping it on the
+            // strength of combining those two sentences would be deciding a design-silent question, so the
+            // conforming behaviour is to return early *and* still submit. Whether it is skippable is an open
+            // question in the register.
             generations.forEach(generation -> submitRequired(
                 new ReplayIntakeInput.ForceGenerationCancellation(generation)
             ));
@@ -529,8 +558,9 @@ public final class KafkaSourceOwner {
         if (state == null) {
             return;
         }
-        cleanupOutstanding.computeIfAbsent(topicPartition, ignored -> new LinkedHashSet<>())
-            .add(state.generation());
+        // Not registered here. Registration happens before graceful cancellation is submitted, so that a
+        // completion arriving during the grace interval matches an obligation that already exists; re-adding
+        // here would resurrect an obligation that completion had already discharged.
         // The diagnostic qualifies the two measurements without interpreting them. NONE_OBSERVED means only
         // that no unresolved or unknown commit outcome is known; kafkaLLD §15.4 leaves conclusions about a zero
         // count to the observer.
@@ -558,7 +588,10 @@ public final class KafkaSourceOwner {
      * <p>No record batch is admitted here, so a batch request arriving during the wait is applied to state
      * but produces no poll.
      */
-    private void awaitGraceDeadlineProcessingInputs(CancellationDeadline deadline) throws InterruptedException {
+    private boolean awaitGraceDeadlineProcessingInputs(
+        CancellationDeadline deadline,
+        List<PartitionGenerationId> revokedGenerations
+    ) throws InterruptedException {
         // The wait is injected, not called on the queue directly. kafkaLLD §15.1 requires one monotonic source
         // for the deadline, and no arrangement of durations achieves that with a raw Object.wait: waiting always
         // elapses in real time, so "the wait expired" and "the deadline passed" would be two different clocks
@@ -569,10 +602,29 @@ public final class KafkaSourceOwner {
         // attempt conditional on further inputs. Only reaching this inside the loop meant that with no new input
         // during the interval, a staged position was never committed at all.
         submitRevocationCommit(deadline);
+        if (allCleanupReported(revokedGenerations)) {
+            return true;
+        }
         while (graceWait.awaitInputUntil(deadline)) {
             applyQueuedInputs();
             submitRevocationCommit(deadline);
+            // procCommit:1308: "If the generation has no unfinished work, the callback returns immediately."
+            // Cleanup completion is how that becomes observable -- intake sends it once its tracker empties --
+            // so waiting out the rest of the interval after it arrives holds the whole consumer, and the
+            // group's rebalance, for nothing.
+            if (allCleanupReported(revokedGenerations)) {
+                return true;
+            }
         }
+        return false;
+    }
+
+    /** True once no revoked generation is still awaiting cleanup, which is procCommit:1308's condition. */
+    private boolean allCleanupReported(List<PartitionGenerationId> revokedGenerations) {
+        return revokedGenerations.stream().noneMatch(generation -> {
+            var outstanding = cleanupOutstanding.get(generation.topicPartition());
+            return outstanding != null && outstanding.contains(generation);
+        });
     }
 
     /**
@@ -593,7 +645,7 @@ public final class KafkaSourceOwner {
         if (stagedCommitPositions.isEmpty()) {
             return;
         }
-        if (!inFlightCommitPositions.isEmpty()) {
+        if (commitOperationInFlight) {
             // §5.7 allows one commit operation at a time, and an asynchronous one cannot be taken back: Kafka
             // guarantees its callback runs before the next commitSync returns, so it resolves *during* any
             // commit issued here — crediting its own record count, which this one would then credit again.
@@ -610,11 +662,24 @@ public final class KafkaSourceOwner {
         // discard a position that a fast round-trip could still have committed, since a revoked generation's
         // position is discarded either way once the callback returns.
         var remainingNanos = deadline.remainingNanos(monotonicNanos.getAsLong());
+        if (remainingNanos <= 0) {
+            // §5.7: "a commit that cannot finish within the remaining grace must not be started". Zero is the
+            // absence of a remainder rather than a minimum, so this does not reintroduce the floor the owner
+            // ruled out -- and starting here charges every submitted partition a spurious unknown outcome,
+            // including partitions that are being retained.
+            return;
+        }
         var submitted = detachForSubmission();
         wakeupController.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
         try {
             outcome = port.commitSync(positionsOf(submitted), Duration.ofNanos(remainingNanos));
+        } catch (WakeupException absorbedByTheCommit) {
+            // §5.7 classifies a wakeup-interrupted commit as an unknown outcome. Recording the absorption is
+            // what keeps the callback's exit able to issue its deferred wakeup: the commit spent the one that
+            // was outstanding, and a controller that still believes it is outstanding issues nothing.
+            wakeupController.onWakeupAbsorbedByProtectedOperation();
+            outcome = KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN;
         } finally {
             wakeupController.leaveProtectedOperation();
         }
@@ -642,6 +707,12 @@ public final class KafkaSourceOwner {
                 var state = partitions.get(topicPartition);
                 if (state != null) {
                     state.endIntake();
+                    // Registered before force cancellation is submitted, for the same reason the revocation
+                    // path does: intake may report cleanup complete before this method returns, and a
+                    // completion with no obligation recorded yet would be discarded as unmatched.
+                    cleanupOutstanding
+                        .computeIfAbsent(topicPartition, ignored -> new LinkedHashSet<>())
+                        .add(state.generation());
                     submitRequired(
                         new ReplayIntakeInput.ForceGenerationCancellation(state.generation())
                     );

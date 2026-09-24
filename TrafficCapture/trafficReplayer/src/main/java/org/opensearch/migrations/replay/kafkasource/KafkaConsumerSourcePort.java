@@ -148,8 +148,14 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         try {
             consumer.commitSync(toOffsets(nextPositions), bound);
             return CommitOutcome.ACKNOWLEDGED;
-        } catch (WakeupException | TimeoutException mayHaveReachedTheBroker) {
+        } catch (TimeoutException ranOutOfTime) {
             return CommitOutcome.OUTCOME_UNKNOWN;
+            // WakeupException is deliberately not caught. §5.7 classifies it as an unknown outcome, but §5.4
+            // makes the owner's loop the only controlled boundary that may interpret a wakeup -- and catching it
+            // here consumed the real Kafka wakeup while the controller still believed one was outstanding, so
+            // the deferred wakeup at the end of the callback coalesced into nothing and the next poll ran its
+            // whole timeout with inputs queued. The owner maps it to the same outcome after recording that the
+            // wakeup was absorbed.
         } catch (RuntimeException failure) {
             if (isRetriable(failure)) {
                 return CommitOutcome.RETRIABLE;

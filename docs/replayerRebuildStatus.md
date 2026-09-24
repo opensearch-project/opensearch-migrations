@@ -540,9 +540,10 @@ added the `§5.3` guard with no test; it has one now. R3 and R9 above are rewrit
 remains. The wrong messages are not rewritten out of history: the correcting commit says plainly what each got
 wrong, which leaves the record accurate without rewriting pushed history.
 
-### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23
+### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23, extended 2026-09-24
 
-Six properties broken one at a time in a throwaway worktree. **All six caught.**
+Eleven properties broken one at a time in a throwaway worktree. **All eleven caught**, five of them only after
+the round below added the tests that see them.
 
 | Property removed | Caught by |
 |---|---|
@@ -552,6 +553,11 @@ Six properties broken one at a time in a throwaway worktree. **All six caught.**
 | Revocation commit loses its bound | `aCommitStagedDuringTheGraceIntervalIsSubmittedFromInsideTheWaitUnderABound` |
 | Cleanup gate clears without matching the generation | `aCleanupCompletionForADifferentGenerationDoesNotReleaseTheGate`, `aPartitionAwaitingCleanupDoesNotStallAnUnrelatedPartition`, `cleanupFinishingBeforeReassignmentLeavesTheSuccessorUngated` |
 | Commit callbacks matched by partition, not generation | `aCommitCallbackArrivingAfterReassignmentIsIgnored` |
+| Cleanup obligation registered at retirement rather than before the grace wait | `cleanupCompletingDuringGraceDoesNotStrandTheSuccessor`, and three commit tests that depend on the interval actually being waited |
+| One-in-flight derived from the per-partition map | `retiringEveryPartitionOfAnUnresolvedOperationDoesNotAdmitASecondCommit` |
+| Absorbed wakeup not recorded | `aWakeupThatInterruptsTheRevocationCommitDoesNotSwallowTheCallbacksOwnWakeup` |
+| Revocation commit started with no grace remaining | `noCommitIsStartedOnceTheGraceIntervalIsGone` |
+| Force cancellation skipped on the early-return path | `aGenerationWhoseCleanupCompletesEarlyReturnsWithoutWaitingOutTheInterval` |
 
 **The first run of this pass reported all six as surviving, and was wrong three times over.** Worth recording,
 because each failure mode makes the tool claim safety it has not established:
@@ -568,6 +574,20 @@ needs the same treatment. Two real gaps did survive the corrected run and were c
 `RUNNING`-window wakeup had no test at all, and the pause-ordering test could not see the ordering it was
 named for.
 
+**Two guards added in the sixth round survived their first falsification**, and the reason is the same in both
+cases: the test observed the mechanism rather than the caller.
+
+- The absorbed wakeup had a `WakeupControllerTest` case proving the transition, and nothing proving the owner
+  makes the call. A controller test cannot see a missing invocation.
+- The no-grace-remaining guard had no test at all, because the fake wait only ever reported input with time
+  still on the clock. Production's wait returns true whenever input arrives during its last slice, so the fake
+  was more permissive than the thing it stood in for and the state was unreachable. It can now be scripted to
+  consume the interval before reporting its input.
+
+**Both are the fixture-fidelity failure, not a missing assertion**, which is why the fix was to the fake rather
+than to the test. A fake that cannot produce a state production reaches makes every test written against it
+silently narrower than it reads.
+
 ### Fourth review pass, 2026-09-24 — verdicts
 
 | Claim | Verdict | Disposition |
@@ -582,6 +602,63 @@ named for.
 **This is the pass that produced the review-policy change.** Five rounds, each finding real defects, with the
 later ones in code the earlier ones' fixes introduced — which is why `AGENTS.md` §3.1 no longer caps a
 milestone at one review and now gates closure on a pass with no unfixed design-conformance defect.
+
+### Fifth review pass, 2026-09-24 — verdicts
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| **Cleanup completing during grace is discarded, stranding a successor forever** | **REAL, critical** | `cleanupOutstanding` was populated at retirement, after the wait. Intake sends `GenerationCleanupFinished` as soon as its tracker empties, so it can arrive inside the grace interval — where it matched no obligation and was dropped. Retirement then registered the obligation anyway, so a successor waited on a cleanup already reported and never sent again. Registration now happens **before** graceful cancellation is submitted, in both the revoked and lost paths |
+| Clean generations always wait the full grace interval | **REAL, and design-stated** | `procCommit:1308`: "If the generation has no unfinished work, the callback returns immediately." The wait now returns as soon as every revoked generation has reported cleanup |
+| G1: empty `TrafficStream`s and invalid observation sequences are accepted | open | Stateful validation needs cross-record state the dumper does not hold. Being triaged for `G3`, which builds source assembly |
+
+**The two G2 fixes are coupled, and the falsification pass is what showed it.** Without pre-registration
+`allCleanupReported` is trivially true on entry, so the early return fires immediately every time and the grace
+loop never runs — breaking in-grace commits. Reproducing the original behaviour required reverting *both*; each
+alone produced a different failure set. They are one change, not two, and the register says so rather than
+letting a later reader assume either could be reverted independently.
+
+**This is the same defect class as the one it sits next to, one step earlier.** When the cleanup gate was built,
+the recorded hazard was "`GenerationCleanupFinished` can arrive before the successor is assigned". That was
+fixed. Cleanup arriving before the *obligation is registered* is the same race moved earlier in the sequence, and
+it was not considered. Worth noting for `G3`: a fix aimed at one ordering is not evidence about the others.
+
+### Sixth review pass, 2026-09-24 — verdicts
+
+The first pass I drove myself rather than receiving, using `tools/review-prompt-design-conformance.md`. It
+independently found the cleanup race the owner had also reported, and caught a design-silent question I had
+decided in code.
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| **The one-in-flight rule is derived from per-partition bookkeeping that a retirement erases** | **REAL** | `§5.7` bounds the *operation*. `inFlightCommitPositions` empties when the partitions an operation covered retire, so an operation still outstanding stopped being visible and a second could be issued beside it — the first's callback then crediting a generation that no longer existed. `commitOperationInFlight` now carries the rule, cleared only where the operation resolves |
+| **A commit is started with no grace remaining** | **REAL** | `§5.7`: "a commit that cannot finish within the remaining grace must not be started." Reachable whenever the wait ends because input arrived in its final slice. Starting also charges every submitted partition an unknown outcome, including partitions the rebalance is retaining |
+| **The adapter swallows `WakeupException` from `commitSync`** | **REAL** | The controller was left believing a wakeup was outstanding that the commit had spent, so the callback's exit coalesced its deferred wakeup into nothing and the next poll ran its full timeout with input queued — the opposite of `§5.4` |
+| **Force cancellation skipped on the early-return path was a design-silent question decided in code** | **REAL** | Mine. `procCommit:1308` states the early return; nothing states the submission may then be skipped, and `§9.2` step 7 makes accepting it what releases the callback. Reverted to unconditional and escalated as C1 below |
+| The bounded-commit test asserts a window it cannot reach | **REAL** | Deleted rather than repaired at the time, then replaced properly in the round that added the end-of-interval wait |
+| The injected grace-wait fake checks its queue before the deadline | **REAL** | Production checks the deadline first. Fixed, and it is what made the no-grace-remaining state reachable |
+
+**The four Class A findings are one defect in four places.** Each is an operation-level rule enforced through
+per-partition state: the in-flight marker, the unknown-outcome charge, the absorbed wakeup, and the skipped
+force cancellation all go wrong when a partition retires out from under an operation that is still running.
+Worth stating because the next milestone inherits the same shape — `PartitionIntakeState` is per-partition and
+`RecordWorkTracker` is per-record, and a rule about a *request* spanning several records will be tempting to
+enforce on one of them.
+
+**Codex could not be used for this pass in this environment.** `codex exec` fails with a 403 from the
+`bedrock-mantle` service-control policy for this role, so the reviewer was `claude -p` with the same calibrated
+prompt. Recorded because `AGENTS.md` §3.1a describes calibrating Codex specifically, and the owner runs those
+passes himself.
+
+### Open questions for the owner — G2, from the sixth pass
+
+Three, all of them design silence rather than defects. None blocks G3; each is currently implemented the
+conservative way, which is stated so a ruling either ratifies or changes one line.
+
+| # | Question | Current behaviour | Why it is not mine to decide |
+|---|---|---|---|
+| C1 | May `ForceGenerationCancellation` be skipped when the grace wait returned early because every revoked generation already reported cleanup? | Submitted unconditionally | `procCommit:1308` gives the early return and `§9.2` step 7 makes accepting force cancellation what releases the callback. Neither says the submission is skippable; combining them to conclude it is would be inference |
+| C2 | `§4.1` requires each input's design to state its duplicate, stale and already-cleaned handling. `ForceGenerationCancellation`'s row does not. | Intake is assumed to tolerate a force cancellation for a generation whose cleanup it has already reported | The design states the requirement and then does not meet it for this input. That is a gap in the design, which only the owner may close |
+| C3 | May `RequestNextPartitionBatch` be applied to source state during the grace wait? | Applied, but no poll results from it | `§15.1` says the callback processes queued inputs; `§5.3` has a batch request resume a partition. Whether "process" includes a request that would resume reading during a revocation is not stated |
 
 ### Repair staging — four commits, and why they are grouped this way
 
