@@ -291,6 +291,10 @@ The posture is **integrate first, observability as the debugging substrate.** No
   decisions escalated, status table updated.** A milestone also names its own evidence — the specific
   behaviors it must demonstrate — and that evidence is what the work is judged on. What is *not* an exit
   criterion is passing the inherited suite, or hitting a coverage bar.
+- **Implement a responsibility as a complete usable chain:** producer, queue, owner, consumer,
+  observability, construction path, and evidence. Another milestone mentioning one link is not a reason
+  to defer it. Defer only for a specific missing design decision or an unavailable prerequisite, using
+  §2.1's full procedure.
 - **Observability is a deliverable of the milestone that creates the component**, not a later pass.
   It must exist before the big-bang integration; logging added retroactively means the first
   debugging pass is blind.

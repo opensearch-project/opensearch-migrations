@@ -38,6 +38,7 @@ public class RootReplayerContext extends RootOtelContext {
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
     public final KafkaConsumerContexts.RebalanceCallbackScopeContext.MetricInstruments
         rebalanceCallbackInstruments;
+    public final ReplayIntakeMetrics replayIntakeMetrics;
 
 // REBUILD-LIMBO-START(G5)
 // Instruments for owners and operations built in G5 and later.
@@ -96,6 +97,7 @@ public class RootReplayerContext extends RootOtelContext {
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
         rebalanceCallbackInstruments =
             KafkaConsumerContexts.RebalanceCallbackScopeContext.makeMetrics(meter);
+        replayIntakeMetrics = new ReplayIntakeMetrics(meter);
 
 // REBUILD-LIMBO-START(G5)
 // Construction returns with the owner and operation instruments above.

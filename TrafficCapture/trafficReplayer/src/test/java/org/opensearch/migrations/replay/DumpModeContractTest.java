@@ -73,7 +73,7 @@ class DumpModeContractTest {
     }
 
     @Test
-    void fileInputInADumpModeFailsNamingTheMilestoneThatRestoresIt() {
+    void fileInputInADumpModeIsPermanentlyRejected() {
         var params = dumpModeParams("dump-raw");
         params.inputFilename = "/some/captured/file";
 
@@ -83,8 +83,8 @@ class DumpModeContractTest {
         );
 
         Assertions.assertTrue(
-            thrown.getMessage().contains("G5"),
-            () -> "file input is deferred, so its rejection must name the milestone: " + thrown.getMessage()
+            thrown.getMessage().contains("no longer supported"),
+            () -> "the rejection must state that file-backed dumping was retired: " + thrown.getMessage()
         );
     }
 

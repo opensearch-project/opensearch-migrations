@@ -27,6 +27,7 @@ import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
+import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
@@ -216,12 +217,11 @@ class SourceReconstructionTest {
     /**
      * {@code §17.2}: "{@code ConnectionExceptionObservation} does not close source assembly."
      *
-     * <p>{@code §9.3} is explicit that it and {@code DisconnectObservation} "do not perform these steps". The
-     * request that was mid-assembly is abandoned — it was never terminated, so replaying it would send a
-     * truncated request — but the connection stays open and its next request reconstructs normally.
+     * <p>{@code §9.3} is explicit that it and {@code DisconnectObservation} "do not perform these steps".
+     * Therefore a request whose reads straddle the diagnostic remains one request and reconstructs normally.
      */
     @Test
-    void aConnectionExceptionAbandonsTheRequestInFlightWithoutClosingTheConnection() {
+    void aConnectionExceptionDoesNotResetTheRequestInFlightOrCloseTheConnection() {
         var script = new RecordScript(TOPIC).addTraffic(
             0,
             0,
@@ -229,9 +229,9 @@ class SourceReconstructionTest {
             WRITER,
             stream(
                 0,
-                read(1, "GET /truncated HTTP/1.1\r\n"),
+                read(1, "GET /thing HTTP/1.1\r\n"),
                 connectionException(2),
-                read(3, REQUEST_BYTES),
+                read(3, "Host: source\r\n\r\n"),
                 endOfMessage(4)
             )
         );
@@ -241,7 +241,7 @@ class SourceReconstructionTest {
         Assertions.assertEquals(
             1,
             sink.requests.size(),
-            "the truncated request must not be replayed and the one after it must be"
+            "the diagnostic must not split or discard the request under assembly"
         );
         Assertions.assertEquals(REQUEST_BYTES, bytesOf(sink.requests.get(0)));
         var lifetime = owner.partitionState(script.generation(0)).orElseThrow()
@@ -251,6 +251,125 @@ class SourceReconstructionTest {
             lifetime.lifetime(),
             "a connection exception is not a close"
         );
+    }
+
+    /**
+     * {@code §9.2}: a connection exception ends the response as unproven, but does not end the source
+     * lifetime. The following request therefore receives the next ordinal rather than colliding with the
+     * request whose response just completed.
+     */
+    @Test
+    void aConnectionExceptionCompletesOnlyTheResponseAndTheNextRequestGetsANewIdentity() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, "HTTP/1.1 200 OK\r\n\r\n"),
+                connectionException(4),
+                read(5, "GET /next HTTP/1.1\r\n\r\n"),
+                endOfMessage(6)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(2, sink.requestIds.size(), "the lifetime remains open for the next request");
+        Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertEquals(1L, sink.requestIds.get(1).capturedRequestOrdinal());
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0)),
+            sink.unprovenResponses,
+            "a connection exception is a response boundary but not proof that the source finished writing"
+        );
+        Assertions.assertTrue(sink.incompleteResponses.isEmpty());
+    }
+
+    /** A next-request boundary proves the previous response finished and must set {@code keptAlive=true}. */
+    @Test
+    void aNextRequestBoundaryMarksThePreviousResponseProven() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, "HTTP/1.1 200 OK\r\n\r\n"),
+                read(4, "GET /next HTTP/1.1\r\n\r\n"),
+                endOfMessage(5)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(sink.requestIds.get(0)), sink.completeResponses);
+        Assertions.assertTrue(
+            sink.unprovenResponses.isEmpty(),
+            "the following request is the proof that must distinguish kept-alive completion"
+        );
+    }
+
+    /**
+     * {@code §9.4}: the proxy may discover capture suppression after recording a request prefix. The marker
+     * discards that prefix, advances the source ordinal, and leaves the connection available for later
+     * captured requests.
+     */
+    @Test
+    void anIntentionallyDroppedRequestAdvancesTheOrdinalAndLeavesTheConnectionOpen() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, "GET /suppressed HTTP/1.1\r\n"),
+                requestIntentionallyDropped(2),
+                read(3, REQUEST_BYTES),
+                endOfMessage(4)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(1, sink.requests.size(), "the suppressed prefix must not become a request");
+        Assertions.assertEquals(REQUEST_BYTES, bytesOf(sink.requests.get(0)));
+        Assertions.assertEquals(
+            1L,
+            sink.requestIds.get(0).capturedRequestOrdinal(),
+            "the intentionally suppressed request still occupied ordinal zero at the source"
+        );
+        var lifetime = owner.partitionState(script.generation(0)).orElseThrow()
+            .lifetimeOf(sink.requestIds.get(0).connectionProcessingId()).orElseThrow();
+        Assertions.assertEquals(SourceConnectionState.Lifetime.OPEN, lifetime.lifetime());
+    }
+
+    /** A drop marker without the captured prefix it describes is a capture-protocol violation. */
+    @Test
+    void anIntentionallyDroppedMarkerWithoutARequestPrefixIsAProtocolViolation() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, requestIntentionallyDropped(1))
+        );
+
+        applyAll(script);
+
+        var violations = drainSource().stream()
+            .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+            .toList();
+        Assertions.assertEquals(1, violations.size());
+        Assertions.assertTrue(sink.requests.isEmpty());
     }
 
     /**
@@ -445,6 +564,12 @@ class SourceReconstructionTest {
     private static TrafficObservation connectionException(long sequence) {
         return observation(sequence)
             .setConnectionException(ConnectionExceptionObservation.newBuilder().setMessage("reset"))
+            .build();
+    }
+
+    private static TrafficObservation requestIntentionallyDropped(long sequence) {
+        return observation(sequence)
+            .setRequestDropped(RequestIntentionallyDropped.getDefaultInstance())
             .build();
     }
 

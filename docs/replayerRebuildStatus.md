@@ -192,8 +192,9 @@ recorded rather than the heading simply being restored:
 - Rendered partition and offset are compared against what a consumer independently reports, so a dumper
   printing plausible but wrong metadata fails.
 - An **undecodable record** ends the dump naming its location, per `kafkaLLD §16`.
-- The deferred modes have contract evidence: `dump-http`, `dump-both` and file input are still accepted and
-  fail naming `G3` and pointing at `dump-raw`, per Plan A `§2.3`.
+- The deferred Kafka modes had contract evidence: `dump-http` and `dump-both` remained accepted and failed
+  naming `G3`. File input was also retained at this point, before the owner retired file-backed dumping on
+  2026-09-24.
 
 `replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
 the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
@@ -243,7 +244,7 @@ Three things were not simple un-markings, and each is a decision worth finding l
    dumper directly.
 
 `validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http`,
-`dump-both`, and `-i` file input with a message naming G3, at exit code 2. The mode names stay in the CLI
+`dump-both`, and, at that point, `-i` file input with a message naming G3, at exit code 2. The mode names stay in the CLI
 because §2.3 makes them a contract; what changed is that asking for them says when they return instead of
 producing output that does not match the mode requested.
 
@@ -473,7 +474,7 @@ prescribed behavior that `kafkaLLD §5.7` forbids. Verifying rather than adoptin
 | 6 | Inputs miss the wakeup between drain and poll | **REAL** | `kafkaLLD §5.4`'s conservative predicate "the Kafka thread **may be** waiting in `poll()`"; `procCommit §5.1` node `D`; `§17.4` "wakes a long all-partitions-paused poll promptly" | Yes. The whole post-drain span is phase `RUNNING`, where `onInputSubmitted` records nothing. Costs one full poll timeout of latency; no safety break |
 | 7 | Ownership-ended outcomes can be retried | **Mostly NOT REAL — as prescribed it would introduce a defect** | `kafkaLLD §5.7` scopes no-retry to "**After revocation**, the old generation does not retry", and requires that "every partition in it that this consumer **still owns under the same generation** keeps its staged position and is offered again" after *any* unsuccessful operation | Treating non-`ACKNOWLEDGED` alike is **conforming**. Dropping on an ownership-ended label would abandon progress for partitions we keep — `RebalanceInProgressException` is Kafka's retriable case. This is the second time this misreading has arisen; it is the "fabricated precision" rejected above. Narrow residue is real: see finding 16 |
 | 8 | Adapter needs a second mutable generation model | **REAL** | `kafkaLLD §5` gives the owner sole authority over generations | Yes. `KafkaConsumerSourcePort` takes a map nothing populates; `WakeupAgainstRealKafkaTest:322` passes `Map.of()`, so a real poll returning records would throw |
-| 8b | G2 not wired through production startup | **REAL but correctly placed** | `AGENTS.md` §4: "If a milestone's real consumer does not exist yet, wiring to a named shell counts, provided the status table names the milestone that replaces it" | `runReplayMode` is inside `REBUILD-LIMBO(G9)`; Plan A assigns startup to **G9**. This row is that naming |
+| 8b | G2 not wired through production startup | **REAL; receiving milestone corrected to G5** | `AGENTS.md` §4 permits a named shell only until the real consumer exists, and now requires each responsibility's complete usable chain | The original G9 placement followed the `runReplayMode` marker rather than the dependency. G2's genuine prerequisite is G5's absent connection/request consumer, so Plan A now sends construction to **G5**; G9 only supervises and configures the already-integrated application |
 | 9 | `KafkaSourceInputQueue` close/submission race | **NOT REAL** | Design is **silent** on this queue's close/drain ordering | The interleaving exists; the harm does not. `close()` deliberately retains inputs and neither `drain()` nor `poll()` consults `closed`, so nothing discards and nothing stops draining. Becomes real only if a "final drain then close" sequence is added — which needs the design to state the ordering first |
 | 10 | Batch requests accepted after intake ended | **REAL** | `kafkaLLD §5.3` third bullet: accept "only when … lifecycle state has not permanently ended intake for the generation" | Reachable; consequence benign because `isReadable()` also ANDs `lifecycleAllowsIntake`. The invariant rests on one check where the design specifies two |
 | 11 | Assignment carries `committed()`, not Kafka's position | **PARTIALLY REAL** | `kafkaLLD §5.2` step 2 names "Kafka's assigned position" only for the **commit queue**. On what the *message* carries the design is **silent** | Unreachable: `initialOffset` is read by nothing, and `ObservedRecordCommitQueue` takes no start position — an empty deque begins at the first polled record, satisfying §5.2. Latent wrong value plus a fabricated `0` |
@@ -823,9 +824,10 @@ is convenience rather than dependency.
 **Still open against G2 after eight review rounds:**
 
 - `§17.4`'s nine demand cases, deferred to `G7` with a ledger row each. Not a gap.
-- Production wiring, deferred to `G9`, which un-marks `runReplayMode`. Not a gap.
+- Production construction, deferred to `G5` because the real connection/request consumer does not exist
+  before then. G9's `runReplayMode` marker is no longer treated as a reason to delay the chain.
 All five owner questions `C1`–`C5` are closed. **Nothing is outstanding against G2 as a piece of work or as a
-decision**; what remains is the deferred `§17.4` demand half and the `G9` wiring above, both with receiving
+decision**; what remains is the deferred `§17.4` demand half and the G5 construction above, both with receiving
 milestones.
 
 The single-clock residue is **closed**, not accepted: `GraceIntervalWait` makes the waiting injectable so the
@@ -1049,7 +1051,7 @@ silently). The owner approved three units:
 | Unit | Contents |
 |---|---|
 | 1 | Identity collapse, `RecordWorkTracker` refactored onto `replay/identity/`, `PartitionIntakeState` built, `kafkaLLD §17.1` record-accounting tests |
-| 2 | `SourceConnectionState`, the `§7` ten-step apply order, `§17.2` source-reconstruction tests |
+| 2 | `SourceConnectionState`, the currently buildable `§7` record-application steps, `§17.2` source-reconstruction tests |
 | 3 | `dump-http`/`dump-both` restored, the 8 `REBUILD-LIMBO-NOTE(G3)` root-switch sites, `ReplayIdentity` deleted |
 
 ### The governing constraint on how
@@ -1075,21 +1077,24 @@ toward this design.
 | `ReplayIntakeOwner`'s input family — `StartSourceRead`, `SourceReadCompleted`, `SourceReadFailed`, `StopReading`, `CloseAccumulator` | of 588 | **dead.** `§3` pushes `PartitionRecordBatch` to intake; it no longer pulls from a traffic source. Its owner-thread discipline and `validateKafkaAssociations` survive. |
 | `ReplayIdentity` | 199 | **dead**, deleted in unit 3 once nothing marked references it. |
 
-### Deferred out of G3, with the owner's agreement
+### Complete-chain correction, 2026-09-24
 
-**`ChannelContextManager` and the accumulator's tracing stay out of G3 entirely.** It carries the
-non-atomic refcount defect already open against G5, and unit 1 needs no tracing to prove record accounting.
-`AGENTS.md` §4 makes observability a deliverable of the milestone that creates a component, so this is a
-real deferral and is in the ledger below with G5 as its receiver — not an omission.
+The earlier tracing deferral was withdrawn after the owner required every responsibility to arrive with its
+producer, queue, owner, consumer, observability, construction path, and evidence. G3 now constructs
+`KafkaTopicDumper` → `ReplayIntakeInputQueue` → `ReplayIntakeOwner` →
+`HttpTransactionDumper`, terminates it with a FIFO stop-after-draining marker, and instruments it from the
+carried `RootReplayerContext`. `ChannelContextManager` is not promoted merely to reproduce the legacy
+accumulator's tracing shape; its separate refcount defect remains G5 work only if G5's connection-owner tracing
+needs that component.
 
 ## G3 — implementation complete, review pending
 
-All three units of the approved split are complete with their evidence. Unit 3 restored the Kafka-backed
-HTTP dump modes, deleted `ReplayIdentity`, and consolidated the temporary Kafka root into the carried
-`RootReplayerContext`. The file-input branch was a separate G1 obligation hidden in the same marked region;
-the owner assigned it to G9 on 2026-09-24, where source construction and CLI compatibility are wired. The
-milestone remains open until the required design-conformance review terminates with no unfixed Class A
-findings.
+All three units of the approved split are implemented. The complete-chain correction additionally puts the
+Kafka-backed HTTP dump modes through the real queue and owner thread, instruments intake and assembly, and
+adds orderly FIFO termination. Unit 3 deleted `ReplayIdentity` and consolidated the temporary Kafka root into
+the carried `RootReplayerContext`. The owner retired the separate file-backed dumper branch on 2026-09-24; it
+is removed rather than deferred to any milestone. The milestone remains open until the corrected production
+diff passes its narrow evidence, falsification rerun, and repeated design-conformance review.
 
 ### Landed
 
@@ -1099,7 +1104,9 @@ findings.
 | `RecordWorkTracker` | Refactored to `§8.1`'s granularity: **one tracker per record**, four fields. The carried class was the *collection* under that name, which is `§6`'s `recordTrackersByKafkaRecordId` |
 | `PartitionIntakeState` | Built. Holds the trackers, the reverse index `§8.3` needs, `§6`'s two connection maps, and `greatestObservedLogAppendTime`. Created per generation and dropped whole, which is what makes "nothing of a revoked generation outlives it" structural |
 | `SourceConnectionState` | `§9`'s assembly, refactored from `Accumulation` and the accumulator's observation state machine. Two design-driven differences from what it replaces: response state keyed by `ReplayRequestId`, and the connection-local observation sequence validated for baseline and contiguity |
-| `ReplayIntakeOwner` | Thread and queue discipline carried; `§7`'s ten-step apply order and `§7.1`'s exhaustive payload switch added. The pull-from-a-traffic-source model is gone with `StartSourceRead` and its four siblings, since `§3` pushes `PartitionRecordBatch` instead |
+| `ReplayIntakeOwner` | Thread and queue discipline carried; `§7` steps 1–3 and 6–9 plus `§7.1`'s exhaustive payload switch are implemented. Steps 4–5 need G6's retry-boundary and broker-time state; step 10 needs G7's demand state, and both sites are marked at the exact insertion point. The pull-from-a-traffic-source model is gone with `StartSourceRead` and its four siblings, since `§3` pushes `PartitionRecordBatch` instead |
+| `ReplayIntakeInputQueue` | Carries only immutable business inputs plus an internal FIFO stop-after-draining control marker. Requesting stop atomically rejects later submissions; the owner seeing the marker proves every earlier accepted input was removed and applied |
+| `ReplayIntakeMetrics` | Fixed-cardinality counters for owner start/orderly stop, input kinds, records applied, requests reconstructed, response confidence/incompletion, captured closes, and protocol violations. Constructed from the carried `RootReplayerContext` |
 | `SourceAssemblySink` | Named shell for `connLLD §3`'s `ConnectionInput`. **G5 replaces it**; two fields of `AdmitReconstitutedRequest` are transformation metadata and an activity-monitor identity that G5 defines, so the value type cannot be built yet without inventing them |
 | `HttpMessageAndTimestamp`, `RawPackets` | Promoted as-is |
 | `ReplayIdentity` | Deleted |
@@ -1118,6 +1125,11 @@ is an absence assertion.
 accepting a sequence gap, joining a closed lifetime, reusing an expired lifetime's identity, relabelling in the
 order `§8.2` forbids, and reversing `§7` steps 7 and 8.
 
+The expanded falsification pass tried fourteen mutations: twelve failed the intended test and two survived.
+The survivors were exactly the missing evidence later found in review — changing a next-request response from
+proved keep-alive to unproven, and ignoring a connection exception during active response assembly. Both now
+have direct deterministic assertions; the expanded pass must be rerun before closure.
+
 The final Unit 3 integration pass also proved:
 
 - the narrowed intake, owner, wakeup, association, reconstruction, and fixture suite passes;
@@ -1134,14 +1146,36 @@ by re-reading rather than by the harness. `§4.1`'s rule catches the class; it d
 real topic and proves both reconstructed output and the `UNPROVEN` response marker; `dump-both` keeps the raw
 and reconstructed views interleaved.
 
+**The complete G3 chain is constructed for production use.** `KafkaTopicDumper` produces immutable assignment
+and batch inputs, `ReplayIntakeInputQueue` owns their FIFO, `ReplayIntakeOwner` applies them on its thread,
+`HttpTransactionDumper` consumes the assembly callbacks, `ReplayIntakeMetrics` records the path, and the FIFO
+stop marker is the completion evidence. The real connection/request sink replaces the diagnostic consumer in
+G5 because its design types do not yet exist.
+
 **`RootReplayerContext` is the single live instrumentation root.** Its carried declaration and Kafka
 instrument fields were promoted in place; later-owner members remain marked at their original lines.
 `KafkaSourceRootContext`, introduced only as G2/G3 scaffolding, is removed and every live caller now uses the
 carried root.
 
-**The file-input dump path is deferred to G9.** Unlike the Kafka-backed modes, it requires the startup source
-construction and deployed-configuration compatibility that G9 owns. Both Plan A endpoints and the ledger name
-that receiver.
+**File-backed dumping is retired.** The owner authorized removing it from every phase of the plan on
+2026-09-24. Dump modes are Kafka-only and reject `--input` as unsupported.
+
+### First G3 design-conformance review
+
+Claude's read-only pass reported five verified Class A defects, all corrected in this milestone:
+
+1. A connection exception discarded an incomplete request, though `§9.3` says it performs no close steps.
+2. A response terminal boundary did not advance the captured-request ordinal, allowing duplicate
+   `ReplayRequestId` values.
+3. A capture-protocol-violating record was marked finished.
+4. Intake continued applying later records after a generation's first protocol violation.
+5. A close-only record's terminal association was added but never finished.
+
+The pass also found that the real-topic response assertion could be satisfied by a different synthetic
+connection, that the register overclaimed all ten `§7` steps, and that the G8 cancellation insertion points
+were unnamed. The assertion now binds the response to the request's captured connection, the landed table
+states the implemented and prerequisite-blocked steps separately, and both G8 sites are marked in code. Any
+production correction reopens review, so this is evidence of the completed first pass rather than closure.
 
 ### Findings
 
@@ -1186,9 +1220,7 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 | Deferred | From | To | Why | State |
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` CLI modes | G1 | G3 | HTTP transaction reconstruction was the legacy accumulator's job. G3 rebuilt source assembly and uses these modes as its real-topic exit evidence. Mode names stayed in the CLI throughout (§2.3 contract) | proved — `SourceAssemblyEvidenceTest` |
-| File-backed `dump-raw`, `dump-http`, and `dump-both` | G1 | G9 | The file branch requires source construction and deployed-configuration compatibility. G9 already owns both and is the first milestone that can restore the branch without reviving the legacy pull-based replay source | open |
-| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G9 | No file path is live, so G1 and G3 did not force the compatibility decision. G9 must settle it when the file-input contract becomes reachable again | open |
-| Tracing for replay intake and source assembly — `ChannelContextManager` and the accumulator's instrumentation contexts | G3 | G5 | `ChannelContextManager` carries the non-atomic refcount defect already open against G5 (`:39-43` reached from `:73-83`), and repairing it inside G3 would mean fixing a G5 defect to add observability G3's own evidence does not need. Record accounting is provable without it. `AGENTS.md` §4 otherwise makes observability a deliverable of the creating milestone, which is why this is recorded rather than simply left out | open |
+| Real replay construction: Kafka source owner and port → source queue → replay-intake queue and owner → connection/request consumer | G2 | G5 | G2's source component exists, but its real downstream connection/request consumer is unavailable until G5. G5 is therefore the first milestone that can construct the responsibility's complete production chain; G9 only places that integrated application under supervision and deployed configuration | open |
 | `§17.4` case 1 — demand requests another batch while fewer than `N` requests have resolved retry input and unfinished target turns | G2 | G7 | `N = P * T_threads` and the supply count are `kafkaLLD §13`, which G7 builds. No symbol in §13 exists in the module | open |
 | `§17.4` case 2 — request reconstitution with unresolved retry input does not increment supply | G2 | G7 | §13 transition 1, per-request intake bookkeeping created at reconstitution. Needs G3's reconstitution first | open |
 | `§17.4` case 3 — a fast complete response may increment supply before `B + W` | G2 | G7 | `B` and `W` are the retry boundary, which G6 builds; G7 then counts against them | open |
@@ -1451,6 +1483,13 @@ than escalated, so the set stays enumerable:
 |---|---|
 | `kafkaSourceWakeupsAbsorbedByProtectedOperation` | How often a Kafka call consumed a wakeup meant for a poll. The one wakeup decision no other series records: the wakeup was issued so `WAKEUPS_ISSUED` has it, and the poll was never woken so `POLLS_WOKEN_BY_QUEUED_INPUT` correctly excludes it. A commit swallowing wakeups was indistinguishable from a run with none |
 | `kafkaSourceRevocationsCleanedBeforeDeadline` / `kafkaSourceRevocationsReachingDeadline` | **How to tune the grace ceiling**, which is why that ceiling is a command-line option. Nearly all early means the ceiling exceeds what the work needs; nearly all at the deadline means revocations are held for their full interval and a longer one costs more than it buys. Neither number says anything alone, which is why they are a pair |
+| `replayIntakeOwnerStarted` / `replayIntakeOwnerStoppedAfterDraining` | Whether the intake owner started and reached its orderly FIFO fence rather than merely having its thread disappear |
+| `replayIntakeInputsApplied` (`inputKind`) / `replayIntakeRecordsApplied` | Which fixed input variants and how many source records the owner actually applied |
+| `replayIntakeRequestsReconstituted` | How many complete captured requests crossed from source assembly to its consumer |
+| `replayIntakeResponsesProvenComplete` / `replayIntakeResponsesUnprovenComplete` | Whether response completion was proved by a following request or only bounded by a close/exception |
+| `replayIntakeResponsesIncomplete` (`incompleteReason`) | How often replay intake itself stopped response assembly through the fixed expiration/cancellation reasons |
+| `replayIntakeCapturedClosesAccepted` | How many captured closes completed the terminal connection association and reached the sink |
+| `replayIntakeCaptureProtocolViolations` | How many invalid capture records stopped further application for their generation |
 
 The second pair also closed a loose end: `awaitGraceDeadlineProcessingInputs` returned how the wait ended and
 **nothing read it**. A discarded return value on that method is an invitation to re-derive the conditional that

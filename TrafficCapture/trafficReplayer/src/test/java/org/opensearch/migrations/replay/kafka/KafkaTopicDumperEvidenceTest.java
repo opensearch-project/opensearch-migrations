@@ -214,6 +214,37 @@ class KafkaTopicDumperEvidenceTest {
         }
     }
 
+    /**
+     * A syntactically valid envelope with no payload is detected by replay intake. The owner-thread path must
+     * propagate that asynchronous violation back to the dump command rather than printing it and continuing.
+     */
+    @Test
+    void aPayloadlessEnvelopeEndsTheHttpDumpAndNamesItsRecord() throws Exception {
+        try (var supply = ProxyWrittenTopic.start("g3-http-dump-payloadless")) {
+            Assertions.assertEquals(200, supply.sendGet("/"));
+            Assertions.assertFalse(supply.readTrafficStreamValues(1).isEmpty(), "nothing was captured");
+            supply.produceDirectly(0, CaptureRecord.getDefaultInstance().toByteArray());
+
+            var thrown = Assertions.assertThrows(Exception.class, () -> captureStdout(() ->
+                TrafficReplayer.main(new String[] {
+                    "--mode", "dump-http",
+                    "--kafka-traffic-brokers", supply.brokers(),
+                    "--kafka-traffic-topic", supply.topic()
+                })
+            ));
+
+            var root = thrown;
+            while (root.getCause() instanceof Exception cause) {
+                root = cause;
+            }
+            var message = String.valueOf(root.getMessage());
+            Assertions.assertTrue(
+                message.contains("Capture protocol violation") && message.contains(supply.topic()),
+                () -> "the HTTP dump must fail and identify the invalid record; got: " + message
+            );
+        }
+    }
+
     private interface ThrowingRunnable {
         void run() throws Exception;
     }
