@@ -433,7 +433,10 @@ callback dangerous. The loop polls every iteration and a poll is what delivers t
 asynchronous submission needs nothing extra to make progress.
 
 Inside `onPartitionsRevoked` the owner submits **synchronously**, bounded by the time remaining before
-the grace deadline, and does not submit at all when less than a configured floor remains. Asynchronous
+the grace deadline. It attempts the commit however little of the interval is left: the bound is what confines
+the call, so a small remainder is a small budget rather than a hazard, and declining to try would discard a
+position a fast round-trip could still have recorded — a revoked generation's position is discarded anyway
+once the callback returns. Asynchronous
 submission cannot be used there: its callback is delivered by a later poll, and the generation is gone
 before that poll happens. A commit that cannot finish within the remaining grace must not be started,
 because the rest of the interval belongs to force-cancellation delivery (§15.2).
@@ -1097,8 +1100,8 @@ the process supervisor immediately.
 - The successor generation stays paused until `GenerationCleanupFinished`.
 - Unrelated partitions continue.
 - Rejected or unknown old-generation commits are not retried.
-- A commit attempted inside the callback cannot hold it past the grace deadline, and one begun with
-  less than the configured floor of grace remaining is not attempted at all.
+- A commit attempted inside the callback cannot hold it past the grace deadline, and is bounded by the
+  interval that remains however small that is.
 - Every retired generation reports `recordsCommittedInGeneration` and `recordsReadInGeneration`
   exactly once, including a generation that committed nothing and a generation that never became
   readable.
