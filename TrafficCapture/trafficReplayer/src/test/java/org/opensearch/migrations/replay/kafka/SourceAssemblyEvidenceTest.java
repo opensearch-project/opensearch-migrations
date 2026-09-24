@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
@@ -170,6 +171,39 @@ class SourceAssemblyEvidenceTest {
             output.lines().anyMatch(line -> line.contains("REQ[") && line.contains("/reconstruct-me")),
             () -> "dump-both must also render the reconstructed transaction. Output:\n" + output
         );
+
+        var lines = output.lines().toList();
+        var rawIndex = indexOf(lines, "ncs:synthetic-writer.truncated-connection");
+        var requestIndex = indexOf(lines, "nc:synthetic-writer.truncated-connection:", " REQ[");
+        var responseIndex = indexOf(lines, "nc:synthetic-writer.truncated-connection:", " RSP[");
+        Assertions.assertTrue(
+            rawIndex < requestIndex && requestIndex < responseIndex,
+            () -> "the raw record must be immediately observable before the transaction callbacks it"
+                + " produces. Output:\n" + output
+        );
+        Assertions.assertEquals(
+            relativeStart(lines.get(rawIndex)),
+            relativeStart(lines.get(requestIndex)),
+            () -> "raw and reconstructed lines must use the same base epoch. Output:\n" + output
+        );
+    }
+
+    private static int indexOf(java.util.List<String> lines, String... fragments) {
+        for (var i = 0; i < lines.size(); i++) {
+            var line = lines.get(i);
+            if (java.util.Arrays.stream(fragments).allMatch(line::contains)) {
+                return i;
+            }
+        }
+        throw new AssertionError("no output line contained " + java.util.Arrays.toString(fragments));
+    }
+
+    private static String relativeStart(String line) {
+        var matcher = Pattern.compile("\\]\\s+(-?\\d+\\.0s)").matcher(line);
+        if (!matcher.find()) {
+            throw new AssertionError("line has no relative start column: " + line);
+        }
+        return matcher.group(1);
     }
 
     /**

@@ -1178,6 +1178,54 @@ were unnamed. The assertion now binds the response to the request's captured con
 states the implemented and prerequisite-blocked steps separately, and both G8 sites are marked in code. Any
 production correction reopens review, so this is evidence of the completed first pass rather than closure.
 
+### Second G3 design-conformance review
+
+Claude's read-only pass over the corrected production diff found two quoted design-conformance defects and
+one design silence:
+
+1. The dump producer numbered the first real batch `1`, while `kafkaLLD §2` reserves `0` for each
+   generation's bootstrap batch. The dump now allocates a separate sequence per partition generation,
+   beginning at `0`; later nonempty batches advance that generation's sequence independently.
+2. `ReplayIntakeOwner.applyGenerationAssigned` claimed assignment created state "and nothing else", while
+   `kafkaLLD §4.1` requires the ordinary demand pass. The implementation remains correctly prerequisite-blocked
+   on G7's supply and explicit-request state, and the exact insertion point now says so rather than contradicting
+   the design.
+3. The designs were silent on source writes before request EOM. The owner chose option 1a: preserve request
+   assembly and ignore the early informational response, matching the carried predecessor. The authorized
+   design amendment is commit `25833dc34`; production now handles both whole writes and complete segmented-write
+   sequences without changing request identity, ordinal, response state, or phase.
+
+The pass's one-pass evidence findings were also corrected:
+
+- the FIFO stop test now blocks the owner inside the accepted batch before appending the stop marker, proving
+  termination cannot pass the marker until that batch completes;
+- the post-violation test no longer cites a source-completion assertion that could pass while the later request
+  was merely held open;
+- `dump-both` emits each raw line synchronously on the intake-owner thread before applying that record, so raw
+  and reconstructed output stay interleaved, and both views receive the same base epoch;
+- dump mode once again receives its `RootReplayerContext` from the CLI construction path, so configured
+  collectors export the fixed-cardinality G3 metrics instead of being replaced by an internal no-op root;
+- unexpected intake-owner failure wakes the dump consumer and propagates, while orderly-shutdown failure is
+  suppressed behind any primary dump failure rather than replacing it; and
+- the public partition-state diagnostic and stop-marker reoffer comments now describe their actual visibility
+  and FIFO precondition.
+
+Validation after these corrections: the 20 focused deterministic intake/association/reconstruction tests pass;
+all three `SourceAssemblyEvidenceTest` real-proxy/real-topic cases pass, including direct assertions that the
+raw line precedes its request/response callbacks and shares their relative-time origin; and the payloadless
+real-topic HTTP dump still fails with the violating record identified.
+
+The batched falsification pass then tested sixteen mutations in one `/private/tmp` worktree. Fourteen failed
+the intended evidence. Two survived: the protocol-violation cutoff test delivered the later record in the same
+batch and therefore did not prove that a separately submitted later batch was rejected, and the real-topic
+payloadless dump proved eventual failure after the two-second poll returned but did not prove the queued
+violation woke an active poll. Both evidence gaps now have deterministic checks: one submits a second batch
+after the violation, and one places the real `WakeupController` in its polling phase before intake submits the
+payloadless-record violation, then requires both an issued wakeup and the
+`kafkaSourcePollsWokenByQueuedInput` metric. `WakeupAgainstRealKafkaTest` separately proves that this same
+controller action shortens a real Kafka poll. Production changes reopen review, so G3 remains open pending the
+current read-only conformance pass and targeted falsification of these two new assertions.
+
 ### Findings
 
 **`SourceConnectionState.expire()` has no production caller.** The transition is production code; its trigger

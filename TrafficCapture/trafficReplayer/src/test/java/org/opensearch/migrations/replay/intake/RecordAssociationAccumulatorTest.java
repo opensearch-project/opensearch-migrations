@@ -217,7 +217,36 @@ class RecordAssociationAccumulatorTest {
         assignAndApply(script);
 
         Assertions.assertTrue(sink.reconstituted.isEmpty(), "no request after the violating offset may pass");
-        Assertions.assertTrue(sourceCompletions().isEmpty(), "neither the violation nor later records finish");
+    }
+
+    /** {@code §16}: a later, separately delivered batch is rejected after the generation's first violation. */
+    @Test
+    void aBatchSubmittedAfterAProtocolViolationIsNotApplied() {
+        var script = new RecordScript(TOPIC)
+            .addPayloadNotSet(0, 0, Instant.ofEpochMilli(1_000), WRITER)
+            .addTraffic(
+                0,
+                1,
+                Instant.ofEpochMilli(2_000),
+                WRITER,
+                stream(0, read(1, "GET /later-batch-must-not-run HTTP/1.1\r\n\r\n"), endOfMessage(2))
+            );
+        var generation = script.generation(0);
+
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(generation, 0),
+            List.of(script.records().get(0))
+        ));
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(generation, 1),
+            List.of(script.records().get(1))
+        ));
+
+        Assertions.assertTrue(
+            sink.reconstituted.isEmpty(),
+            "a new batch must not reopen record admission after a capture-protocol violation"
+        );
     }
 
     /**

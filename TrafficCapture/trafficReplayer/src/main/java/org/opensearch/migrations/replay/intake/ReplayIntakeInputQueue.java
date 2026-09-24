@@ -64,6 +64,8 @@ public final class ReplayIntakeInputQueue {
         if (entry instanceof SubmittedInput submitted) {
             return submitted.input();
         }
+        // requestStopAfterDraining atomically rejects later submissions, so no entry can exist behind this
+        // marker. Re-offering therefore preserves its position for the owner rather than moving it past work.
         entries.offer(entry);
         throw new IllegalStateException("Only ReplayIntakeOwner may remove the stop-after-draining marker");
     }

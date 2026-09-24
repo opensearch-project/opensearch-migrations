@@ -11,7 +11,11 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.URIHelper;
 
 import com.beust.jcommander.Parameter;
@@ -553,6 +557,12 @@ public class TrafficReplayer {
     /** Runs a dump mode against a Kafka topic. */
     private static void runDumpMode(Parameters params) throws Exception {
         var runner = new KafkaTopicDumper();
+        var rootContext = new RootReplayerContext(
+            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
+                new OtelCollectorEndpoints(params.otelTraceCollectorEndpoint, params.otelMetricsCollectorEndpoint),
+                "replay-dump",
+                ProcessHelpers.getNodeInstanceName())
+        );
 
         if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
             runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
@@ -560,7 +570,8 @@ public class TrafficReplayer {
                 params.kafkaTrafficPropertyFile,
                 params.startOffset, params.startTime, params.endOffset, params.endTime,
                 params.previewBytesRead, params.previewBytesWrite,
-                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME);
+                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
+                rootContext);
         } else {
             System.err.println("Dump modes require --kafka-traffic-brokers and --kafka-traffic-topic");
             System.exit(2);

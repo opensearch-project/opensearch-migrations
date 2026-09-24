@@ -72,6 +72,13 @@ public final class ReplayIntakeOwner {
         default void captureProtocolViolation() {}
     }
 
+    @FunctionalInterface
+    public interface RecordObserver {
+        RecordObserver NOOP = record -> {};
+
+        void beforeRecordApplied(ApplicationKafkaRecord record);
+    }
+
     /** Where an invariant failure on the intake thread goes. {@code replayerLLD §4}'s process boundary. */
     public interface FatalHandler {
         void onFatal(Error failure);
@@ -82,6 +89,7 @@ public final class ReplayIntakeOwner {
     private final SourceAssemblySink assemblySink;
     private final FatalHandler fatalHandler;
     private final Metrics metrics;
+    private final RecordObserver recordObserver;
     private final Thread ownerThread;
     private final OwnerThreadGuard ownerThreadGuard;
     private final CompletableFuture<Void> termination = new CompletableFuture<>();
@@ -95,7 +103,7 @@ public final class ReplayIntakeOwner {
         @NonNull SourceAssemblySink assemblySink,
         @NonNull FatalHandler fatalHandler
     ) {
-        this(inputQueue, sourceInputs, assemblySink, fatalHandler, Metrics.NOOP,
+        this(inputQueue, sourceInputs, assemblySink, fatalHandler, Metrics.NOOP, RecordObserver.NOOP,
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -106,7 +114,19 @@ public final class ReplayIntakeOwner {
         @NonNull FatalHandler fatalHandler,
         @NonNull Metrics metrics
     ) {
-        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics,
+        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, RecordObserver.NOOP,
+            runnable -> new Thread(runnable, "replay-intake-owner"));
+    }
+
+    public ReplayIntakeOwner(
+        @NonNull ReplayIntakeInputQueue inputQueue,
+        @NonNull KafkaSourceInputQueue sourceInputs,
+        @NonNull SourceAssemblySink assemblySink,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull Metrics metrics,
+        @NonNull RecordObserver recordObserver
+    ) {
+        this(inputQueue, sourceInputs, assemblySink, fatalHandler, metrics, recordObserver,
             runnable -> new Thread(runnable, "replay-intake-owner"));
     }
 
@@ -116,11 +136,13 @@ public final class ReplayIntakeOwner {
         @NonNull SourceAssemblySink assemblySink,
         @NonNull FatalHandler fatalHandler,
         @NonNull Metrics metrics,
+        @NonNull RecordObserver recordObserver,
         @NonNull ThreadFactory threadFactory
     ) {
         this.inputQueue = inputQueue;
         this.sourceInputs = sourceInputs;
         this.metrics = metrics;
+        this.recordObserver = recordObserver;
         this.assemblySink = new ObservedSourceAssemblySink(assemblySink);
         this.fatalHandler = fatalHandler;
         this.ownerThread = Objects.requireNonNull(threadFactory.newThread(this::runLoop));
@@ -166,7 +188,7 @@ public final class ReplayIntakeOwner {
     /**
      * The state for one generation, for a test that needs to read what applying a record did to it.
      *
-     * <p>Package-private, and read-only in effect: the state's own mutators require the owner thread.
+     * <p>Read-only in effect: the state's own mutators require the owner thread.
      */
     public java.util.Optional<PartitionIntakeState> partitionState(@NonNull PartitionGenerationId generation) {
         return java.util.Optional.ofNullable(partitions.get(generation));
@@ -256,7 +278,12 @@ public final class ReplayIntakeOwner {
 
     // ---------------------------------------------------------------- inputs
 
-    /** {@code §4.1}: creates the corresponding {@link PartitionIntakeState} and nothing else. */
+    /**
+     * Creates the corresponding {@link PartitionIntakeState}.
+     *
+     * <p>REBUILD-LIMBO-NOTE(G7): {@code §4.1}'s ordinary end-of-input demand pass requires the supply count
+     * and explicit batch-request state introduced by G7.
+     */
     private void applyGenerationAssigned(ReplayIntakeInput.PartitionGenerationAssigned assigned) {
         var generation = assigned.generation();
         var existing = partitions.putIfAbsent(generation, newPartitionState(generation));
@@ -324,6 +351,7 @@ public final class ReplayIntakeOwner {
                 "record " + record.recordId() + " does not belong to generation " + state.generation()
             );
         }
+        recordObserver.beforeRecordApplied(record);
         // 2. Create its RecordWorkTracker.
         state.registerRecord(record.recordId());
         // 3. Validate partition LogAppendTime movement before using the record as time evidence.

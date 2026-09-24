@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
@@ -34,8 +35,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
-
-import io.opentelemetry.api.OpenTelemetry;
 
 /**
  * Encapsulates all Kafka dump-mode logic ({@code dump-raw}, {@code dump-http}, {@code dump-both}).
@@ -70,7 +69,8 @@ public class KafkaTopicDumper {
         String kafkaUserName, String kafkaPassword, String propertyFile,
         Long startOffset, Long startTime, Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite,
-        int observedPacketConnectionTimeout, String packetTimeoutParamName
+        int observedPacketConnectionTimeout, String packetTimeoutParamName,
+        RootReplayerContext rootContext
     ) throws Exception {
         var kafkaProps = KafkaConsumerProperties.buildKafkaProperties(
             brokers, "unused-dump-group", authType, kafkaUserName, kafkaPassword, propertyFile);
@@ -90,7 +90,7 @@ public class KafkaTopicDumper {
                     previewBytesRead, previewBytesWrite);
             } else {
                 runHttpFromKafka(consumer, partitions, endOffsets, endOffset, endTime,
-                    previewBytesRead, previewBytesWrite, "dump-both".equals(mode));
+                    previewBytesRead, previewBytesWrite, "dump-both".equals(mode), rootContext);
             }
         }
     }
@@ -134,24 +134,41 @@ public class KafkaTopicDumper {
         Map<TopicPartition, Long> endOffsets,
         Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite,
-        boolean emitRaw
+        boolean emitRaw,
+        RootReplayerContext rootContext
     ) throws Exception {
         var dumper = new HttpTransactionDumper(System.out, "msg ");
-        var rootContext = new RootReplayerContext(OpenTelemetry.noop());
         var wakeupController = new WakeupController(consumer::wakeup, rootContext);
         var sourceInputs = new KafkaSourceInputQueue(
             wakeupController
         );
         var intakeInputs = new ReplayIntakeInputQueue();
+        var ownerFailure = new AtomicReference<Error>();
         var intake = new ReplayIntakeOwner(
             intakeInputs,
             sourceInputs,
             dumper,
-            failure -> log.error("Replay intake failed while dumping", failure),
-            rootContext.replayIntakeMetrics
+            failure -> {
+                ownerFailure.compareAndSet(null, failure);
+                consumer.wakeup();
+            },
+            rootContext.replayIntakeMetrics,
+            record -> {
+                if (emitRaw && record.envelope().getPayloadCase() != CaptureRecord.PayloadCase.PAYLOAD_NOT_SET) {
+                    System.out.println(TrafficStreamDumper.format(
+                        record.envelope(),
+                        record.recordId().generation().topicPartition().partition(),
+                        record.recordId().offset(),
+                        previewBytesRead,
+                        previewBytesWrite,
+                        baseEpoch
+                    ));
+                }
+            }
         );
         intake.start();
 
+        Throwable primaryFailure = null;
         try {
             // One local generation per assigned partition, allocated once: a dump never rebalances, so a
             // partition is read by exactly one generation from start to end.
@@ -162,11 +179,14 @@ public class KafkaTopicDumper {
                 submitRequired(intakeInputs, new ReplayIntakeInput.PartitionGenerationAssigned(generation));
             }
 
-            var batchSequence = 0L;
+            var nextBatchSequence = new LinkedHashMap<TopicPartition, Long>();
+            partitions.forEach(partition -> nextBatchSequence.put(partition, 0L));
             var finishedPartitions = new HashSet<TopicPartition>();
             while (finishedPartitions.size() < endOffsets.size() && !isAtEnd(consumer, endOffsets)) {
+                failOnOwnerFailure(ownerFailure);
                 failOnProtocolViolation(sourceInputs);
                 var polled = pollForDump(consumer, sourceInputs, wakeupController);
+                failOnOwnerFailure(ownerFailure);
                 failOnProtocolViolation(sourceInputs);
                 var byPartition = new LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
                 for (var rec : polled) {
@@ -186,12 +206,7 @@ public class KafkaTopicDumper {
                         throw protocolViolation(rec, e);
                     }
                     if (captureRecord.hasTrafficStream()) {
-                        getBaseEpoch(captureRecord.getTrafficStream());
-                    }
-                    if (emitRaw) {
-                        System.out.println(TrafficStreamDumper.format(
-                            captureRecord, rec.partition(), rec.offset(),
-                            previewBytesRead, previewBytesWrite, baseEpoch));
+                        dumper.setBaseEpochSeconds(getBaseEpoch(captureRecord.getTrafficStream()));
                     }
                     byPartition.computeIfAbsent(recordPartition, ignored -> new ArrayList<>())
                         .add(new ApplicationKafkaRecord(
@@ -201,22 +216,49 @@ public class KafkaTopicDumper {
                             captureRecord
                         ));
                 }
-                batchSequence++;
                 for (var entry : byPartition.entrySet()) {
+                    var sequence = nextBatchSequence.compute(
+                        entry.getKey(),
+                        (ignored, next) -> {
+                            if (next == null) {
+                                throw new IllegalStateException("no generation for " + entry.getKey());
+                            }
+                            return next + 1;
+                        }
+                    ) - 1;
                     submitRequired(
                         intakeInputs,
                         new ReplayIntakeInput.PartitionRecordBatch(
-                            new PartitionBatchRequestId(generations.get(entry.getKey()), batchSequence),
+                            new PartitionBatchRequestId(generations.get(entry.getKey()), sequence),
                             entry.getValue()
                         )
                     );
                 }
             }
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
             intakeInputs.requestStopAfterDraining();
-            intake.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+            try {
+                intake.termination().toCompletableFuture().get(30, TimeUnit.SECONDS);
+            } catch (Exception shutdownFailure) {
+                if (primaryFailure != null) {
+                    primaryFailure.addSuppressed(shutdownFailure);
+                } else {
+                    throw shutdownFailure;
+                }
+            }
         }
+        failOnOwnerFailure(ownerFailure);
         failOnProtocolViolation(sourceInputs);
+    }
+
+    private static void failOnOwnerFailure(AtomicReference<Error> ownerFailure) {
+        var failure = ownerFailure.get();
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     /**
