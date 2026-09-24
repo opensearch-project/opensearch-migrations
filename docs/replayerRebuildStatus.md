@@ -542,8 +542,9 @@ wrong, which leaves the record accurate without rewriting pushed history.
 
 ### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23, extended 2026-09-24
 
-Eleven properties broken one at a time in a throwaway worktree. **All eleven caught**, five of them only after
-the round below added the tests that see them.
+Thirteen properties broken one at a time in a throwaway worktree. **All thirteen caught**, seven of them only
+after the rounds below added the tests that see them. The last two mutate the Kafka adapter, which the harness
+never touched until a fatal defect in it survived eleven green mutations.
 
 | Property removed | Caught by |
 |---|---|
@@ -558,6 +559,8 @@ the round below added the tests that see them.
 | Absorbed wakeup not recorded | `aWakeupThatInterruptsTheRevocationCommitDoesNotSwallowTheCallbacksOwnWakeup` |
 | Revocation commit started with no grace remaining | `noCommitIsStartedOnceTheGraceIntervalIsGone` |
 | Force cancellation skipped on the early-return path | `aGenerationWhoseCleanupCompletesEarlyReturnsWithoutWaitingOutTheInterval` |
+| Adapter no longer re-throws `WakeupException` | `aWakeupInterruptingACommitReachesTheOwnerRatherThanTheFatalBranch` |
+| An async submission refused before registration never resolves | `anAsynchronousSubmissionRefusedBeforeRegistrationStillResolvesOnce` |
 
 **The first run of this pass reported all six as surviving, and was wrong three times over.** Worth recording,
 because each failure mode makes the tool claim safety it has not established:
@@ -659,6 +662,45 @@ conservative way, which is stated so a ruling either ratifies or changes one lin
 | C1 | May `ForceGenerationCancellation` be skipped when the grace wait returned early because every revoked generation already reported cleanup? | Submitted unconditionally | `procCommit:1308` gives the early return and `§9.2` step 7 makes accepting force cancellation what releases the callback. Neither says the submission is skippable; combining them to conclude it is would be inference |
 | C2 | `§4.1` requires each input's design to state its duplicate, stale and already-cleaned handling. `ForceGenerationCancellation`'s row does not. | Intake is assumed to tolerate a force cancellation for a generation whose cleanup it has already reported | The design states the requirement and then does not meet it for this input. That is a gap in the design, which only the owner may close |
 | C3 | May `RequestNextPartitionBatch` be applied to source state during the grace wait? | Applied, but no poll results from it | `§15.1` says the callback processes queued inputs; `§5.3` has a batch request resume a partition. Whether "process" includes a request that would resume reading during a revocation is not stated |
+
+### Seventh review pass, 2026-09-24 — the fix was worse than the defect
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| **The sixth pass's wakeup repair makes a wakeup-interrupted commit process-fatal** | **REAL, critical, and mine** | `WakeupException extends KafkaException extends RuntimeException`, verified against the `kafka-clients` 4.2.0 class files. Removing it from `commitSync`'s multi-catch did not make it propagate — it fell into the broad `RuntimeException` clause, matched neither retriable nor stale, and reached the branch `§5.7` reserves for authorization failure, oversized metadata, an invalid offset size and *unrecognized* failures. A wakeup is recognized and named in `§5.7`'s outcome list, so it is excluded from that set by name. Now re-thrown explicitly |
+| A `commitAsync` that throws before registering a callback strands the one-in-flight slot | **REAL** | No callback means no resolution, and `§5.7` allows one operation at a time, so the source never commits again for the life of the process. The adapter classifies the synchronous throw like any other commit failure, which makes "exactly one resolution per submission" true of every path |
+| `onWakeupAbsorbedByProtectedOperation` has no phase guard | **REAL** | The only transition without one, and it clears a flag the poll boundary owns. Guarded |
+| The fixture's interrupted commit runs no pending callbacks and consumes no time | **REAL** | The real client invokes completed commit callbacks at the top of `commitOffsetsSync`, before the poll that raises the wakeup, and a real commit cannot be interrupted having taken none. Both fixed |
+| Two fixture scripting methods have no caller | **REAL** | Deleted; the survivor is renamed for what it does |
+| Two test comments claim mechanisms they do not use | **REAL** | One claimed a commit had cleared staged positions when nothing had been staged; one claimed a submission point was uniquely discriminating when a second point would do as well. Both corrected — the properties held, the explanations did not |
+| A counter for wakeup absorption | **design silent** | The class's own javadoc says every decision gets a counter, but a counter is a metric name and those are the owner's. Open question C4 below. The reviewer's related claim that `POLLS_WOKEN_BY_QUEUED_INPUT` undercounts does **not** survive: the absorbed wakeup was spent by the commit, so that poll genuinely was not woken by queued input |
+
+**Three consecutive rounds found the defect in the previous round's fix of the same concern**, all on the
+wakeup-absorption path. That is `AGENTS.md` §3.1b's sharper signal, not its third-revision trigger, and the
+owner called it: the next round asks the reviewer for a **patch** rather than a finding. Recorded here because
+it applies to the rest of G2, not just to one round.
+
+**Why eleven caught mutations said nothing about this.** The falsification harness mutated
+`KafkaSourceOwner.java` and `WakeupController.java` and never `KafkaConsumerSourcePort.java`, and there was no
+test for that file at all. The division is the reason: a fixture decides *what* to throw, the adapter decides
+what a throw *means*, so no fixture-driven test can reach the classifier — `PumpedKafkaSource.commitSync`
+throws `WakeupException` directly and bypasses it. `KafkaConsumerSourcePortTest` now covers all six
+classifications and the harness mutates the adapter.
+
+**The general lesson, which is not about wakeups.** A component whose only tests run through a fake of its
+collaborator is untested at exactly the boundary where it does its work. Worth checking before the next
+milestone's fakes are written, because G3 introduces `SourceAssemblySink`, which is the same shape.
+
+**Codex could not run this pass either.** `codex exec` fails with a 403: the organization's service-control
+policy explicitly denies `bedrock-mantle:CreateInference` for the role `codex-DO-NOT-DELETE` resolves to, so
+the model call never happens. Credentials are valid — the deny is an org policy. The reviewer was `claude -p`
+plus an in-session read-only subagent, both with the calibrated prompt.
+
+### Open questions for the owner — added by the seventh pass
+
+| # | Question | Current behaviour | Why it is not mine to decide |
+|---|---|---|---|
+| C4 | Should wakeup absorption inside a protected operation have its own counter? | Not counted. `WakeupController`'s javadoc says "every decision a counter", and every sibling decision has one | A counter is a new metric series, and metric names are a contract the owner owns (red line 2). The absorption is visible in the retirement log's path but not as a series |
 
 ### Repair staging — four commits, and why they are grouped this way
 
@@ -940,6 +982,70 @@ toward this design.
 non-atomic refcount defect already open against G5, and unit 1 needs no tracing to prove record accounting.
 `AGENTS.md` §4 makes observability a deliverable of the milestone that creates a component, so this is a
 real deferral and is in the ledger below with G5 as its receiver — not an omission.
+
+## G3 — landed, and what it does not yet deliver
+
+Units 1 and 2 of the approved three-unit split are complete with their evidence. Unit 3 is half done:
+`ReplayIdentity` is deleted, the dump modes are not restored.
+
+### Landed
+
+| Component | State |
+|---|---|
+| `RecordAssociationId` | Built, in `replay/intake/` — `§8.1`'s operation-identity union over `RequestAssembly`, `Request` and `TerminalConnection`. **Not** a ninth entry in `replay/identity/`: `§2` defines eight identities and this keys them, so `Request` carries a `ReplayRequestId` rather than being one. Java's sealing rule forces the same conclusion — a sealed interface in an unnamed module needs its subtypes in its own package |
+| `RecordWorkTracker` | Refactored to `§8.1`'s granularity: **one tracker per record**, four fields. The carried class was the *collection* under that name, which is `§6`'s `recordTrackersByKafkaRecordId` |
+| `PartitionIntakeState` | Built. Holds the trackers, the reverse index `§8.3` needs, `§6`'s two connection maps, and `greatestObservedLogAppendTime`. Created per generation and dropped whole, which is what makes "nothing of a revoked generation outlives it" structural |
+| `SourceConnectionState` | `§9`'s assembly, refactored from `Accumulation` and the accumulator's observation state machine. Two design-driven differences from what it replaces: response state keyed by `ReplayRequestId`, and the connection-local observation sequence validated for baseline and contiguity |
+| `ReplayIntakeOwner` | Thread and queue discipline carried; `§7`'s ten-step apply order and `§7.1`'s exhaustive payload switch added. The pull-from-a-traffic-source model is gone with `StartSourceRead` and its four siblings, since `§3` pushes `PartitionRecordBatch` instead |
+| `SourceAssemblySink` | Named shell for `connLLD §3`'s `ConnectionInput`. **G5 replaces it**; two fields of `AdmitReconstitutedRequest` are transformation metadata and an activity-monitor identity that G5 defines, so the value type cannot be built yet without inventing them |
+| `HttpMessageAndTimestamp`, `RawPackets` | Promoted as-is |
+| `ReplayIdentity` | Deleted |
+
+### Evidence
+
+`§17.1` — six of seven cases, against `RecordScript` as an independent oracle. The seventh, physical offset
+gaps at the observed-record head, is `G4`'s and already in its `Design refs`. Plan A's G3 exit case is direct:
+a record carrying `read+EOM` for request *N* and `read` for *N+1* holds exactly both associations, and
+finishing *N* leaves it held by *N+1*'s assembly.
+
+`§17.2` — all five cases, plus the captured close because `§9.3`'s "prevents later observations from joining"
+is an absence assertion.
+
+`tools/falsify-g3.sh` — seven mutations, **all seven caught**. Parsing the inherited tail, not counting it,
+accepting a sequence gap, joining a closed lifetime, reusing an expired lifetime's identity, relabelling in the
+order `§8.2` forbids, and reversing `§7` steps 7 and 8.
+
+One assertion was written so it could not fail — an empty list compared against an empty list — and was found
+by re-reading rather than by the harness. `§4.1`'s rule catches the class; it does not catch every instance.
+
+### Not delivered, and where it goes
+
+**`dump-http` and `dump-both` remain unrestored. This is G3's, not a deferral**, and the milestone cannot be
+closed until it lands: Plan A names it as the exit evidence, and it is the only evidence that runs source
+assembly end to end against a real topic. What it needs is known: `HttpTransactionDumper`'s formatting carries
+over verbatim, but its `AccumulationCallbacks` interface does not — that surface is typed on
+`IReplayContexts` and `ITrafficStreamKey`, which are exactly the tracing chain G3 deferred to G5. The dumper is
+refactored onto `SourceAssemblySink`, which needs none of it.
+
+**The `RootReplayerContext` consolidation is also still open** — thirteen `REBUILD-LIMBO-NOTE(G3)` sites, all
+of them `KafkaSourceRootContext` standing in for it. `grep -rn 'REBUILD-LIMBO-NOTE(G3)' src` is the list.
+
+### Findings
+
+**`SourceConnectionState.expire()` has no production caller.** The transition is production code; its trigger
+is `§10.3`'s broker-time evaluation, which is G6's. `§17.2` requires expiry to coexist with a fresh lifetime, so
+the transition has to exist now and the test drives it directly. G6 wires it.
+
+**Two files are named `ReplayIntakeInput`** — the live `§4.1` family in `replay/intake/`, and a marked
+predecessor in `replay/lifecycle/` that G5's and G7's marked components still extend. Not two live models, so
+not a §6 defect, but it is the naming collision §8a warns about. The decision belongs to whoever promotes
+`RequestLifecycleInput`, because `§4.1`'s family does not contain it and making it a variant is a design
+question.
+
+**The register's G3 verdict was wrong about `RecordWorkTracker`.** It read "already `§8` to the letter", and
+the granularity was off by one level. Worth recording because the verdict was written from reading the code
+against the design and still missed it: the field list matched exactly, which is what made the containing
+type's meaning easy to skip past.
 
 ## Deferral ledger — work moved between milestones
 
@@ -1470,20 +1576,21 @@ escape without a guard" rule failing in miniature on the marker's own output, wh
 rather than quietly restated. Making it byte-exact would mean re-marking 228 files to guard the padding —
 not worth it, since no code line is at risk.
 
-### One marked file now references types that no longer exist
+### Dangling references inside marked regions — closed for `ReplayIdentity`
 
-`RecordAssociationAccumulatorTest` (whole-file marked, so inert and not a build problem) calls
-`RecordScript.RecordId` and a **four-argument** `KafkaRecordId(TOPIC, 0, 0, 0)` — a third shape of that
-identity, distinct from both the deleted fixture copy and the design's two-component
-`(generation, offset)`. Whoever promotes it rewires both to `replay/identity/KafkaRecordId`. Same status as
-the `ActorMailbox` dependents: a dangling reference inside a marked region is expected during the rebuild,
-and it is recorded rather than repaired so that promoting the file is the moment the decision gets made.
+`RecordAssociationAccumulatorTest` was promoted in G3 and both references were rewired to
+`replay/identity/KafkaRecordId`, which is the decision this row was waiting for. The rule it established
+stands and is what let `ReplayIdentity.java` be deleted: **a dangling reference inside a marked region is
+expected during the rebuild**, because marked code does not compile, and each promoting milestone rewires its
+own references as part of promoting.
 
-### Stale note to fix in G3
+`ReplayIdentity` is therefore gone, in G3, with roughly sixty marked files still naming it. Every one of them
+is inert, and the alternative — keeping a superseded identity holder alive until the last region resolves —
+is exactly the red-line-3 failure of a legacy type surviving a rewrite because nobody decided to keep it.
 
-`ReplayIdentity.java`'s marked-region note says `UniqueReplayerRequestKey` "stays in
-`trafficReplayerLegacy`." There is no such module. The note predates the one-module collapse; its substance
-(that this adapter goes when its 18 callers move to `replay/identity/`) still holds.
+Its stale marked-region note went with it. That note said `UniqueReplayerRequestKey` "stays in
+`trafficReplayerLegacy`", a module that no longer exists; the substance was that the adapter goes when its
+callers move to `replay/identity/`, which is what happened.
 
 ### Next
 

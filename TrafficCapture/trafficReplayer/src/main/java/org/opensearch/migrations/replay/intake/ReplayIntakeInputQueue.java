@@ -6,11 +6,9 @@
  * compatible open source license.
  */
 
-package org.opensearch.migrations.replay.lifecycle;
+package org.opensearch.migrations.replay.intake;
 
 import java.util.concurrent.LinkedBlockingQueue;
-
-import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 
 import lombok.NonNull;
 

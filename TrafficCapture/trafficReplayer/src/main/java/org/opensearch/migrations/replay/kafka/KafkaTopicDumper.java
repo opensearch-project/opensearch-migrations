@@ -1,11 +1,19 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import org.opensearch.migrations.replay.identity.KafkaRecordId;
+import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -37,15 +45,12 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
  * Encapsulates all dump-mode logic (dump-raw, dump-http, dump-both) for both
  * Kafka and file-based sources. Keeps Kafka-specific details out of TrafficReplayer.
  *
- * <p>Only {@code dump-raw} against Kafka is live. {@code dump-http}, {@code dump-both}, and the file
- * source need HTTP transaction reconstruction, whose closure is the legacy accumulator and tracing
- * chain, so they are deferred to G3 — the milestone that rebuilds source assembly. The CLI still accepts
- * all three mode names, because they are a published contract; it rejects the two deferred ones with a
- * message naming G3.
+ * <p>The file source is still deferred: it needs {@code ISimpleTrafficCaptureSource}, which is G5's.
  *
  * <p>Reading here uses a plain {@link KafkaConsumer} with {@code assign}, no consumer group, an explicit
- * seek and no commit. That is why this milestone can precede the Kafka source owner entirely: dumping
- * needs no ownership, no partition generations, and no commit authority.
+ * seek and no commit. Dumping needs no ownership and no commit authority, which is why it can run without
+ * the Kafka source owner: it allocates one local partition generation per assigned partition and applies
+ * records to replay intake directly.
  */
 @Slf4j
 public class KafkaTopicDumper {
@@ -91,9 +96,8 @@ public class KafkaTopicDumper {
                 runRawFromKafka(consumer, endOffsets, endOffset, endTime,
                     previewBytesRead, previewBytesWrite);
             } else {
-                // TrafficReplayer rejects these modes before parsing gets here; this is the defensive half.
-                throw new IllegalStateException(
-                    mode + " requires HTTP transaction reconstruction, which is restored in milestone G3");
+                runHttpFromKafka(consumer, partitions, endOffsets, endOffset, endTime,
+                    previewBytesRead, previewBytesWrite, "dump-both".equals(mode));
             }
         }
     }
@@ -184,6 +188,126 @@ public class KafkaTopicDumper {
             });
         } else {
             consumer.seekToBeginning(partitions);
+        }
+    }
+
+
+    /**
+     * Reconstructs HTTP transactions from a topic and prints one line each, which is the cheapest reading of
+     * what source assembly produced.
+     *
+     * <p>Replay intake is driven inline rather than on its own thread. One thread applying batches in order is
+     * the same correctness model, and it removes the need for a barrier: the design's barrier is intake
+     * submitting {@code RequestNextPartitionBatch} once it has fully applied a batch ({@code kafkaLLD §4.2}),
+     * whose submission is {@code §13}'s and therefore G7's.
+     *
+     * @param emitRaw also print the per-record raw line, which is what {@code dump-both} is
+     */
+    private void runHttpFromKafka(
+        KafkaConsumer<String, byte[]> consumer,
+        java.util.List<TopicPartition> partitions,
+        Map<TopicPartition, Long> endOffsets,
+        Long endOffset, Long endTime,
+        int previewBytesRead, int previewBytesWrite,
+        boolean emitRaw
+    ) {
+        var dumper = new HttpTransactionDumper(System.out, "msg ");
+        // No telemetry is configured in a dump, and none is needed: the queue's wakeup controller exists to
+        // interrupt a poll the Kafka source owner is sitting in, and there is no such owner here.
+        var sourceInputs = new org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue(
+            new org.opensearch.migrations.replay.kafkasource.WakeupController(
+                () -> {},
+                new org.opensearch.migrations.replay.tracing.KafkaSourceRootContext(
+                    io.opentelemetry.api.OpenTelemetry.noop())
+            )
+        );
+        var intake = new org.opensearch.migrations.replay.intake.ReplayIntakeOwner(
+            new org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue(),
+            sourceInputs,
+            dumper,
+            failure -> {
+                throw failure;
+            }
+        );
+
+        // One local generation per assigned partition, allocated once: a dump never rebalances, so a partition
+        // is read by exactly one generation from start to end.
+        var generations = new LinkedHashMap<TopicPartition, PartitionGenerationId>();
+        for (var partition : partitions) {
+            var generation = new PartitionGenerationId(partition, 0);
+            generations.put(partition, generation);
+            intake.applyOnCallingThread(
+                new org.opensearch.migrations.replay.intake.ReplayIntakeInput.PartitionGenerationAssigned(
+                    generation)
+            );
+        }
+
+        var batchSequence = 0L;
+        var finishedPartitions = new HashSet<TopicPartition>();
+        while (finishedPartitions.size() < endOffsets.size() && !isAtEnd(consumer, endOffsets)) {
+            var polled = consumer.poll(Duration.ofSeconds(2));
+            var byPartition = new LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
+            for (var rec : polled) {
+                var recordPartition = new TopicPartition(rec.topic(), rec.partition());
+                if (finishedPartitions.contains(recordPartition)) {
+                    continue;
+                }
+                if (pastEnd(rec, endOffset, endTime, endOffsets)) {
+                    finishedPartitions.add(recordPartition);
+                    consumer.pause(Set.of(recordPartition));
+                    continue;
+                }
+                CaptureRecord captureRecord;
+                try {
+                    captureRecord = CaptureRecord.parseFrom(rec.value());
+                } catch (InvalidProtocolBufferException e) {
+                    throw protocolViolation(rec, e);
+                }
+                if (captureRecord.hasTrafficStream()) {
+                    getBaseEpoch(captureRecord.getTrafficStream());
+                }
+                if (emitRaw) {
+                    System.out.println(TrafficStreamDumper.format(
+                        captureRecord, rec.partition(), rec.offset(),
+                        previewBytesRead, previewBytesWrite, baseEpoch));
+                }
+                byPartition.computeIfAbsent(recordPartition, ignored -> new ArrayList<>())
+                    .add(new ApplicationKafkaRecord(
+                        new KafkaRecordId(generations.get(recordPartition), rec.offset()),
+                        rec.timestamp(),
+                        rec.serializedValueSize() < 0 ? 0 : rec.serializedValueSize(),
+                        captureRecord
+                    ));
+            }
+            batchSequence++;
+            for (var entry : byPartition.entrySet()) {
+                intake.applyOnCallingThread(
+                    new org.opensearch.migrations.replay.intake.ReplayIntakeInput.PartitionRecordBatch(
+                        new PartitionBatchRequestId(generations.get(entry.getKey()), batchSequence),
+                        entry.getValue()
+                    )
+                );
+            }
+            reportViolations(sourceInputs);
+        }
+        reportViolations(sourceInputs);
+    }
+
+    /**
+     * Prints anything intake reported as invalid capture input and discards the rest.
+     *
+     * <p>Record completions are discarded deliberately: a dump holds no commit authority, so completion is the
+     * one message it has nothing to do with. Draining rather than ignoring matters because the queue would
+     * otherwise grow by one entry per record for the length of the topic.
+     */
+    private static void reportViolations(
+        org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue sourceInputs
+    ) {
+        for (var input : sourceInputs.drain()) {
+            if (input instanceof org.opensearch.migrations.replay.kafkasource.KafkaSourceInput
+                    .CaptureProtocolViolationDetected violation) {
+                System.out.println("msg VIOLATION " + violation.recordId() + " " + violation.diagnostic());
+            }
         }
     }
 

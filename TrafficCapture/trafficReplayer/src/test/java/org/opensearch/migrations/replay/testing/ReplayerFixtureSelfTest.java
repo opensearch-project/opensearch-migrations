@@ -26,7 +26,7 @@ import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
-import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;

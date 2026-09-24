@@ -544,23 +544,10 @@ public class TrafficReplayer {
             throw new ParameterException(
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
         }
-        // All three mode names stay accepted by the parser because they are a published CLI contract, but
-        // dump-http and dump-both need HTTP transaction reconstruction, which milestone G3 rebuilds. Failing
-        // here with the milestone named beats emitting raw-shaped output for a mode that asked for parsed
-        // output. See docs/replayerRebuildPlanA-inPlace.md G1 and the deferral ledger in
-        // docs/replayerRebuildStatus.md.
-        if (MODE_DUMP_HTTP.equals(params.mode) || MODE_DUMP_BOTH.equals(params.mode)) {
-            throw new ParameterException(
-                params.mode
-                    + " is not available yet: HTTP transaction reconstruction is restored in milestone G3."
-                    + " "
-                    + MODE_DUMP_RAW
-                    + " is available and decodes every CaptureRecord envelope case.");
-        }
         if (params.inputFilename != null) {
             throw new ParameterException(
-                "dump modes read from Kafka only for now; file input is restored with the source"
-                    + " abstraction in milestone G3. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
+                "dump modes read from Kafka only for now; file input needs the source abstraction that"
+                    + " milestone G5 builds. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
         }
     }
     /** Runs a dump mode against a Kafka topic. */
@@ -1050,9 +1037,9 @@ public class TrafficReplayer {
 
         System.err.println(
             "Replay mode is under reconstruction and has no runnable entry point yet.\n"
-                + "Available now: --mode dump-raw, which reads a capture topic and prints one line per\n"
-                + "record. --mode dump-http and --mode dump-both are restored at milestone G3, and the\n"
-                + "full replay path and supervision at G9.\n"
+                + "Available now: --mode dump-raw for one line per record, --mode dump-http for one line\n"
+                + "per reconstructed HTTP transaction, and --mode dump-both for both interleaved. The full\n"
+                + "replay path and supervision arrive at milestone G9.\n"
                 + "See docs/replayerRebuildPlanA-inPlace.md and docs/replayerRebuildStatus.md.");
         System.exit(NOT_IMPLEMENTED_EXIT_CODE);
     }
