@@ -16,11 +16,14 @@ W="${1:?usage: falsify-g2.sh <throwaway-worktree-path>}"
 cd "$W" || exit 2
 O=TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/kafkasource/KafkaSourceOwner.java
 C=TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/kafkasource/WakeupController.java
+# The adapter was the harness's blind spot, and that is exactly where the worst defect of the round lived: a
+# wakeup reclassified as a structural failure, fatal in production, with every owner test green.
+A=TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/kafkasource/KafkaConsumerSourcePort.java
 RESULTS="$W/TrafficCapture/trafficReplayer/build/test-results/test"
 
 run() {
   label="$1"
-  if git diff --quiet -- "$O" "$C"; then
+  if git diff --quiet -- "$O" "$C" "$A"; then
     echo "NOT-APPLIED  $label  <-- the mutation did not match; this says nothing about the tests"
     return
   fi
@@ -40,7 +43,7 @@ run() {
   else
     echo "CAUGHT       $label  by: ${failed:-(failed, names unavailable)}"
   fi
-  git checkout -q -- "$O" "$C"
+  git checkout -q -- "$O" "$C" "$A"
 }
 
 # 1. Pause after submitting the batch to intake, rather than before (kafkaLLD §5.3 ordering).
@@ -93,3 +96,13 @@ run "revocation commit started with no grace remaining"
 perl -pi -e 's/^            awaitGraceDeadlineProcessingInputs\(deadline, generations\);$/            var cleanEarly = awaitGraceDeadlineProcessingInputs(deadline, generations);/' "$O"
 perl -0pi -e 's/(            generations\.forEach\(generation -> submitRequired\(\n                new ReplayIntakeInput\.ForceGenerationCancellation\(generation\)\n            \)\);)/            if (!cleanEarly) {\n$1\n            }/' "$O"
 run "force cancellation skipped on the early-return path"
+
+# 12. Let the adapter classify a wakeup instead of re-throwing it. WakeupException is a KafkaException and so a
+#     RuntimeException, which means deleting the clause does not make it propagate -- it falls through to the
+#     structural branch and kills the process on a routine queued input.
+perl -0pi -e 's/        \} catch \(WakeupException absorbedByTheCommit\) \{\n(?:            \/\/[^\n]*\n)+            throw absorbedByTheCommit;\n//' "$A"
+run "adapter no longer re-throws WakeupException"
+
+# 13. Drop the resolution for an async submission the client refuses outright, which strands the one-in-flight slot.
+perl -0pi -e 's/        \} catch \(RuntimeException refusedBeforeSubmission\) \{\n(?:            \/\/[^\n]*\n)+            onResolved\.accept\(classifyAsync\(refusedBeforeSubmission\)\);\n        \}/        } catch (RuntimeException refusedBeforeSubmission) {\n            \/\/ swallowed\n        }/' "$A"
+run "async submission refused before registration never resolves"

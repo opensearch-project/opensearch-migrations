@@ -112,9 +112,17 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         Map<TopicPartition, Long> nextPositions,
         java.util.function.Consumer<CommitOutcome> onResolved
     ) {
-        consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) ->
-            onResolved.accept(classifyAsync(failure))
-        );
+        try {
+            consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) ->
+                onResolved.accept(classifyAsync(failure))
+            );
+        } catch (RuntimeException refusedBeforeSubmission) {
+            // A throw here means no callback was ever registered, so the caller would otherwise wait forever
+            // for a resolution that cannot arrive -- and §5.7 allows it one commit operation at a time, so
+            // waiting forever means never committing again. Classified like any other commit failure, which
+            // keeps "exactly one resolution per submission" true of every path out of this method.
+            onResolved.accept(classifyAsync(refusedBeforeSubmission));
+        }
     }
 
     /**
@@ -148,14 +156,16 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         try {
             consumer.commitSync(toOffsets(nextPositions), bound);
             return CommitOutcome.ACKNOWLEDGED;
+        } catch (WakeupException absorbedByTheCommit) {
+            // Re-thrown rather than classified, even though §5.7 makes a wakeup-interrupted commit an unknown
+            // outcome, because §5.4 leaves the owner as the only boundary that may interpret a wakeup: the
+            // commit spent the one that was outstanding, and only the owner can tell the controller so. It
+            // maps this to that same outcome. The clause is explicit because WakeupException is a
+            // KafkaException and therefore a RuntimeException -- without it, a routine wakeup reaches the
+            // structural branch below and kills the process.
+            throw absorbedByTheCommit;
         } catch (TimeoutException ranOutOfTime) {
             return CommitOutcome.OUTCOME_UNKNOWN;
-            // WakeupException is deliberately not caught. §5.7 classifies it as an unknown outcome, but §5.4
-            // makes the owner's loop the only controlled boundary that may interpret a wakeup -- and catching it
-            // here consumed the real Kafka wakeup while the controller still believed one was outstanding, so
-            // the deferred wakeup at the end of the callback coalesced into nothing and the next poll ran its
-            // whole timeout with inputs queued. The owner maps it to the same outcome after recording that the
-            // wakeup was absorbed.
         } catch (RuntimeException failure) {
             if (isRetriable(failure)) {
                 return CommitOutcome.RETRIABLE;

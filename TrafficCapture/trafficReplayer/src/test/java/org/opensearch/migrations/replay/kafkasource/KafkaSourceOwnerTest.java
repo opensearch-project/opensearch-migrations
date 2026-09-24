@@ -868,7 +868,7 @@ class KafkaSourceOwnerTest {
 
         // The operation covers this partition alone, and is held unresolved for the rest of the test.
         sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(new KafkaRecordId(revoked, 10)));
-        port.scriptDeferAsyncResolutionUntilReleased();
+        port.scriptNeverResolveAsyncCommits();
         port.scriptRebalanceDuringNextPoll(() -> {
             // Cleanup reported inside the callback, so the successor is not gated and can read.
             sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(revoked));
@@ -1039,10 +1039,9 @@ class KafkaSourceOwnerTest {
         ));
         owner.runOnce();
         drainIntake();
-        // Committed here, so the positions the revocation would otherwise find staged are already gone and the
-        // only staged position is the one applied inside the wait.
-        owner.runOnce();
-        drainIntake();
+        // Nothing is staged when the callback is entered, which is load-bearing: a position staged earlier
+        // would be committed by the attempt made *before* the wait, with the whole interval still remaining,
+        // and this test would then be asserting about that commit instead of the one after the wait.
         port.clearHistory();
 
         // An unknown outcome is what a commit given no time actually returns, so scripting it is what makes the
@@ -1092,8 +1091,8 @@ class KafkaSourceOwnerTest {
         wakeupsIssued.set(0);
 
         port.scriptCommitSyncWakeup();
-        // Submitted from inside the commit, which is the only moment that distinguishes the two outcomes: a
-        // submission before it coalesces into the outstanding wakeup either way.
+        // Submitted from inside the commit, so this input's wakeup is necessarily deferred and can only be
+        // issued on callback exit -- which is the moment that reads the flag the absorption clears.
         port.onObservation(call -> {
             if (call.startsWith("commitSync")) {
                 sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));

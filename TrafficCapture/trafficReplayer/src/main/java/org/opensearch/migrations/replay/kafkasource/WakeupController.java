@@ -249,6 +249,9 @@ public final class WakeupController {
      * the opposite of what {@code kafkaLLD §5.4} requires on callback exit.
      */
     public synchronized void onWakeupAbsorbedByProtectedOperation() {
+        // Only the operation itself may report this. The flag is otherwise owned by the poll boundary, and a
+        // caller in any other phase clearing it would consume a wakeup that poll still needs to see.
+        requirePhase(Phase.PROTECTED_OPERATION, "onWakeupAbsorbedByProtectedOperation");
         wakeupOutstanding = false;
     }
 
