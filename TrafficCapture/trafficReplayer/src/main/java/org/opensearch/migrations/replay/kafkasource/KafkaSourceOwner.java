@@ -539,12 +539,12 @@ public final class KafkaSourceOwner {
                 awaitGraceDeadlineProcessingInputs(deadline, generations)
             );
 
-            // Submitted unconditionally, never conditioned on whether the wait ended early. Cancelling the
-            // generation's work is this source's obligation, and a successor assignment of the same partition
-            // waits on it; whether anything remains to cancel is intake's to determine, and on this path it is
-            // nothing -- §4.1 distributes force cancellation "to every remaining connection and request owner in
-            // the generation", which is the empty set once cleanup has completed. A caller that tried to predict
-            // that answer would be holding up the successor to save an inert message.
+            // §4.1: "The Kafka source therefore submits it unconditionally, including when the grace wait
+            // returned early because every revoked generation had already reported cleanup." Cancelling the
+            // generation's work is this source's obligation and a successor assignment of the same partition
+            // waits on it, while whether anything remains to cancel is intake's to determine -- and an
+            // already-cleaned delivery is inert there, so predicting that answer here would only hold up the
+            // successor to save a message that changes nothing.
             generations.forEach(generation -> submitRequired(
                 new ReplayIntakeInput.ForceGenerationCancellation(generation)
             ));
