@@ -277,6 +277,23 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        var bb = (ByteBuf) msg;
+
+        // A 1xx interim response (e.g. "100 Continue", "102 Processing", "103 Early Hints") is
+        // flow control / hint information — not the final response. Capture it separately so
+        // the stream's Read* EOM Write* invariant is preserved. Interims may arrive in any
+        // phase before the final response starts: during request transmission, after EOM
+        // while waiting, or during a long-running blocking operation. 101 Switching Protocols
+        // and 4xx/5xx rejections fall through to the normal Write path.
+        if (!(messageContext instanceof IWireCaptureContexts.IResponseContext)
+                && looksLikeInterim1xxResponse(bb)) {
+            if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
+                trafficOffloader.addInterimResponseEvent(Instant.now(), bb);
+            }
+            super.write(ctx, msg, promise);
+            return;
+        }
+
         IWireCaptureContexts.IResponseContext responseContext;
         if (!(messageContext instanceof IWireCaptureContexts.IResponseContext)) {
             messageContext = responseContext = messageContext.createResponseContext();
@@ -284,13 +301,29 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             responseContext = (IWireCaptureContexts.IResponseContext) messageContext;
         }
 
-        var bb = (ByteBuf) msg;
         if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
             trafficOffloader.addWriteEvent(Instant.now(), bb);
         }
         responseContext.onBytesWritten(bb.readableBytes());
 
         super.write(ctx, msg, promise);
+    }
+
+    // Matches "HTTP/1.x 1NN " in the buffer prefix. Excludes 101 Switching Protocols,
+    // which is a final HTTP response that hands the connection to another protocol.
+    private static boolean looksLikeInterim1xxResponse(ByteBuf bb) {
+        if (bb.readableBytes() < 12) {
+            return false;
+        }
+        int r = bb.readerIndex();
+        if (bb.getByte(r) != 'H' || bb.getByte(r + 1) != 'T' || bb.getByte(r + 2) != 'T'
+                || bb.getByte(r + 3) != 'P' || bb.getByte(r + 4) != '/') {
+            return false;
+        }
+        if (bb.getByte(r + 9) != '1') {
+            return false;
+        }
+        return !(bb.getByte(r + 10) == '0' && bb.getByte(r + 11) == '1');
     }
 
     @Override

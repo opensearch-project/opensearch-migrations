@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -8,6 +9,7 @@ import java.util.List;
 
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
@@ -33,6 +35,9 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     HttpMessageAndTimestamp requestData;
     @Getter
     HttpMessageAndTimestamp responseData;
+    @Getter
+    RawPackets interimResponseData;
+    private ByteArrayOutputStream currentInterimResponseSegmentBytes;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
@@ -113,6 +118,32 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         responseData.setLastPacketTimestamp(packetTimeStamp);
     }
 
+    public void addInterimResponseData(byte[] data) {
+        if (interimResponseData == null) {
+            interimResponseData = new RawPackets();
+        }
+        interimResponseData.add(data);
+    }
+
+    public void addInterimResponseSegment(byte[] data) {
+        if (currentInterimResponseSegmentBytes == null) {
+            currentInterimResponseSegmentBytes = new ByteArrayOutputStream();
+        }
+        currentInterimResponseSegmentBytes.write(data, 0, data.length);
+    }
+
+    public boolean hasInProgressInterimResponseSegment() {
+        return currentInterimResponseSegmentBytes != null;
+    }
+
+    public void finalizeInterimResponseSegments() {
+        if (currentInterimResponseSegmentBytes == null) {
+            return;
+        }
+        addInterimResponseData(currentInterimResponseSegmentBytes.toByteArray());
+        currentInterimResponseSegmentBytes = null;
+    }
+
     public void holdTrafficStream(ITrafficStreamKey trafficStreamKey) {
         if (trafficStreamKeysBeingHeld == null) {
             trafficStreamKeysBeingHeld = new ArrayList<>();
@@ -138,12 +169,13 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         RequestResponsePacketPair that = (RequestResponsePacketPair) o;
         return Objects.equal(requestData, that.requestData)
             && Objects.equal(responseData, that.responseData)
+            && Objects.equal(interimResponseData, that.interimResponseData)
             && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(requestData, responseData, trafficStreamKeysBeingHeld);
+        return Objects.hashCode(requestData, responseData, interimResponseData, trafficStreamKeysBeingHeld);
     }
 
     @Override
@@ -151,6 +183,9 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         final StringBuilder sb = new StringBuilder("RequestResponsePacketPair{");
         sb.append("\n requestData=").append(requestData);
         sb.append("\n responseData=").append(responseData);
+        if (interimResponseData != null && !interimResponseData.isEmpty()) {
+            sb.append("\n interimResponseData=").append(interimResponseData);
+        }
         sb.append('}');
         return sb.toString();
     }

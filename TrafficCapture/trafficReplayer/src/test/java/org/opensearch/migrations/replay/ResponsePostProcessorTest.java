@@ -189,7 +189,8 @@ class ResponsePostProcessorTest {
         var mockContext = Mockito.mock(
             org.opensearch.migrations.replay.tracing.IReplayContexts.ITupleHandlingContext.class);
         return new ParsedHttpMessagesAsDicts(mockContext,
-            java.util.Optional.empty(), java.util.Optional.empty(), java.util.Optional.empty(), responses);
+            java.util.Optional.empty(), java.util.Optional.empty(), java.util.List.of(),
+            java.util.Optional.empty(), responses);
     }
 
     @Test
