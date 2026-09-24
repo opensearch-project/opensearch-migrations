@@ -1,3 +1,8 @@
+# Historical replayer rebuild status through 2026-09-24
+
+> **NON-AUTHORITATIVE ARCHIVE.** This is the complete pre-slimming status and narrative history.
+> Current state lives only in [`../replayerRebuildStatus.md`](../replayerRebuildStatus.md).
+
 # Replayer Rebuild Status
 
 Grep-able register. **Replaces** `replayerRebuildExecutionLog.md`, which is retired. One row per

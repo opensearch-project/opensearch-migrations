@@ -1,11 +1,18 @@
+# Historical replayer rebuild execution log
+
+> **NON-SOURCE, NON-AUTHORITATIVE ARCHIVE.** Retained for history only. Do not derive behavior,
+> process rules, milestone status, or current evidence from this file. Use
+> [`../replayerRebuildStatus.md`](../replayerRebuildStatus.md), [`../../AGENTS.md`](../../AGENTS.md),
+> the selected active plan, and the authoritative designs.
+
 # Replayer Rebuild Execution Log
 
 > **RETIRED. Do not read, follow, or add to this file.** Live status is
-> [`replayerRebuildStatus.md`](replayerRebuildStatus.md); the contract is
-> [`../AGENTS.md`](../AGENTS.md). Awaiting deletion in the final cleanup sweep.
+> [`../replayerRebuildStatus.md`](../replayerRebuildStatus.md); the contract is
+> [`../../AGENTS.md`](../../AGENTS.md). Awaiting deletion in the final cleanup sweep.
 
 This log records implementation evidence for
-[`replayerRebuildPlan.md`](replayerRebuildPlan.md). Every milestone remains non-production until
+[`../replayerRebuildPlan.md`](../replayerRebuildPlan.md). Every milestone remains non-production until
 S0-S15, PA1-PA3, and final acceptance are complete.
 
 ## Starting state
