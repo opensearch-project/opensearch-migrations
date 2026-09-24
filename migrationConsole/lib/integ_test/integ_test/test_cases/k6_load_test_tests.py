@@ -98,7 +98,7 @@ class Test0080CdcK6LoadTest(MATestBase):
     K6_RATE = "10"
     K6_PARALLELISM = 2
     # Keep request-error thresholds active while avoiding latency flakes on loaded CI.
-    K6_OVERRIDES = "LATENCY_THRESHOLDS_ENABLED=false\n"
+    K6_OVERRIDES = "LATENCY_THRESHOLDS_ENABLED=false"
 
     def __init__(self, user_args: MATestUserArguments):
         super().__init__(
