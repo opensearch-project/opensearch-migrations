@@ -24,7 +24,7 @@ import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
-import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.common.TopicPartition;

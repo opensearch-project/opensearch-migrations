@@ -61,22 +61,13 @@ class DumpModeContractTest {
         Assertions.assertDoesNotThrow(() -> TrafficReplayer.validateDumpModeParams(dumpModeParams("dump-raw")));
     }
 
+    /** All three published mode names are accepted again, now that source assembly can serve the other two. */
     @Test
-    void deferredDumpModesFailNamingTheMilestoneThatRestoresThem() {
-        for (var mode : new String[] { "dump-http", "dump-both" }) {
-            var thrown = Assertions.assertThrows(
-                ParameterException.class,
+    void everyDumpModeIsAvailable() {
+        for (var mode : new String[] { "dump-raw", "dump-http", "dump-both" }) {
+            Assertions.assertDoesNotThrow(
                 () -> TrafficReplayer.validateDumpModeParams(dumpModeParams(mode)),
-                () -> mode + " must be rejected explicitly rather than silently producing raw output"
-            );
-            Assertions.assertTrue(
-                thrown.getMessage().contains("G3"),
-                () -> mode + " was rejected without naming the milestone that restores it: "
-                    + thrown.getMessage()
-            );
-            Assertions.assertTrue(
-                thrown.getMessage().contains("dump-raw"),
-                () -> mode + " should point at the mode that does work: " + thrown.getMessage()
+                () -> mode + " is a published CLI mode and must be accepted"
             );
         }
     }
@@ -92,7 +83,7 @@ class DumpModeContractTest {
         );
 
         Assertions.assertTrue(
-            thrown.getMessage().contains("G3"),
+            thrown.getMessage().contains("G5"),
             () -> "file input is deferred, so its rejection must name the milestone: " + thrown.getMessage()
         );
     }

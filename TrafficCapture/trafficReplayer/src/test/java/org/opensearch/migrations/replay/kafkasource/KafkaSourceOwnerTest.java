@@ -19,7 +19,7 @@ import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
-import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;

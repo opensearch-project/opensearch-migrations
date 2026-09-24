@@ -394,7 +394,7 @@ class WakeupAgainstRealKafkaTest {
         var owner = new KafkaSourceOwner(
             new KafkaConsumerSourcePort(consumer, LONG_POLL),
             sourceInputs,
-            new org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue(),
+            new org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue(),
             controller,
             Duration.ofMillis(200),
             System::nanoTime,

@@ -8,41 +8,33 @@
 
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G3) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-
-// REBUILD-LIMBO-START(G3)
-/*
-
 import java.io.PrintStream;
 import java.time.Instant;
-import java.util.Optional;
-import java.util.function.Consumer;
 
-import org.opensearch.migrations.replay.AccumulationCallbacks;
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
-import org.opensearch.migrations.replay.RequestResponsePacketPair;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.TerminalSourceConnectionId;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.intake.SourceAssemblySink;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
-*/
-// REBUILD-LIMBO-END(G3)
 /**
- * AccumulationCallbacks implementation for dump-http mode.
- * Prints one line per request and one line per response to the given PrintStream.
+ * Prints one line per reconstructed request, response and close, for {@code --mode dump-http}.
+ *
+ * <p>This is the cheapest reading of what source assembly produced: run it over a real topic and every
+ * transaction the replayer reconstructed is a line a person can check. A response that ends without completing
+ * prints as {@code RSP INCOMPLETE} and carries no bytes, which is the visible form of {@code kafkaLLD §9.2}'s
+ * rule that partial bytes are never represented as complete.
+ *
+ * <p>The {@code o:} and {@code s:} columns render blank here. They are the Kafka offset and
+ * {@code TrafficStream} index of a single record, and a reconstructed transaction spans however many records
+ * it spans — {@code dump-raw} is the per-record view and keeps them filled. The columns stay in the layout so
+ * {@code dump-both} interleaves the two views in alignment.
  */
-// REBUILD-LIMBO-START(G3)
-/*
 @Slf4j
-public class HttpTransactionDumper implements AccumulationCallbacks {
+public class HttpTransactionDumper implements SourceAssemblySink {
 
     private final PrintStream out;
     private final String linePrefix;
@@ -57,46 +49,55 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     }
 
     @Override
-    public Consumer<RequestResponsePacketPair> onRequestReceived(
-        @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-        @NonNull HttpMessageAndTimestamp request,
-        boolean isResumedConnection
+    public void onRequestReconstituted(
+        @NonNull ReplayRequestId replayRequestId,
+        long capturedRequestOrdinal,
+        @NonNull HttpMessageAndTimestamp.Request request,
+        @NonNull Instant sourceEventTime,
+        long requestCompletingLogAppendTime
     ) {
-        var channelKey = ctx.getReplayerRequestKey().getTrafficStreamKey();
-        var prefix = buildPrefix(channelKey, request.getFirstPacketTimestamp(), request.getLastPacketTimestamp());
-        out.println(linePrefix + prefix + " REQ[" + messageSize(request) + "] " + extractFirstLine(request));
-
-        return rrPair -> {
-            if (rrPair.getResponseData() != null) {
-                var rsp = rrPair.getResponseData();
-                out.println(linePrefix + buildPrefix(channelKey, rsp.getFirstPacketTimestamp(), rsp.getLastPacketTimestamp())
-                    + " RSP[" + messageSize(rsp) + "] " + extractFirstLine(rsp));
-            }
-        };
+        out.println(linePrefix
+            + buildPrefix(
+                replayRequestId.connectionProcessingId(),
+                request.getFirstPacketTimestamp(),
+                request.getLastPacketTimestamp())
+            + " REQ[" + messageSize(request) + "] #" + capturedRequestOrdinal
+            + " " + extractFirstLine(request));
     }
 
     @Override
-    public void onTrafficStreamsExpired(
-        RequestResponsePacketPair.ReconstructionStatus status,
-        @NonNull IReplayContexts.IChannelKeyContext ctx,
-        @NonNull ITrafficStreamKey connectionKey
+    public void onSourceResponseComplete(
+        @NonNull ReplayRequestId replayRequestId,
+        @NonNull HttpMessageAndTimestamp.Response response
     ) {
-        out.println(linePrefix + buildPrefix(connectionKey, Instant.EPOCH, Instant.EPOCH)
-            + " EXPIRED (" + status + ")");
+        out.println(linePrefix
+            + buildPrefix(
+                replayRequestId.connectionProcessingId(),
+                response.getFirstPacketTimestamp(),
+                response.getLastPacketTimestamp())
+            + " RSP[" + messageSize(response) + "] " + extractFirstLine(response));
     }
 
     @Override
-    public void onConnectionClose(
-        int channelInteractionNum,
-        @NonNull IReplayContexts.IChannelKeyContext ctx,
-        int channelSessionNumber,
-        RequestResponsePacketPair.ReconstructionStatus status,
-        @NonNull Instant timestamp,
-        @NonNull ITrafficStreamKey connectionKey,
-        @NonNull Optional<TerminalSourceConnectionId> terminalAssociation
+    public void onSourceResponseIncomplete(
+        @NonNull ReplayRequestId replayRequestId,
+        @NonNull IncompleteReason reason
     ) {
-        out.println(linePrefix + buildPrefix(connectionKey, timestamp, timestamp)
-            + " CLOSED (" + channelInteractionNum + " requests completed)");
+        // No bytes, deliberately: the signal carries none, so this line cannot show a truncated response as
+        // though it were a response.
+        out.println(linePrefix
+            + buildPrefix(replayRequestId.connectionProcessingId(), null, null)
+            + " RSP INCOMPLETE (" + reason + ")");
+    }
+
+    @Override
+    public void onCapturedClose(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull Instant closeTime
+    ) {
+        out.println(linePrefix
+            + buildPrefix(connectionProcessingId, closeTime, closeTime)
+            + " CLOSED");
     }
 
     // Dynamic column widths — start with reasonable defaults, grow as needed
@@ -118,14 +119,11 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         return String.format("%6d.0s %3d.0s", offset, duration);
     }
 
-*/
-// REBUILD-LIMBO-END(G3)
     /**
-     * All lines share the same column layout: [ts-ts] p:N o:N s:N nc:node.conn:
+     * All lines share the same column layout: {@code [ts-ts] p:N o:N s:N nc:node.conn:}, which is what lets
+     * {@code dump-both} interleave these lines with {@code dump-raw}'s.
      */
-// REBUILD-LIMBO-START(G3)
-/*
-    private String buildPrefix(ISourceTrafficChannelKey channelKey, Instant first, Instant last) {
+    private String buildPrefix(ConnectionProcessingId connection, Instant first, Instant last) {
         var sb = new StringBuilder();
         long startEpoch = first != null ? first.getEpochSecond() : 0;
         long endEpoch = last != null ? last.getEpochSecond() : startEpoch;
@@ -135,29 +133,15 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         sb.append('[').append(pad(startStr, tsWidth)).append('-').append(pad(endStr, tsWidth)).append(']');
         sb.append(' ').append(relativeTime(startEpoch, endEpoch));
 
-        if (channelKey instanceof KafkaCommitOffsetData) {
-            var k = (KafkaCommitOffsetData) channelKey;
-            var pStr = String.valueOf(k.getPartition());
-            var oStr = String.valueOf(k.getOffset());
-            pWidth = Math.max(pWidth, pStr.length());
-            oWidth = Math.max(oWidth, oStr.length());
-            sb.append(" p:").append(pad(pStr, pWidth));
-            sb.append(" o:").append(pad(oStr, oWidth));
-            if (channelKey instanceof ITrafficStreamKey) {
-                var sStr = String.valueOf(((ITrafficStreamKey) channelKey).getTrafficStreamIndex());
-                sWidth = Math.max(sWidth, sStr.length());
-                sb.append(" s:").append(pad(sStr, sWidth));
-            } else {
-                sb.append(" s:").append(dashPad(sWidth));
-            }
-        } else {
-            sb.append(" p:").append(dashPad(pWidth));
-            sb.append(" o:").append(dashPad(oWidth));
-            sb.append(" s:").append(dashPad(sWidth));
-        }
+        var pStr = String.valueOf(connection.generation().topicPartition().partition());
+        pWidth = Math.max(pWidth, pStr.length());
+        sb.append(" p:").append(pad(pStr, pWidth));
+        sb.append(" o:").append(dashPad(oWidth));
+        sb.append(" s:").append(dashPad(sWidth));
 
         sb.append(" nc:").append(TrafficChannelKeyFormatter.format(
-            channelKey.getNodeId(), channelKey.getConnectionId())).append(':');
+            connection.capturedConnectionId().writerNodeId(),
+            connection.capturedConnectionId().connectionId())).append(':');
         return sb.toString();
     }
 
@@ -192,5 +176,3 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     }
 }
 
-*/
-// REBUILD-LIMBO-END(G3)

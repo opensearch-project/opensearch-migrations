@@ -12,12 +12,16 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
 
 import lombok.NonNull;
@@ -61,6 +65,24 @@ public final class PartitionIntakeState {
      */
     private final Map<RecordAssociationId, LinkedHashSet<KafkaRecordId>> recordsByAssociation =
         new LinkedHashMap<>();
+
+    /**
+     * {@code §6}: this "points only to the current source-assembly lifetime". A fresh lifetime for the same
+     * captured connection replaces the value here and does not touch the lifetime it replaced.
+     */
+    private final Map<CapturedConnectionId, SourceConnectionState>
+        activeSourceConnectionsByCapturedConnectionId = new LinkedHashMap<>();
+    /**
+     * {@code §6}: "Older expired {@code ConnectionProcessingId} values may remain here while their target and
+     * tuple work finishes." An entry therefore outlives its captured-identity mapping.
+     *
+     * <p>REBUILD-LIMBO-NOTE(G5): removed on {@code ConnectionOwnerFinished} ({@code §4.1}), which is the event
+     * that reports the owner has nothing left. Until G5 sends it, an ended lifetime stays here for the
+     * generation's remaining life.
+     */
+    private final Map<ConnectionProcessingId, SourceConnectionState> activeConnectionProcessingById =
+        new LinkedHashMap<>();
+    private long nextConnectionLocalSequence;
 
     private long greatestObservedLogAppendTime = Long.MIN_VALUE;
 
@@ -177,6 +199,56 @@ public final class PartitionIntakeState {
     public List<KafkaRecordId> recordsFor(@NonNull RecordAssociationId association) {
         ownerThreadGuard.requireOwnerThread();
         return List.copyOf(recordsByAssociation.getOrDefault(association, new LinkedHashSet<>()));
+    }
+
+    // ------------------------------------------------------------------ source connections
+
+    /**
+     * The lifetime that should receive this {@code TrafficStream}'s observations, creating one if the captured
+     * connection has none open.
+     *
+     * <p>{@code §2}: {@code ConnectionProcessingId.localSequence} "is allocated whenever replay intake begins
+     * fresh process-local source assembly for a captured connection. It distinguishes a later fresh lifetime
+     * from an expired lifetime whose target or tuple work is still finishing." So a captured connection whose
+     * lifetime has ended gets a new sequence rather than rejoining the old one — {@code §17.2} requires the two
+     * to "coexist without sharing state or messages", and sharing an identity is the one way they could not.
+     */
+    public SourceConnectionState connectionFor(
+        @NonNull CapturedConnectionId capturedConnectionId,
+        @NonNull TrafficStream firstStream,
+        @NonNull SourceAssemblySink sink
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        var existing = activeSourceConnectionsByCapturedConnectionId.get(capturedConnectionId);
+        if (existing != null && existing.lifetime() == SourceConnectionState.Lifetime.OPEN) {
+            return existing;
+        }
+        var lifetime = new SourceConnectionState(
+            new ConnectionProcessingId(generation, capturedConnectionId, nextConnectionLocalSequence++),
+            firstStream,
+            sink
+        );
+        activeSourceConnectionsByCapturedConnectionId.put(capturedConnectionId, lifetime);
+        activeConnectionProcessingById.put(lifetime.connectionProcessingId(), lifetime);
+        return lifetime;
+    }
+
+    /**
+     * Stops routing new observations for a captured connection to a lifetime that has ended.
+     *
+     * <p>Only if the mapping still points at that lifetime: a fresh lifetime may already have replaced it, and
+     * {@code §6} says replacing "does not mutate the old lifetime" — the converse holds too, so an old
+     * lifetime ending must not unmap its successor.
+     */
+    public void retireLifetime(@NonNull SourceConnectionState endedLifetime) {
+        ownerThreadGuard.requireOwnerThread();
+        var capturedConnectionId = endedLifetime.connectionProcessingId().capturedConnectionId();
+        activeSourceConnectionsByCapturedConnectionId.remove(capturedConnectionId, endedLifetime);
+    }
+
+    public Optional<SourceConnectionState> lifetimeOf(@NonNull ConnectionProcessingId id) {
+        ownerThreadGuard.requireOwnerThread();
+        return Optional.ofNullable(activeConnectionProcessingById.get(id));
     }
 
     // ------------------------------------------------------------------ broker time
