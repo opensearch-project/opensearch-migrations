@@ -246,13 +246,6 @@ public class KafkaConsumerContexts {
             public final LongCounter deferredWakeupsIssuedOnExit;
             public final LongCounter generationsRetired;
             public final LongCounter generationsRetiredWithoutCommit;
-            /**
-             * Retired while a commit it had submitted was still unresolved, so whether that commit landed
-             * is unknown. Kept apart from the zero-commit counter deliberately: reporting an unknown
-             * outcome as "committed nothing" would be a false alarm on the one signal §9.5 asks operators
-             * to watch.
-             */
-            public final LongCounter generationsRetiredWithUnknownCommit;
             public final LongCounter retiredGenerationRecordsCommitted;
             public final LongCounter retiredGenerationRecordsRead;
 
@@ -264,8 +257,6 @@ public class KafkaConsumerContexts {
                     IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED).build();
                 generationsRetiredWithoutCommit = meter.counterBuilder(
                     IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT).build();
-                generationsRetiredWithUnknownCommit = meter.counterBuilder(
-                    IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITH_UNKNOWN_COMMIT).build();
                 retiredGenerationRecordsCommitted = meter.counterBuilder(
                     IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED).build();
                 retiredGenerationRecordsRead = meter.counterBuilder(
@@ -305,24 +296,14 @@ public class KafkaConsumerContexts {
             AttributeKey.longKey("retiredGenerationRecordsRead");
 
         @Override
-        public void onGenerationRetired(
-            String generationLabel,
-            long recordsCommitted,
-            long recordsRead,
-            boolean commitOutcomeUnknown
-        ) {
+        public void onGenerationRetired(String generationLabel, long recordsCommitted, long recordsRead) {
             setAttribute(RETIRED_GENERATION_ATTRIBUTE, generationLabel);
             setTraceAttribute(RETIRED_RECORDS_COMMITTED_ATTRIBUTE, recordsCommitted);
             setTraceAttribute(RETIRED_RECORDS_READ_ATTRIBUTE, recordsRead);
             meterIncrementEvent(getMetrics().generationsRetired);
             meterIncrementEvent(getMetrics().retiredGenerationRecordsCommitted, recordsCommitted);
             meterIncrementEvent(getMetrics().retiredGenerationRecordsRead, recordsRead);
-            if (commitOutcomeUnknown) {
-                // Not a zero-commit retirement even when nothing was credited: the submission may well have
-                // landed, and counting it as a stall would fire the alarm §9.5 exists for on a case that is
-                // merely unresolved.
-                meterIncrementEvent(getMetrics().generationsRetiredWithUnknownCommit);
-            } else if (recordsCommitted == 0) {
+            if (recordsCommitted == 0) {
                 // Counted rather than derived, so the condition procCommit §9.5 names is one series to alarm
                 // on. A run of these on one partition is the head-of-line stall.
                 meterIncrementEvent(getMetrics().generationsRetiredWithoutCommit);

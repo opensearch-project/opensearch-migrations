@@ -313,6 +313,10 @@ public final class KafkaSourceOwner {
 
             if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
                 state.creditRecordsCommitted(detail.recordsCovered());
+                // A still-owned partition restores records after an unknown outcome. An acknowledgement of the
+                // re-offered position covers those restored records, so the earlier uncertainty no longer
+                // explains its retirement count.
+                state.clearCommitUncertainty();
                 return;
             }
 
@@ -519,21 +523,31 @@ public final class KafkaSourceOwner {
         // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying nor
         // waiting, with the next assigned position deciding redelivery instead.
         stagedCommitPositions.remove(topicPartition);
-        var unresolved = inFlightCommitPositions.remove(topicPartition);
+        // Captured before the removal, because it is what distinguishes "committed nothing" from "outcome
+        // unknown" in the log below.
+        var unresolvedAtRetirement = inFlightCommitPositions.remove(topicPartition) != null;
         if (state == null) {
             return;
         }
         cleanupOutstanding.computeIfAbsent(topicPartition, ignored -> new LinkedHashSet<>())
             .add(state.generation());
-        // A submission still unresolved here has a genuinely unknown outcome: its callback arrives after this
-        // generation is gone, so it cannot be credited. Reporting that as "committed nothing" would be a false
-        // alarm on the one signal procCommit §9.5 tells operators to watch, since the commit may well have
-        // landed. It is reported as its own case instead, and the count stays uncredited either way.
+        // The diagnostic qualifies the two measurements without interpreting them. NONE_OBSERVED means only
+        // that no unresolved or unknown commit outcome is known; kafkaLLD §15.4 leaves conclusions about a zero
+        // count to the observer.
+        if (unresolvedAtRetirement) {
+            state.markAsyncCommitUnresolved();
+        }
+        log.atInfo()
+            .setMessage("Retiring generation {}: committed {} of {} records read, commitUncertainty={}")
+            .addArgument(state::generation)
+            .addArgument(state::recordsCommitted)
+            .addArgument(state::recordsRead)
+            .addArgument(state::commitUncertainty)
+            .log();
         wakeupController.recordGenerationRetired(
             state.generation().toString(),
             state.recordsCommitted(),
-            state.recordsRead(),
-            unresolved != null
+            state.recordsRead()
         );
     }
 
@@ -603,6 +617,16 @@ public final class KafkaSourceOwner {
             outcome = port.commitSync(positionsOf(submitted), Duration.ofNanos(remainingNanos));
         } finally {
             wakeupController.leaveProtectedOperation();
+        }
+        if (outcome == KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN) {
+            // Synchronous submissions never enter inFlightCommitPositions, so the retirement check cannot
+            // reconstruct this outcome. The operation-level result applies to every submitted partition.
+            submitted.keySet().forEach(topicPartition -> {
+                var state = partitions.get(topicPartition);
+                if (state != null) {
+                    state.markSyncCommitOutcomeUnknown();
+                }
+            });
         }
         onCommitResolved(submitted, outcome);
     }

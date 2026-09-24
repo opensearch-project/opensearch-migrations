@@ -225,13 +225,10 @@ public final class WakeupController {
     public synchronized void recordGenerationRetired(
         String generationLabel,
         long recordsCommitted,
-        long recordsRead,
-        boolean commitOutcomeUnknown
+        long recordsRead
     ) {
         requirePhase(Phase.REBALANCE_CALLBACK, "recordGenerationRetired");
-        callbackContext.onGenerationRetired(
-            generationLabel, recordsCommitted, recordsRead, commitOutcomeUnknown
-        );
+        callbackContext.onGenerationRetired(generationLabel, recordsCommitted, recordsRead);
     }
 
     /**

@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -524,24 +525,21 @@ class KafkaSourceOwnerTest {
             synchronousCommits.isEmpty(),
             () -> "no synchronous commit may overlap the in-flight asynchronous one; history: " + port.history()
         );
-        // Not credited, and not reported as a zero-commit retirement either. The submission's outcome is
-        // genuinely unknown at retirement -- its callback arrives after the generation is gone -- so crediting
-        // it would be a guess, while calling it "committed nothing" would fire §9.5's stall alarm on a case that
-        // is merely unresolved. It is counted as its own outcome.
+        // Not credited: the submission's outcome is genuinely unknown at retirement, since its callback arrives
+        // after the generation is gone, and crediting it would be a guess.
         Assertions.assertEquals(
             0,
             state.recordsCommitted(),
             () -> "an unresolved submission must not be credited; history: " + port.history()
         );
+        // And therefore reported as a zero-commit retirement, which §15.4 and §9.5 require: they define exactly
+        // two measurements and read zero as the stall signal. That conflates "committed nothing" with "outcome
+        // unknown" -- a real gap, recorded as an open escalation in the register. The code follows the design as
+        // written rather than inventing a third category, which is what red line 1 requires.
         Assertions.assertEquals(
             1,
-            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITH_UNKNOWN_COMMIT),
-            "the retirement must be reported as outcome-unknown"
-        );
-        Assertions.assertEquals(
-            0,
             counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT),
-            "and must not be reported as a zero-commit retirement, which is §9.5's stall signal"
+            "the design defines two measurements and reads zero as the signal, so this retirement reports zero"
         );
     }
 
@@ -552,6 +550,240 @@ class KafkaSourceOwnerTest {
             .flatMap(metric -> metric.getLongSumData().getPoints().stream())
             .mapToLong(point -> point.getValue())
             .sum();
+    }
+
+    /**
+     * Asserts the operator-visible retirement diagnostic rather than only the mutable state that feeds it.
+     */
+    private static void assertRetirementLog(
+        CloseableLogSetup logs,
+        PartitionGenerationId generation,
+        PartitionSourceState.CommitUncertainty uncertainty
+    ) {
+        var generationPrefix = "Retiring generation " + generation + ":";
+        var uncertaintySuffix = "commitUncertainty=" + uncertainty;
+        Assertions.assertTrue(
+            logs.getLogEvents().stream()
+                .anyMatch(message -> message.startsWith(generationPrefix) && message.endsWith(uncertaintySuffix)),
+            () -> "expected retirement log for "
+                + generation
+                + " with "
+                + uncertainty
+                + "; logs="
+                + logs.getLogEvents()
+        );
+    }
+
+    /**
+     * A generation that never became readable retires with no known commit uncertainty.
+     *
+     * <p>{@code kafkaLLD §15.4} explicitly requires this generation to report zero for both measurements, and
+     * says the owner "draws no conclusion from them". So {@code NONE_OBSERVED} means only that no unresolved or
+     * unknown outcome is known — it narrows the explanations for a zero without diagnosing one.
+     */
+    @Test
+    void aGenerationThatNeverReadRetiresWithNoKnownUncertainty() throws Exception {
+        try (var logs = new CloseableLogSetup(KafkaSourceOwner.class.getName())) {
+            var port = pumpedSource(List.of(PARTITION_0));
+            var owner = ownerFor(port);
+            var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+            var state = owner.partitionState(PARTITION_0).orElseThrow();
+
+            port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                PartitionSourceState.CommitUncertainty.NONE_OBSERVED,
+                state.commitUncertainty()
+            );
+            Assertions.assertEquals(0, state.recordsRead());
+            Assertions.assertEquals(0, state.recordsCommitted());
+            assertRetirementLog(logs, generation, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
+        }
+    }
+
+    /**
+     * An asynchronous submission still in flight when its generation retires is reported as such.
+     *
+     * <p>Its callback arrives after the generation is gone, so it cannot be credited — but it may well have
+     * landed, which is why the zero it produces must not read as a stall.
+     */
+    @Test
+    void anUnresolvedAsyncSubmissionIsReportedAtRetirement() throws Exception {
+        try (var logs = new CloseableLogSetup(KafkaSourceOwner.class.getName())) {
+            var port = pumpedSource(List.of(PARTITION_0));
+            var owner = ownerFor(port);
+            var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation, 1)));
+            port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+            owner.runOnce();
+            drainIntake();
+            var state = owner.partitionState(PARTITION_0).orElseThrow();
+
+            // The completion stages a position, the loop submits it asynchronously, and the poll that would
+            // resolve it delivers the revocation first -- so it is still in flight at retirement.
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation, 10)));
+            port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                PartitionSourceState.CommitUncertainty.ASYNC_UNRESOLVED_AT_RETIREMENT,
+                state.commitUncertainty()
+            );
+            Assertions.assertEquals(0, state.recordsCommitted());
+            assertRetirementLog(
+                logs, generation, PartitionSourceState.CommitUncertainty.ASYNC_UNRESOLVED_AT_RETIREMENT
+            );
+        }
+    }
+
+    /**
+     * A synchronous revocation commit returning an unknown outcome is reported at retirement.
+     *
+     * <p>This is the case the in-flight check cannot see, because a synchronous submission never enters
+     * {@code inFlightCommitPositions} — so it has to be marked explicitly. Removing that one line fails this
+     * test and nothing else.
+     */
+    @Test
+    void aSynchronousUnknownOutcomeIsReportedAtRetirement() throws Exception {
+        try (var logs = new CloseableLogSetup(KafkaSourceOwner.class.getName())) {
+            var port = pumpedSource(List.of(PARTITION_0));
+            var owner = ownerFor(port);
+            var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation, 1)));
+            port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+            owner.runOnce();
+            drainIntake();
+            var state = owner.partitionState(PARTITION_0).orElseThrow();
+
+            port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+            port.scriptRebalanceDuringNextPoll(() -> {
+                sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                    new KafkaRecordId(generation, 10)));
+                owner.onPartitionsRevoked(List.of(PARTITION_0));
+            });
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
+                state.commitUncertainty(),
+                () -> "history: " + port.history()
+            );
+            Assertions.assertEquals(0, state.recordsCommitted());
+            assertRetirementLog(logs, generation, PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN);
+        }
+    }
+
+    /**
+     * An unknown outcome is a property of the operation, so it marks every partition in the batch — including
+     * one that is not being revoked.
+     *
+     * <p>{@code kafkaLLD §5.7}: the outcomes "describe the operation, not individual partitions", and the client
+     * reports one result without saying which positions were recorded. Marking only the revoked partition would
+     * be exactly the per-partition inference §5.7 forbids.
+     */
+    @Test
+    void aBatchedUnknownOutcomeMarksEveryPartitionInTheOperation() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+        var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation0, 1)));
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation1, 1)));
+        port.scriptPoll(Map.of(
+            PARTITION_0, List.of(record(10)),
+            PARTITION_1, List.of(record(20))
+        ));
+        owner.runOnce();
+        drainIntake();
+        var revokedState = owner.partitionState(PARTITION_0).orElseThrow();
+        var retainedState = owner.partitionState(PARTITION_1).orElseThrow();
+
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+        port.scriptRebalanceDuringNextPoll(() -> {
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation0, 10)));
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation1, 20)));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
+            revokedState.commitUncertainty(),
+            "the revoked partition was in the operation"
+        );
+        Assertions.assertEquals(
+            PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
+            retainedState.commitUncertainty(),
+            "and so was the retained one, which the operation-level result covers just as much"
+        );
+    }
+
+    /**
+     * A retained partition's uncertainty clears once an acknowledged retry covers the records it restored.
+     *
+     * <p>The revoked partition cannot retry — `§5.7` has it discard rather than re-offer — so only the retained
+     * one recovers. That asymmetry is the point: the diagnostic is not sticky for a partition that goes on to
+     * prove its progress.
+     */
+    @Test
+    void anAcknowledgedRetryClearsARetainedPartitionsUncertainty() throws Exception {
+        try (var logs = new CloseableLogSetup(KafkaSourceOwner.class.getName())) {
+            var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+            var owner = ownerFor(port);
+            assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+            var generation0 = owner.partitionState(PARTITION_0).orElseThrow().generation();
+            var generation1 = owner.partitionState(PARTITION_1).orElseThrow().generation();
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation0, 1)));
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(generation1, 1)));
+            port.scriptPoll(Map.of(
+                PARTITION_0, List.of(record(10)),
+                PARTITION_1, List.of(record(20))
+            ));
+            owner.runOnce();
+            drainIntake();
+            var retainedState = owner.partitionState(PARTITION_1).orElseThrow();
+
+            port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+            port.scriptRebalanceDuringNextPoll(() -> {
+                sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                    new KafkaRecordId(generation0, 10)));
+                sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                    new KafkaRecordId(generation1, 20)));
+                owner.onPartitionsRevoked(List.of(PARTITION_0));
+            });
+            owner.runOnce();
+            Assertions.assertEquals(
+                PartitionSourceState.CommitUncertainty.SYNC_OUTCOME_UNKNOWN,
+                retainedState.commitUncertainty(),
+                "precondition: the retained partition starts uncertain"
+            );
+
+            // The unknown outcome re-staged its position and restored its records, so an acknowledgement of the
+            // re-offered position covers them and the earlier uncertainty no longer explains anything.
+            port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.ACKNOWLEDGED);
+            owner.runOnce();
+
+            Assertions.assertEquals(
+                PartitionSourceState.CommitUncertainty.NONE_OBSERVED,
+                retainedState.commitUncertainty()
+            );
+            Assertions.assertEquals(1, retainedState.recordsCommitted());
+
+            port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_1)));
+            owner.runOnce();
+            assertRetirementLog(logs, generation1, PartitionSourceState.CommitUncertainty.NONE_OBSERVED);
+        }
     }
 
     /** Plan A G2 exit: a poll failure is fatal, never an empty success. */
