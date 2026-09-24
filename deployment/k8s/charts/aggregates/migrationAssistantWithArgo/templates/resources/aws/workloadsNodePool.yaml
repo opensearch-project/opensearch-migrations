@@ -27,7 +27,7 @@ spec:
         {{- end }}
         {{- if .Values.workloadsNodePool.minInstanceGeneration }}
         - key: eks.amazonaws.com/instance-generation
-          operator: Gt
+          operator: Gte
           values: [{{ .Values.workloadsNodePool.minInstanceGeneration | quote }}]
         {{- end }}
         {{- if .Values.workloadsNodePool.architectures }}

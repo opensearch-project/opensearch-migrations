@@ -9,7 +9,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CHART_DIR = REPO_ROOT / "deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
 VALUES_FILE = CHART_DIR / "values.yaml"
 VALUES_EKS_FILE = CHART_DIR / "valuesEks.yaml"
-NODEPOOL_TEST_FILE = REPO_ROOT / "deployment/k8s/aws/examples/nodepool-test.yaml"
 BOOTSTRAP_SCRIPT = REPO_ROOT / "deployment/k8s/aws/aws-bootstrap.sh"
 
 
@@ -30,7 +29,23 @@ def _run_helm(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 class TestGeneralWorkNodePoolOverrides:
-    def test_repo_override_renders_into_general_work_pool(self):
+    def test_valid_override_renders_into_general_work_pool(self, tmp_path: Path):
+        valid_values = tmp_path / "nodepool-valid.yaml"
+        valid_values.write_text(
+            "workloadsNodePool:\n"
+            '  architectures: ["amd64"]\n'
+            '  capacityTypes: ["spot"]\n'
+            '  instanceCategories: ["m", "r"]\n'
+            "  minInstanceGeneration: 5\n"
+            '  instanceSizes: ["large", "xlarge", "2xlarge"]\n'
+            "  limits:\n"
+            '    cpu: "68000m"\n'
+            '    memory: "136Gi"\n'
+            "  disruption:\n"
+            "    consolidationPolicy: WhenEmptyOrUnderutilized\n"
+            "    consolidateAfter: 35m\n"
+        )
+
         completed = _run_helm(
             "template",
             "ma",
@@ -42,7 +57,7 @@ class TestGeneralWorkNodePoolOverrides:
             "-f",
             str(VALUES_EKS_FILE),
             "-f",
-            str(NODEPOOL_TEST_FILE),
+            str(valid_values),
             "--set",
             "stageName=dev",
             "--set",
@@ -57,6 +72,7 @@ class TestGeneralWorkNodePoolOverrides:
         assert "memory: 136Gi" in completed.stdout
         assert 'values: ["spot"]' in completed.stdout
         assert 'values: ["m","r"]' in completed.stdout
+        assert "operator: Gte" in completed.stdout
         assert 'values: ["5"]' in completed.stdout
         assert 'values: ["amd64"]' in completed.stdout
         assert 'values: ["large","xlarge","2xlarge"]' in completed.stdout

@@ -110,7 +110,7 @@ workloadsNodePool:
   architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
   capacityTypes: ["on-demand"]  # Empty = no constraint. Typical values: ["on-demand"], ["spot"].
   instanceCategories: ["c", "m", "r"]  # Empty = no constraint. Typical values: compute, general, memory optimized.
-  minInstanceGeneration: 4  # Set to 0 or null to omit the generation constraint.
+  minInstanceGeneration: 5  # Inclusive minimum generation (5 means generation 5 and newer). Set to 0 or null to omit the constraint.
   instanceSizes: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]  # Empty = no constraint.
   # These limits are keep the entire aggregate compute size under these values.
   # This is an arbiter on total cost that a deployment can consume per unit of time
