@@ -41,7 +41,7 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
 | Test compilation | **Green.** 108 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 as `ReplayerFixtureSelfTest` was promoted |
-| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 217 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 211 whole-file-marked ones. Run it after any marking change |
+| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 216 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 211 whole-file-marked ones. Run it after any marking change |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
 | File counts | One module. **360 files** under `TrafficCapture/trafficReplayer/src` (**347** Java); **217** carry `REBUILD-LIMBO` regions, of which **6** are partial. `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. Historical counts were measured at earlier milestones; use the command, not the number |
@@ -194,8 +194,7 @@ recorded rather than the heading simply being restored:
   printing plausible but wrong metadata fails.
 - An **undecodable record** ends the dump naming its location, per `kafkaLLD §16`.
 - The deferred Kafka modes had contract evidence: `dump-http` and `dump-both` remained accepted and failed
-  naming `G3`. File input was also retained at this point, before the owner retired file-backed dumping on
-  2026-09-24.
+  naming `G3`.
 
 `replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
 the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
@@ -244,8 +243,8 @@ Three things were not simple un-markings, and each is a decision worth finding l
    when an entry point is unreachable. The evidence test therefore goes through `main`, not through the
    dumper directly.
 
-`validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http`,
-`dump-both`, and, at that point, `-i` file input with a message naming G3, at exit code 2. The mode names stay in the CLI
+`validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http` and
+`dump-both` with a message naming G3, at exit code 2. The mode names stay in the CLI
 because §2.3 makes them a contract; what changed is that asking for them says when they return instead of
 producing output that does not match the mode requested.
 
@@ -1212,7 +1211,7 @@ The pass's one-pass evidence findings were also corrected:
 - the public partition-state diagnostic and stop-marker reoffer comments now describe their actual visibility
   and FIFO precondition.
 
-Validation after these corrections: the 20 focused deterministic intake/association/reconstruction tests pass;
+Validation after these corrections: the 24 focused deterministic intake/association/reconstruction tests pass;
 all three `SourceAssemblyEvidenceTest` real-proxy/real-topic cases pass, including direct assertions that the
 raw line precedes its request/response callbacks and shares their relative-time origin; and the payloadless
 real-topic HTTP dump still fails with the violating record identified.
