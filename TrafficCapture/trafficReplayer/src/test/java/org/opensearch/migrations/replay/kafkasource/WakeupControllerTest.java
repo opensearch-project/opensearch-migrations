@@ -68,6 +68,29 @@ class WakeupControllerTest {
     }
 
     /**
+     * Only the protected operation itself may report absorbing a wakeup.
+     *
+     * <p>Outside that phase the outstanding flag belongs to the poll boundary, and clearing it from anywhere else
+     * consumes a wakeup {@link WakeupController#leavePollAndConsumeWakeup()} still has to see — leaving the
+     * controller free to issue a second one into a Kafka operation, which {@code kafkaLLD §5.4} forbids.
+     */
+    @Test
+    void onlyAProtectedOperationMayReportAbsorbingAWakeup() {
+        controller.enterPoll();
+        Assertions.assertTrue(controller.onInputSubmitted(), "precondition: one wakeup is outstanding");
+
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            controller::onWakeupAbsorbedByProtectedOperation,
+            "a caller outside a protected operation must not consume the poll boundary's wakeup"
+        );
+        Assertions.assertTrue(
+            controller.isWakeupOutstanding(),
+            "the rejected call must leave the wakeup for the poll boundary to consume"
+        );
+    }
+
+    /**
      * A poll must not settle in to wait on input that is already queued.
      *
      * <p>A submission while the loop is {@code RUNNING} correctly issues no wakeup — the loop reaches the queue

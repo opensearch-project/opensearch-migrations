@@ -240,6 +240,18 @@ public final class KafkaSourceOwner {
         wakeupController.enterProtectedOperation();
         try {
             port.commitAsync(positionsOf(submitted), outcome -> onCommitResolved(submitted, outcome));
+        } catch (WakeupException absorbedByTheSubmission) {
+            // §5.4 leaves this owner as the only interpreter of a wakeup, which is why the adapter propagates it
+            // rather than classifying it. Resolving it here is what releases the one-in-flight slot §5.7 permits
+            // only one of; a propagating exception would strand that slot for the life of the process, and a
+            // submission interrupted before it registered a callback has nothing else that can resolve it.
+            //
+            // The outcome is the conservative reading rather than a stated rule: §5.7 names a wakeup as an
+            // unknown outcome for a *bounded synchronous* commit, and says nothing about an interrupted
+            // asynchronous submission. Unknown is right either way — the operation may already have reached the
+            // broker — and it keeps a still-owned partition's position and re-offers it.
+            wakeupController.onWakeupAbsorbedByProtectedOperation();
+            onCommitResolved(submitted, KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
         } finally {
             wakeupController.leaveProtectedOperation();
         }

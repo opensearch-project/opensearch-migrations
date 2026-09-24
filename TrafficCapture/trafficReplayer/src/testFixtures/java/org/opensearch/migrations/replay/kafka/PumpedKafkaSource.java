@@ -82,6 +82,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private Duration commitDuration;
     private boolean wakeupNextPollAfterRebalance;
     private boolean wakeupNextCommitSync;
+    private boolean wakeupNextCommitAsync;
     private boolean neverResolveAsyncCommits;
     private java.util.function.Consumer<String> observationListener = call -> {};
 
@@ -167,6 +168,17 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         wakeupNextCommitSync = true;
     }
 
+    /**
+     * Interrupts the next {@link #commitAsync} with {@code WakeupException} before it registers a callback.
+     *
+     * <p>An asynchronous submission is still a Kafka call, so a wakeup outstanding when it begins interrupts it
+     * exactly as it interrupts a blocking one. The submission then never resolves through its callback, which is
+     * what makes the owner's own resolution of it observable.
+     */
+    public void scriptCommitAsyncWakeup() {
+        wakeupNextCommitAsync = true;
+    }
+
     public void setCommittedPosition(TopicPartition topicPartition, long position) {
         committedPositions.put(topicPartition, position);
     }
@@ -205,7 +217,9 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             throw new WakeupException();
         }
         if (neverResolveAsyncCommits) {
-            // Held, exactly as the real client holds a callback until the poll its broker response arrives by.
+            // Held past every poll. The real client holds a callback only until the poll its broker response
+            // arrives by, so this is deliberately stricter than Kafka: it is the only way to hold an operation
+            // unresolved across the several polls a reassign-then-read scenario needs.
         } else {
             while (!pendingAsyncCommits.isEmpty()) {
                 pendingAsyncCommits.removeFirst().run();
@@ -255,6 +269,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     ) {
         var submitted = Map.copyOf(nextPositions);
         record(new CommitSubmittedAsync(submitted));
+        if (wakeupNextCommitAsync) {
+            wakeupNextCommitAsync = false;
+            // Interrupted before a callback is registered, so nothing here will ever resolve this submission.
+            throw new WakeupException();
+        }
         // Held rather than resolved here, because the real client resolves from inside a later poll(). A test
         // that asserts the loop is not blocked depends on that difference being real in the fixture too.
         pendingAsyncCommits.add(() -> onResolved.accept(nextCommitOutcome));

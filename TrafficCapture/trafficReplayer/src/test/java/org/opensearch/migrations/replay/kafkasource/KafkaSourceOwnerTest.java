@@ -1069,6 +1069,41 @@ class KafkaSourceOwnerTest {
     }
 
     /**
+     * A wakeup interrupting the loop's asynchronous submission must not strand the one-in-flight slot.
+     *
+     * <p>{@code kafkaLLD §5.7} allows "at most one commit operation ... in flight at a time" and the slot is
+     * released when a submission resolves. An asynchronous submission interrupted before it registers a callback
+     * has no callback to resolve it, so the owner resolves it — {@code §5.7} makes a wakeup-interrupted commit
+     * an unknown outcome, and an unknown outcome keeps a still-owned partition's position and offers it again.
+     * Left unresolved the source never commits again for the life of the process.
+     */
+    @Test
+    void aWakeupInterruptingTheLoopSubmissionReleasesTheInFlightSlot() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        port.clearHistory();
+
+        port.scriptCommitAsyncWakeup();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+
+        owner.runOnce();
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            List.of("commitAsync{traffic-0=11}", "commitAsync{traffic-0=11}"),
+            port.history().stream().filter(call -> call.startsWith("commitAsync")).toList(),
+            "the interrupted submission must resolve, or the slot it holds blocks every later commit"
+        );
+    }
+
+    /**
      * A wakeup that interrupts the revocation commit must not silence the wakeup the callback owes.
      *
      * <p>{@code kafkaLLD §5.4} has a submission during callback handling issued "when callback handling

@@ -542,9 +542,10 @@ wrong, which leaves the record accurate without rewriting pushed history.
 
 ### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23, extended 2026-09-24
 
-Thirteen properties broken one at a time in a throwaway worktree. **All thirteen caught**, seven of them only
-after the rounds below added the tests that see them. The last two mutate the Kafka adapter, which the harness
-never touched until a fatal defect in it survived eleven green mutations.
+Seventeen properties broken one at a time in a throwaway worktree. **All seventeen caught**, eleven of them only
+after the rounds below added the tests that see them. Four mutate the Kafka adapter, which the harness never
+touched until a fatal defect in it survived eleven green mutations — and the harness itself had to be fixed
+before any of this counted, because it could report full coverage from a dirty tree.
 
 | Property removed | Caught by |
 |---|---|
@@ -561,6 +562,10 @@ never touched until a fatal defect in it survived eleven green mutations.
 | Force cancellation skipped on the early-return path | `aGenerationWhoseCleanupCompletesEarlyReturnsWithoutWaitingOutTheInterval` |
 | Adapter no longer re-throws `WakeupException` | `aWakeupInterruptingACommitReachesTheOwnerRatherThanTheFatalBranch` |
 | An async submission refused before registration never resolves | `anAsynchronousSubmissionRefusedBeforeRegistrationStillResolvesOnce` |
+| Adapter classifies an async-submission wakeup instead of propagating it | `aWakeupOutOfAnAsynchronousSubmissionReachesTheOwnerRatherThanTheFatalBranch` |
+| Adapter resolves one submission twice | `aSubmissionThatBothResolvesAndThrowsResolvesExactlyOnce` |
+| Interrupted loop submission never resolves | `aWakeupInterruptingTheLoopSubmissionReleasesTheInFlightSlot` |
+| Absorption reportable from any phase | `onlyAProtectedOperationMayReportAbsorbingAWakeup` |
 
 **The first run of this pass reported all six as surviving, and was wrong three times over.** Worth recording,
 because each failure mode makes the tool claim safety it has not established:
@@ -695,6 +700,37 @@ milestone's fakes are written, because G3 introduces `SourceAssemblySink`, which
 policy explicitly denies `bedrock-mantle:CreateInference` for the role `codex-DO-NOT-DELETE` resolves to, so
 the model call never happens. Credentials are valid — the deny is an org policy. The reviewer was `claude -p`
 plus an in-session read-only subagent, both with the calibrated prompt.
+
+### Eighth review pass, 2026-09-24 — the reviewer supplied a patch
+
+The first round run under `AGENTS.md` §3.1b's role swap, at the owner's direction: three consecutive rounds had
+found their defect in the previous round's fix of the same concern, which is §3.1b's sharper signal. The
+reviewer was asked for a patch rather than a finding.
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| **`commitAsync`'s new catch makes a routine wakeup process-fatal** | **REAL, Class A, latent, and mine** | The defect the previous round fixed in `commitSync`, reintroduced three lines above it. `§5.4` decides it without needing `§5.7`'s outcome list: "`WakeupException` is caught only at the poll-loop boundary … It is not logged as a Kafka failure." Latent because the classic consumer's `commitAsync` ends in `pollNoWakeup`, which skips the wakeup check |
+| **The same catch can resolve one submission twice** | **REAL, Class A, latent** | My comment asserted "a throw here means no callback was ever registered", which the client does not offer — `ConsumerCoordinator` registers the listener and then runs `pollNoWakeup`. Two resolutions release the in-flight slot `§5.7:446` allows only one of, and credit the same records twice. One-shot now, so the rule holds by construction rather than by every post-registration throw happening to classify as structural |
+| **The falsification harness destroys uncommitted production edits and attributes the fallout to its mutations** | **REAL, and the one to fix first** | `git checkout` per mutation. Run against a dirty tree it wipes the edits and reports every later mutation as CAUGHT by tests failing against the reverted baseline. The reviewer got a full-coverage report with impossible attributions. Now refuses on dirty production files and on a red baseline, with distinct exit codes |
+| The new phase guard is unevidenced | **REAL** | Deleting it broke no test; every caller is already inside a protected operation. Covered, and mutation 17 |
+| A fixture comment claims Kafka fidelity the hook does not have | **REAL** | `neverResolveAsyncCommits` holds a callback past every poll; the real client holds one only until the poll its response arrives by. Corrected to say it is stricter, and why |
+| Two of this round's fixture fidelity changes are unobservable | **REAL, register accuracy** | `scriptCommitDuration` and `scriptCommitSyncWakeup` are never used together, so "advance the clock before the throw" and "run pending callbacks before the throw" are correct but unevidenced. Not counted as proved |
+| The patch's citation for the *asynchronous* unknown outcome | **over-read, corrected** | `§5.7:460` names a wakeup as an unknown outcome for "a bounded **synchronous** commit … or a wakeup interrupted one". It says nothing about an interrupted asynchronous submission. `§5.4` still makes the adapter's classification a defect; the owner's mapping to `OUTCOME_UNKNOWN` is the conservative reading, not a stated rule, and the code says so. C5 below |
+
+**The patch was verified, not applied.** §3.1b requires it, and this round is why: the patch was sound and its
+one flaw was a citation that proved less than it claimed. Applying it unread would have put a confident wrong
+reference into production and into this register.
+
+**What the harness defect means for the evidence already recorded.** Every earlier run in this register was made
+from a freshly-created worktree at a commit, with the tree clean, which is the condition the new guard enforces.
+Those results stand. The defect was a trap for the next person rather than a corruption of what is written down
+— but there was no way to tell that from the output, which is the point.
+
+### Open questions for the owner — added by the eighth pass
+
+| # | Question | Current behaviour | Why it is not mine to decide |
+|---|---|---|---|
+| C5 | What is the outcome of an **asynchronous** commit submission interrupted by a wakeup, or one that fails a *local* timeout? `§5.7` defines the unknown outcome for a bounded synchronous commit only | Both map to `OUTCOME_UNKNOWN` for the wakeup; a local `TimeoutException` out of `commitAsync` currently reaches the fatal branch, while the same type out of `commitSync` is an unknown outcome | The design enumerates outcomes for the synchronous case and routes "any unrecognized commit failure" to the process-failure path. On `group.protocol=consumer` a local timeout is reachable with the commit already handed to the background thread, so the operation may have reached the broker — which is the definition of unknown, but the design does not say it |
 
 ### A G2 commit that carried 600 lines of G3, and the rule it broke
 
