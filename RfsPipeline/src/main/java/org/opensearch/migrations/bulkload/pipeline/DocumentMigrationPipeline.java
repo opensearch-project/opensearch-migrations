@@ -120,28 +120,56 @@ public class DocumentMigrationPipeline {
     /**
      * Migrate all documents for a single partition from source to sink.
      *
-     * @param partition         the partition to migrate
-     * @param collectionName    the target collection name
-     * @param startingDocOffset the document offset to resume from (0 for start)
+     * @param partition        the partition to migrate
+     * @param collectionName   the target collection name
+     * @param startingPosition the source position to resume from (0 for start)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
-        final long[] cumulativeOffset = { startingDocOffset };
+    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingPosition) {
+        return migratePartition(partition, collectionName, startingPosition, 0L);
+    }
+
+    /**
+     * Migrate all documents for a single partition, carrying forward a document total from
+     * a previous lease generation.
+     *
+     * @param partition        the partition to migrate
+     * @param collectionName   the target collection name
+     * @param startingPosition the source position to resume from (0 for start)
+     * @param docsAlreadyEmitted documents already emitted for this partition by previous lease
+     *                           generations, making {@link ProgressCursor#cumulativeDocsEmitted()}
+     *                           a partition-wide total rather than a per-generation subtotal
+     * @return a Flux of progress cursors, one per batch written
+     */
+    public Flux<ProgressCursor> migratePartition(
+        Partition partition, String collectionName, long startingPosition, long docsAlreadyEmitted
+    ) {
+        if (docsAlreadyEmitted < 0) {
+            throw new IllegalArgumentException("docsAlreadyEmitted must be >= 0, got " + docsAlreadyEmitted);
+        }
+        final long[] emitted = { docsAlreadyEmitted };
+        // Used only when the source exposes no position; see Document#position().
+        final long[] fallbackPosition = { startingPosition };
         return Flux.defer(() -> {
             currentPartition.set(partition);
-            return source.readDocuments(partition, startingDocOffset)
+            return source.readDocuments(partition, startingPosition)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
+                    // Captured before the write so the cursor reflects what was read even if the
+                    // sink reorders internally.
+                    var lastPosition = batch.get(batch.size() - 1).position();
                     return sink.writeBatch(collectionName, batch)
                         .map(result -> {
-                            cumulativeOffset[0] += result.docsInBatch();
+                            emitted[0] += result.docsInBatch();
+                            fallbackPosition[0] += result.docsInBatch();
                             totalDocs.addAndGet(result.docsInBatch());
                             totalBytes.addAndGet(result.bytesInBatch());
                             return new ProgressCursor(
                                 partition,
-                                cumulativeOffset[0],
+                                lastPosition.orElse(fallbackPosition[0]),
+                                emitted[0],
                                 result.docsInBatch(),
                                 result.bytesInBatch()
                             );
