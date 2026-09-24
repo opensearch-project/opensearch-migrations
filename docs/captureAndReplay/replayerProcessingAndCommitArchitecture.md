@@ -686,6 +686,12 @@ Only `CloseObservation` terminates a captured connection in the capture protocol
 `ConnectionExceptionObservation` is diagnostic and does not reset or terminate source
 reconstruction.
 
+Source writes observed before the request end-of-message marker are treated as an informational
+response such as `100 Continue`. Replay intake ignores that write observation, or the complete
+write-segment sequence through its segment-end marker, and continues assembling the request. It
+does not discard the request, advance its captured request ordinal, create source-response state,
+or leave request assembly.
+
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,
 expiration, request, target, tuple, or record-completion state.
 

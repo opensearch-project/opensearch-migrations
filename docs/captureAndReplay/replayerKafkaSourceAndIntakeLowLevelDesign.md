@@ -700,6 +700,13 @@ The state uses `TrafficStream.priorRequestsReceived` and
 HTTP message. It discards that tail until the next captured request boundary rather than parsing it
 as a new request.
 
+If the source writes response bytes before the captured request reaches its end-of-message marker,
+replay intake treats that write as an informational response such as `100 Continue`: it ignores the
+write observation, or the complete write-segment sequence through its segment-end marker, and
+continues assembling the request. It does not discard the request, advance the captured request
+ordinal, create source-response state, or change the request-assembly phase. Subsequent response
+writes after the request end-of-message marker follow the ordinary response rules below.
+
 ### 9.1 Complete request
 
 When the parser reconstitutes a request:
