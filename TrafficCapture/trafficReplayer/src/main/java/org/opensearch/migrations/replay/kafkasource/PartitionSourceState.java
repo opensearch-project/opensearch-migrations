@@ -198,6 +198,11 @@ public final class PartitionSourceState {
      *
      * <p>Counted from acknowledgement rather than staging, because a staged position that never commits is
      * exactly the case the retirement measurement exists to reveal ({@code procCommit §9.5}).
+     *
+     * <p>A submission still unresolved when the generation retires is therefore <strong>not</strong> counted.
+     * Its outcome is genuinely unknown at that point, and under-reporting progress is the safe direction: the
+     * measurement exists so that a run of zero-commit retirements is visible, and over-reporting would hide
+     * exactly that.
      */
     public void creditRecordsCommitted(long recordsCovered) {
         recordsCommitted += recordsCovered;

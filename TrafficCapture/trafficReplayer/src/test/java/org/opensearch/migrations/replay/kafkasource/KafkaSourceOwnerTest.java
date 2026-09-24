@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
@@ -44,7 +45,7 @@ class KafkaSourceOwnerTest {
     private static final TopicPartition PARTITION_1 = new TopicPartition("traffic", 1);
     private static final Duration GRACE = Duration.ofMillis(200);
 
-    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, false);
+    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, true);
     private final AtomicLong clockNanos = new AtomicLong();
     private final ReplayIntakeInputQueue intakeInputs = new ReplayIntakeInputQueue();
     // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
@@ -66,12 +67,18 @@ class KafkaSourceOwnerTest {
             wakeupController,
             GRACE,
             clockNanos::get,
-            // A non-blocking wait: yields whatever is queued and never sleeps. The deadline still governs the
-            // bound handed to commitSync, which is what the grace-interval tests assert on, but the loop ends
-            // when the queue empties rather than when wall-clock time passes. That is the point of injecting
-            // the wait at all — with a real Object.wait, a frozen test clock and a real-time wait would be two
-            // sources for one deadline, which kafkaLLD §15.1 forbids.
-            deadline -> !sourceInputs.isEmpty()
+            // A non-blocking wait that still honours the contract: false means the deadline has passed, so when
+            // there is nothing to wait for it advances the injected clock to the deadline before saying so.
+            // Returning false with time still on the clock would let a test claim it waited out the interval
+            // when it did nothing of the kind -- the revocation test asserting that force cancellation follows
+            // the grace period would have passed while cancelling immediately.
+            deadline -> {
+                if (!sourceInputs.isEmpty()) {
+                    return true;
+                }
+                clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
+                return false;
+            }
         );
     }
 
@@ -475,16 +482,21 @@ class KafkaSourceOwnerTest {
 
     /**
      * A revocation commit does not overlap an asynchronous commit still in flight, and the records that
-     * submission covered are still credited when the synchronous one lands.
+     * submission covered are credited exactly once.
      *
-     * <p>`§5.7` allows one commit operation at a time, and the revocation path cannot wait for an outstanding
-     * one: its callback needs a poll that the callback itself is preventing. So the in-flight submission is
-     * reclaimed at revocation entry — it is already abandoned, since by the time its callback arrives the
-     * generation is retired and it resolves as a late callback. Without the reclaim, two operations overlap and
-     * the retirement count is short by whatever the abandoned one covered.
+     * <p>An asynchronous submission cannot be taken back. Kafka guarantees its callback runs before the next
+     * {@code commitSync} returns, so it resolves <em>during</em> any commit the revocation path issues — and
+     * credits its own record count, which the second commit would then credit again. Forgetting it locally does
+     * not cancel it; an earlier version of this code removed it from the in-flight map and called that a
+     * reclaim, which double-counted. Nor can the callback be waited for, since it needs a poll that this
+     * callback is preventing. So it is left to be the one operation, which is also what {@code §5.7}'s
+     * one-at-a-time rule requires.
+     *
+     * <p>The fixture models Kafka's ordering guarantee, which is what makes the double-credit reachable here
+     * rather than only in production.
      */
     @Test
-    void revocationReclaimsAnInFlightCommitRatherThanOverlappingIt() throws Exception {
+    void revocationDoesNotOverlapAnInFlightCommitAndCreditsItOnce() throws Exception {
         var port = pumpedSource(List.of(PARTITION_0));
         var owner = ownerFor(port);
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
@@ -507,21 +519,39 @@ class KafkaSourceOwnerTest {
 
         var synchronousCommits = port.observations().stream()
             .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
-            .map(PumpedKafkaSource.CommitAttempted.class::cast)
             .toList();
-        Assertions.assertEquals(
-            1,
-            synchronousCommits.size(),
-            () -> "exactly one commit may be in flight, so the reclaimed position is committed once from inside"
-                + " the callback; history: " + port.history()
+        Assertions.assertTrue(
+            synchronousCommits.isEmpty(),
+            () -> "no synchronous commit may overlap the in-flight asynchronous one; history: " + port.history()
         );
-        Assertions.assertEquals(Map.of(PARTITION_0, 11L), synchronousCommits.get(0).nextPositions());
+        // Not credited, and not reported as a zero-commit retirement either. The submission's outcome is
+        // genuinely unknown at retirement -- its callback arrives after the generation is gone -- so crediting
+        // it would be a guess, while calling it "committed nothing" would fire §9.5's stall alarm on a case that
+        // is merely unresolved. It is counted as its own outcome.
         Assertions.assertEquals(
-            1,
+            0,
             state.recordsCommitted(),
-            "the record the abandoned async submission covered must still be credited once the synchronous"
-                + " commit is acknowledged, or the retirement count under-reports"
+            () -> "an unresolved submission must not be credited; history: " + port.history()
         );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITH_UNKNOWN_COMMIT),
+            "the retirement must be reported as outcome-unknown"
+        );
+        Assertions.assertEquals(
+            0,
+            counterValue(IKafkaConsumerContexts.MetricNames.GENERATIONS_RETIRED_WITHOUT_COMMIT),
+            "and must not be reported as a zero-commit retirement, which is §9.5's stall signal"
+        );
+    }
+
+    /** Sums a counter across its recorded points, so an assertion reads the value an operator would see. */
+    private long counterValue(String metricName) {
+        return telemetry.getFinishedMetrics().stream()
+            .filter(metric -> metric.getName().equals(metricName))
+            .flatMap(metric -> metric.getLongSumData().getPoints().stream())
+            .mapToLong(point -> point.getValue())
+            .sum();
     }
 
     /** Plan A G2 exit: a poll failure is fatal, never an empty success. */

@@ -33,6 +33,29 @@ class DumpModeContractTest {
         return params;
     }
 
+    /**
+     * All three names route to the dump path, which is the half {@code validateDumpModeParams} cannot prove.
+     *
+     * <p>Without this, dropping {@code dump-http} from {@code isDumpMode} would leave every other test here
+     * green: the validator would simply never be reached, and the mode would fall through to the replay path
+     * instead of failing with its message. The dispatch and the rejection are two separate claims.
+     */
+    @Test
+    void everyDumpModeNameRoutesToTheDumpPath() {
+        for (var mode : new String[] { "dump-raw", "dump-http", "dump-both" }) {
+            Assertions.assertTrue(
+                TrafficReplayer.isDumpMode(dumpModeParams(mode)),
+                () -> mode + " must route to the dump path, or its rejection message is never reached"
+            );
+        }
+    }
+
+    @Test
+    void replayModeDoesNotRouteToTheDumpPath() {
+        Assertions.assertFalse(TrafficReplayer.isDumpMode(dumpModeParams("replay")));
+        Assertions.assertFalse(TrafficReplayer.isDumpMode(dumpModeParams(null)));
+    }
+
     @Test
     void dumpRawIsAvailable() {
         Assertions.assertDoesNotThrow(() -> TrafficReplayer.validateDumpModeParams(dumpModeParams("dump-raw")));

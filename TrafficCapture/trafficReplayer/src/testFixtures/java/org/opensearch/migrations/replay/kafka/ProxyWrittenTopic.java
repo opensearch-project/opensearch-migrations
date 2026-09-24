@@ -112,7 +112,10 @@ public final class ProxyWrittenTopic implements AutoCloseable {
             proxy = new CaptureProxyContainer(
                 () -> destinationUri,
                 () -> brokers,
-                Stream.of("--kafkaTopic", topic)
+                // A one-second heartbeat, so a test can wait for a WriterPartitionHeartbeat without sitting out
+                // the production interval. The heartbeat is one of the three payload cases the replayer must
+                // decode, so it has to be observable here rather than assumed.
+                Stream.of("--kafkaTopic", topic, "--heartbeat-interval-seconds", "1")
             );
             proxy.start();
             return new ProxyWrittenTopic(kafka, destination, proxy, topic);
@@ -245,6 +248,36 @@ public final class ProxyWrittenTopic implements AutoCloseable {
 
     public List<byte[]> readTrafficStreamValues(int atLeast) {
         return readTrafficStreamValues(atLeast, DEFAULT_READ_TIMEOUT);
+    }
+
+    /**
+     * Waits until every payload case in {@code payloadCases} has appeared on the topic, and returns the cases
+     * seen.
+     *
+     * <p>The heartbeat is the case that needs waiting for: the proxy writes one on a timer rather than in
+     * response to traffic, so a test that only drives a request will not see one, and "all three payload cases
+     * are decoded" would be an assumption rather than evidence. The fixture runs the proxy with a one-second
+     * heartbeat interval so that wait is short.
+     */
+    public java.util.Set<CaptureRecord.PayloadCase> awaitPayloadCases(
+        java.util.Set<CaptureRecord.PayloadCase> payloadCases,
+        Duration timeout
+    ) {
+        var deadline = System.nanoTime() + timeout.toNanos();
+        var seen = new java.util.LinkedHashSet<CaptureRecord.PayloadCase>();
+        while (!seen.containsAll(payloadCases) && System.nanoTime() < deadline) {
+            seen.clear();
+            for (var value : readAllRecordValues()) {
+                try {
+                    seen.add(CaptureRecord.parseFrom(value).getPayloadCase());
+                } catch (InvalidProtocolBufferException notAnEnvelope) {
+                    throw new IllegalStateException(
+                        "the proxy wrote a value that is not a CaptureRecord envelope", notAnEnvelope
+                    );
+                }
+            }
+        }
+        return seen;
     }
 
     /**

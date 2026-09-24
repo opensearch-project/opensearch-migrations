@@ -60,6 +60,8 @@ public interface IKafkaConsumerContexts {
         public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
         public static final String LATE_COMMIT_CALLBACKS = "kafkaSourceLateCommitCallbacks";
         public static final String GENERATIONS_RETIRED = "kafkaSourceGenerationsRetired";
+        public static final String GENERATIONS_RETIRED_WITH_UNKNOWN_COMMIT =
+            "kafkaSourceGenerationsRetiredWithUnknownCommitOutcome";
         public static final String GENERATIONS_RETIRED_WITHOUT_COMMIT =
             "kafkaSourceGenerationsRetiredWithoutCommit";
         public static final String RETIRED_GENERATION_RECORDS_COMMITTED =
@@ -134,7 +136,12 @@ public interface IKafkaConsumerContexts {
          * @param recordsRead every record the generation delivered to replay intake, which against
          *                    {@code recordsCommitted} gives the re-work this retirement cost
          */
-        void onGenerationRetired(String generationLabel, long recordsCommitted, long recordsRead);
+        void onGenerationRetired(
+            String generationLabel,
+            long recordsCommitted,
+            long recordsRead,
+            boolean commitOutcomeUnknown
+        );
     }
 
     /**

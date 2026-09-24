@@ -38,7 +38,8 @@ if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then
 fi
 
 merge_base=$(git merge-base "$BASE" HEAD)
-changed=$(git diff --name-only "$merge_base"...HEAD -- "$DESIGN_DIR" | sort -u)
+# Excludes the baseline marker, which lives beside the designs but is not one of them.
+changed=$(git diff --name-only "$merge_base"...HEAD -- "$DESIGN_DIR" | grep -v '/APPROVED-AT$' | sort -u)
 
 if [ -z "$changed" ]; then
     echo "No design documents changed since $BASE. Red line 1 cannot have been crossed."

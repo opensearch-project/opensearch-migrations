@@ -11,9 +11,11 @@ package org.opensearch.migrations.replay.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -137,6 +139,46 @@ class KafkaTopicDumperEvidenceTest {
                         + "\nOutput:\n" + output
                 );
             }
+        }
+    }
+
+    /**
+     * All three payload cases the proxy produces reach the topic and are rendered.
+     *
+     * <p>The heartbeat is why this is a separate test. The proxy writes one on a timer rather than in response
+     * to traffic, so the other tests here never see one and "every envelope case is decoded" was an assumption
+     * about the case most likely to be missing — a decoder that dropped `WRITERPARTITIONHEARTBEAT` would have
+     * passed everything else. The fixture runs the proxy with a one-second heartbeat interval so the wait is
+     * short rather than the production interval.
+     */
+    @Test
+    void dumpRawRendersTrafficProbeAndHeartbeatFromARealProxy() throws Exception {
+        try (var supply = ProxyWrittenTopic.start("g1-dump-all-payloads")) {
+            Assertions.assertEquals(200, supply.sendGet("/"));
+
+            var wanted = java.util.Set.of(
+                CaptureRecord.PayloadCase.TRAFFICSTREAM,
+                CaptureRecord.PayloadCase.CAPTURECAPABILITYPROBE,
+                CaptureRecord.PayloadCase.WRITERPARTITIONHEARTBEAT
+            );
+            var seen = supply.awaitPayloadCases(wanted, Duration.ofSeconds(60));
+            Assertions.assertTrue(
+                seen.containsAll(wanted),
+                () -> "the proxy did not write every payload case within the timeout; saw " + seen
+            );
+
+            var output = captureStdout(() -> TrafficReplayer.main(new String[] {
+                "--mode", "dump-raw",
+                "--kafka-traffic-brokers", supply.brokers(),
+                "--kafka-traffic-topic", supply.topic()
+            }));
+
+            Assertions.assertTrue(output.contains("PROBE"), () -> "no probe rendered. Output:\n" + output);
+            Assertions.assertTrue(output.contains("GET"), () -> "no captured request rendered. Output:\n" + output);
+            Assertions.assertTrue(
+                output.contains("HEARTBEAT"),
+                () -> "no WriterPartitionHeartbeat rendered, though one is on the topic. Output:\n" + output
+            );
         }
     }
 

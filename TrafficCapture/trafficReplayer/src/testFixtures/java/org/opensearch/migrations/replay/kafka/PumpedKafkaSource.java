@@ -236,6 +236,13 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     @Override
     public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
         record(new CommitAttempted(Map.copyOf(nextPositions), bound));
+        // Kafka guarantees a pending commitAsync callback is invoked before the following commitSync returns,
+        // so an asynchronous submission is not abandoned merely by being forgotten locally: its callback still
+        // arrives, and still carries the positions and counts it was given. Modelling that here is what makes
+        // double-crediting reachable in a test rather than only in production.
+        while (!pendingAsyncCommits.isEmpty()) {
+            pendingAsyncCommits.removeFirst().run();
+        }
         // Advances the injected clock, which is what lets a test drive a grace interval to its deadline without
         // sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
         if (commitDuration != null) {
