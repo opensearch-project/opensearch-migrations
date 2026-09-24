@@ -38,10 +38,11 @@ The architecture must make these properties straightforward to reason about:
    partitions continue.
 10. Expected outcomes are explicit typed values. An unexpected exception escaping an owner is a
    process failure.
-11. Kafka input is requested one partition batch at a time. Replay intake requests another batch
-    while the partition has fewer than the configured number of requests whose retry-policy
-    source-response input is complete or explicitly unavailable and whose target turn has not
-    finished.
+11. Kafka input ordinarily flows one partition batch at a time. Assignment adds one source-local
+    bootstrap entitlement while replay intake may add one explicit request from its normal demand
+    pass, producing a bounded two-batch overshoot. Replay intake requests another batch while the
+    partition has fewer than the configured number of requests whose retry-policy source-response
+    input is complete or explicitly unavailable and whose target turn has not finished.
 12. Correctness-relevant asynchronous work has a required typed return path to the owner that must
     act on its result.
 13. Proxy-side periodic connection-record publication affects only where `TrafficStream` records
@@ -436,10 +437,11 @@ The Kafka source and replay intake exchange immutable messages through thread-sa
 Kafka thread removes and applies Kafka-source inputs. Only the replay-intake thread removes and
 applies replay-intake inputs.
 
-Replay intake requests records one partition batch at a time. The Kafka source may satisfy
-requests for several partitions in one `poll()`, but it pauses each returned partition before its
-next poll and sends a separate batch message for each partition. Replay intake applies one complete
-partition batch before requesting another batch for that partition.
+Replay intake keeps at most one explicit request outstanding per partition generation. Assignment
+adds one source-local bootstrap entitlement, so a newly assigned partition may produce two batches
+before demand settles. The Kafka source may satisfy demand for several partitions in one `poll()`,
+but it pauses each returned partition before its next poll and sends a separate batch message for
+each partition. Replay intake applies each complete partition batch in delivery order.
 
 Kafka, Netty, and tuple-output code submit immutable inputs to replay intake. Replay intake never
 synchronously waits for Kafka, target, or tuple completion.
@@ -534,7 +536,7 @@ The source owner sends immutable record batches and partition-lifecycle messages
 It accepts next-batch requests, record-processing completion, generation-cleanup completion, and
 protocol-violation messages from replay intake.
 
-#### Partition batch request cycle
+#### Partition batch demand cycle
 
 ```mermaid
 sequenceDiagram
@@ -542,9 +544,18 @@ sequenceDiagram
     participant Source as Kafka source owner
     participant Kafka as Kafka
 
-    Intake->>Source: RequestNextPartitionBatch(partition, generation)
-    Source->>Source: Record one outstanding batch request
-    Source->>Kafka: Resume partition when no other pause reason applies
+    Kafka-->>Source: Assign partition
+    Source->>Kafka: Pause partition
+    Source->>Source: Install generation and bootstrap entitlement
+    Source->>Intake: PartitionGenerationAssigned
+
+    par Source bootstrap path after assignment input is accepted
+        Source->>Kafka: Resume partition when no other pause reason applies
+    and Independent replay-intake demand path
+        Intake->>Intake: Apply assignment and recompute demand over all assigned partitions
+        Intake-->>Source: RequestNextPartitionBatch when demand is open
+        Source->>Source: Record one explicit request in addition to bootstrap
+    end
 
     loop Until records arrive or lifecycle state changes
         Source->>Kafka: poll()
@@ -661,9 +672,8 @@ Replay intake:
 - tracks each reconstituted request's deterministic source-response boundary for retry policy;
 - tracks whether each reconstituted request remains in target supply and whether its retry-policy
   source-response input is resolved;
-- recomputes per-partition Kafka input demand after every input that can change it: an applied
-  partition batch, `ConnectionRequestFinished`, retry-input resolution, a
-  finalized-archive partition end, cancellation, or partition-generation cleanup;
+- recomputes per-partition Kafka input demand over all assigned partitions after completely
+  applying every input, including `PartitionGenerationAssigned`;
 - processes `WriterPartitionHeartbeat` records;
 - applies broker-time expiration after missed heartbeats;
 - associates processing with the Kafka records that supplied it;
@@ -1049,9 +1059,10 @@ owner accepts each result. It never calls Kafka commit code.
 
 The replayer retains three distinct backpressure controls:
 
-1. **Per-partition Kafka input demand.** Replay intake requests one next batch when it needs more
-   records. The Kafka source resumes only partitions with an outstanding request and continues
-   group-maintenance polls while partitions are paused.
+1. **Per-partition Kafka input demand.** A new assignment begins with one source-local bootstrap
+   entitlement. Replay intake still runs its ordinary demand pass after applying the assignment and
+   may add one explicit next-batch request. The Kafka source resumes only partitions with bootstrap
+   or explicit demand and continues group-maintenance polls while partitions are paused.
 2. **Target-attempt limit.** The configured `--max-concurrent-target-attempts` value is implemented
    by target-concurrency permits, the top-level architecture's concurrency slots, held only while a
    target attempt is in progress. A permit is acquired immediately before a prepared head request
@@ -1064,10 +1075,11 @@ The replayer retains three distinct backpressure controls:
 
 These controls solve different problems and do not replace one another.
 
-For each partition, the Kafka source owner tracks an outstanding batch request, prior-generation
-cleanup, and revocation/shutdown as independent conditions. A partition is effectively readable
-only when one batch request is outstanding, no prior-generation cleanup is pending, and neither
-revocation nor shutdown prohibits intake. Clearing one pause reason cannot clear another.
+For each partition, the Kafka source owner tracks its assignment bootstrap entitlement, at most one
+intake-issued batch request, prior-generation cleanup, and revocation/shutdown as independent
+conditions. A partition is effectively readable only when bootstrap or explicit demand is open, no
+prior-generation cleanup is pending, and neither revocation nor shutdown prohibits intake.
+Clearing one pause reason cannot clear another.
 
 ### 8.1 Kafka input demand
 
@@ -1091,6 +1103,20 @@ Replay intake requests another partition batch while this count is below `N`. A 
 target replay before it contributes to the count. This count controls Kafka input demand, not
 target admission or target ordering.
 
+A new partition generation begins with one source-local bootstrap entitlement. The source submits
+`PartitionGenerationAssigned` after installing that entitlement and the generation's cleanup gate,
+but before permitting Kafka to read. Replay intake creates state expecting the bootstrap batch and
+then runs the same end-of-input demand pass it runs after every other input, over all assigned
+partitions. If demand is open, it may immediately submit one `RequestNextPartitionBatch` while the
+bootstrap entitlement remains open.
+
+The bootstrap batch and explicitly requested batch may therefore both arrive even when one batch
+would have satisfied demand. That bounded overshoot is intentional: Kafka batches are already
+indeterminately sized, and avoiding one ordinary demand signal during assignment is not worth a
+second synchronization protocol. The source consumes bootstrap first and preserves its submission
+order, so replay intake applies the assignment, bootstrap batch, and explicitly requested batch in
+that order. No synthetic or empty batch is sent.
+
 When retry input resolves for a request that still belongs to target supply, replay intake adds
 that request to the count exactly once. `ConnectionRequestFinished` or cancellation removes it
 exactly once if it was counted and marks it ineligible for later addition. Retry-input resolution
@@ -1105,24 +1131,25 @@ Replay intake applies a complete partition batch before recomputing demand. It d
 remainder of that batch or skip offsets. Batch overshoot may therefore increase the request count
 beyond `N`.
 
-When demand requires more records and no earlier request is outstanding, replay intake submits one
-`RequestNextPartitionBatch` for that partition generation. The Kafka source resumes the partition
-only while that request remains outstanding and no generation-cleanup or lifecycle condition
-prohibits reading. When a poll returns records for that partition, the source pauses it before the
-next poll and sends the complete partition batch to replay intake. Replay intake must not request the
-next batch until it has applied every record in the current one.
+When demand requires more records and no intake-issued request is outstanding, replay intake
+submits one `RequestNextPartitionBatch` for that partition generation. The Kafka source resumes the
+partition while either the bootstrap entitlement or that request remains outstanding and no
+generation-cleanup or lifecycle condition prohibits reading. When a poll returns records for that
+partition, the source pauses it before the next poll and sends the complete partition batch to
+replay intake. The assignment bootstrap is the sole case in which two batch entitlements may
+overlap; replay intake never has more than one explicit request outstanding.
 
-An empty poll does not resolve the request. The partition remains requested and resumed. Local
+An empty poll resolves neither bootstrap nor explicit demand. The partition remains resumed. Local
 completion inputs such as `ConnectionRequestFinished` are applied by the replay-intake thread
 without waiting for another Kafka record.
 
 ```mermaid
 flowchart TD
-    A["Replay intake applies an input that can change demand for partition P"]
+    A["Replay intake completely applies any input"]
     B{"Fewer than N requests have resolved retry input<br/>and unfinished target turns?"}
-    C["Submit one RequestNextPartitionBatch<br/>if none is outstanding"]
+    C["Submit one RequestNextPartitionBatch<br/>if no explicit request is outstanding"]
     D["Do not request another batch"]
-    E["Kafka source combines demand with<br/>generation-cleanup and lifecycle state,<br/>then resumes or keeps P paused"]
+    E["Kafka source combines bootstrap or explicit demand with<br/>generation-cleanup and lifecycle state,<br/>then resumes or keeps P paused"]
     F["Kafka returns records for P"]
     G["Kafka source pauses P and sends<br/>one PartitionRecordBatch"]
     H["Replay intake applies the entire batch"]
@@ -1343,6 +1370,9 @@ finished. The exact Java type names belong in the lower-level design.
 If Kafka assigns the same partition again before the old local generation finishes cleanup, the
 Kafka source owner pauses that newly assigned partition.
 
+If assignment and revocation repeat before cleanup catches up, the newest generation remains paused
+until every earlier local generation still cleaning up has reported cleanup.
+
 Unrelated assigned partitions remain active. The replayer does not buffer records from the paused
 partition in application memory; Kafka withholds them until the source owner resumes that
 partition.
@@ -1354,8 +1384,10 @@ The partition resumes only after replay intake reports that:
 - old-generation process-local bookkeeping was removed.
 
 Finishing old-generation cleanup clears only the generation-cleanup pause reason. The partition
-remains paused if no batch request is outstanding or if revocation or shutdown still prohibits
-intake.
+remains paused if neither bootstrap nor explicit batch demand is outstanding, or if revocation or
+shutdown still prohibits intake. The assignment bootstrap normally remains open during cleanup,
+so clearing the last cleanup obligation makes the partition readable without another demand
+signal.
 
 No timeout declares cancellation successful. A timeout may terminate the process.
 
@@ -1679,18 +1711,18 @@ output, and Kafka-record completion remain independent and may continue afterwar
 
 ### 13.4 Backpressure and Kafka tests
 
-- Kafka input demand uses at most one outstanding batch request per partition generation and
-  continued group-maintenance polling. Batch demand, prior-generation cleanup, and
-  revocation/shutdown are independent pause reasons; clearing one cannot resume a partition while
-  another remains.
+- Kafka input demand uses at most one intake-issued batch request per partition generation, plus
+  the one source-local bootstrap entitlement created by assignment, and continued
+  group-maintenance polling. Batch demand, prior-generation cleanup, and revocation/shutdown are
+  independent pause reasons; clearing one cannot resume a partition while another remains.
 - With `N = P * T`, `P` defaults to two retry-ready requests per target Netty event-loop thread and
   `T` is fixed at startup. Replay intake requests a new partition batch whenever fewer than `N`
   requests have resolved retry input and unfinished target turns.
 - A complete captured response can make a request retry-ready well before `B + W`.
 - A slow or missing response keeps demand open until complete or explicitly unavailable.
-- Demand is recomputed after an applied partition batch, `ConnectionRequestFinished`, retry-input
-  resolution, finalized-archive partition end, cancellation, and generation cleanup. Empty polls
-  leave the existing request outstanding and are not sent to replay intake.
+- Demand is recomputed over all assigned partitions after every replay-intake input, including
+  `PartitionGenerationAssigned`. Empty polls leave bootstrap and explicit demand outstanding and
+  are not sent to replay intake.
 - A request may begin target replay before retry input resolves. Resolving retry input after
   `ConnectionRequestFinished` or cancellation does not add that request back to supply.
 - Startup rejects `P < 1`, `T < 1`, and `W <= 0`; the defaults produce `N = 2 * T` and a

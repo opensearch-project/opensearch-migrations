@@ -72,12 +72,14 @@ The Kafka source and replay intake exchange immutable messages through thread-sa
 Kafka thread calls `KafkaConsumer`. Only the replay-intake thread changes replay-intake state.
 Neither waits for the other to run arbitrary work.
 
-Kafka input flows one partition batch at a time. Replay intake keeps at most one
-`RequestNextPartitionBatch` outstanding per partition generation. The Kafka source resumes only
-partitions with an outstanding request; when one `poll()` returns records, it groups them by
-partition, pauses each partition represented in the result before the next poll, and answers each
-outstanding request with one `PartitionRecordBatch`. Replay intake fully applies a batch before
-requesting the next batch for the same partition. The
+Kafka input ordinarily flows one partition batch at a time. A new assignment adds one source-local
+bootstrap entitlement, while replay intake may concurrently keep at most one
+`RequestNextPartitionBatch` outstanding per partition generation; assignment can therefore produce
+a bounded two-batch overshoot. The Kafka source resumes only partitions with bootstrap or explicit
+demand; when one `poll()` returns records, it groups them by partition, pauses each partition
+represented in the result before the next poll, and consumes one entitlement per
+`PartitionRecordBatch`. Replay intake fully applies each batch in delivery order and recomputes
+demand after every input. The
 [Kafka Source and Replay Intake Low-Level Design](replayerKafkaSourceAndIntakeLowLevelDesign.md)
 defines the mechanics.
 
@@ -100,7 +102,7 @@ are still typed and explicit so that completion and cleanup cannot hide in detac
 ```mermaid
 flowchart TD
     Demand["Replay intake requests the next batch<br/>for one partition generation"]
-    Poll["Kafka source resumes requested partitions<br/>and polls"]
+    Poll["Kafka source resumes partitions with batch demand<br/>and polls"]
     Register["Kafka source registers every observed record<br/>in partition and offset order"]
     Deliver["Kafka source pauses each partition returned<br/>and sends its partition batch"]
     Apply["Replay intake applies each CaptureRecord payload<br/>then may request another batch"]

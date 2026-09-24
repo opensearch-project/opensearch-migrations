@@ -366,13 +366,17 @@ total-loss-of-function defect, and this is the milestone that retires it.
 trade-off, `§5.2` assignment, `§5.3` batch request and delivery, `§5.4` poll interruption and wakeup,
 `§5.5` poll-result registration, `§5.6` record-processing-finished, `§5.7` commit submission. Also
 `kafkaLLD §3:106-147`; `procCommit §5.1:518-651` and `§8:1048-1071`; `replayerLLD §2:75-94`.
-**Required tests: `kafkaLLD §17.4:983-1007`** — nineteen cases, the densest list in the corpus, and
+**Required tests: `kafkaLLD §17.4:983-1007`** — twenty-eight cases, the densest list in the corpus, and
 **shared with `G7`**. The section's title is its own partition: the Kafka half is G2's, the demand half is
 G7's, which cites the same section. G2 owns cases 7 (source-side), 8, 9, 10, 13, 15, 16, 17, 18 and 19.
 Cases 1–6, 11, 12, 14 and case 7's intake half need the `§13` supply count, `N = P * T_threads`, and the
 retry boundary — none of which exists before `G6`/`G7` — and are deferred to `G7` with a row each in the
 register's deferral ledger. Writing them here would mean standing up intake demand state inside G2, which is
 the lateral expansion §6 of `AGENTS.md` forbids.
+
+The owner-authorized assignment-bootstrap amendment arrived after G2 closed. Its new cases 25–27
+are owned by G7, where source bootstrap and intake demand are implemented together; case 28's
+cleanup-gated release is owned by G8. G2's Exit therefore does not claim those post-close cases.
 
 `KafkaSourceOwner`, `KafkaSourceInputQueue`, `PartitionSourceState`, `WakeupController`,
 `ObservedRecordCommitQueue` registration. Deferred, coalesced `wakeup()`, suppressed during rebalance
@@ -531,26 +535,28 @@ owned by intake state. Covers `D9`; contributes `R6`, `R7`, `R14`.
 ### G7 — Demand model
 
 **Design refs:** `kafkaLLD §13:765-829` — the four transitions that may change the count, the
-recomputation trigger list, and the `idle`/`requested`/`applying` state machine. Symbol definitions and
+after-every-input demand pass, and the bootstrap plus explicit-request state machines. Symbol definitions and
 the counting rule `procCommit §8.1:1072-1140`; the explicit non-goal `§8.3:1219-1248`; the no-cap
 trade-off stated once at `kafkaLLD §5.1:264-269`. The design writes this as `N = P * T`
 (`procCommit:1079`); this plan writes `T_threads` because the design also uses `T` for the
 first-traffic fallback timestamp (`captureArch §8.1`). Same rule; the `T_threads`/`T_first` convention is
 declared at `replayerRebuildPlan.md:91`.
 **Required tests: `kafkaLLD §17.4:983-1007`**, shared with `G2`. **This milestone owns the demand half**:
-cases 1–6, 11, 12, 14 and the intake half of case 7, all deferred here from `G2` because they need the
+cases 1–6, 11, 12, 14, 25–27 and the intake half of case 7, all deferred here from `G2` because they need the
 `§13` supply count, `N = P * T_threads`, and — for cases 3, 4 and 14 — the `G6` retry boundary. G2 proved
 the Kafka half. See the register's deferral ledger for the row behind each case.
 
-`RequestNextPartitionBatch` / `PartitionRecordBatch`, at most one outstanding request per partition
-generation, `N = P * T_threads` over requests with resolved retry input and unfinished target turns.
-Empty polls neither resolve a request nor reach intake. No record or byte cap exists to be removed.
+`RequestNextPartitionBatch` / `PartitionRecordBatch`, one assignment bootstrap entitlement plus at
+most one intake-issued request per partition generation, `N = P * T_threads` over requests with
+resolved retry input and unfinished target turns. Empty polls resolve neither entitlement and do
+not reach intake. No record or byte cap exists to be removed.
 
 **Exit:** intake requests another batch only while retry-ready supply is below `N`; a fast complete
 response satisfies supply before `B + W`; a target-finished or cancelled request cannot re-enter supply;
 no cap can block the reads needed to reach retry or heartbeat evidence; **intake enforces at most one
-outstanding batch request per generation on its own side, cannot request the next batch until the current
-one is fully applied, and a batch that overshoots `N` loses and reorders nothing**. Covers `D15` — the
+intake-issued batch request per generation on its own side, recomputes demand after every input
+including assignment, applies bootstrap and explicit batches completely in delivery order, and a
+batch—or the bounded two-batch assignment overshoot—that exceeds `N` loses and reorders nothing**. Covers `D15` — the
 hard-cap deadlock cannot recur because no cap exists to saturate. Contributes `R4`, `R5`, `R7`, `R18`.
 
 ### G8 — Cancellation, generation cleanup, protocol violation
@@ -560,7 +566,8 @@ including what the Kafka thread does while awaiting the deadline, `§15.2` force
 conditions for cleanup completeness. Connection side `connLLD §17:658-699`. Protocol violation
 `kafkaLLD §16:922-938` and `procCommit §10.2:1390-1404`. Architecture `procCommit §3.7:376-392` and
 `§9:1249-1370`, especially `§9.2:1261-1332` for the eight-step grace sequence and `§9.3` read gating.
-**Required tests: `kafkaLLD §17.5:996-1005` and `connLLD §19.5:774-781`.**
+**Required tests: `kafkaLLD §17.5:996-1005`, `kafkaLLD §17.4` case 28, and
+`connLLD §19.5:774-781`.**
 
 `GracefulGenerationCancellation(deadline)` and `ForceGenerationCancellation` scoped to
 `PartitionGenerationId`, 5-second default grace. `onPartitionsRevoked` returns as soon as intake
