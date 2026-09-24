@@ -414,10 +414,17 @@ public final class SourceConnectionState {
     }
 
     private ObservationOutcome applyRequestDropped() {
+        if (phase == Phase.DISCARDING_INHERITED_TAIL) {
+            // §9/§9.4: fresh reconstruction already reserved the inherited request's ordinal. The marker is
+            // its boundary, not a second suppressed request, and there are no process-local associations to
+            // release because this lifetime never assembled its prefix.
+            phase = Phase.BETWEEN_REQUESTS;
+            return ObservationOutcome.none();
+        }
         if (phase != Phase.ASSEMBLING_REQUEST || incomingRequest == null) {
             throw new CaptureProtocolViolation(
                 "RequestIntentionallyDropped for " + connectionProcessingId
-                    + " arrived without an incomplete request under assembly"
+                    + " arrived without an incomplete request under assembly or inherited tail under discard"
             );
         }
         // §9.4: capture suppression became known only after the proxy had recorded a prefix. That prefix is

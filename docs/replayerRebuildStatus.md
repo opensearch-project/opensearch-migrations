@@ -1220,12 +1220,25 @@ The batched falsification pass then tested sixteen mutations in one `/private/tm
 the intended evidence. Two survived: the protocol-violation cutoff test delivered the later record in the same
 batch and therefore did not prove that a separately submitted later batch was rejected, and the real-topic
 payloadless dump proved eventual failure after the two-second poll returned but did not prove the queued
-violation woke an active poll. Both evidence gaps now have deterministic checks: one submits a second batch
-after the violation, and one places the real `WakeupController` in its polling phase before intake submits the
-payloadless-record violation, then requires both an issued wakeup and the
-`kafkaSourcePollsWokenByQueuedInput` metric. `WakeupAgainstRealKafkaTest` separately proves that this same
-controller action shortens a real Kafka poll. Production changes reopen review, so G3 remains open pending the
-current read-only conformance pass and targeted falsification of these two new assertions.
+violation woke an active poll. Both evidence gaps now have deterministic checks. Removing the queued-input
+wakeup call makes
+`ReplayIntakeOwnerThreadTest.aPayloadlessRecordWakesAnActiveSourcePollWithItsProtocolViolation` fail before
+the expected wakeup is issued. Removing the replay-wide batch cutoff makes
+`RecordAssociationAccumulatorTest.aProtocolViolationRejectsLaterBatchesFromEveryPartition` admit the second
+partition's request and fail its explicit cross-partition assertion.
+
+The owner's inherited-tail and replay-wide rulings added two further timing/ordering properties. Both were
+falsified in the same direct-CLI style against committed code in one clean `/private/tmp` worktree:
+
+1. Removing only the `DISCARDING_INHERITED_TAIL` branch from `applyRequestDropped` makes
+   `SourceReconstructionTest.anIntentionallyDroppedInheritedTailEndsDiscardWithoutAdvancingAgain` fail because
+   the drop marker no longer forms a valid boundary for the inherited request.
+2. Removing only `ReplayIntakeOwner.applyRecordBatch`'s replay-wide cutoff makes
+   `RecordAssociationAccumulatorTest.aProtocolViolationRejectsLaterBatchesFromEveryPartition` fail because a
+   later batch from another partition is admitted.
+
+Every mutation was restored and each worker ended with a clean worktree. Production changes reopen review, so
+G3 remains open pending the current read-only conformance pass.
 
 ### Findings
 
@@ -1540,7 +1553,8 @@ than escalated, so the set stays enumerable:
 | `replayIntakeResponsesProvenComplete` / `replayIntakeResponsesUnprovenComplete` | Whether response completion was proved by a following request or only bounded by a close/exception |
 | `replayIntakeResponsesIncomplete` (`incompleteReason`) | How often replay intake itself stopped response assembly through the fixed expiration/cancellation reasons |
 | `replayIntakeCapturedClosesAccepted` | How many captured closes completed the terminal connection association and reached the sink |
-| `replayIntakeCaptureProtocolViolations` | How many invalid capture records stopped further application for their generation |
+| `replayIntakeCaptureProtocolViolations` | How many invalid capture records latched the replay-wide protocol-violation cutoff |
+| `replayIntakeRecordBatchesRejectedAfterProtocolViolation` | How many queued record batches, across all partitions, were rejected after the replay-wide cutoff latched |
 
 The second pair also closed a loose end: `awaitGraceDeadlineProcessingInputs` returned how the wait ended and
 **nothing read it**. A discarded return value on that method is an invitation to re-derive the conditional that

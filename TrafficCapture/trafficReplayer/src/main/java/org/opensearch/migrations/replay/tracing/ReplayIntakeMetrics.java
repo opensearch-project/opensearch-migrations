@@ -37,6 +37,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         public static final String RESPONSES_INCOMPLETE = "replayIntakeResponsesIncomplete";
         public static final String CAPTURED_CLOSES_ACCEPTED = "replayIntakeCapturedClosesAccepted";
         public static final String CAPTURE_PROTOCOL_VIOLATIONS = "replayIntakeCaptureProtocolViolations";
+        public static final String RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION =
+            "replayIntakeRecordBatchesRejectedAfterProtocolViolation";
     }
 
     private final LongCounter ownerStarted;
@@ -49,6 +51,7 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter responsesIncomplete;
     private final LongCounter capturedClosesAccepted;
     private final LongCounter captureProtocolViolations;
+    private final LongCounter recordBatchesRejectedAfterProtocolViolation;
 
     public ReplayIntakeMetrics(@NonNull Meter meter) {
         ownerStarted = counter(meter, MetricNames.OWNER_STARTED, "owners");
@@ -61,6 +64,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         responsesIncomplete = counter(meter, MetricNames.RESPONSES_INCOMPLETE, "responses");
         capturedClosesAccepted = counter(meter, MetricNames.CAPTURED_CLOSES_ACCEPTED, "closes");
         captureProtocolViolations = counter(meter, MetricNames.CAPTURE_PROTOCOL_VIOLATIONS, "violations");
+        recordBatchesRejectedAfterProtocolViolation =
+            counter(meter, MetricNames.RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION, "batches");
     }
 
     @Override
@@ -106,6 +111,11 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     @Override
     public void captureProtocolViolation() {
         captureProtocolViolations.add(1);
+    }
+
+    @Override
+    public void recordBatchRejectedAfterProtocolViolation() {
+        recordBatchesRejectedAfterProtocolViolation.add(1);
     }
 
     private static LongCounter counter(Meter meter, String name, String unit) {
