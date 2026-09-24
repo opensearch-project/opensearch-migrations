@@ -280,6 +280,7 @@ jobs:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
+          - ./schema-viewer
           - ./orchestrationSpecs
     env:
       # The secrets context is unavailable in a step `if`, so gate on this instead.
