@@ -404,11 +404,16 @@ register names G9 as the milestone that replaces the shell. Covers `D5`, `D12`, 
 
 ### G3 — Replay intake owner and source assembly
 
-**Design refs:** `kafkaLLD §6:440-466` partition intake state, `§7:467-504` applying one record in its
-ten defined steps, `§8:505-562` record work tracking including association relabeling and mixed
-records, `§9:563-650` source connection state. Also `procCommit §3.3:205-225`, `§5.2:652-743`,
+**Design refs:** `kafkaLLD §6:499-525` partition intake state, `§7:526-563` applying one record in its
+ten defined steps, `§8:564-621` record work tracking including association relabeling and mixed
+records, `§9:622-709` source connection state. Also `procCommit §3.3:205-225`, `§5.2:652-743`,
 `§6.1-6.2:763-831`; inputs table `kafkaLLD §4.1:150-206`.
-**Required tests: `kafkaLLD §17.1:941-950` and `§17.2:952-960`.**
+**Required tests: `kafkaLLD §17.1:1032-1042` and `§17.2:1043-1051`.**
+
+> The `kafkaLLD` line numbers above were +59 stale after the owner-authorized `§5.7`, `§15.1` and `§15.4`
+> amendments, and were corrected by reading the section headings rather than trusting them. **Verify a line
+> citation before reading from it**, in this milestone and every later one: §6 forbids implementing from a
+> paraphrase, and a stale cite is how someone reads the wrong section while believing they read the design.
 
 `ReplayIntakeOwner` with its own thread and typed immutable inputs, `ReplayIntakeInputQueue`,
 `PartitionIntakeState`, `SourceConnectionState`, `RecordWorkTracker`. Associations are created **as each

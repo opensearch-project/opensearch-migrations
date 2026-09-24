@@ -81,6 +81,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private RuntimeException pollFailure;
     private Duration commitDuration;
     private boolean wakeupNextPollAfterRebalance;
+    private boolean wakeupNextCommitSync;
+    private boolean neverResolveAsyncCommits;
     private java.util.function.Consumer<String> observationListener = call -> {};
 
     /** A rebalance callback can throw, because {@code onPartitionsRevoked} waits and can be interrupted. */
@@ -129,6 +131,16 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     /**
+     * Holds asynchronous commit callbacks indefinitely, so an operation can stay unresolved.
+     *
+     * <p>For scenarios that need an operation to stay unresolved across several polls — reassigning a partition
+     * takes one, and reading on it takes another.
+     */
+    public void scriptNeverResolveAsyncCommits() {
+        neverResolveAsyncCommits = true;
+    }
+
+    /**
      * Interrupts the next poll with {@code WakeupException} after its scripted rebalance callbacks have run.
      *
      * <p>This is what makes {@code kafkaLLD §17.4} case 18 expressible: a rebalance that has delivered
@@ -142,6 +154,17 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
 
     public void scriptCommitOutcome(CommitOutcome outcome) {
         nextCommitOutcome = Objects.requireNonNull(outcome);
+    }
+
+    /**
+     * Interrupts the next {@link #commitSync} with {@code WakeupException}, which is what a wakeup issued
+     * before the commit began does to it.
+     *
+     * <p>The attempt is still recorded before the throw: the call was made, and a test needs to distinguish an
+     * interrupted commit from one that never happened.
+     */
+    public void scriptCommitSyncWakeup() {
+        wakeupNextCommitSync = true;
     }
 
     public void setCommittedPosition(TopicPartition topicPartition, long position) {
@@ -181,8 +204,12 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
             // the remainder of that rebalance is delivered by a later poll.
             throw new WakeupException();
         }
-        while (!pendingAsyncCommits.isEmpty()) {
-            pendingAsyncCommits.removeFirst().run();
+        if (neverResolveAsyncCommits) {
+            // Held, exactly as the real client holds a callback until the poll its broker response arrives by.
+        } else {
+            while (!pendingAsyncCommits.isEmpty()) {
+                pendingAsyncCommits.removeFirst().run();
+            }
         }
         if (pollFailure != null) {
             var failure = pollFailure;
@@ -233,20 +260,32 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         pendingAsyncCommits.add(() -> onResolved.accept(nextCommitOutcome));
     }
 
+    /**
+     * Kafka guarantees a pending {@code commitAsync} callback is invoked before the following
+     * {@code commitSync} returns, so an asynchronous submission is not abandoned merely by being forgotten
+     * locally: its callback still arrives carrying the positions and counts it was given. Modelling that is
+     * what makes double-crediting reachable in a test rather than only in production.
+     *
+     * <p>The injected clock advance is what lets a test drive a grace interval to its deadline without
+     * sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
+     */
     @Override
     public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
         record(new CommitAttempted(Map.copyOf(nextPositions), bound));
-        // Kafka guarantees a pending commitAsync callback is invoked before the following commitSync returns,
-        // so an asynchronous submission is not abandoned merely by being forgotten locally: its callback still
-        // arrives, and still carries the positions and counts it was given. Modelling that here is what makes
-        // double-crediting reachable in a test rather than only in production.
+        // Pending async callbacks run first even when this call is about to be interrupted. The real client
+        // invokes completed commit callbacks at the top of commitOffsetsSync, before the network poll that
+        // raises WakeupException, so a callback resolving during an interrupted commit is reachable.
         while (!pendingAsyncCommits.isEmpty()) {
             pendingAsyncCommits.removeFirst().run();
         }
-        // Advances the injected clock, which is what lets a test drive a grace interval to its deadline without
-        // sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
         if (commitDuration != null) {
+            // An interrupted commit still consumed time. Advancing before the throw is what keeps a scripted
+            // duration meaningful on this path -- a real commit cannot be interrupted having taken none.
             clockAdvance.accept(commitDuration.toNanos());
+        }
+        if (wakeupNextCommitSync) {
+            wakeupNextCommitSync = false;
+            throw new WakeupException();
         }
         return nextCommitOutcome;
     }

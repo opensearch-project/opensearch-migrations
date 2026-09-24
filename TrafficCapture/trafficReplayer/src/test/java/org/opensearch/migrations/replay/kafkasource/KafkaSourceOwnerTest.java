@@ -52,7 +52,21 @@ class KafkaSourceOwnerTest {
     // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
     private final KafkaSourceRootContext rootContext =
         new KafkaSourceRootContext(telemetry.openTelemetrySdk);
-    private final WakeupController wakeupController = new WakeupController(() -> {}, rootContext);
+    /** Counts issuance, which is the only observable form of "a wakeup was not coalesced into a spent one". */
+    private final java.util.concurrent.atomic.AtomicInteger wakeupsIssued =
+        new java.util.concurrent.atomic.AtomicInteger();
+    private final WakeupController wakeupController =
+        new WakeupController(wakeupsIssued::incrementAndGet, rootContext);
+    /**
+     * Makes the next grace wait report its input only after the whole interval has elapsed.
+     *
+     * <p>Production's wait does this: {@code GraceIntervalWait.blockingOn} waits a slice sized by the time
+     * remaining and returns true if input became available, so input arriving in that slice's last nanosecond
+     * ends the wait with nothing left on the clock. A fake that only ever returns true with time to spare is
+     * more permissive than the thing it stands in for, and puts "apply an input, then find no grace left" out
+     * of reach.
+     */
+    private boolean nextWaitConsumesTheWholeInterval;
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
 
     @AfterEach
@@ -74,7 +88,17 @@ class KafkaSourceOwnerTest {
             // when it did nothing of the kind -- the revocation test asserting that force cancellation follows
             // the grace period would have passed while cancelling immediately.
             deadline -> {
+                // Deadline first, exactly as GraceIntervalWait.blockingOn does. Checking the queue first made
+                // the fake more permissive than production and put "deadline passed with inputs still queued"
+                // out of reach -- which is the state a commit-with-no-grace-left is reached from.
+                if (deadline.hasPassed(clockNanos.get())) {
+                    return false;
+                }
                 if (!sourceInputs.isEmpty()) {
+                    if (nextWaitConsumesTheWholeInterval) {
+                        nextWaitConsumesTheWholeInterval = false;
+                        clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
+                    }
                     return true;
                 }
                 clockNanos.updateAndGet(now -> Math.max(now, deadline.monotonicDeadlineNanos()));
@@ -786,6 +810,133 @@ class KafkaSourceOwnerTest {
         }
     }
 
+    /**
+     * Cleanup completing <em>during</em> the grace interval must not leave a successor paused forever.
+     *
+     * <p>Intake sends {@code GenerationCleanupFinished} as soon as its tracker empties, which for a generation
+     * with little in flight is immediately — so the completion can arrive inside the grace wait. The obligation
+     * is therefore registered before graceful cancellation is submitted. Registering it at retirement instead
+     * discarded such a completion as unmatched and then recorded the obligation anyway, so the successor waited
+     * on a cleanup already reported and never sent again: a permanently paused partition, with no test failing.
+     */
+    @Test
+    void cleanupCompletingDuringGraceDoesNotStrandTheSuccessor() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var revokedGeneration = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+
+        // Delivered from inside the callback, which is exactly when intake would send it.
+        port.scriptRebalanceDuringNextPoll(() -> {
+            sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(revokedGeneration));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+        owner.runOnce();
+
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var successor = owner.partitionState(PARTITION_0).orElseThrow();
+
+        Assertions.assertNotEquals(revokedGeneration, successor.generation());
+        Assertions.assertFalse(
+            successor.isPriorGenerationCleanupPending(),
+            "the predecessor's cleanup was reported during the grace interval, so the successor must not be"
+                + " gated on a message that will never be sent again"
+        );
+    }
+
+
+    /**
+     * `§5.7`: "at most one commit operation is in flight at a time" — an invariant about the <em>operation</em>,
+     * which retiring its partitions must not appear to satisfy.
+     *
+     * <p>The guard used to be derived from the per-partition in-flight map, which `retireGeneration` empties. So
+     * when every partition of an outstanding operation was revoked, the map emptied while the operation was
+     * still unresolved and the next loop submitted a second one — the broker-spam the section's rationale names.
+     * A successor generation is what provides the second staged position here, which is why the predecessor's
+     * cleanup is reported: otherwise the successor stays gated and never reads.
+     */
+    @Test
+    void retiringEveryPartitionOfAnUnresolvedOperationDoesNotAdmitASecondCommit() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var revoked = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(revoked, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+
+        // The operation covers this partition alone, and is held unresolved for the rest of the test.
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(new KafkaRecordId(revoked, 10)));
+        port.scriptNeverResolveAsyncCommits();
+        port.scriptRebalanceDuringNextPoll(() -> {
+            // Cleanup reported inside the callback, so the successor is not gated and can read.
+            sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(revoked));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+        owner.runOnce();
+        drainIntake();
+
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+        var successor = owner.partitionState(PARTITION_0).orElseThrow();
+        Assertions.assertFalse(successor.isPriorGenerationCleanupPending(), "precondition: successor can read");
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(successor.generation(), 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(11))));
+        owner.runOnce();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(successor.generation(), 11)));
+        port.clearHistory();
+
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().stream().noneMatch(call -> call.startsWith("commitAsync")),
+            () -> "a second operation was submitted while the first was still unresolved; history: "
+                + port.history()
+        );
+    }
+
+
+    /**
+     * `procCommit:1308`: "If the generation has no unfinished work, the callback returns immediately."
+     *
+     * <p>The early return is what the design states. Skipping force cancellation is <strong>not</strong> — §9.2
+     * step 7 makes accepting it what releases the callback — so this asserts both that the interval was not
+     * waited out and that the submission still happened. An earlier version asserted the skip, which was a
+     * design-silent question decided in code.
+     */
+    @Test
+    void aGenerationWhoseCleanupCompletesEarlyReturnsWithoutWaitingOutTheInterval() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+        var clockAtEntry = clockNanos.get();
+
+        port.scriptRebalanceDuringNextPoll(() -> {
+            sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            clockNanos.get() - clockAtEntry < GRACE.toNanos(),
+            () -> "the callback waited out the interval although cleanup was already reported; the wait advanced"
+                + " the clock by " + (clockNanos.get() - clockAtEntry) + "ns of " + GRACE.toNanos()
+        );
+        var intake = drainIntake();
+        Assertions.assertTrue(
+            intake.stream().anyMatch(ReplayIntakeInput.GracefulGenerationCancellation.class::isInstance),
+            () -> "graceful cancellation is what tells intake to stop admitting; " + intake
+        );
+        Assertions.assertTrue(
+            intake.stream().anyMatch(ReplayIntakeInput.ForceGenerationCancellation.class::isInstance),
+            () -> "force cancellation is still submitted; nothing in the design says an early return skips it; "
+                + intake
+        );
+    }
+
     /** Plan A G2 exit: a poll failure is fatal, never an empty success. */
     @Test
     void aPollFailurePropagatesRatherThanBecomingAnEmptyPoll() {
@@ -859,6 +1010,113 @@ class KafkaSourceOwnerTest {
         Assertions.assertTrue(
             owner.partitionState(PARTITION_0).isEmpty(),
             "revoked partition state should be gone once the callback returns"
+        );
+    }
+
+    /**
+     * A commit must not be started once the grace interval is gone.
+     *
+     * <p>{@code kafkaLLD §5.7}: "a commit that cannot finish within the remaining grace must not be started."
+     * The window is real rather than theoretical — the wait returns because input arrived, which can be the
+     * last nanosecond of the interval, and applying that input takes time of its own. Starting anyway also
+     * charges every submitted partition an unknown outcome it did not earn, including partitions the rebalance
+     * is retaining, which is what the second assertion holds.
+     */
+    @Test
+    void noCommitIsStartedOnceTheGraceIntervalIsGone() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+        var revoked = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        var retained = owner.partitionState(PARTITION_1).orElseThrow().generation();
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(revoked, 1)));
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(retained, 1)));
+        port.scriptPoll(Map.of(
+            PARTITION_0, List.of(record(10)),
+            PARTITION_1, List.of(record(20))
+        ));
+        owner.runOnce();
+        drainIntake();
+        // Nothing is staged when the callback is entered, which is load-bearing: a position staged earlier
+        // would be committed by the attempt made *before* the wait, with the whole interval still remaining,
+        // and this test would then be asserting about that commit instead of the one after the wait.
+        port.clearHistory();
+
+        // An unknown outcome is what a commit given no time actually returns, so scripting it is what makes the
+        // spurious-uncertainty consequence observable rather than hypothetical.
+        port.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
+        nextWaitConsumesTheWholeInterval = true;
+        port.scriptRebalanceDuringNextPoll(() -> {
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(retained, 20)));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().stream().noneMatch(call -> call.startsWith("commitSync")),
+            () -> "the grace interval was spent by the wait, so no commit may be started; history: "
+                + port.history()
+        );
+        Assertions.assertEquals(
+            PartitionSourceState.CommitUncertainty.NONE_OBSERVED,
+            owner.partitionState(PARTITION_1).orElseThrow().commitUncertainty(),
+            "a retained partition must not be charged an unknown outcome by a commit that never ran"
+        );
+    }
+
+    /**
+     * A wakeup that interrupts the revocation commit must not silence the wakeup the callback owes.
+     *
+     * <p>{@code kafkaLLD §5.4} has a submission during callback handling issued "when callback handling
+     * finishes". The commit throws {@code WakeupException} for the wakeup that was outstanding when the poll
+     * began, which spends it; if the controller still believes that wakeup is outstanding, the callback's exit
+     * coalesces the deferred one into it and issues nothing. The next poll then waits out its whole timeout
+     * with an input already queued.
+     */
+    @Test
+    void aWakeupThatInterruptsTheRevocationCommitDoesNotSwallowTheCallbacksOwnWakeup() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        port.clearHistory();
+        wakeupsIssued.set(0);
+
+        port.scriptCommitSyncWakeup();
+        // Submitted from inside the commit, so this input's wakeup is necessarily deferred and can only be
+        // issued on callback exit -- which is the moment that reads the flag the absorption clears.
+        port.onObservation(call -> {
+            if (call.startsWith("commitSync")) {
+                sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(generation));
+            }
+        });
+        port.scriptRebalanceDuringNextPoll(() -> {
+            // Submitted while the poll is in progress and before the callback begins, so this one is issued
+            // immediately and is the wakeup the commit goes on to absorb.
+            sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+                new KafkaRecordId(generation, 10)));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().stream().anyMatch(call -> call.startsWith("commitSync")),
+            () -> "precondition: the interrupted commit must have been attempted; history: " + port.history()
+        );
+        Assertions.assertEquals(
+            2,
+            wakeupsIssued.get(),
+            "the wakeup deferred during the callback must be issued on its exit; it was coalesced into the one"
+                + " the interrupted commit had already consumed"
         );
     }
 

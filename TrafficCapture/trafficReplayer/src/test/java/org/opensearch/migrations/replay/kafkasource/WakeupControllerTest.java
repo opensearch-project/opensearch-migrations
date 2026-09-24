@@ -34,6 +34,40 @@ class WakeupControllerTest {
     }
 
     /**
+     * A wakeup absorbed by a Kafka call inside a protected operation must not leave the controller believing one
+     * is still outstanding.
+     *
+     * <p>{@code kafkaLLD §5.4}: wakeups submitted during callback handling are "issued when callback handling
+     * finishes". A blocking commit inside the callback throws {@code WakeupException} for a wakeup issued before
+     * it began — {@code §5.7} names that path — which spends it. Left marked outstanding, the callback's exit
+     * coalesces its deferred wakeup into nothing and the surrounding poll runs its full timeout with inputs
+     * queued: the opposite of what §5.4 requires.
+     */
+    @Test
+    void aWakeupAbsorbedInsideACallbackDoesNotSuppressTheDeferredOne() {
+        controller.enterPoll();
+        Assertions.assertTrue(controller.onInputSubmitted(), "precondition: one wakeup is outstanding");
+        Assertions.assertEquals(1, wakeups.get());
+
+        controller.enterRebalanceCallback();
+        controller.enterProtectedOperation();
+        // The commit inside the callback consumed the outstanding wakeup.
+        controller.onWakeupAbsorbedByProtectedOperation();
+        controller.leaveProtectedOperation();
+
+        // An input arriving during the callback must produce a wakeup when the callback returns.
+        Assertions.assertFalse(controller.onInputSubmitted(), "a callback defers rather than issuing");
+        controller.leaveRebalanceCallback();
+
+        Assertions.assertEquals(
+            2,
+            wakeups.get(),
+            "the deferred wakeup must be issued on callback exit; it was coalesced into the one the commit had"
+                + " already consumed"
+        );
+    }
+
+    /**
      * A poll must not settle in to wait on input that is already queued.
      *
      * <p>A submission while the loop is {@code RUNNING} correctly issues no wakeup — the loop reaches the queue
