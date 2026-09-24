@@ -433,10 +433,12 @@ callback dangerous. The loop polls every iteration and a poll is what delivers t
 asynchronous submission needs nothing extra to make progress.
 
 Inside `onPartitionsRevoked` the owner submits **synchronously**, bounded by the time remaining before
-the grace deadline. It attempts the commit however little of the interval is left: the bound is what confines
-the call, so a small remainder is a small budget rather than a hazard, and declining to try would discard a
-position a fast round-trip could still have recorded — a revoked generation's position is discarded anyway
-once the callback returns. Asynchronous
+the grace deadline. **It attempts the commit however little of the interval is left, and there is no minimum
+remainder below which it declines to try.** The work whose position this commits has already been sent to the
+target and cannot be recalled, so every remaining millisecond is worth spending on recording it completely: the
+alternative is not a saving but a guaranteed re-send of traffic the target has already seen. The bound is what
+confines the call, so a small remainder is a small budget rather than a hazard, and a revoked generation's
+position is discarded once the callback returns whether or not the attempt was made. Asynchronous
 submission cannot be used there: its callback is delivered by a later poll, and the generation is gone
 before that poll happens. A commit that cannot finish within the remaining grace must not be started,
 because the rest of the interval belongs to force-cancellation delivery (§15.2).
