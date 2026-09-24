@@ -124,7 +124,8 @@ public class SupportedClusters {
         return List.of(
             SearchClusterContainer.OS_V1_3_20,
             SearchClusterContainer.OS_V2_19_4,
-            SearchClusterContainer.OS_V3_5_0
+            SearchClusterContainer.OS_V3_5_0,
+            SearchClusterContainer.OS_V3_7_0
         );
     }
 
@@ -180,7 +181,9 @@ public class SupportedClusters {
             // Target version coverage: OS 1.3
             new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V1_3_20),
             // Target version coverage: OS 3.x
-            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_LATEST)
+            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_LATEST),
+            // Typed Elasticsearch 6.8 indices → OpenSearch 3.7
+            new MigrationPair(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_7_0)
         );
     }
 

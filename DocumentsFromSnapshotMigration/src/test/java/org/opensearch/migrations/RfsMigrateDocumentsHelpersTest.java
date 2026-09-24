@@ -359,6 +359,23 @@ class RfsMigrateDocumentsHelpersTest {
     }
 
     @Test
+    void validateArgs_acceptsGcsRepoWithLocalDir() {
+        var args = validEsArgs();
+        args.legacySource.repoUri = "gs://bucket/key";
+        args.localDir = "/tmp/gcs";
+        assertDoesNotThrow(() -> RfsMigrateDocuments.validateArgs(args));
+    }
+
+    @Test
+    void validateArgs_rejectsGcsRepoWithoutLocalDir() {
+        var args = validEsArgs();
+        args.legacySource.repoUri = "gs://bucket/key";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), equalTo("If a GCS repo is being used, --local-dir must be set."));
+    }
+
+    @Test
     void validateArgs_rejectsMissingSnapshotName() {
         var args = validEsArgs();
         args.legacySource.snapshotName = null;
@@ -436,6 +453,21 @@ class RfsMigrateDocumentsHelpersTest {
         var thrown = assertThrows(ParameterException.class,
             () -> RfsMigrateDocuments.validateArgs(args));
         assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("--coordinator-host"));
+    }
+
+    @Test
+    void validateArgs_solr_rejectsGcsRepoUpFront() {
+        // Solr supports only file:// and s3:// for its backup location. Without an
+        // exhaustive switch, gs:// passed validation here and failed much later in
+        // buildSolrSourceFactory, after the migration had already started.
+        var args = new RfsMigrateDocuments.Args();
+        args.legacySource.sourceVersion = Version.fromString("SOLR_8.11");
+        args.legacySource.repoUri = "gs://bucket/key";
+        args.localDir = "/tmp/gcs";
+        args.coordinatorArgs.host = "http://localhost:9200";
+        var thrown = assertThrows(ParameterException.class,
+            () -> RfsMigrateDocuments.validateArgs(args));
+        assertThat(thrown.getMessage(), org.hamcrest.Matchers.containsString("file:// or s3://"));
     }
 
     @Test

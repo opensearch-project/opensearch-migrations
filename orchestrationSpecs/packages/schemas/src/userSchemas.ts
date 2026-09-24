@@ -491,7 +491,7 @@ export const CONTAINER_RESOURCES = {
     cpu: CPU_QUANTITY.describe("CPU allocation for the container in Kubernetes millicores."),
     memory: MEMORY_QUANTITY.describe("Memory allocation for the container."),
     "ephemeral-storage": STORAGE_QUANTITY.optional()
-        .describe("Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration.")
+        .describe("Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes.")
 }
 
 export const RESOURCE_REQUIREMENTS = z.object({
@@ -863,6 +863,18 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    resources: z.preprocess(
+        (v) => deepmerge(
+            DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI,
+            (v ?? {}) as Partial<ResourceRequirementsType>
+        ),
+        RESOURCE_REQUIREMENTS
+    )
+        .describe("Kubernetes resource limits and requests for the metadata migration container. " +
+            "Partial overrides are deep-merged with the built-in defaults. " +
+            "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
+            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
+        .default(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI),
     skipEvaluateApproval: z.boolean().optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
     skipMigrateApproval: z.boolean().optional()
@@ -958,7 +970,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = withScalableServiceValidation(z.object(
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS. " +
-            "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
+            "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified.")
+        .default(DEFAULT_RESOURCES.RFS),
 }))
     .describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 

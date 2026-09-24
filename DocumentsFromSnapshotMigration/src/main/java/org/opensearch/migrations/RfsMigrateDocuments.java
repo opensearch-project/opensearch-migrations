@@ -661,9 +661,20 @@ public class RfsMigrateDocuments {
                 );
             }
             var parsedUri = RepoUri.parse(args.legacySource.repoUri);
-            if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.legacySource.s3Region == null)) {
-                throw new ParameterException(
-                    "For Solr backup migration with S3, --local-dir and --s3-region are required."
+            switch (parsedUri) {
+                case RepoUri.S3RepoUri s -> {
+                    if (args.localDir == null || args.legacySource.s3Region == null) {
+                        throw new ParameterException(
+                            "For Solr backup migration with S3, --local-dir and --s3-region are required."
+                        );
+                    }
+                }
+                case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
+                // Solr supports only file:// and s3:// for its backup location. Reject anything
+                // else here rather than in buildSolrSourceFactory, which fails after the
+                // migration has already started.
+                case RepoUri.GcsRepoUri g -> throw new ParameterException(
+                    "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
                 );
             }
             if (args.coordinatorArgs.host == null) {
@@ -689,15 +700,22 @@ public class RfsMigrateDocuments {
         }
 
         var parsedUri = RepoUri.parse(args.legacySource.repoUri);
-        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.legacySource.s3Region == null)) {
-            throw new ParameterException(
-                "If an s3 repo is being used, --s3-region and --local-dir must be set."
-            );
-        }
-        if (parsedUri instanceof RepoUri.GcsRepoUri && args.localDir == null) {
-            throw new ParameterException(
-                "If a GCS repo is being used, --local-dir must be set."
-            );
+        switch (parsedUri) {
+            case RepoUri.S3RepoUri s -> {
+                if (args.localDir == null || args.legacySource.s3Region == null) {
+                    throw new ParameterException(
+                        "If an s3 repo is being used, --s3-region and --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.GcsRepoUri g -> {
+                if (args.localDir == null) {
+                    throw new ParameterException(
+                        "If a GCS repo is being used, --local-dir must be set."
+                    );
+                }
+            }
+            case RepoUri.FileRepoUri f -> { /* no additional arguments required */ }
         }
         
         // Validate delta mode parameters
