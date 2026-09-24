@@ -482,6 +482,14 @@ the retained record as a protocol violation on every restart. Waiting for N's ac
 prevents that situation: if N fails or is ambiguous, the proxy enters the compromised workflow and
 never submits the successor record for that connection.
 
+The proxy may deliberately suppress capture for requests selected by configured policy while still
+forwarding them to the source. If the decision is available before any request byte is captured, the
+request produces no traffic observation. If capture has already begun when the decision becomes
+available, the proxy emits `RequestIntentionallyDropped` after the captured prefix. The marker means
+that the preceding incomplete read sequence was intentionally abandoned, not lost in transport.
+It advances the request sequence while leaving the connection open, so later captured requests on
+the same connection remain distinguishable and reconstruct normally.
+
 `CloseObservation` is the final sequence value for a connection. `DisconnectObservation` and
 `ConnectionExceptionObservation` are non-terminal. Once the replayer consumes `CloseObservation`,
 any later `TrafficObservation` for that connection is a protocol violation, including a contiguous
