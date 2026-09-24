@@ -46,8 +46,11 @@ public sealed interface ReplayIntakeInput {
     /**
      * Kafka assigned a partition and the source allocated a new process-local generation.
      *
-     * <p>Creates the corresponding partition intake state. It does <strong>not</strong> request records until
-     * prior-generation cleanup and replay-intake demand both permit that request.</p>
+     * <p>Creates the corresponding partition intake state expecting the source-local bootstrap batch.
+     *
+     * <p>REBUILD-LIMBO-NOTE(G7): once retry-ready supply and explicit batch-request state are present, applying
+     * this input also runs the ordinary demand pass over every assigned generation and may request one
+     * additional batch. Prior-generation cleanup delays source reading without rejecting that request.</p>
      */
     record PartitionGenerationAssigned(PartitionGenerationId generation) implements ReplayIntakeInput {
         public PartitionGenerationAssigned {

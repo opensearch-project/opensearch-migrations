@@ -88,6 +88,26 @@ class SourceReconstructionTest {
     }
 
     /**
+     * {@code §17.2}: periodic record boundaries must not change response reconstruction either.
+     */
+    @Test
+    void aResponseSplitAcrossRecordsReconstructsTheSameBytesAsOneRecord() {
+        var responseBytes = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody";
+        var firstHalf = responseBytes.substring(0, 20);
+        var secondHalf = responseBytes.substring(20);
+        var script = new RecordScript(TOPIC)
+            .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER,
+                stream(0, read(1, REQUEST_BYTES), endOfMessage(2), write(3, firstHalf)))
+            .addTraffic(0, 1, Instant.ofEpochMilli(1_100), WRITER,
+                stream(1, write(4, secondHalf), close(5)));
+
+        applyAll(script);
+
+        Assertions.assertEquals(1, sink.responses.size(), "one response, however many records carried it");
+        Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
+    }
+
+    /**
      * {@code §17.2}: "Fresh reconstruction discards an incomplete preceding message using the continuity
      * fields."
      *

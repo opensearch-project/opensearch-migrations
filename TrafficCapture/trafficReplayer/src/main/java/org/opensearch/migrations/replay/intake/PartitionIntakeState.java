@@ -40,8 +40,10 @@ import lombok.NonNull;
  * <p>REBUILD-LIMBO-NOTE(G6): {@code §6} also lists {@code writerTimeStateByWriterNodeId} and
  * {@code unresolvedRetryBoundaries}. Both need types {@code §10.2} and {@code §11} define, and the
  * {@code §10.1} fatal backward-skew check belongs with them; {@link #observeLogAppendTime} is where it lands.
- * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code retryReadyRequestSupplyCount} and
- * {@code partitionBatchState = idle | requested | applying}, which are {@code §13}'s demand model.
+ * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code requestStateByReplayRequestId},
+ * {@code retryReadyRequestSupplyCount}, {@code bootstrapBatchState = pending | applying | consumed}, and
+ * {@code requestedBatchState = idle | requested | applying}, which are {@code §9.1} and {@code §13}'s
+ * request bookkeeping and demand model.
  * <p>REBUILD-LIMBO-NOTE(G8): {@code §6}'s {@code cancellationState} and {@code GenerationCleanupTracker},
  * which are {@code §15.2} and {@code §15.3}.
  */

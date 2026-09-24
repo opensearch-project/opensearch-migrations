@@ -299,11 +299,11 @@ class RecordAssociationAccumulatorTest {
     }
 
     /**
-     * {@code procCommit §6.1}: a close-only record finishes once source assembly settles it and the ordered
-     * close command is accepted by the sink.
+     * {@code procCommit §6.1}: a close-only record finishes once source assembly settles it. {@code §9.3}
+     * says no connection owner is created merely to process that close when no request was reconstituted.
      */
     @Test
-    void aCloseOnlyRecordFinishesAfterTheCloseIsAccepted() {
+    void aCloseOnlyRecordFinishesWithoutCreatingAConnectionOwner() {
         var script = new RecordScript(TOPIC).addTraffic(
             0,
             0,
@@ -314,7 +314,10 @@ class RecordAssociationAccumulatorTest {
 
         assignAndApply(script);
 
-        Assertions.assertEquals(1, sink.closes.size(), "the sink accepted the close exactly once");
+        Assertions.assertTrue(
+            sink.closes.isEmpty(),
+            "source-side settlement is sufficient when no reconstituted request created a connection owner"
+        );
         Assertions.assertEquals(
             List.of(script.records().get(0).recordId()),
             sourceCompletions(),
@@ -328,7 +331,7 @@ class RecordAssociationAccumulatorTest {
         var generation = script.generation(0);
         owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
         owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
-            new PartitionBatchRequestId(generation, 1),
+            new PartitionBatchRequestId(generation, 0),
             script.records()
         ));
         while (script.hasNext()) {

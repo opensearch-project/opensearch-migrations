@@ -79,6 +79,9 @@ public interface SourceAssemblySink {
         GENERATION_CANCELLED
     }
 
-    /** The captured close for one source-connection lifetime ({@code §9.3} step 3). */
+    /**
+     * The captured close for a source-connection lifetime that reconstituted at least one request
+     * ({@code §9.3} step 3). A request-less lifetime has no connection owner to receive this command.
+     */
     void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime);
 }

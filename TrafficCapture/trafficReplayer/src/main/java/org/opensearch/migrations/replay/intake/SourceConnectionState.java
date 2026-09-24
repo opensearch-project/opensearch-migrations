@@ -110,6 +110,7 @@ public final class SourceConnectionState {
 
     private Phase phase;
     private boolean ignoringInformationalWriteSegments;
+    private boolean requestEverReconstituted;
     private long currentCapturedRequestOrdinal;
     private HttpMessageAndTimestamp.Request incomingRequest;
     private ReplayRequestId responseBeingAssembledFor;
@@ -349,8 +350,11 @@ public final class SourceConnectionState {
         ignoringInformationalWriteSegments = false;
         responseBeingAssembledFor = replayRequestId;
         responseStateByRequest.put(replayRequestId, new HttpMessageAndTimestamp.Response(sourceEventTime));
+        requestEverReconstituted = true;
         phase = Phase.ASSEMBLING_RESPONSE;
 
+        // REBUILD-LIMBO-NOTE(G7): create §9.1's request-state bookkeeping for retry input, final source
+        // response and demand before admitting the request to its connection owner.
         sink.onRequestReconstituted(
             replayRequestId,
             currentCapturedRequestOrdinal,
@@ -404,7 +408,9 @@ public final class SourceConnectionState {
         var terminal = new RecordAssociationId.TerminalConnection(connectionProcessingId);
         var abandoned = endAssemblyAtBoundary();
         lifetime = Lifetime.EXPLICITLY_CLOSED;
-        sink.onCapturedClose(connectionProcessingId, latestObservationTime);
+        if (requestEverReconstituted) {
+            sink.onCapturedClose(connectionProcessingId, latestObservationTime);
+        }
         return new ObservationOutcome(
             concat(abandoned.associationsToAdd(), List.of(terminal)),
             concat(abandoned.associationsFinished(), List.of(terminal)),

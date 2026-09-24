@@ -1123,9 +1123,10 @@ finishing *N* leaves it held by *N+1*'s assembly.
 `§17.2` — all five cases, plus the captured close because `§9.3`'s "prevents later observations from joining"
 is an absence assertion.
 
-`tools/falsify-g3.sh` — seven mutations, **all seven caught**. Parsing the inherited tail, not counting it,
-accepting a sequence gap, joining a closed lifetime, reusing an expired lifetime's identity, relabelling in the
-order `§8.2` forbids, and reversing `§7` steps 7 and 8.
+The original `tools/falsify-g3.sh` pass at `ecea185e0` caught all seven mutations that matched that revision.
+It is historical evidence, not the closure harness: mutation 7 no longer matches the conditional
+`applyPayload` call, and current falsification runs through one direct ephemeral Codex CLI worker against an
+exact committed revision.
 
 The expanded falsification pass tried fourteen mutations: twelve failed the intended test and two survived.
 The survivors were exactly the missing evidence later found in review — changing a next-request response from
@@ -1239,6 +1240,24 @@ falsified in the same direct-CLI style against committed code in one clean `/pri
 
 Every mutation was restored and each worker ended with a clean worktree. Production changes reopen review, so
 G3 remains open pending the current read-only conformance pass.
+
+### Third G3 design-conformance review — disposition
+
+| Finding | Class | Disposition | Evidence / impact |
+|---|---|---|---|
+| A request-less captured close sent `AdmitCapturedClose` despite no connection owner existing | A | fixed, review reopened | `SourceConnectionState` now records whether the lifetime ever reconstituted a request and emits the ordered close only in that case. The close-only record still finishes through source-side settlement; the focused source/association suite passes |
+| `SourceConnectionState` does not directly store the `contributing record identities` named by `kafkaLLD §9` | A | open — owner decision | The partition-owned reverse association index supplies every live behavior without a second record set. Adding redundant state or accepting the placement are both design decisions |
+| A `WakeupException` after an async commit callback can resolve one submission twice | A, G4 component | open — route through §2.1 before G3 closes | Commit authority is G4's responsibility. Its full chain must share one resolution latch rather than add a G3-only patch |
+| The checked-in G3 shell harness no longer applies mutation 7 and conflicts with the direct-CLI worker rule | B | open — owner deletion decision | The historical claim above is corrected. Current closure evidence comes from a clean exact-commit Codex worker |
+| Six carried lifecycle tests still name G3 in the verdict table although their marked members are assigned elsewhere | B | open — receiving milestones must be corrected before G3 closes | Leaving G3 in the table silently drops their restoration after G3 closes; the member-level subjects span cancellation/cleanup and later integrated behavior |
+| `HttpTransactionDumper` has isolated real-topic evidence but its carried deterministic test remains marked | B | register | G3's production chain is exercised, but deterministic rendering/layout coverage remains to be resolved with the carried test rather than reinvented |
+| `§17.2` did not prove response bytes survive periodic record boundaries | B | fixed | `SourceReconstructionTest.aResponseSplitAcrossRecordsReconstructsTheSameBytesAsOneRecord` now splits one response over two records and compares the reconstructed bytes exactly |
+| G7 insertion points omitted request-state bookkeeping and named one combined batch state | B | fixed | Notes now name `requestStateByReplayRequestId`, `bootstrapBatchState`, and `requestedBatchState` at their exact construction/application sites |
+| Five new accessors and two private parameters have no caller | B | open — owner deletion/retention decision | Deleting is irreversible; retaining a compatibility or future surface is also a red-line decision |
+| Marked `replay/lifecycle/ReplayIntakeInput` references two deleted enclosing predecessor types | B | open — owner deletion/retention decision | The file is inert, but can no longer be restored by marker deletion alone; either retire it as dead or restore enough predecessor shape to preserve mechanical reconstruction |
+| `replayIntakeInputsApplied` includes a rejected post-violation batch | B | won't-fix | The input was applied to the terminal-state rule; `replayIntakeRecordsApplied` stays unchanged and `replayIntakeRecordBatchesRejectedAfterProtocolViolation` reports the rejection separately |
+| The record-association fixture labelled its first batch as explicit sequence 1 | B | fixed | The helper now uses bootstrap sequence 0, matching `kafkaLLD §2` and the production producer |
+| Post-close observations, duplicate request completion, within-batch offset validation, request source-event timestamp, and a segment-end with no active segmented value | C | open — owner decisions | The cited designs are silent or conflict on these boundaries; implementation must not infer the answers |
 
 ### Findings
 
