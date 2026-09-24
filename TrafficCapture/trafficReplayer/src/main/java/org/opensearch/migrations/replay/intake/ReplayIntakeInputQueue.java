@@ -24,26 +24,61 @@ import lombok.NonNull;
  */
 public final class ReplayIntakeInputQueue {
 
-    private final LinkedBlockingQueue<ReplayIntakeInput> inputs = new LinkedBlockingQueue<>();
+    sealed interface Entry permits SubmittedInput, StopAfterDraining {}
+
+    record SubmittedInput(@NonNull ReplayIntakeInput input) implements Entry {}
+
+    enum StopAfterDraining implements Entry {
+        INSTANCE
+    }
+
+    private final LinkedBlockingQueue<Entry> entries = new LinkedBlockingQueue<>();
     private boolean accepting = true;
 
     public synchronized boolean submit(@NonNull ReplayIntakeInput input) {
         if (!accepting) {
             return false;
         }
-        return inputs.offer(input);
+        return entries.offer(new SubmittedInput(input));
     }
 
+    /**
+     * Atomically stops accepting inputs and appends the FIFO marker that terminates the owner after all
+     * previously accepted inputs have been applied.
+     */
+    public synchronized boolean requestStopAfterDraining() {
+        if (!accepting) {
+            return false;
+        }
+        accepting = false;
+        return entries.offer(StopAfterDraining.INSTANCE);
+    }
+
+    /**
+     * Removes one business input for diagnostic fixtures that inspect producer output directly.
+     *
+     * <p>The running owner uses {@link #takeEntry()} so it can also observe queue-control markers.
+     */
     public ReplayIntakeInput take() throws InterruptedException {
-        return inputs.take();
+        var entry = entries.take();
+        if (entry instanceof SubmittedInput submitted) {
+            return submitted.input();
+        }
+        entries.offer(entry);
+        throw new IllegalStateException("Only ReplayIntakeOwner may remove the stop-after-draining marker");
+    }
+
+    Entry takeEntry() throws InterruptedException {
+        return entries.take();
     }
 
     public int size() {
-        return inputs.size();
+        return entries.size();
     }
 
-    public synchronized void close() {
+    /** Abrupt failure-path closure: reject new work and discard anything not yet removed by the owner. */
+    public synchronized void closeNow() {
         accepting = false;
-        inputs.clear();
+        entries.clear();
     }
 }

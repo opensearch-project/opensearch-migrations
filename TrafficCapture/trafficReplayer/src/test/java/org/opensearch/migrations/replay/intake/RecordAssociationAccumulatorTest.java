@@ -25,6 +25,7 @@ import org.opensearch.migrations.replay.kafkasource.WakeupController;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -185,10 +186,62 @@ class RecordAssociationAccumulatorTest {
         var script = new RecordScript(TOPIC).addPayloadNotSet(0, 0, Instant.ofEpochMilli(1_000), WRITER);
         assignAndApply(script);
 
-        var violations = drainSourceInputs().stream()
+        var sourceEvents = drainSourceInputs();
+        var violations = sourceEvents.stream()
             .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
             .toList();
         Assertions.assertEquals(1, violations.size(), "the violation must reach the source");
+        Assertions.assertTrue(
+            sourceEvents.stream().noneMatch(KafkaSourceInput.RecordProcessingFinished.class::isInstance),
+            "the violating record must remain unfinished"
+        );
+        Assertions.assertFalse(
+            completionEmitted(script, script.records().get(0).recordId()),
+            "intake itself must preserve the violating record, not depend on source-queue ordering"
+        );
+    }
+
+    /** {@code §16}: only work admitted before a violation may drain; a later record is not applied. */
+    @Test
+    void aRecordAfterAProtocolViolationIsNotApplied() {
+        var script = new RecordScript(TOPIC)
+            .addPayloadNotSet(0, 0, Instant.ofEpochMilli(1_000), WRITER)
+            .addTraffic(
+                0,
+                1,
+                Instant.ofEpochMilli(2_000),
+                WRITER,
+                stream(0, read(1, "GET /must-not-run HTTP/1.1\r\n\r\n"), endOfMessage(2))
+            );
+
+        assignAndApply(script);
+
+        Assertions.assertTrue(sink.reconstituted.isEmpty(), "no request after the violating offset may pass");
+        Assertions.assertTrue(sourceCompletions().isEmpty(), "neither the violation nor later records finish");
+    }
+
+    /**
+     * {@code procCommit §6.1}: a close-only record finishes once source assembly settles it and the ordered
+     * close command is accepted by the sink.
+     */
+    @Test
+    void aCloseOnlyRecordFinishesAfterTheCloseIsAccepted() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(0, close(1))
+        );
+
+        assignAndApply(script);
+
+        Assertions.assertEquals(1, sink.closes.size(), "the sink accepted the close exactly once");
+        Assertions.assertEquals(
+            List.of(script.records().get(0).recordId()),
+            sourceCompletions(),
+            "the terminal association must be released after acceptance"
+        );
     }
 
     // ---------------------------------------------------------------- driving
@@ -336,6 +389,10 @@ class RecordAssociationAccumulatorTest {
         return observation(sequence)
             .setEndOfMessageIndicator(EndOfMessageIndication.getDefaultInstance())
             .build();
+    }
+
+    private static TrafficObservation close(long sequence) {
+        return observation(sequence).setClose(CloseObservation.getDefaultInstance()).build();
     }
 
     /**

@@ -189,7 +189,7 @@ viable. Each item is a red-line-2 contract; changing any of them is an escalated
 |---|---|
 | **Published Maven artifact** `trafficReplayer`, plus its separately published `testFixtures` jar | Root `build.gradle:265-272` — every subproject outside `excludedProjectPaths` publishes `mavenJava`; artifactId comes from the project name |
 | Docker image name `traffic_replayer` | `buildImages/build.gradle:22,46,51` |
-| Dump modes `dump-raw`, `dump-http`, `dump-both` | `KafkaTopicDumper`, invoked from `TrafficReplayer.java:644` — a user-facing CLI mode, for Kafka and file sources both |
+| Dump modes `dump-raw`, `dump-http`, `dump-both` | `KafkaTopicDumper`, invoked from `TrafficReplayer.java:644` — a user-facing CLI mode for Kafka topics. The owner retired the file-backed branch on 2026-09-24 |
 | Module path `:TrafficCapture:trafficReplayer` | `settings.gradle:70` |
 | CLI options and inline-JSON keys | Previous plan §7 — the full alias list, including the deprecated parse-and-warn set |
 | Workflow schema fields | `orchestrationSpecs/packages/schemas/src/userSchemas.ts`, `workflowTemplates/replayer.ts` |
@@ -334,8 +334,8 @@ The cheapest possible end-to-end evidence, deliberately placed first.
 
 - Decode the `CaptureRecord` envelope exhaustively: `TrafficStream`, `WriterPartitionHeartbeat`,
   `CaptureCapabilityProbe`, and `PAYLOAD_NOT_SET` as a violation.
-- **Carry over the existing dump mode.** This is not new tooling: `KafkaTopicDumper` already implements
-  `dump-raw`, `dump-http`, and `dump-both` for Kafka and file sources, already decodes `CaptureRecord`,
+- **Carry over the existing Kafka dump mode.** This is not new tooling: `KafkaTopicDumper` already implements
+  `dump-raw`, `dump-http`, and `dump-both`, already decodes `CaptureRecord`,
   and is invoked from `TrafficReplayer.java:644`. Its three mode names are a user-facing CLI contract
   (§2.3), so they are preserved. `TrafficStreamDumper` and `HttpTransactionDumper` come with it. This is
   a good example of §3 rule 1 in the permissive direction — useful, close to final, and worth moving.
@@ -344,15 +344,11 @@ The cheapest possible end-to-end evidence, deliberately placed first.
   which is exactly why this milestone can precede G2. The only member it needs from the marked
   `KafkaTrafficCaptureSource` is the self-contained static `buildKafkaProperties`.
 
-**Deferred out of G1 — Kafka `dump-http` and `dump-both` to G3; file input to G9.** The HTTP modes require
+**Deferred out of G1 — Kafka `dump-http` and `dump-both` to G3.** The HTTP modes require
 HTTP transaction reconstruction, whose closure was the legacy accumulator and tracing identity chain.
 Rebuilding those here would be the lateral milestone expansion §6 forbids. G3 rebuilds source assembly, so
-the Kafka-backed modes return there — see G3. The **file** input path needs the source construction and
-configuration compatibility G9 owns, so it returns there instead; G9 also settles whether that source speaks
-bare base64 `TrafficStream` or a `CaptureRecord` envelope. All three mode names and the file-input option stay
-in the CLI because §2.3 and the deployed-configuration inventory make them contracts; invoking unavailable
-combinations in the interim fails with a message naming the receiving milestone rather than producing output
-that does not match the mode requested.
+the Kafka-backed modes return there — see G3. The owner retired file-backed dumping on 2026-09-24 rather
+than carrying that branch into the rebuild; dump modes reject `--input` as unsupported.
 
 **Exit:** the module reads and dumps a topic written by the **current, unmodified proxy** via `dump-raw`,
 and every envelope case is handled explicitly, `PAYLOAD_NOT_SET` included. This is the milestone that
@@ -401,10 +397,11 @@ commits occur at all.
 rebalance callback or another Kafka operation; one partition paused for cleanup does not stall
 unrelated partitions; a poll failure is fatal; and a commit attempted during revocation cannot hold the
 callback past the grace deadline. Also `§17.4` case 18: a wakeup arriving between revocation and assignment
-postpones the assignment callback to a later poll without losing it. **Production startup does not construct
-the source here** — `runReplayMode` is marked `REBUILD-LIMBO(G9)` and `G9` wires it; per `AGENTS.md` §4 the
-register names G9 as the milestone that replaces the shell. Covers `D5`, `D12`, `D16`; contributes `R3`,
-`R9`.
+postpones the assignment callback to a later poll without losing it. **The real replay construction chain is
+deferred to G5**, not because startup happens later, but because G2's source owner has no real connection/request
+consumer until G5 builds it. G5 constructs source owner, queues, intake owner, and connection/request consumer
+as one usable chain; G9 later places that already-integrated application under process supervision and deployed
+configuration. Covers `D5`, `D12`, `D16`; contributes `R3`, `R9`.
 
 ### G3 — Replay intake owner and source assembly
 
@@ -427,11 +424,16 @@ can know: `kafkaLLD §9.2` makes a following request on the same connection the 
 finished a response, so every other completion is marked unproven rather than presented as whole, and
 `SourceResponseIncomplete` is reserved for expiry and cancellation — the replayer's own doing.
 
-**Deferred out of G3 to G5 — tracing for intake and source assembly.** `ChannelContextManager` carries the
-non-atomic refcount defect G5 already owns, and G3's own evidence — record accounting and source
-reconstruction — is provable without instrumentation. G5 repairs that defect and adds the contexts then.
-Everything else about observability in this milestone is unchanged; this names one component, not a licence to
-ship G3 uninstrumented.
+**Complete usable G3 chain.** `KafkaTopicDumper` is the bounded producer and construction path for this
+milestone: Kafka records enter `ReplayIntakeInputQueue`, the real `ReplayIntakeOwner` removes and applies them
+on its owner thread, and `HttpTransactionDumper` consumes source-assembly output. A FIFO queue-control marker
+outside the nine-value business-input family stops acceptance and proves every preceding accepted input was
+applied before the owner terminates. `ReplayIntakeMetrics`, constructed from the carried
+`RootReplayerContext`, observes owner start/stop, inputs and records applied, reconstructed requests, response
+completion confidence, captured closes, and protocol violations with fixed cardinality. G5 replaces
+`HttpTransactionDumper` with the real connection/request consumer because the design types for that consumer
+do not exist until G5; G3 nevertheless ships a reachable, observable, terminating production chain rather
+than an unconstructed component.
 
 **Inherited from G1 — restore Kafka `dump-http` and `dump-both`.** G1 deferred them because HTTP transaction
 reconstruction was the legacy accumulator's job, and this is the milestone that rebuilds it. They belong
@@ -444,8 +446,10 @@ still needs a tracing context is a G3 question: it required `ChannelContextManag
 **Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* has exactly both
 associations, matching the `RecordScript` oracle; no record emits completion while an expected
 association remains; a source connection that dies mid-response produces a tuple that says so. No owner
-blocks on a stage only its own thread can complete. **`dump-http` and `dump-both` work again against a
-real topic, and a response nothing proved finished is visible as `UNPROVEN` in that output** —
+blocks on a stage only its own thread can complete. The producer → queue → owner-thread → consumer path is
+constructed by `KafkaTopicDumper`, terminates through its FIFO stop marker, and emits its fixed-cardinality
+intake/assembly metrics. **`dump-http` and `dump-both` work again against a real topic, and a response nothing
+proved finished is visible as `UNPROVEN` in that output** —
 reconstruction honesty stated as something a person can read. This criterion previously asked for a
 close-truncated response to be visible *as truncated*, which `§9.2` establishes is not detectable: the capture
 protocol marks the end of a request and not of a response, and the owner ruled against adding response parsing
@@ -483,9 +487,14 @@ completion, `§11` final source response, `§12` tuple durability, `§13` reques
 activity monitoring. Also `procCommit §3.2:155-204`, `§3.4:226-279`, `§7:871-1047`.
 **Required tests: `connLLD §19.1-19.3:729-762`.**
 
-**Inherited from G3 — tracing for intake and source assembly**, deferred here because repairing
-`ChannelContextManager`'s non-atomic refcount is this milestone's work and G3 needed no instrumentation to
-prove record accounting. Add the intake and assembly contexts alongside that repair.
+**Inherited from G2 — the real replay construction chain.** G2 could not construct its source owner against a
+real downstream consumer because the connection/request owner types did not exist. Construct
+`KafkaSourceOwner`, `KafkaConsumerSourcePort`, both owner queues, the wakeup controller,
+`ReplayIntakeOwner`, and the real connection/request assembly sink together here. The composition root may be
+a top-level application object that G9 starts under its supervisor; it must already be a reachable source →
+intake → connection/request chain in this milestone. This does not inherit G3 observability: G3 already
+constructs and instruments replay intake and source assembly. `ChannelContextManager`'s separate non-atomic
+refcount defect remains G5 work only where the connection-owner tracing design actually requires it.
 
 **Inherited from G0 — the shells for `ConnectionAdmissionEntry`, `TargetChannelPort`,
 `RequestPreparationResult` and `RetryDecision`**, which G0 never declared. They arrive here as real types
@@ -512,8 +521,9 @@ no-response. Tuple output is unconditional and retried to durability.
 completion, and a normal completion produces both in order with the second after tuple durability; with
 the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits;
 **preparation has exactly the two outcomes `connLLD §6` names, and an unexpected preparation throw reaches
-the process-failure boundary rather than becoming a value**. Covers `D6`, `D7`, `D10`, `D17`; contributes
-`R2`, `R8`, `R10`.
+the process-failure boundary rather than becoming a value**. The real Kafka source → replay intake →
+connection/request path is constructed and reachable through its production queues, with no test-only caller
+standing in for a missing consumer. Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
 
 ### G6 — Retry boundary and broker-time expiration
 
@@ -606,25 +616,14 @@ the intake fence; no unbounded doubling loop; no join on a group that may be dea
 config surface from previous-plan §7, including every deprecated parse-and-warn alias. Startup rejects
 `P < 1`, `T_threads < 1`, `W <= 0`, `E <= 0`, `S < 0`.
 
-**Inherited from G2 — constructing the Kafka source in the real startup path.** `runReplayMode` is marked
-`REBUILD-LIMBO(G9)`, so `KafkaSourceOwner`, `KafkaConsumerSourcePort`, the queues and the wakeup controller
-have no production construction site until this milestone un-marks it. `AGENTS.md` §4 permits that only
-while the register names the replacing milestone, which it does; this line is the other half.
-
-**Inherited from G1 via G3 — the file-input dump path.** Restore file-backed `dump-raw`, `dump-http`, and
-`dump-both` while rebuilding source construction, and settle whether the file source decodes bare base64
-`TrafficStream` values or `CaptureRecord` envelopes. The Kafka-backed modes are already live; this obligation
-is only the file-input branch and its compatibility evidence.
-
 **Inherited from G0 — the shells for `TupleWriter` and `TupleWriteResult`**, which G0 never declared. The
 threading contract that must survive is in the register's `TupleWriter` row.
 
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
 dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
-behavioral effect, and does not fail as an unrecognized key; **file-backed `dump-raw`, `dump-http`, and
-`dump-both` work again with the explicitly selected file-envelope format**; **the replay path constructs the
-Kafka source owner and its port for real, so no replayer component remains unwired**. Covers `D13`, `D14`;
-contributes `R1`, `R19`.
+behavioral effect, and does not fail as an unrecognized key; the already-integrated replay application from
+G5 is started and stopped through the supervisor and deployed configuration, without replacing its owner or
+queue construction. Covers `D13`, `D14`; contributes `R1`, `R19`.
 
 ### G9.5 — Full correctness review at production-complete
 

@@ -85,6 +85,7 @@ public final class PartitionIntakeState {
     private long nextConnectionLocalSequence;
 
     private long greatestObservedLogAppendTime = Long.MIN_VALUE;
+    private KafkaRecordId captureProtocolViolationRecord;
 
     public PartitionIntakeState(
         @NonNull PartitionGenerationId generation,
@@ -267,6 +268,25 @@ public final class PartitionIntakeState {
     public long greatestObservedLogAppendTime() {
         ownerThreadGuard.requireOwnerThread();
         return greatestObservedLogAppendTime;
+    }
+
+    /**
+     * Latches the first record whose payload violates the capture protocol.
+     *
+     * <p>{@code §16} leaves that record unfinished and permits only work admitted before it to drain. The
+     * generation therefore accepts no later record application while termination is pending.
+     */
+    public void captureProtocolViolationAt(@NonNull KafkaRecordId recordId) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(recordId);
+        if (captureProtocolViolationRecord == null) {
+            captureProtocolViolationRecord = recordId;
+        }
+    }
+
+    public boolean hasCaptureProtocolViolation() {
+        ownerThreadGuard.requireOwnerThread();
+        return captureProtocolViolationRecord != null;
     }
 
     // ------------------------------------------------------------------ internals

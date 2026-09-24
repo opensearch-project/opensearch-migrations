@@ -186,9 +186,9 @@ public final class SourceConnectionState {
         }
         if (observation.hasConnectionException()) {
             // §9.3: ConnectionExceptionObservation does not perform the close steps, so the lifetime stays
-            // open. It is still a boundary the replayer observed, which §9.2 makes a completion with
-            // completion unproven.
-            return endAssemblyAtBoundary();
+            // open and an incomplete request remains under assembly. It is still a response boundary the
+            // replayer observed, which §9.2 makes a completion with completion unproven.
+            return applyConnectionException();
         }
         if (observation.hasRequestDropped()) {
             return applyRequestDropped();
@@ -314,7 +314,6 @@ public final class SourceConnectionState {
             // response. It is the only evidence of that available anywhere in the protocol.
             var completed = completeResponse(true);
             phase = Phase.ASSEMBLING_REQUEST;
-            currentCapturedRequestOrdinal++;
             var next = applyToRequest(observation, containingRecord, logAppendTimeMillis);
             return new ObservationOutcome(
                 concat(completed.associationsToAdd(), next.associationsToAdd()),
@@ -378,8 +377,24 @@ public final class SourceConnectionState {
         responseBeingAssembledFor = null;
         if (response != null) {
             sink.onSourceResponseComplete(requestId, response, keptAlive);
+            currentCapturedRequestOrdinal++;
         }
         return ObservationOutcome.none();
+    }
+
+    /**
+     * A connection exception ends only a response that is already under assembly.
+     *
+     * <p>{@code §9.2} names it as a response terminal boundary, while {@code §9.3} says it performs none of
+     * the captured-close steps. In particular, it does not discard an incomplete request or end the lifetime.
+     */
+    private ObservationOutcome applyConnectionException() {
+        if (phase != Phase.ASSEMBLING_RESPONSE) {
+            return ObservationOutcome.none();
+        }
+        var completed = completeResponse(false);
+        phase = Phase.BETWEEN_REQUESTS;
+        return completed;
     }
 
     private ObservationOutcome applyCapturedClose(KafkaRecordId containingRecord) {
@@ -389,28 +404,36 @@ public final class SourceConnectionState {
         sink.onCapturedClose(connectionProcessingId, latestObservationTime);
         return new ObservationOutcome(
             concat(abandoned.associationsToAdd(), List.of(terminal)),
-            abandoned.associationsFinished(),
+            concat(abandoned.associationsFinished(), List.of(terminal)),
             abandoned.relabels(),
             true
         );
     }
 
     private ObservationOutcome applyRequestDropped() {
-        // RequestIntentionallyDropped: the proxy decided this request never reached the source, so it must
-        // not be replayed and no tuple is owed. Its assembly association is released.
-        var finished = incomingRequest == null ? List.<RecordAssociationId>of() : List.of(currentAssemblyId());
+        if (phase != Phase.ASSEMBLING_REQUEST || incomingRequest == null) {
+            throw new CaptureProtocolViolation(
+                "RequestIntentionallyDropped for " + connectionProcessingId
+                    + " arrived without an incomplete request under assembly"
+            );
+        }
+        // §9.4: capture suppression became known only after the proxy had recorded a prefix. That prefix is
+        // deliberately discarded, no replay request or tuple is created, and the next captured request keeps
+        // the source's ordinal progression.
+        var finished = List.<RecordAssociationId>of(currentAssemblyId());
         incomingRequest = null;
+        currentCapturedRequestOrdinal++;
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
     }
 
     /**
-     * Ends assembly at an observed terminal boundary — a captured close or a connection exception.
+     * Ends assembly at a boundary that abandons an incomplete request: a captured close, or response bytes
+     * arriving before that request's end-of-message marker.
      *
-     * <p>{@code §9.2} makes both of these <em>complete</em> with {@code keptAlive = false}: the response
-     * reached an end the replayer observed, and whether the source had finished writing it is unprovable.
-     * Reporting it incomplete instead would be the replayer describing the capture rather than itself, and
-     * would label every response on a closing connection — which is most of them — as unusable.
+     * <p>A response already under assembly is completed with {@code keptAlive = false}: it reached an end the
+     * replayer observed, while whether the source had finished writing it is unprovable. Connection exceptions
+     * use {@link #applyConnectionException()} because {@code §9.3} leaves an incomplete request untouched.
      *
      * <p>A request that never reached end-of-message has no identity at all, so nothing is notified about it
      * and its assembly association is simply released ({@code §8.2}).

@@ -94,13 +94,19 @@ class SourceAssemblyEvidenceTest {
     void dumpHttpReconstructsATransactionCapturedByTheRealProxy() throws Exception {
         var output = dump("dump-http");
 
-        Assertions.assertTrue(
-            output.lines().anyMatch(line -> line.contains("REQ[") && line.contains("/reconstruct-me")),
-            () -> "the captured request was not reconstructed into a request line. Output:\n" + output
+        var requestLine = output.lines()
+            .filter(line -> line.contains("REQ[") && line.contains("/reconstruct-me"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError(
+                "the captured request was not reconstructed into a request line. Output:\n" + output
+            ));
+        var connectionIdentity = requestLine.substring(
+            requestLine.indexOf(" nc:"),
+            requestLine.indexOf(" REQ[")
         );
         Assertions.assertTrue(
-            output.lines().anyMatch(line -> line.contains("RSP[")),
-            () -> "the source response was not reconstructed. Output:\n" + output
+            output.lines().anyMatch(line -> line.contains(connectionIdentity + " RSP[")),
+            () -> "the proxy-captured connection's source response was not reconstructed. Output:\n" + output
         );
         // The probe and heartbeats create no connection state, so this mode must not render them: its subject
         // is transactions, and the topic demonstrably contains records that are not one.

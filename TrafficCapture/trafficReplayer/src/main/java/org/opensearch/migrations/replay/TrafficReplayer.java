@@ -546,8 +546,8 @@ public class TrafficReplayer {
         }
         if (params.inputFilename != null) {
             throw new ParameterException(
-                "dump modes read from Kafka only for now; file input needs the source abstraction that"
-                    + " milestone G9 wires. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
+                "dump modes support Kafka topics only; file-backed dumping is no longer supported."
+                    + " Use --kafka-traffic-brokers and --kafka-traffic-topic.");
         }
     }
     /** Runs a dump mode against a Kafka topic. */
@@ -566,31 +566,6 @@ public class TrafficReplayer {
             System.exit(2);
         }
     }
-// REBUILD-LIMBO-START(G9)
-// The file-input branch of runDumpMode, and the tracing context it needs. Blocked on
-// TrafficCaptureSourceFactory; returns with runDumpFromSource in G9, which is also
-// where the open question in the ledger is settled -- whether the file source speaks bare base64
-// TrafficStream or a CaptureRecord envelope.
-/*
-        var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(
-                OtelCollectorEndpoints.empty(),
-                "dump",
-                ProcessHelpers.getNodeInstanceName()),
-            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
-        );
-
-        if (params.inputFilename != null) {
-            try (var source = TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource(topContext, params)) {
-                runner.runDumpFromSource(params.mode, source,
-                    params.previewBytesRead, params.previewBytesWrite,
-                    params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
-                    topContext);
-            }
-        }
-*/
-// REBUILD-LIMBO-END(G9)
-
     /**
      * Parse and validate the replay target URI and timing params. On invalid input this prints the
      * error and calls System.exit (matching the prior inline behavior); it returns null only on the
