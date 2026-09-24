@@ -59,13 +59,13 @@ criteria, and on conflict the design's list wins.
 |---|---|---|---|---|---|---|
 | R1 | One named owner per mutable value | G9 | procCommit §3.1; replayerLLD §2; async §2 | connLLD §19.6; procCommit §13.1 | open | |
 | R2 | At most one turn + one processing completion; normal has both | G5 | procCommit §3.2; connLLD §10, §13 | connLLD §19.2 | open | |
-| R3 | At most one outstanding batch request per generation | G2, G7 | kafkaLLD §4.2, §13; replayerLLD §2 | kafkaLLD §17.4 | open | Source half proved (`PartitionSourceStateTest`). Intake's own `partitionBatchState` is G7's; ledger row filed. Still open on G2's side until the `§5.3` ended-intake acceptance guard lands |
+| R3 | At most one outstanding batch request per generation | G2, G7 | kafkaLLD §4.2, §13; replayerLLD §2 | kafkaLLD §17.4 | open | **G2's side is proved**: `PartitionSourceStateTest` for the duplicate and wrong-generation rejections, and `aBatchRequestIsRefusedAfterIntakeHasPermanentlyEnded` for `§5.3`'s third condition. Remains open only for intake's own `partitionBatchState`, which is G7's — ledger row filed |
 | R4 | Delivered batch matches one request, applied before next | G7 | kafkaLLD §5.3, §13 | kafkaLLD §17.4 | open | |
 | R5 | Demand open while retry-ready supply below N | G7 | procCommit §8.1; kafkaLLD §13 | kafkaLLD §17.4 | open | |
 | R6 | Fast responses satisfy supply before B+W | G6 | procCommit §8.2; kafkaLLD §11 | kafkaLLD §17.3, §17.4 | open | |
 | R7 | Finished/cancelled cannot re-enter supply | G6, G7 | kafkaLLD §12, §13; procCommit §8.1 | kafkaLLD §17.4 | open | |
 | R8 | Target-write start stays local cancellation state | G5 | connLLD §8; procCommit §3.2 | connLLD §19.2 | open | |
-| R9 | Queued input wakes long poll without interrupting protected work | G2 | kafkaLLD §5.4; replayerLLD §2 | kafkaLLD §17.4 | open | Protected-work half proved against a real broker. The waking half is **not** met: an input submitted while the phase is `RUNNING` records nothing, so it waits a full poll timeout, and `WakeupException` escapes `runOnce()` rather than returning control to queue draining |
+| R9 | Queued input wakes long poll without interrupting protected work | G2 | kafkaLLD §5.4; replayerLLD §2 | kafkaLLD §17.4 | **proved** | All three halves. Protected work and coalescing against a real broker; the `RUNNING`-window gap closed by `enterPoll(inputAlreadyQueued)`; and `theOwnerAbsorbsAWakeupRatherThanUnwindingItsIteration` drives `runOnce()` against a real consumer with no catch in the test, so the owner's own boundary is what makes it pass. `§17.4` case 18 covers the revoke-to-assign interleaving |
 | R10 | No processing completion before tuple durability | G5 | connLLD §12, §13; replayerLLD §5 | connLLD §19.2, §19.3 | open | |
 | R11 | No record completion with unfinished associations | G3, G4 | kafkaLLD §8 | kafkaLLD §17.1 | open | |
 | R12 | Shared record waits for all its requests | G3 | kafkaLLD §8.3; procCommit §6.2 | kafkaLLD §17.1 | open | |
@@ -176,15 +176,24 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
-## G1 — production path done, evidence reopened by the 2026-09-23 review
+## G1 — complete, after `G1R` reopened and closed its evidence
 
-**Not complete.** The dump path works and is wired through `main`, but three of its evidence claims did not
-hold: the real-proxy tests gated on "at least one record", which a startup capability probe satisfies before
-the record under test exists; multi-partition raw dumping truncates the whole dump when one partition reaches
-its bound; and neither all three payload types with a malformed envelope, nor rendered-versus-consumed
-metadata, was shown against a real broker. `G1R` in the repair staging above closes all four. The heading
-previously said "complete", which a reader takes at face value — the same failure mode as the stale line
-citations this pass fixed.
+Closed 2026-09-23. It was marked complete once before on evidence that did not hold, so what changed is
+recorded rather than the heading simply being restored:
+
+- The real-proxy tests gated on "at least one record", which the proxy's **startup capability probe** satisfies
+  before the request under test is captured. They wait for a durable `TrafficStream` now.
+- **Multi-partition raw dumping truncated the whole dump** when any one partition reached its bound, because
+  the bound is per-partition and a single poll interleaves partitions. Partitions retire individually now.
+- That defect was invisible because every test used one partition, where returning from the dump is
+  indistinguishable from finishing. The multi-partition test populates all three partitions **deliberately**
+  rather than hoping the proxy's partitioner spreads them — it previously skipped via `assumeTrue`, and a skip
+  that fires looks exactly like coverage that was never there.
+- Rendered partition and offset are compared against what a consumer independently reports, so a dumper
+  printing plausible but wrong metadata fails.
+- An **undecodable record** ends the dump naming its location, per `kafkaLLD §16`.
+- The deferred modes have contract evidence: `dump-http`, `dump-both` and file input are still accepted and
+  fail naming `G3` and pointing at `dump-raw`, per Plan A `§2.3`.
 
 `replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
 the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
@@ -511,6 +520,54 @@ poll."
 Covered today: cases 8, 9, 10, 13, 15, 16, 17, 19. Partial: 7 (source-side enforcement only; the intake half
 is G7's).
 
+### Second review pass, 2026-09-23 — verdicts
+
+A follow-up review after the first repair round. One critical, four majors, and a commit-message audit. The
+critical and three majors were real; the fifth was a fair charge against a claim rather than against behavior.
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| Async callbacks are not generation-scoped | **REAL, critical** | Submissions now carry the generation and the record count they cover. A callback whose generation is no longer current changes no state — previously it credited the successor's retirement count, re-staged a position the successor never derived, and cleared the successor's in-flight marker so a second operation could race it. Also what finally gives `LATE_CALLBACK` a producer |
+| `RebalanceInProgressException` classified as `GENERATION_STALE` | **REAL** | And an internal contradiction: `6b0cd9f1d`'s message said the two had been separated as retriable versus terminal while its diff put both in `isGenerationStale`. Kafka keeps the generation for this error, so it is `RETRIABLE`; treating it as stale abandoned progress for partitions this consumer keeps across a rebalance |
+| Retirement committed counts over-credit | **REAL** | The count is detached at submission and travels with it, so it is exact. The previous comment defended the approximation; with generation-scoping already adding a per-submission record, exactness became free and the defence stopped being worth making |
+| The grace deadline still uses two clocks | **PARTIALLY REAL** | Not two domains any more — the earlier defect compared an absolute from one clock against another, which is gone. What remains is that the *wait* measures elapsed real time while the *deadline* is in injected time, and `Object.wait` cannot be driven by an injected clock, so the interval must end on real time or spin. Left as-is and now logged when the two disagree, which only a non-advancing clock can produce. Restructuring would mean injecting the wait itself, which buys test fidelity in one test and adds an abstraction to production |
+| The limbo verifier overstates its guarantee | **REAL, about the claim** | The check is a sorted multiset difference: it detects a vanished line, not reordering or duplication. A set comparison is the most available, since body lines like a bare `}` also occur in live code and an order-preserving check would have to guess which occurrence is which. The summary now says "no marked code line missing" for all 226, credits order and duplication to the exact history diff for the 220 that support one, and a new line-count bound catches duplication for the rest |
+
+**Commit-message audit, all four charges accepted.** `6b0cd9f1d` overclaimed findings 1–6 — finding 1 landed in
+`0ac3dffb4` — and described a classification its diff did not implement. `7a29d1747` said `LATE_CALLBACK` had a
+real producer, which was true of the design and not of the code until generation-scoping landed. `0ac3dffb4`
+added the `§5.3` guard with no test; it has one now. R3 and R9 above are rewritten to state what actually
+remains. The wrong messages are not rewritten out of history: the correcting commit says plainly what each got
+wrong, which leaves the record accurate without rewriting pushed history.
+
+### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23
+
+Six properties broken one at a time in a throwaway worktree. **All six caught.**
+
+| Property removed | Caught by |
+|---|---|
+| Pause moved after the batch reaches intake | `aPartitionIsPausedBeforeItsBatchReachesIntake` |
+| `enterPoll` ignores already-queued input | `aPollDoesNotWaitWhenInputIsAlreadyQueued` |
+| `WakeupException` escapes `runOnce` | `aWakeupBetweenRevocationAndAssignmentPostponesTheAssignmentWithoutLosingIt` |
+| Revocation commit loses its bound | `aCommitStagedDuringTheGraceIntervalIsSubmittedFromInsideTheWaitUnderABound` |
+| Cleanup gate clears without matching the generation | `aCleanupCompletionForADifferentGenerationDoesNotReleaseTheGate`, `aPartitionAwaitingCleanupDoesNotStallAnUnrelatedPartition`, `cleanupFinishingBeforeReassignmentLeavesTheSuccessorUngated` |
+| Commit callbacks matched by partition, not generation | `aCommitCallbackArrivingAfterReassignmentIsIgnored` |
+
+**The first run of this pass reported all six as surviving, and was wrong three times over.** Worth recording,
+because each failure mode makes the tool claim safety it has not established:
+
+1. `--quiet` suppresses Gradle's test-failure lines, which is precisely what the harness grepped for. Exit
+   status is the signal now, with names read from the result XML.
+2. A `perl` substitution that does not match leaves the code intact and the suite passes. The harness now
+   refuses to draw a conclusion unless `git diff` confirms the mutation landed, and reports `NOT-APPLIED`.
+3. The worktree was created from `HEAD` while the tests being validated were **staged and uncommitted**, so it
+   measured the previous test set. Committing before falsifying is now part of the procedure.
+
+A harness that cannot fail is worth nothing, which is the same argument the rule makes about tests — so it
+needs the same treatment. Two real gaps did survive the corrected run and were closed before this table: the
+`RUNNING`-window wakeup had no test at all, and the pause-ordering test could not see the ordering it was
+named for.
+
 ### Repair staging — four commits, and why they are grouped this way
 
 G2 does not close until the first three land. G3 waits on them, because findings 1, 4 and 11 are all on the
@@ -520,6 +577,9 @@ completion is identified. Building intake against that interface first means rew
 **Nine items, not four.** An earlier version of this table had four and collapsed real work into phrases —
 the owner caught that it looked too small for twenty-four findings. Two items were genuinely lost in the
 collapse and are marked below.
+
+**Status as of the second review pass:** `§5.7`, G2R-a, -b, -c, -d, Marking, Verifier and Register are landed;
+G1R is landed pending its real-broker run. What remains open against G2 is listed under "still open" below.
 
 | Item | Findings it discharges | Blocked on |
 |---|---|---|
@@ -535,6 +595,31 @@ collapse and are marked below.
 
 Everything except G2R-a is unblocked. G2R-b, -c, -d and G1R are disjoint by package, so ordering among them
 is convenience rather than dependency.
+
+**Still open against G2 after three repair rounds:**
+
+- `§17.4`'s nine demand cases, deferred to `G7` with a ledger row each. Not a gap.
+- Production wiring, deferred to `G9`, which un-marks `runReplayMode`. Not a gap.
+- **The two unratified `kafkaLLD` edits above.** The only thing genuinely outstanding, and it is the owner's
+  decision, not a piece of work.
+
+The single-clock residue is **closed**, not accepted: `GraceIntervalWait` makes the waiting injectable so the
+deadline is measured by one clock, which is what `§15.1` requires. Recording my own acceptance of that
+deviation was itself the error the escalation above describes.
+
+### Third review pass, 2026-09-23 — verdicts
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| Revocation bypasses the one-in-flight guard | **REAL** | A pending async submission could overlap a newer synchronous one, and the retirement count came up short when the async attempt failed while the newer position landed. Such a submission is already abandoned — its callback needs a poll this callback prevents — so it is **reclaimed** at revocation entry: record count returned, position re-staged unless a newer one exists. Sound either way it went, since re-committing is idempotent |
+| Unratified design edits to `kafkaLLD` | **REAL, escalated** | See the escalation section above. Current state is self-consistent; the decision is ratify or revert |
+| Grace wait still uses two clocks | **REAL** | Fixed rather than accepted. `GraceIntervalWait` returns only when the deadline's own clock says so |
+| `G1R` not fully closed | **REAL** | All four items closed and the heading corrected. The `assumeTrue` skip is gone |
+
+**Writing the test for the first finding exposed a fourth defect nobody had reported:**
+`submitRevocationCommit` was only reachable from inside the wait loop, so with no input arriving during the
+grace interval a position staged *before* revocation was never committed at all. It is attempted on entry now,
+which is what `procCommit §9.2` step 5 describes — the attempt is not conditional on further inputs.
 
 **Findings that produce no code**, recorded so they are not re-raised: 7 (the review's rule would introduce
 the very defect `589bda5df` fixed), 9 (not real; design silent on close-versus-drain ordering), 12 (`§5.5`
@@ -588,6 +673,41 @@ caller exists yet.
 `§17.4` is at `983-1007`, not `970-994`: a uniform +13 shift, wrong in Plan A twice and in this register's
 R18 row once. `AGENTS.md` §6 forbids implementing from a paraphrase, and a stale line cite is how someone
 reads the wrong bullets while believing they read the design.
+
+## Unratified design edits — open escalation, 2026-09-23
+
+**Two edits to `kafkaLLD` that the owner did not authorize.** Raised by the second review pass against
+`AGENTS.md:17` and correct. Both are mine, and the remedy is the owner's call, not mine.
+
+The owner authorized the `§5.7` amendment in substance: the outcome reshape and the asynchronous-loop /
+synchronous-revocation split, both of which were on the table as an explicit recommendation when he said to
+proceed. What he did **not** authorize:
+
+1. **Adding the commit floor to `§5.7` and `§17.5`.** It was my own invention, folded into the authorized
+   amendment without being part of it. Nobody asked for a floor and nobody approved one.
+2. **Removing it again**, in `da7787ebf`, which also edited implementation in the same commit — so a design
+   change and a code change travelled together, which makes the design edit easy to miss on review.
+
+The reasoning for the removal still stands on its merits: the bound already confines the call to the deadline,
+the interval it reserved is an in-memory queue submit that needs no reserve, and skipping guarantees the loss
+of a position an attempt might have committed. But a sound argument is not authorization, and red line 1 is
+absolute rather than conditional on being right.
+
+**Current state is self-consistent** — no floor in the design, none in the code — so nothing is broken. What
+is missing is the owner's decision between:
+
+- **Ratify**, and this row becomes two ordinary entries in the table below; or
+- **Revert both edits**, restoring `§5.7`/`§17.5` to their pre-floor wording, which is the state before
+  `7a29d1747` on that one point and leaves the code unchanged.
+
+**A third, separate misstep, already corrected in code.** The register previously recorded the grace wait's
+real-time-versus-injected-clock behaviour as *accepted*, with me as the one accepting it. Accepting a deviation
+from `§15.1` is not mine to do either. `GraceIntervalWait` now satisfies the single-clock requirement instead,
+so there is no deviation to accept and no decision pending — but the earlier entry was the same category of
+error as the two above and is called out rather than quietly rewritten.
+
+**Process change taken without needing a decision:** design edits go in their own commit from here, never
+mixed with implementation, so that a reviewer sees exactly one kind of change per commit.
 
 ## Design changes — only ever on the owner's instruction
 

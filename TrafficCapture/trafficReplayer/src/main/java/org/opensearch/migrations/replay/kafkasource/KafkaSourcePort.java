@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import org.apache.kafka.common.TopicPartition;
 
@@ -37,11 +37,14 @@ public interface KafkaSourcePort {
     /**
      * One poll. Returns the records grouped by partition, empty when the poll produced none.
      *
+     * <p>Returns {@link PolledKafkaRecord} rather than a record carrying process-local identity, because
+     * generations belong to {@code KafkaSourceOwner} alone ({@code kafkaLLD §5}) and the owner stamps them.</p>
+     *
      * <p>A failure here is fatal and must propagate: {@code kafkaLLD} allows no "empty success" that hides a
      * poll error, because an empty result is indistinguishable from a partition with nothing to read and
      * would silently stall the source instead of ending the process.
      */
-    Map<TopicPartition, List<ApplicationKafkaRecord>> poll();
+    Map<TopicPartition, List<PolledKafkaRecord>> poll();
 
     void pause(TopicPartition topicPartition);
 
@@ -58,12 +61,13 @@ public interface KafkaSourcePort {
      * that a blocking commit is dangerous for in the first place ({@code kafkaLLD §5.7}). The loop polls every
      * iteration and a poll is what delivers the callback, so nothing extra is needed to make progress.
      *
-     * @param onResolved invoked with the positions as submitted and the operation's outcome, on the Kafka
-     *                   thread, from within a later {@code poll()}. Travels with the submission rather than
-     *                   being registered once, so there is no mutable wiring and no question which
-     *                   submission a callback belongs to
+     * @param onResolved invoked with the operation's outcome, on the Kafka thread, from within a later
+     *                   {@code poll()}. Travels with the submission rather than being registered once, so
+     *                   there is no mutable wiring and no question which submission a callback belongs to —
+     *                   which is also why it carries no echo of the positions: the caller already holds them,
+     *                   along with the generation each belongs to, which this port has no knowledge of
      */
-    void commitAsync(Map<TopicPartition, Long> nextPositions, BiConsumer<Map<TopicPartition, Long>, CommitOutcome> onResolved);
+    void commitAsync(Map<TopicPartition, Long> nextPositions, Consumer<CommitOutcome> onResolved);
 
     /**
      * Submits the given next-read positions and waits at most {@code bound} for the result.

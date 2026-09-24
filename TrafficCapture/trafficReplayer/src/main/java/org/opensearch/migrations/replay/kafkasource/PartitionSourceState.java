@@ -180,20 +180,32 @@ public final class PartitionSourceState {
     }
 
     /**
-     * Credits the records awaiting commit as committed, once an operation covering them was acknowledged.
+     * Detaches the records a commit is about to cover, so the count travels with that submission.
+     *
+     * <p>Taken at submission rather than credited at acknowledgement, because records keep finishing while a
+     * commit is in flight and those belong to the <em>next</em> position, not this one. Crediting whatever was
+     * awaiting at acknowledgement time would report them committed although their position was never
+     * acknowledged.
+     */
+    public long takeRecordsAwaitingCommit() {
+        var taken = recordsAwaitingCommit;
+        recordsAwaitingCommit = 0;
+        return taken;
+    }
+
+    /**
+     * Credits exactly the records the acknowledged operation covered.
      *
      * <p>Counted from acknowledgement rather than staging, because a staged position that never commits is
      * exactly the case the retirement measurement exists to reveal ({@code procCommit §9.5}).
-     *
-     * <p>The magnitude is approximate and the zero is exact — which is the way round that matters. A record
-     * finishing between submission and acknowledgement is credited to the acknowledgement it did not strictly
-     * belong to, so the total can run slightly ahead within a generation. But nothing is credited without an
-     * acknowledgement, so a generation that committed nothing reports exactly zero, and that is the signal
-     * {@code §9.5} tells operators to watch.
      */
-    public void recordCommitAcknowledged() {
-        recordsCommitted += recordsAwaitingCommit;
-        recordsAwaitingCommit = 0;
+    public void creditRecordsCommitted(long recordsCovered) {
+        recordsCommitted += recordsCovered;
+    }
+
+    /** Returns a failed submission's records to the awaiting pool, so a later commit still credits them. */
+    public void restoreRecordsAwaitingCommit(long recordsCovered) {
+        recordsAwaitingCommit += recordsCovered;
     }
 
     public long recordsCommitted() {

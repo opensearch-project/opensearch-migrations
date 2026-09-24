@@ -33,6 +33,45 @@ class WakeupControllerTest {
         telemetry.close();
     }
 
+    /**
+     * A poll must not settle in to wait on input that is already queued.
+     *
+     * <p>A submission while the loop is {@code RUNNING} correctly issues no wakeup — the loop reaches the queue
+     * on its own — but the loop has already passed its drain by the time it polls, so that input would otherwise
+     * wait out the whole poll timeout. {@code kafkaLLD §5.4}'s predicate is deliberately conservative: act
+     * whenever the Kafka thread <em>may</em> be waiting.
+     *
+     * <p>This gap is what the {@code §4.1} falsification pass caught. The production fix had no test, so
+     * reverting it changed nothing any test observed.
+     */
+    @Test
+    void aPollDoesNotWaitWhenInputIsAlreadyQueued() {
+        // Submitted while RUNNING: nothing issued, and nothing recorded as pending either.
+        Assertions.assertFalse(controller.onInputSubmitted(), "a RUNNING submission needs no wakeup");
+        Assertions.assertEquals(0, wakeups.get());
+
+        controller.enterPoll(true);
+
+        Assertions.assertEquals(
+            1,
+            wakeups.get(),
+            "entering a poll with input already queued must issue a wakeup, or that input waits out the whole"
+                + " poll timeout even though the loop has already passed its drain"
+        );
+        Assertions.assertTrue(controller.isWakeupOutstanding());
+        controller.leavePollAndConsumeWakeup();
+        Assertions.assertFalse(controller.isWakeupOutstanding());
+    }
+
+    /** The control case: an empty queue must not provoke a wakeup, or every poll would be interrupted. */
+    @Test
+    void aPollWithNothingQueuedIssuesNoWakeup() {
+        controller.enterPoll(false);
+
+        Assertions.assertEquals(0, wakeups.get(), "an empty queue must leave the poll alone");
+        controller.leavePollAndConsumeWakeup();
+    }
+
     @Test
     void aQueuedInputWakesALongPollAndRepeatSubmissionsCoalesce() {
         controller.enterPoll();

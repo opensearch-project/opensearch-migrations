@@ -537,7 +537,9 @@ public class TrafficReplayer {
         return MODE_DUMP_RAW.equals(params.mode) || MODE_DUMP_HTTP.equals(params.mode) || MODE_DUMP_BOTH.equals(params.mode);
     }
 
-    private static void validateDumpModeParams(Parameters params) {
+    // Package-private so the deferred-mode contract can be asserted without going through main(), which exits
+    // the process on a ParameterException and would take the test JVM with it.
+    static void validateDumpModeParams(Parameters params) {
         if (params.kafkaTrafficGroupId != null) {
             throw new ParameterException(
                 "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");

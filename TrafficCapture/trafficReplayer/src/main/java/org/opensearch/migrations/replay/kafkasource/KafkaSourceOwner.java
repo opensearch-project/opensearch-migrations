@@ -41,19 +41,13 @@ import org.apache.kafka.common.errors.WakeupException;
 @Slf4j
 public final class KafkaSourceOwner {
 
-    /**
-     * Below this much remaining grace, a revocation commit is not attempted at all. Small relative to the
-     * one-second default interval, because the point is only to refuse a commit that cannot plausibly
-     * round-trip before the deadline it would otherwise overrun.
-     */
-    static final Duration COMMIT_FLOOR = Duration.ofMillis(50);
-
     private final KafkaSourcePort port;
     private final KafkaSourceInputQueue sourceInputs;
     private final ReplayIntakeInputQueue intakeInputs;
     private final WakeupController wakeupController;
     private final Duration cancellationGrace;
     private final LongSupplier monotonicNanos;
+    private final GraceIntervalWait graceWait;
 
     private final Map<TopicPartition, PartitionSourceState> partitions = new LinkedHashMap<>();
     private final Map<TopicPartition, Long> stagedCommitPositions = new LinkedHashMap<>();
@@ -62,7 +56,7 @@ public final class KafkaSourceOwner {
      * advances again mid-flight stages the newer position instead of racing a second operation for it, and so
      * at most one operation is ever outstanding ({@code kafkaLLD §5.7}).
      */
-    private final Map<TopicPartition, Long> inFlightCommitPositions = new LinkedHashMap<>();
+    private final Map<TopicPartition, SubmittedPosition> inFlightCommitPositions = new LinkedHashMap<>();
     /**
      * Generations revoked or lost whose cleanup replay intake has not yet reported.
      *
@@ -81,7 +75,8 @@ public final class KafkaSourceOwner {
         ReplayIntakeInputQueue intakeInputs,
         WakeupController wakeupController,
         Duration cancellationGrace,
-        LongSupplier monotonicNanos
+        LongSupplier monotonicNanos,
+        GraceIntervalWait graceWait
     ) {
         this.port = Objects.requireNonNull(port, "port");
         this.sourceInputs = Objects.requireNonNull(sourceInputs, "sourceInputs");
@@ -89,6 +84,7 @@ public final class KafkaSourceOwner {
         this.wakeupController = Objects.requireNonNull(wakeupController, "wakeupController");
         this.cancellationGrace = Objects.requireNonNull(cancellationGrace, "cancellationGrace");
         this.monotonicNanos = Objects.requireNonNull(monotonicNanos, "monotonicNanos");
+        this.graceWait = Objects.requireNonNull(graceWait, "graceWait");
         if (cancellationGrace.isNegative()) {
             throw new IllegalArgumentException("cancellationGrace must not be negative");
         }
@@ -228,16 +224,55 @@ public final class KafkaSourceOwner {
         if (stagedCommitPositions.isEmpty() || !inFlightCommitPositions.isEmpty()) {
             return;
         }
-        var submitted = Map.copyOf(stagedCommitPositions);
-        stagedCommitPositions.clear();
+        var submitted = detachForSubmission();
         inFlightCommitPositions.putAll(submitted);
         wakeupController.enterProtectedOperation();
         try {
-            port.commitAsync(submitted, this::onCommitResolved);
+            port.commitAsync(positionsOf(submitted), outcome -> onCommitResolved(submitted, outcome));
         } finally {
             wakeupController.leaveProtectedOperation();
         }
     }
+
+    /**
+     * Removes the staged positions and records, per partition, the generation they belong to and how many
+     * records they cover.
+     *
+     * <p>The generation is what makes a callback resolvable. Without it a callback that arrives after the
+     * partition was revoked and reassigned would be indistinguishable from one for the current generation, and
+     * would credit or re-stage against a successor that never submitted it.
+     */
+    private Map<TopicPartition, SubmittedPosition> detachForSubmission() {
+        var submitted = new LinkedHashMap<TopicPartition, SubmittedPosition>();
+        stagedCommitPositions.forEach((topicPartition, position) -> {
+            var state = partitions.get(topicPartition);
+            if (state == null) {
+                return;
+            }
+            submitted.put(
+                topicPartition,
+                new SubmittedPosition(state.generation(), position, state.takeRecordsAwaitingCommit())
+            );
+        });
+        stagedCommitPositions.clear();
+        return submitted;
+    }
+
+    private static Map<TopicPartition, Long> positionsOf(Map<TopicPartition, SubmittedPosition> submitted) {
+        var positions = new LinkedHashMap<TopicPartition, Long>();
+        submitted.forEach((topicPartition, detail) -> positions.put(topicPartition, detail.nextPosition()));
+        return positions;
+    }
+
+    /**
+     * One partition's position in a submitted commit, with the generation that submitted it and how many
+     * records it covers.
+     */
+    private record SubmittedPosition(
+        PartitionGenerationId generation,
+        long nextPosition,
+        long recordsCovered
+    ) {}
 
     /**
      * Resolves a submitted commit. Runs on the Kafka thread, delivered from inside a later {@code poll()}.
@@ -249,33 +284,46 @@ public final class KafkaSourceOwner {
      * its prefix next advances — which work blocked behind an unfinished head can delay without bound.
      */
     private void onCommitResolved(
-        Map<TopicPartition, Long> submitted,
+        Map<TopicPartition, SubmittedPosition> submitted,
         KafkaSourcePort.CommitOutcome outcome
     ) {
-        submitted.forEach(inFlightCommitPositions::remove);
-        var late = submitted.keySet().stream().filter(tp -> !partitions.containsKey(tp)).toList();
-        if (!late.isEmpty()) {
-            // kafkaLLD §5.7: a callback for a generation no longer held locally is diagnostic only.
-            log.atDebug().setMessage("Commit callback for {} arrived after its generation was retired: {}")
-                .addArgument(late).addArgument(outcome).log();
-        }
-        if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
-            submitted.forEach((topicPartition, position) -> {
-                var state = partitions.get(topicPartition);
-                if (state != null) {
-                    state.recordCommitAcknowledged();
-                }
-            });
-            return;
-        }
-        // Nothing is reported to intake, which finished its record-processing decision before sending
-        // RecordProcessingFinished (kafkaLLD §5.7).
-        submitted.forEach((topicPartition, position) -> {
+        submitted.forEach((topicPartition, detail) -> {
+            var state = partitions.get(topicPartition);
+            var currentGeneration = state != null && state.generation().equals(detail.generation());
+
+            // Matched on generation, not on partition. A callback can outlive a revoke-and-reassign, and
+            // clearing the marker by partition alone would release the successor's in-flight slot and let a
+            // second operation race it (kafkaLLD §5.7's one-in-flight rule).
+            var inFlight = inFlightCommitPositions.get(topicPartition);
+            if (inFlight != null && inFlight.generation().equals(detail.generation())) {
+                inFlightCommitPositions.remove(topicPartition);
+            }
+
+            if (!currentGeneration) {
+                // kafkaLLD §5.7's LATE_CALLBACK: diagnostic only. It changes no state -- crediting a successor
+                // for an operation the revoked generation submitted would inflate its retirement count, and
+                // re-staging would offer a successor a position it never derived.
+                wakeupController.countLateCommitCallback();
+                log.atDebug()
+                    .setMessage("Late commit callback for retired generation {} at {}: {}; ignoring")
+                    .addArgument(detail::generation).addArgument(detail::nextPosition).addArgument(outcome)
+                    .log();
+                return;
+            }
+
+            if (outcome == KafkaSourcePort.CommitOutcome.ACKNOWLEDGED) {
+                state.creditRecordsCommitted(detail.recordsCovered());
+                return;
+            }
+
+            // Nothing is reported to intake, which finished its record-processing decision before sending
+            // RecordProcessingFinished (kafkaLLD §5.7).
             if (stillOwnsForCommit(topicPartition)) {
-                stagedCommitPositions.putIfAbsent(topicPartition, position);
+                stagedCommitPositions.putIfAbsent(topicPartition, detail.nextPosition());
+                state.restoreRecordsAwaitingCommit(detail.recordsCovered());
             } else {
                 log.atInfo().setMessage("Dropping commit position {} for {}: {} and no longer committable")
-                    .addArgument(position).addArgument(topicPartition).addArgument(outcome).log();
+                    .addArgument(detail::nextPosition).addArgument(topicPartition).addArgument(outcome).log();
             }
         });
     }
@@ -323,7 +371,7 @@ public final class KafkaSourceOwner {
      * unwinds the iteration.
      */
     private void pollAndDeliver() {
-        Map<TopicPartition, List<ApplicationKafkaRecord>> polled;
+        Map<TopicPartition, List<PolledKafkaRecord>> polled;
         wakeupController.enterPoll(!sourceInputs.isEmpty());
         try {
             polled = port.poll();
@@ -338,7 +386,7 @@ public final class KafkaSourceOwner {
         polled.forEach(this::deliver);
     }
 
-    private void deliver(TopicPartition topicPartition, List<ApplicationKafkaRecord> records) {
+    private void deliver(TopicPartition topicPartition, List<PolledKafkaRecord> records) {
         if (records.isEmpty()) {
             // An empty poll completes no request; the partition stays resumed and the request outstanding.
             return;
@@ -354,9 +402,19 @@ public final class KafkaSourceOwner {
             state.setKafkaPaused(true);
         }
         var requestId = state.completeOutstandingRequest();
-        records.forEach(record -> state.commitQueue().register(record.recordId()));
-        state.countRecordsRead(records.size());
-        submitRequired(new ReplayIntakeInput.PartitionRecordBatch(requestId, records));
+        // Stamped here, by the only component that knows the generation. The adapter returns raw records
+        // precisely so it needs no generation map of its own to keep in step (kafkaLLD §5).
+        var stamped = records.stream()
+            .map(raw -> new ApplicationKafkaRecord(
+                new KafkaRecordId(state.generation(), raw.offset()),
+                raw.logAppendTimeMillis(),
+                raw.serializedSizeBytes(),
+                raw.envelope()
+            ))
+            .toList();
+        stamped.forEach(record -> state.commitQueue().register(record.recordId()));
+        state.countRecordsRead(stamped.size());
+        submitRequired(new ReplayIntakeInput.PartitionRecordBatch(requestId, stamped));
     }
 
     // ---------------------------------------------------------------- rebalance callbacks
@@ -431,6 +489,8 @@ public final class KafkaSourceOwner {
                 return;
             }
 
+            reclaimInFlightCommits(revoked);
+
             var deadlineNanos = monotonicNanos.getAsLong() + cancellationGrace.toNanos();
             var deadline = new CancellationDeadline(deadlineNanos);
             generations.forEach(generation -> submitRequired(
@@ -482,12 +542,17 @@ public final class KafkaSourceOwner {
      * but produces no poll.
      */
     private void awaitGraceDeadlineProcessingInputs(CancellationDeadline deadline) throws InterruptedException {
-        while (!deadline.hasPassed(monotonicNanos.getAsLong())) {
-            // A duration, not the deadline: the queue's wait measures elapsed real time and cannot read this
-            // owner's clock, so converting here keeps one monotonic source per deadline (kafkaLLD §15.1).
-            if (!sourceInputs.awaitInput(deadline.remainingNanos(monotonicNanos.getAsLong()))) {
-                return;
-            }
+        // The wait is injected, not called on the queue directly. kafkaLLD §15.1 requires one monotonic source
+        // for the deadline, and no arrangement of durations achieves that with a raw Object.wait: waiting always
+        // elapses in real time, so "the wait expired" and "the deadline passed" would be two different clocks
+        // answering one question. GraceIntervalWait returns only when the deadline's own clock says so.
+        // Attempted once before waiting, not only after an input arrives. Positions can already be staged when
+        // revocation begins -- a prefix that advanced earlier in this iteration, or one reclaimed from an
+        // abandoned async submission -- and `procCommit §9.2` step 5 permits attempting them without making the
+        // attempt conditional on further inputs. Only reaching this inside the loop meant that with no new input
+        // during the interval, a staged position was never committed at all.
+        submitRevocationCommit(deadline);
+        while (graceWait.awaitInputUntil(deadline)) {
             applyQueuedInputs();
             submitRevocationCommit(deadline);
         }
@@ -502,29 +567,67 @@ public final class KafkaSourceOwner {
      * {@code max.poll.interval.ms} — which is also the rebalance timeout — fences the member and converts this
      * graceful revocation into a lost one, discarding every staged position.
      *
-     * <p>Skipped entirely below {@link #COMMIT_FLOOR}: a commit that cannot finish in the time left is worse
-     * than none, because the remainder of the interval belongs to force-cancellation delivery
-     * ({@code kafkaLLD §15.2}).
+     * <p>Attempted however little grace remains. The bound is what confines the call to the deadline, so a
+     * sliver is a small budget rather than a hazard, and declining to try would discard a position a fast
+     * round-trip could still have committed — a revoked generation's position is discarded anyway once the
+     * callback returns, so attempting is never the worse choice.
      */
+    /**
+     * Takes back any asynchronous commit still in flight for a partition being revoked.
+     *
+     * <p>Such a submission is already abandoned: its callback is delivered by a later {@code poll()}, and this
+     * callback returns before one happens, so by the time it arrives the generation is retired and it resolves
+     * as {@code LATE_CALLBACK}. Leaving it in the in-flight map would let the synchronous commit below overlap
+     * it, breaking {@code kafkaLLD §5.7}'s one-operation-at-a-time rule; leaving its record count detached
+     * would under-credit the generation's retirement measurement when the async attempt is the one that fails
+     * and the newer synchronous position is the one that lands.
+     *
+     * <p>Reclaiming is sound whichever way the abandoned attempt actually went. If it succeeded, the position
+     * committed below is the same or newer and committing it again is idempotent, and the count is credited
+     * once. If it failed, the count stays with the generation and is credited only if the synchronous attempt
+     * succeeds.
+     */
+    private void reclaimInFlightCommits(Collection<TopicPartition> revoked) {
+        for (var topicPartition : revoked) {
+            var inFlight = inFlightCommitPositions.remove(topicPartition);
+            if (inFlight == null) {
+                continue;
+            }
+            var state = partitions.get(topicPartition);
+            if (state == null || !state.generation().equals(inFlight.generation())) {
+                continue;
+            }
+            state.restoreRecordsAwaitingCommit(inFlight.recordsCovered());
+            // A position staged since the submission is newer, so it wins; a commit position only advances.
+            stagedCommitPositions.putIfAbsent(topicPartition, inFlight.nextPosition());
+        }
+    }
+
     private void submitRevocationCommit(CancellationDeadline deadline) {
         if (stagedCommitPositions.isEmpty()) {
             return;
         }
-        var remainingNanos = deadline.remainingNanos(monotonicNanos.getAsLong());
-        if (remainingNanos < COMMIT_FLOOR.toNanos()) {
-            log.atInfo().setMessage("Not attempting a revocation commit for {}: {}ns of grace left")
-                .addArgument(stagedCommitPositions::keySet).addArgument(remainingNanos).log();
+        if (!inFlightCommitPositions.isEmpty()) {
+            // §5.7 allows one commit operation at a time, and nothing here can wait for the outstanding one to
+            // resolve: its callback needs a poll that this callback is preventing. Reclaiming at revocation
+            // entry means this can only be an operation for a partition that is not being revoked.
+            log.atDebug().setMessage("Not attempting a revocation commit while {} is in flight")
+                .addArgument(inFlightCommitPositions::keySet).log();
             return;
         }
-        var submitted = Map.copyOf(stagedCommitPositions);
+        // Attempted however little grace is left. The bound is what keeps the call inside the deadline, so a
+        // sliver of remaining time is a small budget rather than a hazard -- and skipping the attempt would
+        // discard a position that a fast round-trip could still have committed, since a revoked generation's
+        // position is discarded either way once the callback returns.
+        var remainingNanos = deadline.remainingNanos(monotonicNanos.getAsLong());
+        var submitted = detachForSubmission();
         wakeupController.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
         try {
-            outcome = port.commitSync(submitted, Duration.ofNanos(remainingNanos));
+            outcome = port.commitSync(positionsOf(submitted), Duration.ofNanos(remainingNanos));
         } finally {
             wakeupController.leaveProtectedOperation();
         }
-        submitted.forEach(stagedCommitPositions::remove);
         onCommitResolved(submitted, outcome);
     }
 

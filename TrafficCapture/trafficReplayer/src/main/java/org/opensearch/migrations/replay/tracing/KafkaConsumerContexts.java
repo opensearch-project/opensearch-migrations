@@ -322,8 +322,17 @@ public class KafkaConsumerContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
+            /**
+             * Commit callbacks that arrived for a generation no longer held. Diagnostic only per
+             * {@code kafkaLLD §5.7}, but worth a series: a sustained rate means commits keep resolving after
+             * their generation was revoked, which is the shape of a rebalance storm.
+             */
+            public final LongCounter lateCommitCallbacks;
+
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
+                lateCommitCallbacks = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.LATE_COMMIT_CALLBACKS).build();
             }
         }
 

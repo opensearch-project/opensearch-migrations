@@ -231,6 +231,15 @@ public final class WakeupController {
         callbackContext.onGenerationRetired(generationLabel, recordsCommitted, recordsRead);
     }
 
+    /**
+     * Records a commit callback that arrived for a generation no longer held — {@code kafkaLLD §5.7}'s
+     * {@code LATE_CALLBACK}, which is diagnostic only. Counted on the commit scope's instruments rather than
+     * inside a span, because the callback arrives with no commit scope open.
+     */
+    public synchronized void countLateCommitCallback() {
+        rootContext.commitInstruments.lateCommitCallbacks.add(1);
+    }
+
     private boolean issueUnlessOutstanding() {
         if (wakeupOutstanding) {
             pollInstruments().wakeupsCoalesced.add(1);

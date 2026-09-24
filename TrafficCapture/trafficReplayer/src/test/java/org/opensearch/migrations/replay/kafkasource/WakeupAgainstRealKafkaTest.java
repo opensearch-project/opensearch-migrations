@@ -319,7 +319,7 @@ class WakeupAgainstRealKafkaTest {
     void aWakeupDuringACommitIsDeferredAndTheCommitCompletes() throws Exception {
         var controller = controllerFor(consumer);
         var queue = queueFor(controller);
-        var port = new KafkaConsumerSourcePort(consumer, LONG_POLL, Map.of());
+        var port = new KafkaConsumerSourcePort(consumer, LONG_POLL);
 
         controller.enterProtectedOperation();
         KafkaSourcePort.CommitOutcome outcome;
@@ -375,6 +375,63 @@ class WakeupAgainstRealKafkaTest {
                 + " assertion elsewhere could pass for the wrong reason"
         );
         assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 0);
+    }
+
+    /**
+     * The owner's own boundary, against a real consumer: {@code runOnce()} returns normally when a queued input
+     * wakes its poll.
+     *
+     * <p>Every other test here brackets {@code consumer.poll} itself and catches {@code WakeupException} in the
+     * test, which proves the controller issues a wakeup and the broker honours it — but leaves the production
+     * boundary untested, so {@code runOnce()} could propagate and every assertion would still pass. That is what
+     * happened: the escape was real while these tests were green. This one drives the owner instead, so the
+     * catch in {@code pollAndDeliver} is what makes it pass.
+     */
+    @Test
+    void theOwnerAbsorbsAWakeupRatherThanUnwindingItsIteration() throws Exception {
+        var controller = controllerFor(consumer);
+        var sourceInputs = queueFor(controller);
+        var owner = new KafkaSourceOwner(
+            new KafkaConsumerSourcePort(consumer, LONG_POLL),
+            sourceInputs,
+            new org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue(),
+            controller,
+            Duration.ofMillis(200),
+            System::nanoTime,
+            // The production wait, since this test runs against a real broker on real time.
+            GraceIntervalWait.blockingOn(sourceInputs, System::nanoTime)
+        );
+
+        var submitter = new Thread(() -> {
+            try {
+                awaitCounter(IKafkaConsumerContexts.MetricNames.POLLS_ENTERED, 1);
+                Thread.sleep(BLOCKED_DWELL.toMillis());
+                sourceInputs.submit(generationCleanupFinished(topicPartition));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        submitter.start();
+
+        // No try/catch: propagating out of here is the defect, so an escape fails the test by escaping.
+        owner.runOnce();
+        submitter.join();
+
+        var pollDuration = reportAndReturnSingleSpanDuration(IKafkaConsumerContexts.ActivityNames.KAFKA_POLL);
+        Assertions.assertTrue(
+            pollDuration.compareTo(PROMPT) < 0,
+            () -> "the owner's poll ran " + pollDuration.toMillis() + "ms, so it was not woken"
+        );
+        Assertions.assertTrue(
+            pollDuration.compareTo(BLOCKED_DWELL) >= 0,
+            () -> "the poll returned in " + pollDuration.toMillis() + "ms, before the submitter had even"
+                + " submitted, so it was never actually blocked and the wakeup proved nothing"
+        );
+        assertCounter(IKafkaConsumerContexts.MetricNames.WAKEUPS_ISSUED, 1);
+        Assertions.assertFalse(
+            controller.isWakeupOutstanding(),
+            "the wakeup must be consumed at the poll boundary, or it would interrupt the next Kafka operation"
+        );
     }
 
     // ------------------------------------------------------------------ span and metric helpers
