@@ -88,11 +88,10 @@ done
 # Already-pushed commits cannot be un-mixed without rewriting shared history, so known ones are listed here with
 # their reason. The list is deliberately explicit and deliberately short: a check that stays red gets ignored,
 # and an exemption nobody can see is worse than no check. Adding to it for a *new* commit is not a remedy.
-ACKNOWLEDGED_MIXED="
-da7787ebf removed the revocation commit floor from kafkaLLD and from the code together. It is the violation
-          that prompted this script; recorded in the register's escalation rather than rewritten out of
-          pushed history.
-"
+# Empty, and that is the point: the one entry this list ever held was split into a design commit and a code
+# commit during the 2026-09-24 history consolidation, so the exemption has no subject. A stale exemption is
+# worse than a visible violation, because it silently widens what the check permits.
+ACKNOWLEDGED_MIXED=""
 for commit in $(git rev-list "$merge_base"..HEAD -- "$DESIGN_DIR"); do
     short=$(git rev-parse --short "$commit")
     if printf '%s' "$ACKNOWLEDGED_MIXED" | grep -q "$short"; then
