@@ -723,22 +723,56 @@ class StreamChannelConnectionCaptureSerializerTest {
     }
 
     @Test
-    public void testAssertionErrorDuringInitializationWhenInitializeWithTooLargeId() {
-        final String realNodeId = "b671d2f2-577b-414e-9eb4-8bc3e89ee182";
-        final String realKafkaConnectionId = "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2";
-
-        // Prepending "a" to a realNodeId to create a larger than expected id to trigger failure
-        final String tooLargeNodeId = 'a' + realNodeId;
-
+    public void testLongProductionIdsAreSerializedWithoutAnArtificialLimit() throws Exception {
+        final String writerNodeId = "capture_4b917989-a0e8-48a2-8de9-49d556660acc:123456789";
+        final String connectionId = "9a25a4fffe620014-00034cfa-00000001-d208faac76346d02-864e38e2";
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
-        Assertions.assertThrows(
-            AssertionError.class,
-            () -> new StreamChannelConnectionCaptureSerializer<>(
-                "a" + tooLargeNodeId,
-                realKafkaConnectionId,
-                new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated)
-            )
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            writerNodeId,
+            connectionId,
+            new StreamManager(1024, outputBuffersCreated)
         );
+
+        serializer.addCloseEvent(REFERENCE_TIMESTAMP);
+        serializer.flushCommitAndResetStream(true).get();
+
+        var stream = TrafficStream.parseFrom(outputBuffersCreated.element());
+        Assertions.assertEquals(writerNodeId, stream.getNodeId());
+        Assertions.assertEquals(connectionId, stream.getConnectionId());
+    }
+
+    @Test
+    void intentionallyDroppedRequestAdvancesSuccessorStreamBaseline() throws Exception {
+        var outputBuffers = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = new StreamChannelConnectionCaptureSerializer<>(
+            TEST_NODE_ID_STRING,
+            TEST_TRAFFIC_RECORD_ID_STRING,
+            new StreamManager(1024, outputBuffers)
+        );
+
+        var droppedPrefix = Unpooled.wrappedBuffer(new byte[] { 1 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, droppedPrefix);
+        droppedPrefix.release();
+        serializer.cancelCaptureForCurrentRequest(REFERENCE_TIMESTAMP);
+        serializer.flushCommitAndResetStream(false).get();
+
+        var successor = Unpooled.wrappedBuffer(new byte[] { 2 });
+        serializer.addReadEvent(REFERENCE_TIMESTAMP, successor);
+        successor.release();
+        serializer.flushCommitAndResetStream(true).get();
+
+        var records = outputBuffers.stream().map(buffer -> {
+            try {
+                return TrafficStream.parseFrom(buffer);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }).sorted(Comparator.comparingInt(StreamChannelConnectionCaptureSerializerTest::getIndexForTrafficStream))
+            .toList();
+
+        Assertions.assertEquals(2, records.size());
+        Assertions.assertTrue(records.get(0).getSubStream(1).hasRequestDropped());
+        Assertions.assertEquals(1, records.get(1).getPriorRequestsReceived());
     }
 
     @ParameterizedTest

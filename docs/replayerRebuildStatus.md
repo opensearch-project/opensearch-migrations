@@ -114,6 +114,16 @@ refuted. Full measurements remain in the archived status.
 | Active-record-tracker gauge during generation cancellation | A, unreachable before G8 | deferred(G8) | Every unfinished tracker removed by `GenerationCleanupTracker` decrements the process-wide gauge once; prove return to the pre-generation value without generation metric attributes |
 | G3 final review | conformance | proved | Seventh pass found no production-code design-conformance defect; only the typed-interim plan/design mismatch remains |
 
+## PA2 items 1–4 latest dispositions
+
+| Exit obligation | State | Evidence |
+|---|---|---|
+| Real proxy topics use `LogAppendTime` | proved | The fixture creates or verifies the default topic with `message.timestamp.type=LogAppendTime`; the real-proxy capability test captures a request, and the CreateTime falsification failed during startup qualification |
+| Production-shaped capture identifiers serialize without an artificial bound | proved | The stale assertion and replayer `-da:` workaround are deleted; the identifier round-trip passes, and restoring the artificial limit fails at construction |
+| In-process fatal proxy exit is observable without halting the test JVM | proved | JVM actions are injected at `CaptureProxy.main`; the fixture observes exit 78, and disabling produce rejection makes the focused test time out |
+| Intentional drop advances the successor baseline | proved | The serializer increments `eomsSoFar`; the successor reports one prior request, and removing the increment makes it report zero |
+| Review and falsification | proved | The read-only design-conformance pass returned `NO_ACTIONABLE_FINDINGS`; one direct ephemeral worker inverted all four properties independently and restored clean at `9ea48669f` |
+
 ## G4 latest dispositions
 
 | Finding / decision | Class | State | Required disposition |
@@ -255,7 +265,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Deferred | From | To | Why | State |
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` | G1 | G3 | Source assembly was required first | proved — `SourceAssemblyEvidenceTest` |
-| Proxy dropped-request successor baseline | G3 | PA2 | Serializer does not increment `eomsSoFar`; proxy-owned repair | open — PA2 item 4 |
+| Proxy dropped-request successor baseline | G3 | PA2 | Serializer does not increment `eomsSoFar`; proxy-owned repair | proved — `intentionallyDroppedRequestAdvancesSuccessorStreamBaseline`, including falsification without the increment |
 | Typed source-interim observation producer | G3 | PA2 | Proxy must classify source `1xx` other than `101` and emit typed whole/segmented observations before G3 can interoperate; no compatibility path | open — PA2 item 5 |
 | Preserve target interim responses in tuples | G5 | POST1 | Owner deliberately placed the complete target-channel → aggregation → tuple chain after the rewrite | open |
 | Replace temporary per-connection tuple-writer placement and preserve stable sink index | G5 | G9 | G5 owns the complete logical transform/drop/retry/durability chain; G9 owns the configured bounded worker set, stable integer worker/sink index including S3 naming, per-worker transformer/sink construction, explicit close, and deletion of G5's per-connection placement | open |
@@ -290,10 +300,10 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | `REBUILD-LIMBO-NOTE` stand-ins | varies | named milestone in each note | open — 5 NOTE files measured 2026-09-25 |
 | Module `build.gradle` limbo note | G0 | last limbo region | open |
 | `KafkaSourceRootContext` | G2 | G3 | proved deleted |
-| Proxy Kafka tests missing `LogAppendTime` topic setup | inherited | PA2 item 1 | open; masks PA2 item 2 |
-| Proxy `MAX_ID_SIZE` assertion; replayer `-da:` workaround | inherited/G1 workaround | PA2 item 2; delete workaround in same repair | open |
-| In-process proxy `System.exit(78)` and broker-lifetime workaround | inherited/G1 workaround | PA2 item 3; delete workaround in same repair | open |
-| Proxy dropped-request successor baseline | inherited | PA2 item 4 | open |
+| Proxy Kafka tests missing `LogAppendTime` topic setup | inherited | PA2 item 1 | proved — fixture creates/verifies `LogAppendTime`; real-proxy capability test captures a request; CreateTime falsification fails qualification |
+| Proxy `MAX_ID_SIZE` assertion; replayer `-da:` workaround | inherited/G1 workaround | PA2 item 2; delete workaround in same repair | proved — assertion and workaround deleted; production-shaped identifiers round-trip; restored bound fails |
+| In-process proxy `System.exit(78)` and broker-lifetime workaround | inherited/G1 workaround | PA2 item 3; delete workaround in same repair | proved — JVM actions injected; in-process fatal exit observed as 78; healthy-produce falsification times out |
+| Proxy dropped-request successor baseline | inherited | PA2 item 4 | proved — drop advances `eomsSoFar`; successor baseline test proves one prior request; no-increment falsification reports zero |
 | Marked connection/context lifetime members | G2 carry | G5 | proved live refactor; trace-eligible predecessor members remain marked through the final completeness sweep |
 | Marked revocation/stale-assembly/cleanup members | G2 carry | G8 | open; preserve and refactor onto typed cancellation/cleanup |
 | Interrupted-source application-close member | G2 carry | G11 | open; process teardown only |

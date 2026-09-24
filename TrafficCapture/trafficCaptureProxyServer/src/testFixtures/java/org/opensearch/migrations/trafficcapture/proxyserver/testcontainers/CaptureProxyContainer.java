@@ -4,6 +4,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -28,6 +32,8 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
     private final Supplier<String> destinationUriSupplier;
     private final Supplier<String> kafkaUriSupplier;
     private final List<String> extraArgs;
+    private final CompletableFuture<Integer> fatalExitCode = new CompletableFuture<>();
+    private final AtomicBoolean stopRequested = new AtomicBoolean();
     private Integer listeningPort;
     private Thread serverThread;
 
@@ -81,11 +87,27 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
 
                 argsList.addAll(extraArgs);
 
-                CaptureProxy.main(argsList.toArray(new String[0]));
+                CaptureProxy.run(
+                    argsList.toArray(new String[0]),
+                    // Log4j2 belongs to the hosting JVM; the terminator flushes System.err itself.
+                    () -> {},
+                    exitCode -> {
+                        fatalExitCode.complete(exitCode);
+                        var runningThread = serverThread;
+                        if (runningThread != null) {
+                            runningThread.interrupt();
+                        }
+                    }
+                );
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (!stopRequested.get() && !fatalExitCode.isDone()) {
+                    throw new AssertionError("Capture proxy stopped unexpectedly", e);
+                }
             } catch (Exception e) {
                 throw new AssertionError("Should not have exception", e);
             }
-        });
+        }, "in-process-capture-proxy");
 
         serverThread.start();
         new HttpWaitStrategy().forPort(listeningPort).withStartupTimeout(TIMEOUT_DURATION).waitUntilReady(this);
@@ -93,21 +115,42 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
 
     @Override
     public boolean isRunning() {
-        return serverThread != null;
+        return serverThread != null && serverThread.isAlive();
     }
 
     @Override
     public void stop() {
-        if (serverThread != null) {
-            serverThread.interrupt();
-            this.serverThread = null;
+        stopRequested.set(true);
+        var runningThread = serverThread;
+        if (runningThread != null) {
+            if (!fatalExitCode.isDone()) {
+                runningThread.interrupt();
+            }
+            try {
+                runningThread.join(TIMEOUT_DURATION.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (runningThread.isAlive()) {
+                log.warn("Capture proxy thread did not stop within {}", TIMEOUT_DURATION);
+            }
         }
+        this.serverThread = null;
         this.listeningPort = null;
-        close();
     }
 
     @Override
-    public void close() {}
+    public void close() {
+        stop();
+    }
+
+    public int waitForFatalExit(Duration timeout) throws InterruptedException, TimeoutException {
+        try {
+            return fatalExitCode.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new IllegalStateException("Fatal exit observation failed", e.getCause());
+        }
+    }
 
     @Override
     public Set<Integer> getLivenessCheckPortNumbers() {

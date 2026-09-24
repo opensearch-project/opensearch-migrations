@@ -164,8 +164,8 @@ class CaptureProxyOrderlyShutdownTest {
         var source = Files.readString(Path.of(
             "src/main/java/org/opensearch/migrations/trafficcapture/proxyserver/CaptureProxy.java"
         ));
-        var hookStart = source.indexOf("Runtime.getRuntime().addShutdownHook");
-        var hookEnd = source.indexOf("proxy.waitForClose()", hookStart);
+        var hookStart = source.indexOf("var shutdownHook = new Thread");
+        var hookEnd = source.indexOf("Runtime.getRuntime().addShutdownHook(shutdownHook)", hookStart);
         assertTrue(hookStart >= 0 && hookEnd > hookStart);
 
         var shutdownHook = source.substring(hookStart, hookEnd);

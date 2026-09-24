@@ -369,23 +369,9 @@ public final class ProxyWrittenTopic implements AutoCloseable {
         }
     }
 
-    /**
-     * Stops the destination but deliberately leaves the broker running.
-     *
-     * <p>{@code CaptureProxyContainer.stop()} interrupts the proxy's server thread, but the proxy's Kafka
-     * publisher keeps running, and nothing outside the proxy can stop it. If the broker goes away while that
-     * publisher is still attached, the publisher declares capture permanently compromised and the proxy calls
-     * {@code System.exit(78)} — which, running in-process, kills the test JVM and fails whatever test class
-     * happens to be executing. Every test here passes alone; the earlier version of this method made them
-     * fail together.
-     *
-     * <p>Leaving the broker up keeps the topic present so the publisher never fails. Testcontainers' reaper
-     * removes the container when the JVM exits, so nothing leaks past the run. Deleted by PA2 item 3
-     * (docs/replayerRebuildPlan.md section 3.2), which gives the proxy an injectable exit hook.
-     */
     @Override
     public void close() {
-        closeQuietly(destination);
+        closeQuietly(proxy, destination, kafka);
     }
 
     /**
