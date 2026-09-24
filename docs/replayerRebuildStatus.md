@@ -542,8 +542,8 @@ wrong, which leaves the record accurate without rewriting pushed history.
 
 ### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23, extended 2026-09-24
 
-Twenty properties broken one at a time in a throwaway worktree. **All twenty caught**, fourteen of them only
-after the rounds below added the tests that see them. Four mutate the Kafka adapter, which the harness never
+Twenty-one properties broken one at a time in a throwaway worktree. **All twenty-one caught**, fifteen of them
+only after the rounds below added the tests that see them. Four mutate the Kafka adapter, which the harness never
 touched until a fatal defect in it survived eleven green mutations — and the harness itself had to be fixed
 before any of this counted, because it could report full coverage from a dirty tree.
 
@@ -564,6 +564,10 @@ before any of this counted, because it could report full coverage from a dirty t
 | An async submission refused before registration never resolves | `anAsynchronousSubmissionRefusedBeforeRegistrationStillResolvesOnce` |
 | Adapter classifies an async-submission wakeup instead of propagating it | `aWakeupOutOfAnAsynchronousSubmissionReachesTheOwnerRatherThanTheFatalBranch` |
 | Adapter resolves one submission twice | `aSubmissionThatBothResolvesAndThrowsResolvesExactlyOnce` |
+| Batch request served for a partition on its way out | `aBatchRequestIsRefusedAfterIntakeHasPermanentlyEnded` |
+| Async local timeout treated as a structural failure | `aLocalTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal` |
+| Absorbed wakeup not counted | `absorbingAWakeupIsCounted` |
+| Grace wait always reported as ending early | `howTheGraceWaitEndedIsCounted` |
 | Interrupted loop submission never resolves | `aWakeupInterruptingTheLoopSubmissionReleasesTheInFlightSlot` |
 | Absorption reportable from any phase | `onlyAProtectedOperationMayReportAbsorbingAWakeup` |
 

@@ -111,7 +111,7 @@ perl -pi -e 's/if \(remainingNanos <= 0\) \{/if (false) {/' "$O"
 run "revocation commit started with no grace remaining"
 
 # 11. Skip force cancellation when every generation reported cleanup early (procCommit §9.2 step 7).
-perl -pi -e 's/^            awaitGraceDeadlineProcessingInputs\(deadline, generations\);$/            var cleanEarly = awaitGraceDeadlineProcessingInputs(deadline, generations);/' "$O"
+perl -0pi -e 's/            wakeupController\.recordGraceWaitEnded\(\n                awaitGraceDeadlineProcessingInputs\(deadline, generations\)\n            \);/            var cleanEarly = awaitGraceDeadlineProcessingInputs(deadline, generations);\n            wakeupController.recordGraceWaitEnded(cleanEarly);/' "$O"
 perl -0pi -e 's/(            generations\.forEach\(generation -> submitRequired\(\n                new ReplayIntakeInput\.ForceGenerationCancellation\(generation\)\n            \)\);)/            if (!cleanEarly) {\n$1\n            }/' "$O"
 run "force cancellation skipped on the early-return path"
 
@@ -156,7 +156,7 @@ run "async local timeout treated as a structural failure"
 perl -0pi -e 's/        pollInstruments\(\)\.wakeupsAbsorbedByProtectedOperation\.add\(1\);\n//' "$C"
 run "absorbed wakeup not counted"
 
-# 21. Report every grace wait as having ended early, which makes the pair of counters unable to say whether the
-#     ceiling is tuned -- the one question they exist to answer.
-perl -pi -e 's/            wakeupController\.recordGraceWaitEnded\(\n?/            wakeupController.recordGraceWaitEnded(true); if (false) recordGraceWaitEndedUnused(\n/' "$O"
+# 21. Report every grace wait as having ended early, which leaves the counter pair unable to answer the one
+#     question it exists for -- whether the grace ceiling is tuned.
+perl -0pi -e 's/            wakeupController\.recordGraceWaitEnded\(\n                awaitGraceDeadlineProcessingInputs\(deadline, generations\)\n            \);/            awaitGraceDeadlineProcessingInputs(deadline, generations);\n            wakeupController.recordGraceWaitEnded(true);/' "$O"
 run "grace wait always reported as ending early"
