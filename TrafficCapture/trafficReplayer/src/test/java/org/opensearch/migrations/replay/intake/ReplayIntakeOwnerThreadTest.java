@@ -11,7 +11,9 @@ package org.opensearch.migrations.replay.intake;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
@@ -19,8 +21,10 @@ import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
+import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ReplayIntakeMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
@@ -43,6 +47,51 @@ import org.junit.jupiter.api.Test;
 class ReplayIntakeOwnerThreadTest {
 
     @Test
+    void aPayloadlessRecordWakesAnActiveSourcePollWithItsProtocolViolation() {
+        try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var wakeups = new AtomicInteger();
+            var wakeupController = new WakeupController(wakeups::incrementAndGet, rootContext);
+            var sourceInputs = new KafkaSourceInputQueue(wakeupController);
+            var owner = new ReplayIntakeOwner(
+                new ReplayIntakeInputQueue(),
+                sourceInputs,
+                new RecordingSink(() -> true, new CountDownLatch(0), new CountDownLatch(0)),
+                failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+                rootContext.replayIntakeMetrics
+            );
+            var script = new RecordScript("traffic")
+                .addPayloadNotSet(0, 0, Instant.ofEpochMilli(1_000), "writer");
+            var generation = script.generation(0);
+
+            owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+            wakeupController.enterPoll();
+            try {
+                owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                    new PartitionBatchRequestId(generation, 0),
+                    script.records()
+                ));
+            } finally {
+                wakeupController.leavePollAndConsumeWakeup();
+            }
+
+            Assertions.assertEquals(1, wakeups.get(), "the queued violation must interrupt an active poll");
+            Assertions.assertTrue(
+                sourceInputs.drain().stream()
+                    .anyMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance),
+                "the wakeup must point at the queued protocol-violation input"
+            );
+            Assertions.assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    telemetry.getFinishedMetrics(),
+                    IKafkaConsumerContexts.MetricNames.POLLS_WOKEN_BY_QUEUED_INPUT
+                )
+            );
+        }
+    }
+
+    @Test
     void stopAfterDrainingAppliesEveryAcceptedInputOnTheOwnerThreadAndRecordsIt() throws Exception {
         try (var telemetry = new InMemoryInstrumentationBundle(false, true)) {
             var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
@@ -50,7 +99,13 @@ class ReplayIntakeOwnerThreadTest {
             var sourceInputs = new KafkaSourceInputQueue(new WakeupController(() -> {}, rootContext));
             var ownerRef = new AtomicReference<ReplayIntakeOwner>();
             var fatal = new AtomicReference<Error>();
-            var sink = new RecordingSink(() -> ownerRef.get().isOwnerThread());
+            var callbackEntered = new CountDownLatch(1);
+            var releaseCallback = new CountDownLatch(1);
+            var sink = new RecordingSink(
+                () -> ownerRef.get().isOwnerThread(),
+                callbackEntered,
+                releaseCallback
+            );
             var owner = new ReplayIntakeOwner(
                 intakeInputs,
                 sourceInputs,
@@ -79,15 +134,24 @@ class ReplayIntakeOwnerThreadTest {
             );
             Assertions.assertTrue(
                 intakeInputs.submit(new ReplayIntakeInput.PartitionRecordBatch(
-                    new PartitionBatchRequestId(generation, 1),
+                    new PartitionBatchRequestId(generation, 0),
                     script.records()
                 ))
+            );
+            Assertions.assertTrue(
+                callbackEntered.await(5, TimeUnit.SECONDS),
+                "the owner never reached the accepted batch"
             );
             Assertions.assertTrue(intakeInputs.requestStopAfterDraining());
             Assertions.assertFalse(
                 intakeInputs.submit(new ReplayIntakeInput.PartitionGenerationAssigned(generation)),
                 "nothing may be accepted after the FIFO stop marker"
             );
+            Assertions.assertFalse(
+                owner.termination().toCompletableFuture().isDone(),
+                "the stop marker must wait behind the accepted batch"
+            );
+            releaseCallback.countDown();
 
             owner.termination().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
@@ -162,12 +226,20 @@ class ReplayIntakeOwnerThreadTest {
 
     private static final class RecordingSink implements SourceAssemblySink {
         private final BooleanSupplier currentThreadIsOwner;
+        private final CountDownLatch callbackEntered;
+        private final CountDownLatch releaseCallback;
         private final List<ReplayRequestId> requests = new ArrayList<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
         private boolean everyCallbackUsedOwnerThread = true;
 
-        private RecordingSink(BooleanSupplier currentThreadIsOwner) {
+        private RecordingSink(
+            BooleanSupplier currentThreadIsOwner,
+            CountDownLatch callbackEntered,
+            CountDownLatch releaseCallback
+        ) {
             this.currentThreadIsOwner = currentThreadIsOwner;
+            this.callbackEntered = callbackEntered;
+            this.releaseCallback = releaseCallback;
         }
 
         @Override
@@ -180,6 +252,13 @@ class ReplayIntakeOwnerThreadTest {
         ) {
             everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();
             requests.add(replayRequestId);
+            callbackEntered.countDown();
+            try {
+                releaseCallback.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("owner interrupted while the FIFO fence was under test", e);
+            }
         }
 
         @Override

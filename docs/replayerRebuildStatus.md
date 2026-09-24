@@ -1178,6 +1178,54 @@ were unnamed. The assertion now binds the response to the request's captured con
 states the implemented and prerequisite-blocked steps separately, and both G8 sites are marked in code. Any
 production correction reopens review, so this is evidence of the completed first pass rather than closure.
 
+### Second G3 design-conformance review
+
+Claude's read-only pass over the corrected production diff found two quoted design-conformance defects and
+one design silence:
+
+1. The dump producer numbered the first real batch `1`, while `kafkaLLD §2` reserves `0` for each
+   generation's bootstrap batch. The dump now allocates a separate sequence per partition generation,
+   beginning at `0`; later nonempty batches advance that generation's sequence independently.
+2. `ReplayIntakeOwner.applyGenerationAssigned` claimed assignment created state "and nothing else", while
+   `kafkaLLD §4.1` requires the ordinary demand pass. The implementation remains correctly prerequisite-blocked
+   on G7's supply and explicit-request state, and the exact insertion point now says so rather than contradicting
+   the design.
+3. The designs were silent on source writes before request EOM. The owner chose option 1a: preserve request
+   assembly and ignore the early informational response, matching the carried predecessor. The authorized
+   design amendment is commit `25833dc34`; production now handles both whole writes and complete segmented-write
+   sequences without changing request identity, ordinal, response state, or phase.
+
+The pass's one-pass evidence findings were also corrected:
+
+- the FIFO stop test now blocks the owner inside the accepted batch before appending the stop marker, proving
+  termination cannot pass the marker until that batch completes;
+- the post-violation test no longer cites a source-completion assertion that could pass while the later request
+  was merely held open;
+- `dump-both` emits each raw line synchronously on the intake-owner thread before applying that record, so raw
+  and reconstructed output stay interleaved, and both views receive the same base epoch;
+- dump mode once again receives its `RootReplayerContext` from the CLI construction path, so configured
+  collectors export the fixed-cardinality G3 metrics instead of being replaced by an internal no-op root;
+- unexpected intake-owner failure wakes the dump consumer and propagates, while orderly-shutdown failure is
+  suppressed behind any primary dump failure rather than replacing it; and
+- the public partition-state diagnostic and stop-marker reoffer comments now describe their actual visibility
+  and FIFO precondition.
+
+Validation after these corrections: the 20 focused deterministic intake/association/reconstruction tests pass;
+all three `SourceAssemblyEvidenceTest` real-proxy/real-topic cases pass, including direct assertions that the
+raw line precedes its request/response callbacks and shares their relative-time origin; and the payloadless
+real-topic HTTP dump still fails with the violating record identified.
+
+The batched falsification pass then tested sixteen mutations in one `/private/tmp` worktree. Fourteen failed
+the intended evidence. Two survived: the protocol-violation cutoff test delivered the later record in the same
+batch and therefore did not prove that a separately submitted later batch was rejected, and the real-topic
+payloadless dump proved eventual failure after the two-second poll returned but did not prove the queued
+violation woke an active poll. Both evidence gaps now have deterministic checks: one submits a second batch
+after the violation, and one places the real `WakeupController` in its polling phase before intake submits the
+payloadless-record violation, then requires both an issued wakeup and the
+`kafkaSourcePollsWokenByQueuedInput` metric. `WakeupAgainstRealKafkaTest` separately proves that this same
+controller action shortens a real Kafka poll. Production changes reopen review, so G3 remains open pending the
+current read-only conformance pass and targeted falsification of these two new assertions.
+
 ### Findings
 
 **`SourceConnectionState.expire()` has no production caller.** The transition is production code; its trigger
@@ -1291,7 +1339,7 @@ and one shared verdict, and the owner answers `P1a, P2b, …`.
 | P5 | **OpenSearch retry policy** — `BulkItemErrorClassifier` as-is; `OpenSearchDefaultRetry`, `DefaultRetry` stripped | 3 | CARRY | The streaming bulk-response analyzer is 190 lines of OpenSearch-specific error classification with no replayer coupling at all. Strip is only the return type: `RequestSenderOrchestrator.RetryDirective` → the sealed `RetryDecision` of connLLD §9.2:394-397. **Per D-2, `MAX_RETRIES` is kept, not stripped** — it applies to the response path only and is lifted to a top-level config setting defaulting to 4. `IRetryVisitorFactory`, `RequestRetryEvaluator`, and `RetryCollectingVisitorFactory` are **not** in this group — every line of them names a legacy inner type, so they are REWRITE |
 | P6 | **Auth transformers** — all five `transform/` files | 5 | CARRY_ASIS | `IAuthTransformer`'s reentrant `SignatureProducer` is exactly what connLLD §8:333 requires ("signing immediately before the attempt"), and `SigV4AuthTransformerFactory` already takes an injected `Supplier<Clock>`. Zero legacy identity coupling; their only replayer dependency is `HttpJsonRequestWithFaultingPayload`, which P1 carries |
 | P7 | **Utilities** — `util/NettyUtils`, `util/RefSafeHolder`, `util/RefSafeStreamUtils`, `util/TrafficChannelKeyFormatter` as-is; `Utils` (keep only `setIfLater`), `NettyFutureBinders` stripped | 6 | CARRY | Stateless, final, no replayer types. `RefSafeHolder`/`RefSafeStreamUtils` directly serve procCommit §13.1's release-exactly-once proof. `NettyFutureBinders` is load-bearing for the event-loop-affine completion model but has one overload that schedules the same task twice (`:83-84`, no production caller) — that overload is the strip |
-| P8 | **Observability adapters for new-architecture owners** — `AsyncPermitPoolMetrics`, `ConnectionActorMetrics`, `TargetExchangeStateMetrics`, `ResourceOwnershipMetrics`, `ReplayProcessFatalMetrics`, `IKafkaConsumerContexts` as-is; `IReplayContexts`, `IRootReplayerContext`, `KafkaConsumerContexts`, `KafkaCommitStateMetrics` stripped | 10 | CARRY, with two carve-outs | All ten hold their OTEL instruments in `final` instance fields from an injected `Meter`, which is already the `AGENTS.md` "telemetry is instance-owned and injected" shape. **Carve-out 1:** `ReplayTransactionMetrics` is excluded — `ReplayTransaction` is LEAVE, so its metrics adapter has no owner. **Carve-out 2:** `ReplayContexts`/`RootReplayerContext` are REWRITE, and the rewrite must reproduce five metric strings verbatim (see design gap D-4) |
+| P8 | **Observability adapters for new-architecture owners** — `AsyncPermitPoolMetrics`, `ConnectionActorMetrics`, `TargetExchangeStateMetrics`, `ResourceOwnershipMetrics`, `ReplayProcessFatalMetrics`, `ReplayTransactionMetrics`, `IKafkaConsumerContexts` as-is; `IReplayContexts`, `IRootReplayerContext`, `KafkaConsumerContexts`, `KafkaCommitStateMetrics` stripped | 11 | CARRY, with one carve-out | All eleven hold their OTEL instruments in `final` instance fields from an injected `Meter`, which is already the `AGENTS.md` "telemetry is instance-owned and injected" shape. **Owner decision, 2026-09-24:** preserve `ReplayTransactionMetrics`; G5 uses its existing context and metric set as a starting point for the new model even if the legacy `ReplayTransaction` lifecycle implementation is replaced. **Carve-out:** `ReplayContexts`/`RootReplayerContext` are REWRITE, and the rewrite must reproduce five metric strings verbatim (see design gap D-4) |
 | P9 | **Owner-discipline primitives** — `CompletionGate`, `RequestLifecycleInput` as-is; `OwnerThreadGuard`, `OwnerTransitionRunner`, `ResourceOwnership`, `RecordWorkTracker`, `ObservedRecordCommitQueue`, `ReplayIntakeInputQueue`, and the `PreparationOutcome`/`TargetAttemptOutcome` half of `ReplayOutcomes` stripped. **`ActorMailbox` and `NettyEventLoopActorMailbox` corrected to LEAVE** — see below | 10 | CARRY, minus the mailbox pair | This is the genuine yield of S0–S6b and the highest-value group. `RequestLifecycleInput` is exactly replayerLLD §5's two-milestone pair, immutable and generation-carrying. `ObservedRecordCommitQueue` satisfies kafkaLLD §5.5 and §5.6 outright — ordered deque tolerating physical offset gaps, single `RecordProcessingFinished`, head-contiguous removal, duplicate-completion and unregistered-record both invariant failures — and fails only §5.7, which is not its job. Named strips: `ActorMailbox`'s wall-clock `now()`, `OwnerThreadGuard`'s lazily-bound `guard(Runnable)` mode, `OwnerTransitionRunner.applyNowOrPost` (reentrant inline application defeats "one input applied completely before the next"), `RecordWorkTracker`'s `completedRecords` listener escape hatch and the `:31` comment deferring commit authority, `ReplayIntakeInputQueue`'s per-item `CompletableFuture` side-channel, and the permit provider's `cost` parameter. **The permit provider is reshaped rather than carried, per D-1:** an application-owned atomic number, constructed in `main()` and passed by reference into every connection owner, with no `Input` family, no owner executor, and no `ReplayIntakeInput` membership. What survives from the existing 301 lines is the one-shot `OwnedPermit.released` guard, the held-duration metric, and cancellation-withdraws-a-pending-acquisition; S6b-1's fatal boundary must be added |
 | P10 | **Dump mode — a user-facing CLI contract** — `TrafficStreamDumper` as-is; `KafkaTopicDumper`, `HttpTransactionDumper`, `CaptureRecordProtocolViolationException` stripped | 4 | CARRY | Plan A §2.3 pins `dump-raw` / `dump-http` / `dump-both`, and Plan A G1 already decided to carry them. `TrafficStreamDumper.format:38-69` is a fully exhaustive kafkaLLD §7.1 switch with no default, including `PAYLOAD_NOT_SET → protocolViolation`. Four real gaps go with it, and G1's exit evidence should name them: `dump-http` silently drops heartbeats and probes (`processHttpRecords:281-292` gates that arm on `emitRaw`); no dumped record carries broker time, so heartbeat lines print `[?-?]`; `baseEpoch` stays `-1` for every control record before the first traffic record; and the file path decodes bare base64 `TrafficStream`, not `CaptureRecord`, so its envelope branches are dead. Also strip the fabricated `new PojoKafkaCommitOffsetData(0, …)` and the per-record OTEL span it opens in a mode that never commits (`:265-279`) |
 | P11 | **CLI surface and process supervision** — `TrafficReplayer.java`'s `Parameters` block (54 options, lines 113-579), `ProcessSupervisor`, `ReplayProcessFatalHandler`, `KafkaSaslAuthHelper`, `TrafficCaptureSourceFactory` stripped | 5 | CARRY | The 54-option surface with all its aliases is red-line-2 and carries verbatim; `JsonCommandLineParser` derives the inline-JSON keys from the `@Parameter` names automatically, so the JSON contract follows for free. Strips: the `ThreadLocalTupleWriter` construction and the legacy `ResultsToLogsConsumer`/`TupleParserChainConsumer` branch out of `TrafficReplayer` (§P12 note), the `maximumOwnedKafkaRecords`/`Bytes` arguments and the already-ignored liveness-scanner argument out of `TrafficCaptureSourceFactory`, and the `RequestSenderOrchestrator.FatalReplayHandler` coupling out of `ReplayProcessFatalHandler`. Note the two supervision classes between them cover only 4 of replayerLLD §8's 6 duties (see D13) |
@@ -1306,8 +1354,9 @@ keys, `UniqueSourceRequestKey`, `UniqueReplayerRequestKey`), the connection-pool
 `traffic/expiration/` files, against kafkaLLD §10's broker-time rule), the pull-based source interfaces
 (`ITrafficCaptureSource` and its five satellites, `BlockingTrafficSource`, `BufferedFlowController`,
 `ReplayReadGate`, `ReplayProgressController`), the three commit-authority casualties
-(`RecordDispositionLedger`, `RecordDisposition`, `ResolvedRecordIndex`), the `ReplayTransaction` pair, the
-three `CancellationException` subclasses that replayerLLD §4:163 forbids, `KafkaRecordOwnershipBudget`
+(`RecordDispositionLedger`, `RecordDisposition`, `ResolvedRecordIndex`), the legacy `ReplayTransaction`
+lifecycle implementation (its `ReplayTransactionMetrics` adapter is retained by the 2026-09-24 owner
+decision in P8), the three `CancellationException` subclasses that replayerLLD §4:163 forbids, `KafkaRecordOwnershipBudget`
 (kafkaLLD §5.1 forbids the cap it implements), and the four coordinators being rebuilt
 (`RequestSenderOrchestrator` 2 560 lines, `TrafficReplayerCore`, `TrafficReplayerTopLevel`, `ReplayEngine`).
 

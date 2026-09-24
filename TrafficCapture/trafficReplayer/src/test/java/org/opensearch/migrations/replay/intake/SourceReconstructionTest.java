@@ -26,11 +26,13 @@ import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
+import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -253,6 +255,60 @@ class SourceReconstructionTest {
         );
     }
 
+    @Test
+    void anInformationalWriteBeforeRequestEndDoesNotDiscardOrAdvanceTheRequest() {
+        var finalResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, "GET /thing HTTP/1.1\r\n"),
+                write(2, "HTTP/1.1 100 Continue\r\n\r\n"),
+                read(3, "Host: source\r\n\r\n"),
+                endOfMessage(4),
+                write(5, finalResponse),
+                close(6)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList());
+        Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertEquals(List.of(finalResponse), sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList());
+    }
+
+    @Test
+    void segmentedInformationalWritesAreIgnoredThroughTheirSegmentEnd() {
+        var finalResponse = "HTTP/1.1 204 No Content\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, "GET /thing HTTP/1.1\r\n"),
+                writeSegment(2, "HTTP/1.1 100 "),
+                writeSegment(3, "Continue\r\n\r\n"),
+                segmentEnd(4),
+                read(5, "Host: source\r\n\r\n"),
+                endOfMessage(6),
+                write(7, finalResponse),
+                close(8)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList());
+        Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertEquals(List.of(finalResponse), sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList());
+    }
+
     /**
      * {@code §9.2}: a connection exception ends the response as unproven, but does not end the source
      * lifetime. The following request therefore receives the next ordinal rather than colliding with the
@@ -458,7 +514,7 @@ class SourceReconstructionTest {
         var generation = script.generation(0);
         owner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
         owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
-            new PartitionBatchRequestId(generation, 1),
+            new PartitionBatchRequestId(generation, 0),
             script.records()
         ));
     }
@@ -479,6 +535,7 @@ class SourceReconstructionTest {
         private final List<HttpMessageAndTimestamp.Request> requests = new ArrayList<>();
         private final List<ReplayRequestId> requestIds = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
+        private final List<HttpMessageAndTimestamp.Response> responses = new ArrayList<>();
         /** Completed, but with nothing proving the source finished writing — {@code §9.2}'s {@code keptAlive}. */
         private final List<ReplayRequestId> unprovenResponses = new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
@@ -503,6 +560,7 @@ class SourceReconstructionTest {
             boolean keptAlive
         ) {
             completeResponses.add(replayRequestId);
+            responses.add(response);
             if (!keptAlive) {
                 unprovenResponses.add(replayRequestId);
             }
@@ -552,6 +610,18 @@ class SourceReconstructionTest {
     private static TrafficObservation write(long sequence, String data) {
         return observation(sequence)
             .setWrite(WriteObservation.newBuilder().setData(ByteString.copyFromUtf8(data)))
+            .build();
+    }
+
+    private static TrafficObservation writeSegment(long sequence, String data) {
+        return observation(sequence)
+            .setWriteSegment(WriteSegmentObservation.newBuilder().setData(ByteString.copyFromUtf8(data)))
+            .build();
+    }
+
+    private static TrafficObservation segmentEnd(long sequence) {
+        return observation(sequence)
+            .setSegmentEnd(EndOfSegmentsIndication.getDefaultInstance())
             .build();
     }
 

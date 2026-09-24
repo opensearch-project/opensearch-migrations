@@ -109,6 +109,7 @@ public final class SourceConnectionState {
     private Long nextExpectedObservationSequence;
 
     private Phase phase;
+    private boolean ignoringInformationalWriteSegments;
     private long currentCapturedRequestOrdinal;
     private HttpMessageAndTimestamp.Request incomingRequest;
     private ReplayRequestId responseBeingAssembledFor;
@@ -267,21 +268,22 @@ public final class SourceConnectionState {
             return added(assembly);
         }
         if (observation.hasSegmentEnd()) {
+            if (ignoringInformationalWriteSegments) {
+                ignoringInformationalWriteSegments = false;
+                return ObservationOutcome.none();
+            }
             requireRequestUnderAssembly().finalizeRequestSegments(timestamp);
             return added(assembly);
         }
         if (observation.hasEndOfMessageIndicator()) {
             return reconstituteRequest(timestamp, logAppendTimeMillis, containingRecord);
         }
-        if (observation.hasWrite() || observation.hasWriteSegment()) {
-            // A response with no end-of-message for its request: the request is truncated and must not be
-            // replayed. Requests are the case the protocol *does* mark, so this is knowable rather than
-            // inferred, and the partial bytes are dropped rather than sent.
-            log.atWarn().setMessage("Response bytes arrived for {} before its request ended; discarding the"
-                    + " partial request rather than replaying it")
-                .addArgument(connectionProcessingId)
-                .log();
-            return endAssemblyAtBoundary();
+        if (observation.hasWrite()) {
+            return ObservationOutcome.none();
+        }
+        if (observation.hasWriteSegment()) {
+            ignoringInformationalWriteSegments = true;
+            return ObservationOutcome.none();
         }
         return ObservationOutcome.none();
     }
@@ -344,6 +346,7 @@ public final class SourceConnectionState {
         var requestAssociation = new RecordAssociationId.Request(replayRequestId);
 
         incomingRequest = null;
+        ignoringInformationalWriteSegments = false;
         responseBeingAssembledFor = replayRequestId;
         responseStateByRequest.put(replayRequestId, new HttpMessageAndTimestamp.Response(sourceEventTime));
         phase = Phase.ASSEMBLING_RESPONSE;
@@ -422,6 +425,7 @@ public final class SourceConnectionState {
         // the source's ordinal progression.
         var finished = List.<RecordAssociationId>of(currentAssemblyId());
         incomingRequest = null;
+        ignoringInformationalWriteSegments = false;
         currentCapturedRequestOrdinal++;
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
@@ -444,6 +448,7 @@ public final class SourceConnectionState {
             finished.add(currentAssemblyId());
             incomingRequest = null;
         }
+        ignoringInformationalWriteSegments = false;
         if (responseBeingAssembledFor != null) {
             completeResponse(false);
         }
@@ -464,6 +469,7 @@ public final class SourceConnectionState {
             finished.add(currentAssemblyId());
             incomingRequest = null;
         }
+        ignoringInformationalWriteSegments = false;
         if (responseBeingAssembledFor != null) {
             var requestId = responseBeingAssembledFor;
             responseStateByRequest.remove(requestId);
