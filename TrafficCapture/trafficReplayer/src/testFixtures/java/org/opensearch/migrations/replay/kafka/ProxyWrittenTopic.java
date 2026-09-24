@@ -28,7 +28,13 @@ import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.Captu
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
+
+import com.google.protobuf.InvalidProtocolBufferException;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.TopicConfig;
@@ -197,6 +203,137 @@ public final class ProxyWrittenTopic implements AutoCloseable {
 
     public List<byte[]> readRecordValues(int atLeast) {
         return readRecordValues(atLeast, DEFAULT_READ_TIMEOUT);
+    }
+
+    /**
+     * Reads until {@code atLeast} records carry a {@code TrafficStream} payload, and returns those.
+     *
+     * <p>Use this rather than {@link #readRecordValues(int)} to wait for captured traffic. The proxy writes a
+     * {@code CaptureCapabilityProbe} at startup, so "at least one record exists" is satisfied before any request
+     * has been captured at all — a test gated on the count can inspect or snapshot the probe and pass while the
+     * request it cares about is still in flight. Filtering on the payload case removes the race rather than
+     * papering over it with a longer timeout.
+     *
+     * <p>Records that fail to decode are not filtered out, they are fatal: an undecodable value on this topic
+     * means the proxy wrote something the replayer cannot read, which is the one thing these fixtures exist to
+     * catch.
+     */
+    public List<byte[]> readTrafficStreamValues(int atLeast, Duration timeout) {
+        var deadline = System.nanoTime() + timeout.toNanos();
+        var trafficStreams = new ArrayList<byte[]>();
+        while (trafficStreams.size() < atLeast && System.nanoTime() < deadline) {
+            trafficStreams.clear();
+            // Reads to the current end offsets rather than stopping at a count: a count-bounded read returns
+            // after the first batch, which on a fresh topic is the startup probe alone, and would then never
+            // see the records that arrive after it.
+            for (var value : readAllRecordValues()) {
+                CaptureRecord envelope;
+                try {
+                    envelope = CaptureRecord.parseFrom(value);
+                } catch (InvalidProtocolBufferException notAnEnvelope) {
+                    throw new IllegalStateException(
+                        "the proxy wrote a value that is not a CaptureRecord envelope", notAnEnvelope
+                    );
+                }
+                if (envelope.getPayloadCase() == CaptureRecord.PayloadCase.TRAFFICSTREAM) {
+                    trafficStreams.add(value);
+                }
+            }
+        }
+        return trafficStreams;
+    }
+
+    public List<byte[]> readTrafficStreamValues(int atLeast) {
+        return readTrafficStreamValues(atLeast, DEFAULT_READ_TIMEOUT);
+    }
+
+    /**
+     * Writes one value directly to a chosen partition, bypassing the proxy.
+     *
+     * <p>For the two things proxy-written traffic cannot express. Partition placement is the proxy's
+     * partitioner's business, so a test that needs records on specific partitions would otherwise have to
+     * <em>assume</em> the spread it got and skip when it did not — and a skip that fires is indistinguishable
+     * from coverage that was never there. And a malformed value cannot be produced by a correct proxy at all,
+     * while the dumper's behaviour on one is a stated protocol requirement.
+     *
+     * <p>This does not weaken the proxy-written claim: the envelope-shape assertions still read what the real
+     * proxy wrote. What is under test here is the reader's handling of placement and of corruption, neither of
+     * which depends on who produced the bytes.
+     */
+    public void produceDirectly(int partition, byte[] value) throws Exception {
+        var props = new Properties();
+        props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers());
+        props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+            "org.apache.kafka.common.serialization.StringSerializer");
+        props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+            "org.apache.kafka.common.serialization.ByteArraySerializer");
+        try (var producer = new KafkaProducer<String, byte[]>(props)) {
+            producer.send(new ProducerRecord<>(topic, partition, null, value)).get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    /** Every record currently on the topic, read to the end offsets of every partition. */
+    public List<byte[]> readAllRecordValues() {
+        var values = new ArrayList<byte[]>();
+        readToEnd((partition, record) -> values.add(record.value()));
+        return values;
+    }
+
+    /** Where Kafka says a record is, independently of anything the replayer renders. */
+    public record RecordLocation(int partition, long offset) {}
+
+    /**
+     * Every record's partition and offset, as Kafka reports them.
+     *
+     * <p>For comparing rendered metadata against the real thing. Asserting only that a dump <em>contains</em>
+     * partition and offset fields passes for a dumper that prints plausible but wrong values, and on a
+     * single-partition topic it passes for one that prints a constant.
+     */
+    public List<RecordLocation> readRecordMetadata() {
+        var locations = new ArrayList<RecordLocation>();
+        readToEnd((partition, record) ->
+            locations.add(new RecordLocation(record.partition(), record.offset()))
+        );
+        return locations;
+    }
+
+    /**
+     * Reads every partition from the beginning to the end offset it had when the read started.
+     *
+     * <p>Bounded by end offsets rather than by a record count, because a count stops at the first batch. On a
+     * freshly started topic that batch is the proxy's startup capability probe on its own, so a count-bounded
+     * read of "one record" can never see the captured traffic that follows it.
+     */
+    private void readToEnd(
+        java.util.function.BiConsumer<TopicPartition, org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]>> sink
+    ) {
+        var props = new Properties();
+        props.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers());
+        props.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+            "org.apache.kafka.common.serialization.StringDeserializer");
+        props.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+            "org.apache.kafka.common.serialization.ByteArrayDeserializer");
+        props.setProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.setProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+
+        try (var consumer = new KafkaConsumer<String, byte[]>(props)) {
+            var partitions = consumer.partitionsFor(topic)
+                .stream()
+                .map(info -> new TopicPartition(info.topic(), info.partition()))
+                .collect(Collectors.toList());
+            consumer.assign(partitions);
+            consumer.seekToBeginning(partitions);
+            var endOffsets = consumer.endOffsets(partitions);
+            var deadline = System.nanoTime() + DEFAULT_READ_TIMEOUT.toNanos();
+            var atEnd = partitions.stream()
+                .allMatch(partition -> endOffsets.getOrDefault(partition, 0L) == 0L);
+            while (!atEnd && System.nanoTime() < deadline) {
+                consumer.poll(Duration.ofMillis(500))
+                    .forEach(record -> sink.accept(new TopicPartition(record.topic(), record.partition()), record));
+                atEnd = partitions.stream()
+                    .allMatch(partition -> consumer.position(partition) >= endOffsets.getOrDefault(partition, 0L));
+            }
+        }
     }
 
     /**

@@ -58,6 +58,7 @@ public interface IKafkaConsumerContexts {
         public static final String WAKEUPS_ISSUED = "kafkaSourceWakeupsIssued";
         public static final String WAKEUPS_COALESCED = "kafkaSourceWakeupsCoalesced";
         public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
+        public static final String LATE_COMMIT_CALLBACKS = "kafkaSourceLateCommitCallbacks";
         public static final String GENERATIONS_RETIRED = "kafkaSourceGenerationsRetired";
         public static final String GENERATIONS_RETIRED_WITHOUT_COMMIT =
             "kafkaSourceGenerationsRetiredWithoutCommit";

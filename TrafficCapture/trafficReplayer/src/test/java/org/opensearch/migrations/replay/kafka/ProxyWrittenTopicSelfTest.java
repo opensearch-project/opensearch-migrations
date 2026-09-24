@@ -45,6 +45,12 @@ class ProxyWrittenTopicSelfTest {
                 "the request did not reach the destination through the proxy, so nothing would be captured"
             );
 
+            // Gated on a durable TrafficStream, not on "at least one record": the proxy writes a capability
+            // probe at startup, so a count of one is satisfied before the GET above is captured at all.
+            Assertions.assertFalse(
+                supply.readTrafficStreamValues(1).isEmpty(),
+                "the proxy accepted the request but wrote no TrafficStream to " + supply.topic()
+            );
             var values = supply.readRecordValues(1);
 
             Assertions.assertFalse(

@@ -1,0 +1,88 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
+package org.opensearch.migrations.replay;
+
+import com.beust.jcommander.ParameterException;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The CLI surface Plan A §2.3 treats as a contract: every dump mode name stays accepted, and the two that need
+ * machinery a later milestone restores fail with a message naming that milestone.
+ *
+ * <p>Failing with the milestone named is the whole point. A deferred mode that were simply removed would be
+ * rejected as an unrecognised option, which reads to an operator as "this tool never had that feature" rather
+ * than "this build does not have it yet" — and a deferred mode that silently produced raw-shaped output for a
+ * request that asked for parsed output would be worse still.
+ *
+ * <p>Asserted against the validator rather than through {@code main}, which catches {@code ParameterException}
+ * and calls {@code System.exit(2)} — that would take the test JVM down with it. The CLI dispatch that reaches
+ * this validator is covered end-to-end by the {@code dump-raw} evidence in {@code KafkaTopicDumperEvidenceTest}.
+ */
+class DumpModeContractTest {
+
+    private static TrafficReplayer.Parameters dumpModeParams(String mode) {
+        var params = new TrafficReplayer.Parameters();
+        params.mode = mode;
+        return params;
+    }
+
+    @Test
+    void dumpRawIsAvailable() {
+        Assertions.assertDoesNotThrow(() -> TrafficReplayer.validateDumpModeParams(dumpModeParams("dump-raw")));
+    }
+
+    @Test
+    void deferredDumpModesFailNamingTheMilestoneThatRestoresThem() {
+        for (var mode : new String[] { "dump-http", "dump-both" }) {
+            var thrown = Assertions.assertThrows(
+                ParameterException.class,
+                () -> TrafficReplayer.validateDumpModeParams(dumpModeParams(mode)),
+                () -> mode + " must be rejected explicitly rather than silently producing raw output"
+            );
+            Assertions.assertTrue(
+                thrown.getMessage().contains("G3"),
+                () -> mode + " was rejected without naming the milestone that restores it: "
+                    + thrown.getMessage()
+            );
+            Assertions.assertTrue(
+                thrown.getMessage().contains("dump-raw"),
+                () -> mode + " should point at the mode that does work: " + thrown.getMessage()
+            );
+        }
+    }
+
+    @Test
+    void fileInputInADumpModeFailsNamingTheMilestoneThatRestoresIt() {
+        var params = dumpModeParams("dump-raw");
+        params.inputFilename = "/some/captured/file";
+
+        var thrown = Assertions.assertThrows(
+            ParameterException.class,
+            () -> TrafficReplayer.validateDumpModeParams(params)
+        );
+
+        Assertions.assertTrue(
+            thrown.getMessage().contains("G3"),
+            () -> "file input is deferred, so its rejection must name the milestone: " + thrown.getMessage()
+        );
+    }
+
+    /** A consumer group is meaningless for a read-only inspection, and accepting one would imply otherwise. */
+    @Test
+    void aConsumerGroupIsRejectedInDumpModes() {
+        var params = dumpModeParams("dump-raw");
+        params.kafkaTrafficGroupId = "some-group";
+
+        Assertions.assertThrows(
+            ParameterException.class,
+            () -> TrafficReplayer.validateDumpModeParams(params)
+        );
+    }
+}

@@ -16,11 +16,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.replay.identity.KafkaRecordId;
-import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -45,20 +42,10 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
 
     private final Consumer<String, byte[]> consumer;
     private final Duration pollTimeout;
-    private final Map<TopicPartition, PartitionGenerationId> generations;
 
-    /**
-     * @param generations the owner's current generation per partition, read at poll time so a record is
-     *                    stamped with the generation that was active when it arrived
-     */
-    public KafkaConsumerSourcePort(
-        Consumer<String, byte[]> consumer,
-        Duration pollTimeout,
-        Map<TopicPartition, PartitionGenerationId> generations
-    ) {
+    public KafkaConsumerSourcePort(Consumer<String, byte[]> consumer, Duration pollTimeout) {
         this.consumer = Objects.requireNonNull(consumer, "consumer");
         this.pollTimeout = Objects.requireNonNull(pollTimeout, "pollTimeout");
-        this.generations = Objects.requireNonNull(generations, "generations");
     }
 
     @Override
@@ -75,20 +62,14 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
      * ({@code kafkaLLD §5.4}).
      */
     @Override
-    public Map<TopicPartition, List<ApplicationKafkaRecord>> poll() {
+    public Map<TopicPartition, List<PolledKafkaRecord>> poll() {
         var polled = consumer.poll(pollTimeout);
-        var byPartition = new LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
+        var byPartition = new LinkedHashMap<TopicPartition, List<PolledKafkaRecord>>();
         for (var topicPartition : polled.partitions()) {
-            var generation = generations.get(topicPartition);
-            if (generation == null) {
-                throw new IllegalStateException(
-                    "poll returned records for " + topicPartition + " which has no current generation"
-                );
-            }
-            var records = new ArrayList<ApplicationKafkaRecord>();
+            var records = new ArrayList<PolledKafkaRecord>();
             for (var kafkaRecord : polled.records(topicPartition)) {
-                records.add(new ApplicationKafkaRecord(
-                    new KafkaRecordId(generation, kafkaRecord.offset()),
+                records.add(new PolledKafkaRecord(
+                    kafkaRecord.offset(),
                     kafkaRecord.timestamp(),
                     kafkaRecord.serializedValueSize(),
                     decode(kafkaRecord.value(), topicPartition, kafkaRecord.offset())
@@ -129,11 +110,10 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
     @Override
     public void commitAsync(
         Map<TopicPartition, Long> nextPositions,
-        BiConsumer<Map<TopicPartition, Long>, CommitOutcome> onResolved
+        java.util.function.Consumer<CommitOutcome> onResolved
     ) {
-        var submitted = Map.copyOf(nextPositions);
-        consumer.commitAsync(toOffsets(submitted), (offsets, failure) ->
-            onResolved.accept(submitted, classifyAsync(failure))
+        consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) ->
+            onResolved.accept(classifyAsync(failure))
         );
     }
 
@@ -146,7 +126,7 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         if (failure == null) {
             return CommitOutcome.ACKNOWLEDGED;
         }
-        if (failure instanceof RetriableCommitFailedException) {
+        if (isRetriable(failure)) {
             return CommitOutcome.RETRIABLE;
         }
         if (isGenerationStale(failure)) {
@@ -171,6 +151,9 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         } catch (WakeupException | TimeoutException mayHaveReachedTheBroker) {
             return CommitOutcome.OUTCOME_UNKNOWN;
         } catch (RuntimeException failure) {
+            if (isRetriable(failure)) {
+                return CommitOutcome.RETRIABLE;
+            }
             if (isGenerationStale(failure)) {
                 return CommitOutcome.GENERATION_STALE;
             }
@@ -179,14 +162,25 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
     }
 
     /**
-     * The three the client uses to say this member's generation or membership is gone.
-     * {@code CommitFailedException}'s own javadoc is explicit that "the commit cannot generally be retried",
-     * which is what separates these from {@code RetriableCommitFailedException}.
+     * The two the client uses to say this member's generation or membership is gone.
+     * {@code CommitFailedException}'s own javadoc is explicit that "the commit cannot generally be retried
+     * because some of the partitions may have already been assigned to another member".
+     *
+     * <p>{@code RebalanceInProgressException} is deliberately <strong>not</strong> here. Kafka raises it while
+     * keeping the generation: {@code ConsumerCoordinator}'s handler comments "request re-join but do not reset
+     * generations. If the callers decide to retry they can", which is the definition of retriable. Classifying
+     * it as stale would abandon staged progress for partitions this consumer keeps across the rebalance —
+     * precisely the harm {@code kafkaLLD §5.7}'s keep-and-re-offer rule exists to prevent.
      */
     private static boolean isGenerationStale(Throwable failure) {
         return failure instanceof CommitFailedException
-            || failure instanceof RebalanceInProgressException
             || failure instanceof FencedInstanceIdException;
+    }
+
+    /** Generation intact; the caller retries. Only {@code commitAsync} surfaces this, so it is checked first. */
+    private static boolean isRetriable(Throwable failure) {
+        return failure instanceof RetriableCommitFailedException
+            || failure instanceof RebalanceInProgressException;
     }
 
     /**

@@ -20,13 +20,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.function.LongConsumer;
 
-import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
+import org.opensearch.migrations.replay.kafkasource.PolledKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourcePort;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.WakeupException;
 
 /**
  * A {@link KafkaSourcePort} that returns only what a test scripted, and records every call the owner made.
@@ -71,7 +71,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private final Set<TopicPartition> assignment = new LinkedHashSet<>();
     private final Set<TopicPartition> paused = new LinkedHashSet<>();
     private final Map<TopicPartition, Long> committedPositions = new LinkedHashMap<>();
-    private final Deque<Map<TopicPartition, List<ApplicationKafkaRecord>>> scriptedPolls = new ArrayDeque<>();
+    private final Deque<Map<TopicPartition, List<PolledKafkaRecord>>> scriptedPolls = new ArrayDeque<>();
     private final List<Observation> observations = new ArrayList<>();
     private final Deque<ThrowingRunnable> scriptedRebalances = new ArrayDeque<>();
     /** Async commits awaiting a poll to resolve them, exactly as the real client defers its callbacks. */
@@ -80,6 +80,8 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     private CommitOutcome nextCommitOutcome = CommitOutcome.ACKNOWLEDGED;
     private RuntimeException pollFailure;
     private Duration commitDuration;
+    private boolean wakeupNextPollAfterRebalance;
+    private java.util.function.Consumer<String> observationListener = call -> {};
 
     /** A rebalance callback can throw, because {@code onPartitionsRevoked} waits and can be interrupted. */
     public interface ThrowingRunnable {
@@ -103,7 +105,7 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     // ---------------------------------------------------------------- scripting
 
     /** Scripts one poll result. An absent or empty entry is how an empty poll is expressed. */
-    public void scriptPoll(Map<TopicPartition, List<ApplicationKafkaRecord>> result) {
+    public void scriptPoll(Map<TopicPartition, List<PolledKafkaRecord>> result) {
         scriptedPolls.add(Map.copyOf(result));
     }
 
@@ -126,6 +128,18 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         pollFailure = Objects.requireNonNull(failure);
     }
 
+    /**
+     * Interrupts the next poll with {@code WakeupException} after its scripted rebalance callbacks have run.
+     *
+     * <p>This is what makes {@code kafkaLLD §17.4} case 18 expressible: a rebalance that has delivered
+     * {@code onPartitionsRevoked} but not yet {@code onPartitionsAssigned} when a queued input wakes the poll.
+     * Kafka postpones the assignment callback to a later poll rather than discarding it ({@code §5.4}), so a
+     * test scripts the revoke here and the assign on the following poll, and the wakeup lands between them.
+     */
+    public void scriptWakeupAfterNextRebalance() {
+        wakeupNextPollAfterRebalance = true;
+    }
+
     public void scriptCommitOutcome(CommitOutcome outcome) {
         nextCommitOutcome = Objects.requireNonNull(outcome);
     }
@@ -146,11 +160,11 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     }
 
     @Override
-    public Map<TopicPartition, List<ApplicationKafkaRecord>> poll() {
-        // Async commit callbacks are delivered from inside poll, which is where the real client delivers them.
-        while (!pendingAsyncCommits.isEmpty()) {
-            pendingAsyncCommits.removeFirst().run();
-        }
+    public Map<TopicPartition, List<PolledKafkaRecord>> poll() {
+        // Rebalance callbacks run before commit callbacks are resolved. Kafka delivers both from inside poll()
+        // and guarantees no order between them, so either is faithful -- but this order is the one that can
+        // expose a commit resolving after its generation was revoked and reassigned, and a fixture that always
+        // resolved first would make that case unreachable.
         while (!scriptedRebalances.isEmpty()) {
             var rebalance = scriptedRebalances.removeFirst();
             try {
@@ -161,36 +175,45 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
                 throw new IllegalStateException("scripted rebalance callback failed", checkedFailure);
             }
         }
+        if (wakeupNextPollAfterRebalance) {
+            wakeupNextPollAfterRebalance = false;
+            // Exactly what the real consumer does: the poll that was carrying the rebalance is interrupted, and
+            // the remainder of that rebalance is delivered by a later poll.
+            throw new WakeupException();
+        }
+        while (!pendingAsyncCommits.isEmpty()) {
+            pendingAsyncCommits.removeFirst().run();
+        }
         if (pollFailure != null) {
             var failure = pollFailure;
             pollFailure = null;
             throw failure;
         }
         var result = scriptedPolls.isEmpty()
-            ? Map.<TopicPartition, List<ApplicationKafkaRecord>>of()
+            ? Map.<TopicPartition, List<PolledKafkaRecord>>of()
             : scriptedPolls.removeFirst();
         // Only paused partitions are withheld, which is what makes "paused before the next poll" testable:
         // a partition the owner failed to pause keeps yielding records.
-        var delivered = new LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
+        var delivered = new LinkedHashMap<TopicPartition, List<PolledKafkaRecord>>();
         result.forEach((topicPartition, records) -> {
             if (!paused.contains(topicPartition)) {
                 delivered.put(topicPartition, records);
             }
         });
-        observations.add(new Polled(Set.copyOf(delivered.keySet())));
+        record(new Polled(Set.copyOf(delivered.keySet())));
         return delivered;
     }
 
     @Override
     public void pause(TopicPartition topicPartition) {
         paused.add(topicPartition);
-        observations.add(new PartitionPaused(topicPartition));
+        record(new PartitionPaused(topicPartition));
     }
 
     @Override
     public void resume(TopicPartition topicPartition) {
         paused.remove(topicPartition);
-        observations.add(new PartitionResumed(topicPartition));
+        record(new PartitionResumed(topicPartition));
     }
 
     @Override
@@ -201,18 +224,18 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
     @Override
     public void commitAsync(
         Map<TopicPartition, Long> nextPositions,
-        BiConsumer<Map<TopicPartition, Long>, CommitOutcome> onResolved
+        java.util.function.Consumer<CommitOutcome> onResolved
     ) {
         var submitted = Map.copyOf(nextPositions);
-        observations.add(new CommitSubmittedAsync(submitted));
+        record(new CommitSubmittedAsync(submitted));
         // Held rather than resolved here, because the real client resolves from inside a later poll(). A test
         // that asserts the loop is not blocked depends on that difference being real in the fixture too.
-        pendingAsyncCommits.add(() -> onResolved.accept(submitted, nextCommitOutcome));
+        pendingAsyncCommits.add(() -> onResolved.accept(nextCommitOutcome));
     }
 
     @Override
     public CommitOutcome commitSync(Map<TopicPartition, Long> nextPositions, Duration bound) {
-        observations.add(new CommitAttempted(Map.copyOf(nextPositions), bound));
+        record(new CommitAttempted(Map.copyOf(nextPositions), bound));
         // Advances the injected clock, which is what lets a test drive a grace interval to its deadline without
         // sleeping: a commit that "takes" longer than the remaining grace is expressed as a clock advance.
         if (commitDuration != null) {
@@ -235,19 +258,40 @@ public final class PumpedKafkaSource implements KafkaSourcePort {
         return List.copyOf(observations);
     }
 
+    /**
+     * Reports each call as it happens, rendered as {@link #history} renders it.
+     *
+     * <p>For assertions that must order port calls against something outside the port — a submission to replay
+     * intake, say. Comparing two separate histories cannot express "A happened before B" across them, so a
+     * test written that way passes with the two production statements reversed.
+     */
+    public void onObservation(java.util.function.Consumer<String> listener) {
+        observationListener = Objects.requireNonNull(listener);
+    }
+
     public boolean isPaused(TopicPartition topicPartition) {
         return paused.contains(topicPartition);
     }
 
-    /** Renders the call history compactly, so a failure message shows the sequence rather than a count. */
-    public List<String> history() {
-        return observations.stream().map(observation -> switch (observation) {
+    /** One place every call is recorded, so a listener cannot miss one that was added later. */
+    private void record(Observation observation) {
+        observations.add(observation);
+        observationListener.accept(render(observation));
+    }
+
+    private static String render(Observation observation) {
+        return switch (observation) {
             case PartitionPaused paused -> "pause(" + paused.topicPartition() + ")";
             case PartitionResumed resumed -> "resume(" + resumed.topicPartition() + ")";
             case Polled polled -> "poll->" + polled.partitionsReturned();
             case CommitSubmittedAsync commit -> "commitAsync" + commit.nextPositions();
             case CommitAttempted commit -> "commitSync" + commit.nextPositions();
-        }).toList();
+        };
+    }
+
+    /** Renders the call history compactly, so a failure message shows the sequence rather than a count. */
+    public List<String> history() {
+        return observations.stream().map(PumpedKafkaSource::render).toList();
     }
 
     public void clearHistory() {

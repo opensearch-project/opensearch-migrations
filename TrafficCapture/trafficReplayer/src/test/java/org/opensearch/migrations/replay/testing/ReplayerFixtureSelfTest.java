@@ -30,6 +30,7 @@ import org.opensearch.migrations.replay.lifecycle.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
+import org.opensearch.migrations.replay.kafkasource.PolledKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.RecordProcessingFinished;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput.RequestNextPartitionBatch;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
@@ -324,7 +325,15 @@ class ReplayerFixtureSelfTest {
             var sourceInputs = new KafkaSourceInputQueue(wakeupController);
             var intakeInputs = new ReplayIntakeInputQueue();
             var owner = new KafkaSourceOwner(
-                port, sourceInputs, intakeInputs, wakeupController, Duration.ofSeconds(1), () -> 0L
+                port,
+                sourceInputs,
+                intakeInputs,
+                wakeupController,
+                Duration.ofSeconds(1),
+                () -> 0L,
+                // Non-blocking: this self-test never revokes, and a real wait against a frozen clock would
+                // be the two-clock problem kafkaLLD 15.1 forbids.
+                deadline -> !sourceInputs.isEmpty()
             );
 
             // Assignment arrives from inside a poll, which is where Kafka delivers rebalance callbacks.
@@ -333,7 +342,7 @@ class ReplayerFixtureSelfTest {
             var generation = owner.partitionState(topicPartition).orElseThrow().generation();
             var requestId = new PartitionBatchRequestId(generation, 1);
             sourceInputs.submit(new RequestNextPartitionBatch(requestId));
-            port.scriptPoll(Map.of(topicPartition, reStampedForGeneration(script, generation)));
+            port.scriptPoll(Map.of(topicPartition, asPolled(script)));
             port.clearHistory();
 
             owner.runOnce();
@@ -413,18 +422,17 @@ class ReplayerFixtureSelfTest {
     }
 
     /**
-     * The script builds records for generation 0 by default; the owner allocates its own generation on
-     * assignment, so the records are restamped to match rather than the script being told a generation it
-     * cannot know in advance.
+     * Strips the script's records back to what a port actually returns.
+     *
+     * <p>This used to restamp them onto the generation the owner allocated, because the port carried a
+     * generation map and had to agree with the owner. The owner stamps now, so there is nothing to keep in
+     * step — a port that cannot know a generation cannot disagree about one.
      */
-    private static List<ApplicationKafkaRecord> reStampedForGeneration(
-        RecordScript script,
-        PartitionGenerationId generation
-    ) {
+    private static List<PolledKafkaRecord> asPolled(RecordScript script) {
         return script.records()
             .stream()
-            .map(record -> new ApplicationKafkaRecord(
-                new KafkaRecordId(generation, record.recordId().offset()),
+            .map(record -> new PolledKafkaRecord(
+                record.recordId().offset(),
                 record.logAppendTimeMillis(),
                 record.serializedSizeBytes(),
                 record.envelope()

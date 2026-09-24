@@ -60,7 +60,18 @@ class KafkaSourceOwnerTest {
 
     private KafkaSourceOwner ownerFor(PumpedKafkaSource port) {
         return new KafkaSourceOwner(
-            port, sourceInputs, intakeInputs, wakeupController, GRACE, clockNanos::get
+            port,
+            sourceInputs,
+            intakeInputs,
+            wakeupController,
+            GRACE,
+            clockNanos::get,
+            // A non-blocking wait: yields whatever is queued and never sleeps. The deadline still governs the
+            // bound handed to commitSync, which is what the grace-interval tests assert on, but the loop ends
+            // when the queue empties rather than when wall-clock time passes. That is the point of injecting
+            // the wait at all — with a real Object.wait, a frozen test clock and a real-time wait would be two
+            // sources for one deadline, which kafkaLLD §15.1 forbids.
+            deadline -> !sourceInputs.isEmpty()
         );
     }
 
@@ -73,13 +84,12 @@ class KafkaSourceOwnerTest {
         return new PumpedKafkaSource(partitions, clockNanos::addAndGet);
     }
 
-    private static ApplicationKafkaRecord record(PartitionGenerationId generation, long offset) {
+    /** The port returns records without identity; the owner stamps the generation (kafkaLLD 5). */
+    private static PolledKafkaRecord record(long offset) {
         var envelope = CaptureRecord.newBuilder()
             .setTrafficStream(TrafficStream.newBuilder().setConnectionId("c").setNumber(0).build())
             .build();
-        return new ApplicationKafkaRecord(
-            new KafkaRecordId(generation, offset), 1_000L + offset, envelope.getSerializedSize(), envelope
-        );
+        return new PolledKafkaRecord(offset, 1_000L + offset, envelope.getSerializedSize(), envelope);
     }
 
     private List<ReplayIntakeInput> drainIntake() {
@@ -143,24 +153,32 @@ class KafkaSourceOwnerTest {
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation, 1)));
-        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation, 10))));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         port.clearHistory();
+        // Drained so the depth below starts at zero; assignment already put PartitionGenerationAssigned there.
+        drainIntake();
+
+        // One timeline across both sides. Each port call is stamped with how many inputs had reached intake at
+        // that moment, so "paused before the batch reached intake" is a single ordered fact. Asserting the
+        // port's history and the queue's contents separately would hold just as well with the two production
+        // statements reversed, which is exactly the property. Sampling the queue from the port's listener keeps
+        // this in the test rather than adding an observation hook to a production class.
+        var events = new java.util.ArrayList<String>();
+        port.onObservation(call -> events.add(call + " intake=" + intakeInputs.size()));
 
         owner.runOnce();
 
-        var history = port.history();
-        var resumeIndex = history.indexOf("resume(traffic-0)");
-        var pollIndex = history.indexOf("poll->[traffic-0]");
-        var pauseIndex = history.lastIndexOf("pause(traffic-0)");
-        Assertions.assertTrue(resumeIndex >= 0 && pollIndex > resumeIndex, () -> "history: " + history);
-        Assertions.assertTrue(
-            pauseIndex > pollIndex,
-            () -> "the partition was not paused after its records were returned; history: " + history
+        Assertions.assertEquals(
+            List.of("resume(traffic-0) intake=0", "poll->[traffic-0] intake=0", "pause(traffic-0) intake=0"),
+            events,
+            () -> "the partition must be paused while intake is still empty, so no further poll can fetch for"
+                + " it while this batch is being applied; events: " + events
         );
-        var batches = drainIntake().stream()
-            .filter(ReplayIntakeInput.PartitionRecordBatch.class::isInstance)
-            .count();
-        Assertions.assertEquals(1, batches, "exactly one batch should reach intake");
+        Assertions.assertEquals(
+            1,
+            drainIntake().stream().filter(ReplayIntakeInput.PartitionRecordBatch.class::isInstance).count(),
+            "exactly one batch should reach intake, after the pause"
+        );
         Assertions.assertTrue(
             port.isPaused(PARTITION_0),
             "the partition must still be paused once the batch has been submitted"
@@ -202,8 +220,8 @@ class KafkaSourceOwnerTest {
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(request0));
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(request1));
         port.scriptPoll(Map.of(
-            PARTITION_0, List.of(record(generation0, 10)),
-            PARTITION_1, List.of(record(generation1, 20))
+            PARTITION_0, List.of(record(10)),
+            PARTITION_1, List.of(record(20))
         ));
 
         owner.runOnce();
@@ -253,8 +271,8 @@ class KafkaSourceOwnerTest {
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation1, 1)));
         port.scriptPoll(Map.of(
-            PARTITION_0, List.of(record(generation0, 10)),
-            PARTITION_1, List.of(record(generation1, 20))
+            PARTITION_0, List.of(record(10)),
+            PARTITION_1, List.of(record(20))
         ));
 
         owner.runOnce();
@@ -275,7 +293,7 @@ class KafkaSourceOwnerTest {
         // gate lives on its successor. Matching them is the point: clearing by topic-partition alone would let
         // any generation's cleanup release any successor.
         sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(revokedGeneration0));
-        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation0, 10))));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         owner.runOnce();
 
         Assertions.assertEquals(
@@ -349,6 +367,163 @@ class KafkaSourceOwnerTest {
         );
     }
 
+    /**
+     * A commit callback that arrives after its generation was revoked and reassigned must change nothing.
+     *
+     * <p>This is the case a partition-keyed callback gets wrong in three ways at once: it would credit the
+     * successor's retirement count for an operation the revoked generation submitted, re-stage a position the
+     * successor never derived, and clear the successor's in-flight marker so a second operation could race it.
+     * The fixture resolves commit callbacks <em>after</em> rebalance callbacks specifically so this is
+     * reachable — resolving first made it impossible to express.
+     */
+    @Test
+    void aCommitCallbackArrivingAfterReassignmentIsIgnored() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var firstGeneration = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(firstGeneration, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(firstGeneration, 10)));
+        drainIntake();
+
+        // Submits the commit for the first generation, then revokes and reassigns inside the same poll, so the
+        // callback resolves against a partition whose generation has already been replaced.
+        port.scriptRebalanceDuringNextPoll(() -> {
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+            owner.onPartitionsAssigned(List.of(PARTITION_0));
+        });
+        owner.runOnce();
+
+        var successor = owner.partitionState(PARTITION_0).orElseThrow();
+        Assertions.assertNotEquals(firstGeneration, successor.generation(), "expected a new generation");
+        Assertions.assertEquals(
+            0,
+            successor.recordsCommitted(),
+            "the successor must not be credited for the revoked generation's commit"
+        );
+        Assertions.assertTrue(
+            owner.stagedCommitPosition(PARTITION_0).isEmpty(),
+            "the revoked generation's position must not be re-staged onto its successor"
+        );
+    }
+
+    /** §5.3: a batch request is refused once lifecycle state has permanently ended intake. */
+    @Test
+    void aBatchRequestIsRefusedAfterIntakeHasPermanentlyEnded() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        var state = owner.partitionState(PARTITION_0).orElseThrow();
+        state.endIntake();
+
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            state.outstandingRequest().isEmpty(),
+            "a request accepted past the permanent boundary can never be satisfied, so it must be refused"
+        );
+        Assertions.assertFalse(state.isReadable(), "and the partition must stay unreadable");
+    }
+
+    /**
+     * §17.4 case 18: a wakeup arriving between revocation and assignment postpones the assignment to a later
+     * poll without losing it.
+     *
+     * <p>{@code §5.4}: "the assignment callback is postponed, not discarded". The wakeup lands after
+     * {@code onPartitionsRevoked} has run and before {@code onPartitionsAssigned} does, which is the one
+     * interleaving that can silently drop an assignment — the partition would then be owned by Kafka and
+     * unknown to this owner, reading nothing forever.
+     */
+    @Test
+    void aWakeupBetweenRevocationAndAssignmentPostponesTheAssignmentWithoutLosingIt() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var revokedGeneration = assignAndGetGeneration(owner, port, PARTITION_0);
+        drainIntake();
+        port.clearHistory();
+
+        // The revoke half of the rebalance runs, then the poll is interrupted before the assign half.
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        port.scriptWakeupAfterNextRebalance();
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            owner.partitionState(PARTITION_0).isEmpty(),
+            "the revoke half must have taken effect before the wakeup interrupted the poll"
+        );
+
+        // The next poll continues the rebalance, exactly as Kafka does.
+        assignThroughPoll(owner, port, List.of(PARTITION_0));
+
+        var successor = owner.partitionState(PARTITION_0)
+            .orElseThrow(() -> new AssertionError("the assignment was lost rather than postponed"));
+        Assertions.assertNotEquals(
+            revokedGeneration,
+            successor.generation(),
+            "the postponed assignment must produce a new generation, not resurrect the revoked one"
+        );
+        Assertions.assertTrue(
+            successor.isPriorGenerationCleanupPending(),
+            "and it must still be gated on the revoked generation's cleanup"
+        );
+    }
+
+    /**
+     * A revocation commit does not overlap an asynchronous commit still in flight, and the records that
+     * submission covered are still credited when the synchronous one lands.
+     *
+     * <p>`§5.7` allows one commit operation at a time, and the revocation path cannot wait for an outstanding
+     * one: its callback needs a poll that the callback itself is preventing. So the in-flight submission is
+     * reclaimed at revocation entry — it is already abandoned, since by the time its callback arrives the
+     * generation is retired and it resolves as a late callback. Without the reclaim, two operations overlap and
+     * the retirement count is short by whatever the abandoned one covered.
+     */
+    @Test
+    void revocationReclaimsAnInFlightCommitRatherThanOverlappingIt() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+            new PartitionBatchRequestId(generation, 1)));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
+        owner.runOnce();
+        drainIntake();
+        var state = owner.partitionState(PARTITION_0).orElseThrow();
+        port.clearHistory();
+
+        // One iteration does all three in the order production does: the completion stages a position,
+        // submitLoopCommitIfEligible sends it asynchronously, and the poll that would resolve it instead
+        // delivers the revocation first. The fixture runs rebalance callbacks before resolving commit
+        // callbacks precisely so this state — a submission in flight while revocation begins — is reachable.
+        sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
+            new KafkaRecordId(generation, 10)));
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_0)));
+        owner.runOnce();
+
+        var synchronousCommits = port.observations().stream()
+            .filter(PumpedKafkaSource.CommitAttempted.class::isInstance)
+            .map(PumpedKafkaSource.CommitAttempted.class::cast)
+            .toList();
+        Assertions.assertEquals(
+            1,
+            synchronousCommits.size(),
+            () -> "exactly one commit may be in flight, so the reclaimed position is committed once from inside"
+                + " the callback; history: " + port.history()
+        );
+        Assertions.assertEquals(Map.of(PARTITION_0, 11L), synchronousCommits.get(0).nextPositions());
+        Assertions.assertEquals(
+            1,
+            state.recordsCommitted(),
+            "the record the abandoned async submission covered must still be credited once the synchronous"
+                + " commit is acknowledged, or the retirement count under-reports"
+        );
+    }
+
     /** Plan A G2 exit: a poll failure is fatal, never an empty success. */
     @Test
     void aPollFailurePropagatesRatherThanBecomingAnEmptyPoll() {
@@ -383,7 +558,7 @@ class KafkaSourceOwnerTest {
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation, 1)));
-        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation, 10))));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         owner.runOnce();
         drainIntake();
         port.clearHistory();
@@ -445,7 +620,7 @@ class KafkaSourceOwnerTest {
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation, 1)));
-        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation, 10))));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         owner.runOnce();
         drainIntake();
         port.clearHistory();
@@ -497,7 +672,7 @@ class KafkaSourceOwnerTest {
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation, 1)));
-        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation, 10))));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         owner.runOnce();
         sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
             new KafkaRecordId(generation, 10)));
@@ -530,7 +705,7 @@ class KafkaSourceOwnerTest {
         var generation = assignAndGetGeneration(owner, port, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(generation, 1)));
-        port.scriptPoll(Map.of(PARTITION_0, List.of(record(generation, 10))));
+        port.scriptPoll(Map.of(PARTITION_0, List.of(record(10))));
         owner.runOnce();
         sourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
             new KafkaRecordId(generation, 10)));
@@ -571,13 +746,13 @@ class KafkaSourceOwnerTest {
         assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1, partition2));
 
         var generations = new java.util.LinkedHashMap<TopicPartition, PartitionGenerationId>();
-        var records = new java.util.LinkedHashMap<TopicPartition, List<ApplicationKafkaRecord>>();
+        var records = new java.util.LinkedHashMap<TopicPartition, List<PolledKafkaRecord>>();
         for (var topicPartition : List.of(PARTITION_0, PARTITION_1, partition2)) {
             var generation = owner.partitionState(topicPartition).orElseThrow().generation();
             generations.put(topicPartition, generation);
             sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
                 new PartitionBatchRequestId(generation, 1)));
-            records.put(topicPartition, List.of(record(generation, 10)));
+            records.put(topicPartition, List.of(record(10)));
         }
         port.scriptPoll(records);
         owner.runOnce();

@@ -11,6 +11,7 @@ package org.opensearch.migrations.replay.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import org.opensearch.migrations.replay.TrafficReplayer;
 
@@ -37,7 +38,11 @@ class KafkaTopicDumperEvidenceTest {
             Assertions.assertEquals(200, supply.sendGet("/"));
             // Wait for durability before dumping: the dumper stops at the endOffsets snapshot it takes at
             // startup, so a record still in flight would simply not be in the range it reads.
-            Assertions.assertFalse(supply.readRecordValues(1).isEmpty(), "nothing was captured to dump");
+            Assertions.assertFalse(
+                supply.readTrafficStreamValues(1).isEmpty(),
+                "no captured traffic reached the topic; the startup capability probe does not count, which is"
+                    + " why this waits for a TrafficStream rather than for any record"
+            );
 
             // Through TrafficReplayer.main, not by calling the dumper directly. Calling the dumper would
             // prove the dumper works while leaving the CLI dispatch unexercised, and an entry point with no
@@ -68,6 +73,101 @@ class KafkaTopicDumperEvidenceTest {
             Assertions.assertTrue(
                 output.contains("GET"),
                 () -> "the captured request was not rendered. Output:\n" + output
+            );
+        }
+    }
+
+    /**
+     * A dump of a multi-partition topic renders records from every partition, and the partition and offset it
+     * prints are the ones Kafka reported.
+     *
+     * <p>This is the case a single-partition topic cannot express, and it is why the truncation defect survived:
+     * {@code runRawFromKafka} returned from the whole dump on the first record past a bound, while the bound is
+     * per-partition and one poll interleaves partitions. With one partition that return is indistinguishable
+     * from finishing.
+     *
+     * <p>The rendered metadata is compared against what a consumer independently reports for the same records,
+     * rather than merely checked for being present, so a dumper printing a plausible but wrong partition fails.
+     */
+    @Test
+    void dumpRawRendersEveryPartitionAndTheMetadataKafkaReported() throws Exception {
+        try (var supply = ProxyWrittenTopic.start("g1-dump-multipartition", 3)) {
+            // Several requests, so the proxy's partitioner spreads connections across partitions.
+            for (var i = 0; i < 12; i++) {
+                Assertions.assertEquals(200, supply.sendGet("/req-" + i));
+            }
+            var captured = supply.readTrafficStreamValues(1);
+            Assertions.assertFalse(captured.isEmpty(), "nothing was captured to dump");
+
+            // Every partition is populated deliberately, by replaying a proxy-written envelope onto each one.
+            // Relying on the proxy's partitioner would mean assuming the spread and skipping when it did not
+            // happen — and a skip that fires is indistinguishable from coverage that never existed, which is
+            // exactly how the truncation defect survived a green suite. The bytes are still the real proxy's.
+            for (var partition = 0; partition < 3; partition++) {
+                supply.produceDirectly(partition, captured.get(0));
+            }
+
+            var consumed = supply.readRecordMetadata();
+            var populatedPartitions = consumed.stream().map(ProxyWrittenTopic.RecordLocation::partition)
+                .distinct().sorted().toList();
+            Assertions.assertEquals(
+                List.of(0, 1, 2),
+                populatedPartitions,
+                "every partition must hold a record, or this proves nothing about multi-partition dumping"
+            );
+
+            var output = captureStdout(() -> TrafficReplayer.main(new String[] {
+                "--mode", "dump-raw",
+                "--kafka-traffic-brokers", supply.brokers(),
+                "--kafka-traffic-topic", supply.topic()
+            }));
+
+            // Whitespace is removed from both sides rather than the expected string being built to match the
+            // dumper's format. The offset is rendered right-padded to a fixed width for readability, so
+            // coupling to that padding would turn a presentation change into a false "record dropped" — and
+            // collapsing runs of spaces is not enough, since `o:%6d` of zero leaves a space after the colon.
+            var withoutSpacing = output.replaceAll("\\s", "");
+            for (var location : consumed) {
+                var rendered = "p:" + location.partition() + " o:" + location.offset();
+                var expected = rendered.replaceAll("\\s", "");
+                Assertions.assertTrue(
+                    withoutSpacing.contains(expected),
+                    () -> "the dump omitted " + rendered + ", so a partition's records were dropped or their"
+                        + " metadata was rendered wrong. Partitions with records: " + populatedPartitions
+                        + "\nOutput:\n" + output
+                );
+            }
+        }
+    }
+
+    /**
+     * A record that is not a {@code CaptureRecord} envelope ends the dump with a message naming where it is,
+     * rather than being skipped or rendered as something else.
+     *
+     * <p>A correct proxy cannot produce this, so it is written directly. The behaviour is a stated protocol
+     * requirement: {@code kafkaLLD §16} makes an undecodable record fatal, and silently tolerating one would let
+     * a producer-side format change pass as an empty or partial dump.
+     */
+    @Test
+    void anUndecodableRecordEndsTheDumpAndNamesItsLocation() throws Exception {
+        try (var supply = ProxyWrittenTopic.start("g1-dump-malformed")) {
+            Assertions.assertEquals(200, supply.sendGet("/"));
+            Assertions.assertFalse(supply.readTrafficStreamValues(1).isEmpty(), "nothing was captured");
+            supply.produceDirectly(0, "this is not protobuf".getBytes(StandardCharsets.UTF_8));
+
+            var thrown = Assertions.assertThrows(Exception.class, () -> captureStdout(() ->
+                TrafficReplayer.main(new String[] {
+                    "--mode", "dump-raw",
+                    "--kafka-traffic-brokers", supply.brokers(),
+                    "--kafka-traffic-topic", supply.topic()
+                })
+            ));
+
+            var message = String.valueOf(thrown.getMessage());
+            Assertions.assertTrue(
+                message.contains(supply.topic()) && message.contains("CaptureRecord"),
+                () -> "the failure must name the record's location and what was wrong with it, so an operator"
+                    + " can find it; got: " + message
             );
         }
     }

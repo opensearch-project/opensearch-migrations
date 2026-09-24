@@ -49,6 +49,7 @@ unbalanced=0
 residue=0
 drifted=0
 unrecovered=0
+duplicated=0
 whole_file_checked=0
 body_checked=0
 
@@ -94,13 +95,19 @@ for file in $marked; do
         residue=$((residue + 1))
     fi
 
-    # Property 2c: every marked code line comes back, checked without history and therefore for EVERY file
-    # rather than only whole-file-marked ones. The region bodies are already present verbatim in the file --
-    # un-marking only deletes marker and delimiter lines -- so any body line missing from the reconstruction
-    # is a line the awk lost. This is what the history comparison below cannot do for a partially marked
-    # file, whose regions were added across several commits with no single "before" to diff against. Those
-    # are precisely the files where recovery is least mechanical, so leaving them unchecked left the
-    # marking system's own trust claim unverified exactly where it mattered most.
+    # Property 2c: no marked code line goes MISSING from the reconstruction. Checked without history and
+    # therefore for every file, including the partially marked ones the comparison below cannot cover -- their
+    # regions were added across several commits, so there is no single "before" to diff against, and those are
+    # precisely the files where recovery is least mechanical.
+    #
+    # What this does and does not prove, stated exactly because the summary line used to overclaim it. The
+    # comparison is a sorted multiset difference, so it detects a line that vanishes. It does NOT detect
+    # reordering, and it does not detect a duplicate, because both leave the set of present lines unchanged.
+    # A set comparison is the most that is available here: body lines like a bare `}` also occur in live code,
+    # so an order-preserving check would have to decide which occurrence is which, and would report false
+    # failures on every file. Order and duplication are covered exactly, by diff, for the whole-file-marked
+    # files below -- which is 220 of 226 -- and the line-count check that follows bounds duplication for the
+    # rest.
     #
     # Escaped lines are excluded: the awk rewrites them by design, so they are not expected to appear
     # unchanged. Blank lines are excluded for the same reason as below.
@@ -120,6 +127,16 @@ for file in $marked; do
             unrecovered=$((unrecovered + 1))
         fi
         body_checked=$((body_checked + 1))
+
+        # Bounds duplication, which the set comparison above cannot see. Reconstruction only ever deletes
+        # lines, so its output must be no longer than the input; a longer output means the awk emitted
+        # something twice.
+        input_lines=$(grep -cv '^[[:space:]]*$' "$file")
+        output_lines=$(awk -f "$AWK" "$file" | grep -cv '^[[:space:]]*$')
+        if [ "$output_lines" -gt "$input_lines" ]; then
+            echo "DUPLICATED: $file reconstructs to $output_lines non-blank lines from $input_lines"
+            duplicated=$((duplicated + 1))
+        fi
     fi
 
     # Property 2b: for a whole-file-marked file, reconstruction must reproduce exactly what was marked.
@@ -146,12 +163,12 @@ done
 
 echo
 echo "Checked $marked_count marked file(s) under $SRC."
-echo "  every marked code line recovered, checked directly for $body_checked file(s) with region bodies"
-echo "  reconstruction additionally compared against history for $whole_file_checked whole-file-marked file(s)"
-failures=$((malformed + unbalanced + residue + drifted + unrecovered))
+echo "  no marked code line missing, checked directly for $body_checked file(s) with region bodies"
+echo "  order and duplication proved exactly, by diff against history, for $whole_file_checked whole-file-marked file(s)"
+failures=$((malformed + unbalanced + residue + drifted + unrecovered + duplicated))
 if [ "$failures" -ne 0 ]; then
     echo "FAIL: $unbalanced unbalanced, $malformed malformed, $residue with residue, $drifted drifted," \
-         "$unrecovered with unrecovered lines"
+         "$unrecovered with unrecovered lines, $duplicated with duplicated lines"
     exit 1
 fi
 echo "PASS: markers well-formed, reconstruction clean, no drift."
