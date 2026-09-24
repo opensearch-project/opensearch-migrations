@@ -24,7 +24,9 @@ function main(context) {
                     space_type: mapSimilarity(similarity),
                     parameters: {
                         encoder: {
-                            name: "sq"
+                            name: "sq",
+                            // Preserve Lucene's pre-3.6 quantization; newer targets require explicit bits.
+                            parameters: { bits: 7 }
                         },
                         m: m,
                         ef_construction: efConstr

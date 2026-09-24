@@ -848,7 +848,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -873,7 +873,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2013,6 +2013,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "resources": {
                       "type": "object",
+                      "nullable": true,
                       "properties": {
                         "limits": {
                           "type": "object",
@@ -2026,6 +2027,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                               "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2046,6 +2052,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                               "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2053,6 +2064,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "memory"
                           ],
                           "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                        }
+                      },
+                      "default": {
+                        "limits": {
+                          "cpu": "500m",
+                          "memory": "1800Mi"
+                        },
+                        "requests": {
+                          "cpu": "500m",
+                          "memory": "1800Mi"
                         }
                       },
                       "required": [
@@ -2308,7 +2329,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2333,7 +2354,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -2341,6 +2362,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "memory"
                           ],
                           "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                        }
+                      },
+                      "default": {
+                        "limits": {
+                          "cpu": "3300m",
+                          "memory": "7000Mi"
+                        },
+                        "requests": {
+                          "cpu": "3300m",
+                          "memory": "7000Mi"
                         }
                       },
                       "required": [
@@ -3120,7 +3151,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -3145,7 +3176,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                              "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                             }
                           },
                           "required": [
@@ -4403,6 +4434,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "resources": {
                         "type": "object",
+                        "nullable": true,
                         "properties": {
                           "limits": {
                             "type": "object",
@@ -4416,6 +4448,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                                 "description": "Memory allocation for the container."
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4436,6 +4473,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
                                 "description": "Memory allocation for the container."
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4443,6 +4485,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "memory"
                             ],
                             "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                          }
+                        },
+                        "default": {
+                          "limits": {
+                            "cpu": "500m",
+                            "memory": "1800Mi"
+                          },
+                          "requests": {
+                            "cpu": "500m",
+                            "memory": "1800Mi"
                           }
                         },
                         "required": [
@@ -4943,7 +4995,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4968,7 +5020,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                                "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                               }
                             },
                             "required": [
@@ -4976,6 +5028,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "memory"
                             ],
                             "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                          }
+                        },
+                        "default": {
+                          "limits": {
+                            "cpu": "3300m",
+                            "memory": "7000Mi"
+                          },
+                          "requests": {
+                            "cpu": "3300m",
+                            "memory": "7000Mi"
                           }
                         },
                         "required": [
@@ -5618,7 +5680,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -5643,7 +5705,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -6210,7 +6272,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
@@ -6235,7 +6297,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            "description": "Local ephemeral storage allocation for the container's writable layer, logs, and disk-backed emptyDir volumes."
                           }
                         },
                         "required": [
