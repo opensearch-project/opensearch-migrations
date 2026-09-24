@@ -41,7 +41,7 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
 | Test compilation | **Green.** 108 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 as `ReplayerFixtureSelfTest` was promoted |
-| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 217 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 211 whole-file-marked ones. Run it after any marking change |
+| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 216 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 211 whole-file-marked ones. Run it after any marking change |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
 | File counts | One module. **360 files** under `TrafficCapture/trafficReplayer/src` (**347** Java); **217** carry `REBUILD-LIMBO` regions, of which **6** are partial. `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. Historical counts were measured at earlier milestones; use the command, not the number |
@@ -173,6 +173,7 @@ Non-blocking, fold into the relevant milestone (`replayerRebuildPlan.md:163-166`
 | Proxy Kafka tests cannot start the proxy — no test creates the topic with `LogAppendTime`, so the capability probe aborts. Full detail and repair in `replayerRebuildPlan.md` §3.2, PA2 item 1. **Fix first; it masks item 2** | PA2 | open, verified by running it |
 | Stale `MAX_ID_SIZE = 100` assert in `StreamChannelConnectionCaptureSerializer:150` vs ~111 actual. Assert-only, no production impact, but blocks every assertions-enabled capture test. `replayerRebuildPlan.md` §3.2, PA2 item 2 | PA2 | open, worked around with `-da:` in the replayer's `build.gradle` — **that workaround is deleted by this repair** |
 | `CaptureProxy`'s fatal handler calls `System.exit(78)`, killing the test JVM when run in-process. `replayerRebuildPlan.md` §3.2, PA2 item 3 | PA2 | open, worked around — **observed failing, not just theorised**: `CaptureProxyContainer.stop()` interrupts the server thread but not the Kafka publisher, so an orphaned publisher whose broker has stopped exits the JVM and fails whichever test class is running. `ProxyWrittenTopic.close()` therefore leaves its broker up, keeping the topic present so the publisher never fails; Ryuk reaps the container at JVM exit. **That workaround is deleted by this repair** |
+| `StreamChannelConnectionCaptureSerializer.cancelCaptureForCurrentRequest` emits `RequestIntentionallyDropped` but does not increment `eomsSoFar`, so a successor stream can serialize `priorRequestsReceived` one request too low. Full detail and repair in `replayerRebuildPlan.md` §3.2, PA2 item 4 | PA2 | open, verified against the serializer's drop, EOM, and stream-header paths |
 | Non-atomic refcount read-modify-write — cited as `tracing/ChannelContextManager.java:127`, **actually `:39-43` reached from `:73-83`** (the file is 84 lines). Plain non-`volatile` `int refCount`; `retain()` is safe inside `ConcurrentHashMap.compute`, the release path is not. Lost decrement, double close, and release-racing-retain all follow, and correctness rests on `assert` at `:41`/`:76`. Moot under the pull-over verdict — the file is REWRITE, not a two-line repair | G5 | open, reworded |
 | `ISourceTrafficChannelKey.getSourceGeneration()` defaults to 0, letting two lifetimes collide. **Confirmed at `:12-14`**, and only two types override it (`kafka/TrafficStreamKeyWithKafkaRecordId:53`, fixture `TrafficStreamCursorKey:41`), so every non-Kafka key is generation 0. Live consumers of the constant: `CapturedTrafficToHttpTransactionAccumulator:359` generation comparison, `tracing/ChannelContextManager:53`, and `ClientConnectionPool`'s cache key (`:42-51` plus two `getKey` overloads that hard-code 0) — so two `ConnectionProcessingId`-equivalent lifetimes collide in both the session cache and the accumulator check | G3 | open, confirmed |
 
@@ -193,8 +194,7 @@ recorded rather than the heading simply being restored:
   printing plausible but wrong metadata fails.
 - An **undecodable record** ends the dump naming its location, per `kafkaLLD §16`.
 - The deferred Kafka modes had contract evidence: `dump-http` and `dump-both` remained accepted and failed
-  naming `G3`. File input was also retained at this point, before the owner retired file-backed dumping on
-  2026-09-24.
+  naming `G3`.
 
 `replayer --mode dump-raw --kafka-traffic-brokers <b> --kafka-traffic-topic <t>` reads a topic written by
 the real proxy and prints one line per record, exercised end to end through `TrafficReplayer.main` in
@@ -243,8 +243,8 @@ Three things were not simple un-markings, and each is a decision worth finding l
    when an entry point is unreachable. The evidence test therefore goes through `main`, not through the
    dumper directly.
 
-`validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http`,
-`dump-both`, and, at that point, `-i` file input with a message naming G3, at exit code 2. The mode names stay in the CLI
+`validateDumpModeParams` — already live but previously uncalled — now also rejects `dump-http` and
+`dump-both` with a message naming G3, at exit code 2. The mode names stay in the CLI
 because §2.3 makes them a contract; what changed is that asking for them says when they return instead of
 producing output that does not match the mode requested.
 
@@ -1211,7 +1211,7 @@ The pass's one-pass evidence findings were also corrected:
 - the public partition-state diagnostic and stop-marker reoffer comments now describe their actual visibility
   and FIFO precondition.
 
-Validation after these corrections: the 20 focused deterministic intake/association/reconstruction tests pass;
+Validation after these corrections: the 24 focused deterministic intake/association/reconstruction tests pass;
 all three `SourceAssemblyEvidenceTest` real-proxy/real-topic cases pass, including direct assertions that the
 raw line precedes its request/response callbacks and shares their relative-time origin; and the payloadless
 real-topic HTTP dump still fails with the violating record identified.
@@ -1283,6 +1283,7 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 | Deferred | From | To | Why | State |
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` CLI modes | G1 | G3 | HTTP transaction reconstruction was the legacy accumulator's job. G3 rebuilt source assembly and uses these modes as its real-topic exit evidence. Mode names stayed in the CLI throughout (§2.3 contract) | proved — `SourceAssemblyEvidenceTest` |
+| Proxy `RequestIntentionallyDropped` successor-baseline repair | G3 | PA2 | G3 now consumes the marker according to `kafkaLLD §9.4`, but the proxy serializer emits it without incrementing the connection's `eomsSoFar`; the next stream can therefore understate `priorRequestsReceived`. Proxy repair belongs to the proxy milestone rather than Plan A's replayer implementation | open — PA2 item 4 |
 | Real replay construction: Kafka source owner and port → source queue → replay-intake queue and owner → connection/request consumer | G2 | G5 | G2's source component exists, but its real downstream connection/request consumer is unavailable until G5. G5 is therefore the first milestone that can construct the responsibility's complete production chain; G9 only places that integrated application under supervision and deployed configuration | open |
 | `§17.4` case 1 — demand requests another batch while fewer than `N` requests have resolved retry input and unfinished target turns | G2 | G7 | `N = P * T_threads` and the supply count are `kafkaLLD §13`, which G7 builds. No symbol in §13 exists in the module | open |
 | `§17.4` case 2 — request reconstitution with unresolved retry input does not increment supply | G2 | G7 | §13 transition 1, per-request intake bookkeeping created at reconstitution. Needs G3's reconstitution first | open |

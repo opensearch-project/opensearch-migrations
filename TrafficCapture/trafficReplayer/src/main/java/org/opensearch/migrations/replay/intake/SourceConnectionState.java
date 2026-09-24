@@ -439,8 +439,7 @@ public final class SourceConnectionState {
     }
 
     /**
-     * Ends assembly at a boundary that abandons an incomplete request: a captured close, or response bytes
-     * arriving before that request's end-of-message marker.
+     * Ends assembly at a captured close.
      *
      * <p>A response already under assembly is completed with {@code keptAlive = false}: it reached an end the
      * replayer observed, while whether the source had finished writing it is unprovable. Connection exceptions

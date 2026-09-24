@@ -24,9 +24,9 @@ import lombok.extern.slf4j.Slf4j;
  * Prints one line per reconstructed request, response and close, for {@code --mode dump-http}.
  *
  * <p>This is the cheapest reading of what source assembly produced: run it over a real topic and every
- * transaction the replayer reconstructed is a line a person can check. A response that ends without completing
- * prints as {@code RSP INCOMPLETE} and carries no bytes, which is the visible form of {@code kafkaLLD §9.2}'s
- * rule that partial bytes are never represented as complete.
+ * transaction the replayer reconstructed is a line a person can check. A close- or exception-bounded response
+ * keeps its reconstructed bytes and prints {@code UNPROVEN}; {@code RSP INCOMPLETE} is reserved for expiration
+ * and generation cancellation, where the signal deliberately carries no response bytes.
  *
  * <p>The {@code o:} and {@code s:} columns render blank here. They are the Kafka offset and
  * {@code TrafficStream} index of a single record, and a reconstructed transaction spans however many records
@@ -186,4 +186,3 @@ public class HttpTransactionDumper implements SourceAssemblySink {
         return sb.toString();
     }
 }
-

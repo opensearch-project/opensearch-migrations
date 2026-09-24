@@ -258,7 +258,8 @@ deliberately placed where there is a complete artifact to review rather than a p
 
 ### 3.2b Invoking a Claude review in this environment
 
-The repository directory is already trusted. AWS credentials are not needed; Midway is sufficient.
+Invoke Claude through the CLI directly, never through an API-launched subagent. The repository directory is
+already trusted. AWS credentials are not needed; Midway is sufficient.
 Do **not** use `--permission-mode plan` (it can block waiting for `ExitPlanMode`), and do not use
 `--restricted` or `--safe-mode` here. Allow up to 30 minutes for a substantial review — prior successful
 runs took about 11 and 14 minutes — and poll for stdout, stderr, PID, and exit code at least every 60
@@ -340,10 +341,12 @@ subtle:
 Each would have been caught by the same check, and the cost of the check is near zero for a real test.
 It is expensive only for a test that is not testing anything, which is the point.
 
-**Run it as a subagent in a throwaway worktree**, not by hand and not in the working tree: the subagent
-breaks one property, runs the narrowed test, reports pass or fail, and the worktree is discarded. A
-*pass* is the finding. Doing this in place risks committing a deliberate break, and doing it by hand is
-how it gets skipped under time pressure.
+**Run it through one direct ephemeral Codex CLI worker in a throwaway worktree**, not through an API-launched
+subagent, by hand, or in the working tree. Batch the milestone's independent mutations into that one worker:
+it breaks one property at a time, runs the narrowed test, restores the tree before the next mutation, and
+reports pass or fail. A *pass* is the finding. The worker must finish at the exact committed revision with a
+clean worktree before the worktree is discarded. Doing this in place risks committing a deliberate break, and
+doing it by hand is how it gets skipped under time pressure.
 
 ### Two terms this document uses precisely
 
@@ -455,14 +458,44 @@ never re-run it before smaller tests exist for what it found.
 The development machine has 18 cores and 64 GB of memory. Use it, but optimize for **elapsed time**
 rather than maximum process count.
 
-- Fan out independent code inspection, compilation, and test work.
-- Use subagents for substantial independent questions, not tiny edits whose coordination costs more than
-  they save.
-- Use separate worktrees when builds could write overlapping Gradle outputs.
+- **Do not launch API-based subagents.** Launch workers through direct `codex exec` or `claude -p` CLI
+  invocations. On this installed Codex CLI, non-interactive approval is
+  `-c 'approval_policy="never"'`; there is no `--ask-for-approval` flag.
+- The coordinator exclusively owns the primary checkout, integrates commits, updates the register, and writes
+  final commit messages. A mutating worker receives one non-overlapping responsibility, works in a named
+  branch and worktree under `/private/tmp/cdc-workers/`, includes that responsibility's complete usable chain,
+  observability, construction path, and evidence, and reports its commit hash for verification and integration.
+- Pin read-only reviewers and analysts to an exact commit in a read-only `/private/tmp` worktree so the
+  coordinator can keep moving without changing the artifact under review. They report findings or proposed
+  patches; they never edit the reviewed tree.
+- At every committed production checkpoint, immediately run the independent lanes that apply: read-only
+  Claude design-conformance review, one batched Codex falsification worker, narrow compilation or evidence
+  tests, and read-only preflight for the next milestone. A preflight maps responsibilities, file ownership,
+  complete chains, design silences, and owner decisions; it does not implement the next milestone before the
+  current milestone closes.
+- Run an independent proxy milestone worker concurrently with Plan A whenever the proxy plan permits
+  interleaving. Do not manufacture parallelism between sequential Plan A milestones.
+- Keep at most four active reusable worker worktrees. Reuse a worker for a batch of related checks and remove
+  its worktree immediately after its result is integrated or rejected; do not create one worker per test or
+  finding.
+- Use separate worktrees whenever builds could write overlapping Gradle outputs. If two independent Gradle
+  builds run concurrently, divide their worker limits so the combined `--max-workers` is at most 16.
 - **Never parallelize tests that share an event loop, port, static state, Gradle output, or external
   process.** When work units become small or tightly coupled, go serial.
+- A worker that reaches a red line stops and returns one batched escalation table. It does not wait
+  interactively for permission or make the decision itself.
 - Parallel work is what exposed why mutable statics are dangerous: they make otherwise independent tests
   interfere. Fix the ownership problem rather than widening test serialization.
+
+The standard direct Codex worker shape is:
+
+```bash
+codex exec --ephemeral \
+  -C /private/tmp/cdc-workers/<lane> \
+  --sandbox workspace-write \
+  -c 'approval_policy="never"' \
+  "<prompt>"
+```
 
 ## 6. What *not* to do
 
