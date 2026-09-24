@@ -34,6 +34,25 @@ These are not "use judgment" items. Hitting one means stopping and bringing it t
    the code suggests otherwise. If implementation reveals the design is ambiguous, contradictory, or
    silent on something you need, stop and ask. Absolute.
 
+   **"Absolute" has been read too loosely twice**, so it gets stated in the narrowest form: *you do not edit any
+   file under `docs/captureAndReplay/` unless the owner has said to change that thing.* Not a design change you
+   believe is right. Not a clarification. Not a sentence added inside a change he did authorize — that is the
+   one that actually happened, and it is why the scope of an authorization is the sentence he approved and not
+   the section it lives in. Authorizing an amendment is not authorizing everything adjacent to it.
+
+   Two further things that are **not** authorization, both of which were treated as such: your own reasoning
+   being sound, and the owner not objecting. Silence is not consent, and being right is not permission.
+
+   And accepting a *deviation* from the design is the same act as changing it. Recording "this requirement is
+   not met and that is acceptable" decides the design's meaning, so it needs the same explicit authorization —
+   either satisfy the requirement or ask.
+
+   Because this is another rule that requires noticing, it has a check: `tools/verify-design-authorization.sh`
+   compares the design corpus against the settled point in `docs/captureAndReplay/APPROVED-AT` and fails on any
+   changed document with no dated row in the register's design-changes table, and on any commit that mixes a
+   design edit with implementation. **Run it before pushing.** Separating design edits into their own commit is
+   only a visibility aid — the rule is that the edit needs the owner's word first.
+
 2. **Any decision to break an existing contract.** CLI options, config keys, metric names, exit
    codes, published test fixtures, protobuf, module or image names.
 

@@ -1,0 +1,10 @@
+f5753f261
+# The commit at which the authoritative designs were settled, before implementation began editing them.
+#
+# tools/verify-design-authorization.sh diffs the design corpus against this point, so that the designs' own
+# authoring history is not mistaken for implementation-era edits. Every change after it must have a dated row
+# in the "Design changes" table of docs/replayerRebuildStatus.md, and per AGENTS.md red line 1 a row may only
+# exist because the owner authorized the change.
+#
+# Move this forward only when the owner says the design is settled at a newer point. An agent moving it to
+# silence the check is the failure the check exists to prevent, and is why the reason lives here next to it.
