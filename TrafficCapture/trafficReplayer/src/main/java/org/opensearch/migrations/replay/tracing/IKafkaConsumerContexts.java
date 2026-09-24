@@ -58,6 +58,16 @@ public interface IKafkaConsumerContexts {
         public static final String WAKEUPS_ISSUED = "kafkaSourceWakeupsIssued";
         public static final String WAKEUPS_COALESCED = "kafkaSourceWakeupsCoalesced";
         public static final String WAKEUPS_DEFERRED = "kafkaSourceWakeupsDeferred";
+        /**
+         * A wakeup consumed by a Kafka call rather than by the poll it was issued for.
+         *
+         * <p>Its own series because it is otherwise invisible: the wakeup was issued, so
+         * {@code WAKEUPS_ISSUED} counts it, and the poll it was meant to shorten was never woken, so
+         * {@code POLLS_WOKEN_BY_QUEUED_INPUT} correctly does not. Without this, a commit repeatedly
+         * swallowing wakeups looks exactly like a run with no wakeups at all.
+         */
+        public static final String WAKEUPS_ABSORBED_BY_PROTECTED_OPERATION =
+            "kafkaSourceWakeupsAbsorbedByProtectedOperation";
         public static final String LATE_COMMIT_CALLBACKS = "kafkaSourceLateCommitCallbacks";
         public static final String GENERATIONS_RETIRED = "kafkaSourceGenerationsRetired";
         public static final String GENERATIONS_RETIRED_WITHOUT_COMMIT =
@@ -65,6 +75,19 @@ public interface IKafkaConsumerContexts {
         public static final String RETIRED_GENERATION_RECORDS_COMMITTED =
             "kafkaSourceRetiredGenerationRecordsCommitted";
         public static final String RETIRED_GENERATION_RECORDS_READ = "kafkaSourceRetiredGenerationRecordsRead";
+        /**
+         * Revocations whose grace wait ended because every revoked generation reported cleanup, against those
+         * that ran the interval out.
+         *
+         * <p>The pair is how an operator tunes the grace ceiling, which is the reason it is a command-line
+         * option rather than a constant. Nearly all early means the ceiling is larger than the work needs;
+         * nearly all exhausted means revocations are being held for their full interval and a longer ceiling
+         * would cost more than it buys. Neither number says anything on its own.
+         */
+        public static final String REVOCATIONS_CLEANED_BEFORE_DEADLINE =
+            "kafkaSourceRevocationsCleanedBeforeDeadline";
+        public static final String REVOCATIONS_REACHING_DEADLINE =
+            "kafkaSourceRevocationsReachingDeadline";
         public static final String DEFERRED_WAKEUPS_ISSUED_ON_CALLBACK_EXIT =
             "kafkaSourceDeferredWakeupsIssuedOnCallbackExit";
     }
@@ -135,6 +158,14 @@ public interface IKafkaConsumerContexts {
          *                    {@code recordsCommitted} gives the re-work this retirement cost
          */
         void onGenerationRetired(String generationLabel, long recordsCommitted, long recordsRead);
+
+        /**
+         * How the grace wait ended.
+         *
+         * @param everyGenerationReportedCleanup true if the wait returned because all revoked generations had
+         *                                       reported cleanup, false if the deadline arrived first
+         */
+        void onGraceWaitEnded(boolean everyGenerationReportedCleanup);
     }
 
     /**

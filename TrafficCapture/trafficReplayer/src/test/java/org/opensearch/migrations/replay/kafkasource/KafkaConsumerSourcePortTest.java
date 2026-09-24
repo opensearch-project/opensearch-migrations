@@ -199,6 +199,32 @@ class KafkaConsumerSourcePortTest {
         );
     }
 
+    /**
+     * A local timeout on an asynchronous submission is an unknown outcome, not a fatal error.
+     *
+     * <p>A timeout says the client stopped waiting, not that the commit is invalid — and on
+     * {@code group.protocol=consumer} the request is already with the background thread when it is raised, so
+     * the operation may have reached the broker. The synchronous path has always classified a timeout this way.
+     * Killing the process on the asynchronous one abandons every partition's progress over one partition's slow
+     * commit, which is the opposite of finishing an outgoing partition's work on a good-effort basis.
+     */
+    @Test
+    void aLocalTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal() {
+        var port = new KafkaConsumerSourcePort(
+            new ScriptedCommitConsumer(null, null, new TimeoutException("stopped waiting")),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+
+        Assertions.assertEquals(
+            List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
+            resolutions,
+            "the same failure type the synchronous path calls unknown must not be fatal here"
+        );
+    }
+
     @Test
     void anAcknowledgedCommitCarriesThePositionsItWasGiven() {
         var consumer = new ScriptedCommitConsumer(null, null, null);

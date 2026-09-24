@@ -141,3 +141,17 @@ run "interrupted loop submission never resolves"
 # 17. Remove the phase guard on absorption reporting, letting any caller consume the poll boundary's wakeup.
 perl -0pi -e 's/^        requirePhase\(Phase\.PROTECTED_OPERATION, "onWakeupAbsorbedByProtectedOperation"\);\n//m' "$C"
 run "absorption reportable from any phase"
+
+# 18. Serve a batch request for a generation whose intake has permanently ended, so a partition in limbo is
+#     resumed for a request whose offsets have already moved past it.
+perl -0pi -e 's/        if \(!state\.get\(\)\.lifecycleAllowsIntake\(\)\) \{\n(?:            [^\n]*\n)+        \}\n//' "$O"
+run "batch request served for a partition on its way out"
+
+# 19. Classify a local timeout on an asynchronous submission as structural, which kills the process over one
+#     partition's slow commit and abandons every other partition's progress.
+perl -0pi -e 's/        if \(failure instanceof TimeoutException\) \{\n(?:            \/\/[^\n]*\n)+            return CommitOutcome\.OUTCOME_UNKNOWN;\n        \}\n//' "$A"
+run "async local timeout treated as a structural failure"
+
+# 20. Stop counting an absorbed wakeup, which makes a commit swallowing them look like a run with none.
+perl -0pi -e 's/        pollInstruments\(\)\.wakeupsAbsorbedByProtectedOperation\.add\(1\);\n//' "$C"
+run "absorbed wakeup not counted"

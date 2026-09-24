@@ -535,14 +535,16 @@ public final class KafkaSourceOwner {
                 new ReplayIntakeInput.GracefulGenerationCancellation(generation, deadline)
             ));
 
-            awaitGraceDeadlineProcessingInputs(deadline, generations);
+            wakeupController.recordGraceWaitEnded(
+                awaitGraceDeadlineProcessingInputs(deadline, generations)
+            );
 
-            // Submitted unconditionally. procCommit:1308 states the early return -- "if the generation has no
-            // unfinished work, the callback returns immediately" -- but nothing states that the submission may
-            // then be skipped, and §9.2 step 7 makes accepting it what releases the callback. Skipping it on the
-            // strength of combining those two sentences would be deciding a design-silent question, so the
-            // conforming behaviour is to return early *and* still submit. Whether it is skippable is an open
-            // question in the register.
+            // Submitted unconditionally, never conditioned on whether the wait ended early. Cancelling the
+            // generation's work is this source's obligation, and a successor assignment of the same partition
+            // waits on it; whether anything remains to cancel is intake's to determine, and on this path it is
+            // nothing -- §4.1 distributes force cancellation "to every remaining connection and request owner in
+            // the generation", which is the empty set once cleanup has completed. A caller that tried to predict
+            // that answer would be holding up the successor to save an inert message.
             generations.forEach(generation -> submitRequired(
                 new ReplayIntakeInput.ForceGenerationCancellation(generation)
             ));

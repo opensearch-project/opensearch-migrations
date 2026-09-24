@@ -156,6 +156,14 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         if (isGenerationStale(failure)) {
             return CommitOutcome.GENERATION_STALE;
         }
+        if (failure instanceof TimeoutException) {
+            // A timeout says the client stopped waiting, not that the commit is invalid. On
+            // `group.protocol=consumer` the request is already with the background thread when this is raised,
+            // so the operation may well have reached the broker -- which is what an unknown outcome means. The
+            // synchronous path has always classified a timeout this way; killing the process on the
+            // asynchronous one would abandon every partition's progress over one partition's slow commit.
+            return CommitOutcome.OUTCOME_UNKNOWN;
+        }
         throw structurallyInvalid(failure);
     }
 

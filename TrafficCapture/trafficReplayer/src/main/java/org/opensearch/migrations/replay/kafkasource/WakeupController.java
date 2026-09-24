@@ -232,6 +232,18 @@ public final class WakeupController {
     }
 
     /**
+     * Records how the revocation's grace wait ended, on the callback scope that is open while it waits.
+     *
+     * <p>The pair of counters is what makes the grace ceiling tunable: every revocation ending early says the
+     * ceiling exceeds what the work needs, and every one reaching the deadline says revocations are held for
+     * their full interval. Without it the wait's outcome is invisible — the callback returns either way.
+     */
+    public synchronized void recordGraceWaitEnded(boolean everyGenerationReportedCleanup) {
+        requirePhase(Phase.REBALANCE_CALLBACK, "recordGraceWaitEnded");
+        callbackContext.onGraceWaitEnded(everyGenerationReportedCleanup);
+    }
+
+    /**
      * Records a commit callback that arrived for a generation no longer held — {@code kafkaLLD §5.7}'s
      * {@code LATE_CALLBACK}, which is diagnostic only. Counted on the commit scope's instruments rather than
      * inside a span, because the callback arrives with no commit scope open.
@@ -253,6 +265,11 @@ public final class WakeupController {
         // caller in any other phase clearing it would consume a wakeup that poll still needs to see.
         requirePhase(Phase.PROTECTED_OPERATION, "onWakeupAbsorbedByProtectedOperation");
         wakeupOutstanding = false;
+        // Counted, because this is the one wakeup decision no other series records: the wakeup was issued, so
+        // it is in wakeupsIssued, and the poll it was meant to shorten was never woken, so
+        // pollsWokenByQueuedInput correctly excludes it. A commit repeatedly swallowing wakeups would
+        // otherwise be indistinguishable from a run with none.
+        pollInstruments().wakeupsAbsorbedByProtectedOperation.add(1);
     }
 
     private boolean issueUnlessOutstanding() {

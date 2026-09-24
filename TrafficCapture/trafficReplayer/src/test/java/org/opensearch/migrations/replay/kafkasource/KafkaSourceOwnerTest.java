@@ -1014,6 +1014,102 @@ class KafkaSourceOwnerTest {
     }
 
     /**
+     * How the grace wait ended is observable, because the callback returns either way.
+     *
+     * <p>The pair of counters is what makes the grace ceiling tunable, which is why it is a command-line option:
+     * every revocation ending early says the ceiling exceeds what the work needs, and every one reaching the
+     * deadline says revocations are held for their whole interval. A run cannot tell those apart from the
+     * outside — both end with the generation retired and force cancellation submitted.
+     */
+    @Test
+    void howTheGraceWaitEndedIsCounted() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+        var cleanEarly = owner.partitionState(PARTITION_0).orElseThrow().generation();
+
+        // Cleanup reported from inside the callback, so the wait returns before the deadline.
+        port.scriptRebalanceDuringNextPoll(() -> {
+            sourceInputs.submit(new KafkaSourceInput.GenerationCleanupFinished(cleanEarly));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+        owner.runOnce();
+
+        // Nothing reports cleanup for this one, so its wait runs the interval out.
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsRevoked(List.of(PARTITION_1)));
+        owner.runOnce();
+
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.REVOCATIONS_CLEANED_BEFORE_DEADLINE),
+            "the revocation whose cleanup arrived during the wait must be counted as ending early"
+        );
+        Assertions.assertEquals(
+            1,
+            counterValue(IKafkaConsumerContexts.MetricNames.REVOCATIONS_REACHING_DEADLINE),
+            "the revocation that waited out its interval must be counted separately, or the pair says nothing"
+        );
+    }
+
+    /**
+     * A revocation must not take a retained partition's batch request down with it.
+     *
+     * <p>The grace wait is a downstream push and the rest of the processing model continues around it: a
+     * request that arrives during the wait for a partition the rebalance is <em>keeping</em> is handled as it
+     * normally would be, and is resumed and polled once the callback returns. A request for the partition
+     * leaving is dropped instead, which is decidable rather than guessed because every input carries its
+     * generation ({@code PartitionBatchRequestId}, {@code §2}).
+     *
+     * <p>The dropping half is proved by {@code aBatchRequestIsRefusedAfterIntakeHasPermanentlyEnded}, not here:
+     * removing the ended-intake guard leaves this test passing, because the revoked generation retires moments
+     * later and can no longer be resumed whether it accepted the request or not. This test is evidence about
+     * the partition that stays.
+     */
+    @Test
+    void aRetainedPartitionsBatchRequestSurvivesAnotherPartitionsRevocation() throws Exception {
+        var port = pumpedSource(List.of(PARTITION_0, PARTITION_1));
+        var owner = ownerFor(port);
+        assignThroughPoll(owner, port, List.of(PARTITION_0, PARTITION_1));
+        var leaving = owner.partitionState(PARTITION_0).orElseThrow().generation();
+        var retained = owner.partitionState(PARTITION_1).orElseThrow().generation();
+        port.clearHistory();
+
+        port.scriptRebalanceDuringNextPoll(() -> {
+            // Submitted from inside the callback, so both are applied while the grace wait is running.
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(leaving, 1)));
+            sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
+                new PartitionBatchRequestId(retained, 1)));
+            owner.onPartitionsRevoked(List.of(PARTITION_0));
+        });
+
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            owner.partitionState(PARTITION_0).isEmpty(),
+            "the revoked generation retires, taking its dropped request with it"
+        );
+        Assertions.assertTrue(
+            owner.partitionState(PARTITION_1).orElseThrow().outstandingRequest().isPresent(),
+            "the retained partition's request must survive a revocation of a different partition"
+        );
+
+        // The next iteration is where the surviving request becomes a resume and a poll.
+        port.scriptPoll(Map.of(PARTITION_1, List.of(record(20))));
+        owner.runOnce();
+
+        Assertions.assertTrue(
+            port.history().contains("resume(" + PARTITION_1 + ")"),
+            () -> "the retained partition should have been resumed for its request; history: " + port.history()
+        );
+        Assertions.assertFalse(
+            port.history().contains("resume(" + PARTITION_0 + ")"),
+            () -> "a partition in limbo must never be resumed for a dropped request; history: "
+                + port.history()
+        );
+    }
+
+    /**
      * A commit must not be started once the grace interval is gone.
      *
      * <p>{@code kafkaLLD §5.7}: "a commit that cannot finish within the remaining grace must not be started."
