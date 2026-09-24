@@ -177,12 +177,17 @@ These are events that replay intake processes, not states:
 | `PartitionGenerationAssigned` | Kafka assigned a partition and the source allocated a new process-local generation. | Creates the corresponding `PartitionIntakeState`. It does not request records until prior-generation cleanup and replay-intake demand permit that request. |
 | `PartitionRecordBatch` | Kafka returned the records that satisfy one outstanding request for this partition generation. | Applies every record in order, closes that batch request, recomputes demand, and may submit the next request. |
 | `GracefulGenerationCancellation` | Kafka began revoking the partition and supplied the grace deadline. | Stops admitting records from the generation, cancels work that has not started an external operation, and distributes scoped graceful cancellation. |
-| `ForceGenerationCancellation` | The revocation grace period ended. | Records forced cancellation and distributes it to every remaining connection and request owner in the generation. |
+| `ForceGenerationCancellation` | Cancellation of everything remaining in this generation is now required. Sent when the revocation's grace interval ends — at its deadline, or earlier once every revoked generation has reported cleanup. | Records forced cancellation and distributes it to every remaining connection and request owner in the generation. |
 | `FinalizedArchivePartitionEnd` | A finalized imported partition has no later record. | Applies the finite-input expiration rules without creating Kafka timestamp or offset evidence. |
 | `ConnectionRequestFinished` | The request has finished all target sends and retries, so the next request from the same captured connection may start. Tuple work may still be unfinished. | Removes the request from retry-ready Kafka demand supply if it was counted and prevents later retry-input resolution from adding it back. |
 | `RequestProcessingFinished` | Target sending and retries are finished, the captured source response is either complete or known to be incomplete, the tuple is durable, and the request's resources have been released. | Marks this request's required processing complete for every Kafka record containing its request or response observations. A record may then finish if no other request or incomplete source reconstruction still depends on it. |
 | `ConnectionOwnerFinished` | A normally completed connection owner has no requests, queued work, target connection, timers, or retained data left. | Removes the mapping used to send later messages to that connection owner. This event does not itself finish a Kafka record. |
 | `ConnectionCleanupFinished` | A connection owner and all of its requests have finished cancellation cleanup after Kafka revoked the partition. | Records that this connection no longer prevents cleanup of the revoked partition assignment. Cancelled Kafka work does not become committable. |
+
+Duplicate or already-cleaned delivery of `ForceGenerationCancellation` is inert. It is distributed to every
+remaining connection and request owner in the generation, which is the empty set once that generation's cleanup
+has completed, and it creates no state. The Kafka source therefore submits it unconditionally, including when
+the grace wait returned early because every revoked generation had already reported cleanup.
 
 Any future input must be a named immutable value and its design must state:
 
