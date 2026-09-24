@@ -422,9 +422,10 @@ records, `§9:622-709` source connection state. Also `procCommit §3.3:205-225`,
 `ReplayIntakeOwner` with its own thread and typed immutable inputs, `ReplayIntakeInputQueue`,
 `PartitionIntakeState`, `SourceConnectionState`, `RecordWorkTracker`. Associations are created **as each
 observation is applied**, many per record, never rejecting a second association. Records contributing
-source-response bytes stay associated through tuple durability. Source reconstruction is honest: a
-close-truncated response is never labelled `COMPLETE`, and an incomplete final response carries no
-partial bytes rendered as complete.
+source-response bytes stay associated through tuple durability. Source reconstruction is honest about what it
+can know: `kafkaLLD §9.2` makes a following request on the same connection the only proof that the source
+finished a response, so every other completion is marked unproven rather than presented as whole, and
+`SourceResponseIncomplete` is reserved for expiry and cancellation — the replayer's own doing.
 
 **Deferred out of G3 to G5 — tracing for intake and source assembly.** `ChannelContextManager` carries the
 non-atomic refcount defect G5 already owns, and G3's own evidence — record accounting and source
@@ -444,8 +445,12 @@ still needs a tracing context is a G3 question: it required `ChannelContextManag
 associations, matching the `RecordScript` oracle; no record emits completion while an expected
 association remains; a source connection that dies mid-response produces a tuple that says so. No owner
 blocks on a stage only its own thread can complete. **`dump-http` and `dump-both` work again against a
-real topic, and a close-truncated response is visible as truncated in that output** — reconstruction
-honesty stated as something a person can read. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`,
+real topic, and a response nothing proved finished is visible as `UNPROVEN` in that output** —
+reconstruction honesty stated as something a person can read. This criterion previously asked for a
+close-truncated response to be visible *as truncated*, which `§9.2` establishes is not detectable: the capture
+protocol marks the end of a request and not of a response, and the owner ruled against adding response parsing
+to the proxy. Unproven is the strongest claim the output can make, and a claim that can be made truthfully is
+worth more than one that cannot. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`,
 `R12`, `R13`.
 
 ### G4 — Commit authority
