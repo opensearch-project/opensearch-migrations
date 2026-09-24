@@ -68,9 +68,12 @@ fires, so it gets observable triggers instead:
 1. **Naming trigger (primary).** The first time new code references a legacy type, *that reference* is
    the red-line-3 decision. Write the row then. This one is greppable, so a reviewer can check it
    without judgment.
-2. **Thrash trigger.** The **third** time you edit the same file within one milestone, stop and write
-   down what is making it hard. Repeatedly reworking one file is the observable signature of shoehorning
-   new behavior into a shape that does not want it.
+2. **Thrash trigger.** The **third** time you rework the same *concern* within one milestone, stop and write
+   down what is making it hard. Repeatedly reworking one thing is the observable signature of shoehorning
+   new behavior into a shape that does not want it. **The unit is the concern, not the file** — this was
+   written as a file rule and duly missed when one behavior was revised four times across two files, which
+   is the shape it most needs to catch. Past the third revision, §3.1b says to stop implementing it and ask
+   the reviewer for a patch.
 3. **Responsibility-placement trigger.** At every milestone boundary, for each responsibility the
    milestone was supposed to move or remove, name the file that holds it now and check that against where
    the design assigns it. **A responsibility still living where the design does not put it is a reportable
@@ -176,6 +179,44 @@ it is what stops a review from doing damage.
   specific questions with verdicts expected. Do not ask it to "find problems" or "suggest improvements".
 - Reviewers are for **checking**, not deciding. A reviewer's findings are input to an escalation, never
   authority to change course — and never authority to change a design.
+
+### 3.1b Hand the next attempt to the reviewer when you are thrashing
+
+Review normally produces findings and the implementer fixes them. **When the same concern keeps coming back,
+swap roles: ask the reviewer for a patch and verify it instead of writing the next attempt yourself.**
+
+The evidence is the retirement-measurement episode. Over four rounds: a third measurement added that the design
+forbade and that was not needed; removed; replaced by an explanation that was wrong for one of three cases; then
+a diagnostic enum whose `NONE` case over-claimed against `§15.4`. The round that fixed it was the one where the
+reviewer supplied a **patch** rather than a finding, and that patch was better than what the previous three
+rounds had produced. The reason is not capability — it is that each of my attempts reasoned from the mechanism I
+had just built. An agent with no stake in that design produced a cleaner one immediately.
+
+**The trigger already exists and was missed.** §1's thrash trigger fires on the third edit of one file within a
+milestone: "stop and write down what is making it hard." The metric code was revised in four consecutive
+commits and the trigger never fired, because it reads as a file-level rule and this was one *concern* moving
+across two files. So it is restated for this purpose:
+
+> **Third revision of the same concern within one milestone.** Not the same file — the same behavior, wherever
+> it lives. At that point stop implementing it and ask the reviewer for a patch.
+
+A second, sharper signal, specific to repeated review: **a round whose findings are in code the previous
+round's fix created.** One of those is ordinary. Two consecutively on the same concern means the implementer is
+the bottleneck, not the reviewing.
+
+**How the swap works, and what does not transfer.**
+
+- The reviewer supplies a patch. It is still a *proposal*: verify it against the design exactly as you would
+  verify a finding, because a patch can contradict the design as easily as a prescribed fix can — and one
+  already has.
+- **Verify, do not apply.** The last swap's patch was sound and still had two defects: a malformed table and a
+  semantics gap its own documentation did not mention. Applying without checking converts a good patch into an
+  unexamined one.
+- **The commit message and the register stay with you.** They carry the reasoning and are the durable record; a
+  patch carries a diff. Rewrite them rather than paraphrasing the patch's own summary.
+- **Take control back** when the patch contradicts a design section, when its fix is larger than the defect, or
+  when verifying it costs more than writing the fix would have. The swap is a tool for a stuck concern, not a
+  default division of labour — most work in a milestone never needs it.
 
 ### 3.1a Calibrating a design-conformance review
 
