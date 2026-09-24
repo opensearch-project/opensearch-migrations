@@ -1,0 +1,19 @@
+# Example overrides for the main EKS general workload NodePool (`general-work-pool`).
+# Pass with:
+#   ./deployment/k8s/aws/aws-bootstrap.sh --helm-values deployment/k8s/aws/examples/nodepool-overrides.yaml ...
+#
+# Omitted map fields fall back to the chart defaults. List fields replace the
+# full default list, so provide the complete desired list when overriding them.
+
+workloadsNodePool:
+  architectures: ["amd64", "arm64"]
+  capacityTypes: ["on-demand"]
+  instanceCategories: ["c", "m", "r"]
+  minInstanceGeneration: 4
+  instanceSizes: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]
+  limits:
+    cpu: "64000m"
+    memory: "128Gi"
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m

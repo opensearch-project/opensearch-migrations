@@ -15,27 +15,35 @@ spec:
         kind: NodeClass
         name: {{ .Values.aws.nodeClassName }}
       requirements:
+        {{- if .Values.workloadsNodePool.capacityTypes }}
         - key: karpenter.sh/capacity-type
           operator: In
-          values: ["on-demand"]
+          values: {{ .Values.workloadsNodePool.capacityTypes | toJson }}
+        {{- end }}
+        {{- if .Values.workloadsNodePool.instanceCategories }}
         - key: eks.amazonaws.com/instance-category
           operator: In
-          values: ["c", "m", "r"]
+          values: {{ .Values.workloadsNodePool.instanceCategories | toJson }}
+        {{- end }}
+        {{- if .Values.workloadsNodePool.minInstanceGeneration }}
         - key: eks.amazonaws.com/instance-generation
           operator: Gt
-          values: ["4"]
+          values: [{{ .Values.workloadsNodePool.minInstanceGeneration | quote }}]
+        {{- end }}
         {{- if .Values.workloadsNodePool.architectures }}
         - key: kubernetes.io/arch
           operator: In
           values: {{ .Values.workloadsNodePool.architectures | toJson }}
         {{- end }}
+        {{- if .Values.workloadsNodePool.instanceSizes }}
         - key: eks.amazonaws.com/instance-size
           operator: In
-          values: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]
+          values: {{ .Values.workloadsNodePool.instanceSizes | toJson }}
+        {{- end }}
         - key: kubernetes.io/os
           operator: In
           values: ["linux"]
   disruption:
-    consolidationPolicy: WhenEmpty
-    consolidateAfter: 30m
+    consolidationPolicy: {{ .Values.workloadsNodePool.disruption.consolidationPolicy }}
+    consolidateAfter: {{ .Values.workloadsNodePool.disruption.consolidateAfter }}
 {{- end }}
