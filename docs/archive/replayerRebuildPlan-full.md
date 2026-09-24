@@ -1,3 +1,11 @@
+# Historical full replayer rebuild plan
+
+> **NON-AUTHORITATIVE ARCHIVE.** Retained in full for history. The only still-active material formerly
+> owned here is reproduced without semantic change in the focused
+> [`../replayerRebuildPlan.md`](../replayerRebuildPlan.md): D1–D18 (§2), PA1–PA3 (§3.2),
+> R1–R19 (§6.5), and deployed-configuration compatibility (§7). Use Plan A or explicitly selected
+> Plan B for sequencing.
+
 # Replayer Rebuild Plan
 
 **Status:** execution-ready implementation plan
@@ -15,20 +23,20 @@ product behavior.
 
 Read these documents before implementing:
 
-- [Capture and Replay Architecture](captureAndReplay/captureAndReplayArchitecture.md) — externally
+- [Capture and Replay Architecture](../captureAndReplay/captureAndReplayArchitecture.md) — externally
   observable protocol and system behavior;
-- [Proxy Capture Protocol](captureAndReplay/proxyCaptureProtocol.md) — proxy capture, publication,
+- [Proxy Capture Protocol](../captureAndReplay/proxyCaptureProtocol.md) — proxy capture, publication,
   failure, and retirement behavior;
-- [Replayer Processing and Commit Architecture](captureAndReplay/replayerProcessingAndCommitArchitecture.md)
+- [Replayer Processing and Commit Architecture](../captureAndReplay/replayerProcessingAndCommitArchitecture.md)
   — ownership, ordering, cancellation, demand, and commit structure;
-- [Replayer Low-Level Design](captureAndReplay/replayerLowLevelDesign.md) — shared replayer owner and
+- [Replayer Low-Level Design](../captureAndReplay/replayerLowLevelDesign.md) — shared replayer owner and
   message rules;
-- [Kafka Source and Replay Intake Low-Level Design](captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md)
+- [Kafka Source and Replay Intake Low-Level Design](../captureAndReplay/replayerKafkaSourceAndIntakeLowLevelDesign.md)
   — Kafka-source and replay-intake classes, messages, and state transitions; and
-- [Connection and Request Replay Low-Level Design](captureAndReplay/replayerConnectionAndRequestLowLevelDesign.md)
+- [Connection and Request Replay Low-Level Design](../captureAndReplay/replayerConnectionAndRequestLowLevelDesign.md)
   — target-connection, request, retry, pacing, and tuple behavior.
 
-[Asynchronous Message-Passing Programming Guide](captureAndReplay/asyncMessagePassingProgrammingGuide.md)
+[Asynchronous Message-Passing Programming Guide](../captureAndReplay/asyncMessagePassingProgrammingGuide.md)
 provides the implementation pattern for typed owner inputs. `managedFleetCaptureRecovery.md` is a
 future compatibility boundary only; it adds no implementation scope to this plan.
 

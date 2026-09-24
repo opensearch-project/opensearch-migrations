@@ -1,3 +1,9 @@
+# Historical appendix — prior full agent execution contract
+
+> **NON-AUTHORITATIVE ARCHIVE.** This is the complete pre-slimming `AGENTS.md`, retained verbatim below
+> for incident narratives, rationale, and history. Its duplicated rules are not a source of instructions.
+> The active execution contract is [`../../AGENTS.md`](../../AGENTS.md).
+
 # Agent execution contract — capture/replay hardening
 
 **Read this before doing anything else. It governs both rebuild plans.**
