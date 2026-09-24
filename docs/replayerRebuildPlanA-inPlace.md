@@ -5,10 +5,9 @@
 **Fallback:** [`replayerRebuildPlanB-inPlace.md`](replayerRebuildPlanB-inPlace.md) — see
 [§10 Rollback](#10-rollback-to-plan-b)
 
-**Supersedes:** [`replayerRebuildPlan.md`](replayerRebuildPlan.md) for sequencing and code disposition.
-That document remains authoritative for three things only: the `D1`–`D18` defect analysis (§2), the
-`R1`–`R19` obligation set (§6.5), and deployed-configuration compatibility (§7). Everything it says
-about step order, class disposition, and per-step procedure is replaced here.
+**Supplemented by:** [`replayerRebuildPlan.md`](replayerRebuildPlan.md), which contains no competing
+sequencing and is authoritative only for the `D1`–`D18` defect analysis (§2), the PA1–PA3 proxy
+milestones (§3.2), the `R1`–`R19` obligation set (§6.5), and deployed-configuration compatibility (§7).
 
 **Governed by:** [`../AGENTS.md`](../AGENTS.md). Read it before this file. Its red lines, escalation
 format, review policy, test policy, and `-x spotless` rule apply to every milestone below and are not
@@ -635,8 +634,8 @@ after-every-input demand pass, and the bootstrap plus explicit-request state mac
 the counting rule `procCommit §8.1:1072-1140`; the explicit non-goal `§8.3:1219-1248`; the no-cap
 trade-off stated once at `kafkaLLD §5.1:264-269`. The design writes this as `N = P * T`
 (`procCommit:1079`); this plan writes `T_threads` because the design also uses `T` for the
-first-traffic fallback timestamp (`captureArch §8.1`). Same rule; the `T_threads`/`T_first` convention is
-declared at `replayerRebuildPlan.md:91`.
+first-traffic fallback timestamp (`captureArch §8.1`). Same rule; this paragraph declares the
+`T_threads`/`T_first` convention.
 **Required tests: `kafkaLLD §17.4:983-1007`**, shared with `G2`. **This milestone owns the demand half**:
 cases 1–6, 11, 12, 14, 25–27 and the intake half of case 7, all deferred here from `G2` because they need the
 `§13` supply count, `N = P * T_threads`, and — for cases 3, 4 and 14 — the `G6` retry boundary. G2 proved
