@@ -689,6 +689,13 @@ reconstruction.
 `CaptureCapabilityProbe` is inert. It creates no writer, partition, connection, heartbeat,
 expiration, request, target, tuple, or record-completion state.
 
+`RequestIntentionallyDropped` is the proxy's explicit statement that capture suppression became
+known only after some bytes of the request had already been recorded. Replay intake discards that
+incomplete request assembly, releases its associations, advances the captured request ordinal, and
+keeps the source connection lifetime open. It creates no replay request, target admission, source
+response, or tuple. Receiving the marker without an incomplete request under assembly is a
+capture-protocol violation.
+
 For a bring-your-own archive declared `finalized`, the import workflow sends one partition-end
 input after replay intake has processed that partition's declared final Kafka record. The input is
 not a Kafka record, has no offset or timestamp, and does not bypass record accounting. It resolves
@@ -699,6 +706,12 @@ records continue normally. A `range` archive sends no such input.
 `CaptureRecord.payload` is the record-type discriminator. Replay intake does not infer the type by
 trying several protobuf decoders and does not depend on a Kafka record-type header. An envelope
 with no recognized payload is a protocol violation.
+
+Orderly replay-intake termination is a FIFO queue-control marker, not a business input and not a
+callback hidden inside the input family. Requesting it atomically stops new submission and appends
+the marker after every accepted input. When the replay-intake owner removes it, every preceding
+input has been applied completely; the owner ends its loop and completes its termination future.
+Fatal shutdown does not wait for this fence.
 
 `WriterPartitionHeartbeat` updates only that writer and partition's accepted broker-time baseline.
 It creates no downstream request, connection, or tuple work. After replay intake applies that
@@ -1459,7 +1472,9 @@ Normal shutdown:
 4. attempts commits for work that completes while the assignment remains valid;
 5. submits force cancellation for remaining unfinished work when the interval expires;
 6. allows owners to finish process-local cleanup; and
-7. closes Kafka, tuple output, transformation resources, and event loops.
+7. requests replay-intake stop after draining and waits for its termination within the shutdown
+   bound; and
+8. closes Kafka, tuple output, transformation resources, and event loops.
 
 Normal shutdown never treats cancellation as successful replay.
 

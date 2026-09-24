@@ -217,6 +217,17 @@ The queue does not accept a generic callback or `Runnable`. Such a value would h
 replay-intake fields it can change and would bypass the exhaustive switch over the named input
 types.
 
+Orderly owner termination is queue control, not another `ReplayIntakeInput`. The queue internally
+orders two entry types: an ordinary immutable input and one stop-after-draining marker. Requesting
+stop atomically stops acceptance before appending that marker. The replay-intake owner therefore
+cannot remove it until every successfully submitted input before it has been removed and applied
+completely. Removing the marker ends the owner loop and completes its termination future.
+
+The marker changes no replay-intake state, carries no generation identity, and does not enter the
+exhaustive input switch above. It is the FIFO fence used by orderly process shutdown and by bounded
+producers that need to close replay intake after their final input. An abrupt process-failure path
+may close the queue without draining and does not wait for this marker.
+
 Inputs sent by one owner to this queue preserve that sender's submission order. In particular, the
 Kafka source submits `PartitionGenerationAssigned` before it can submit that generation's initial
 `PartitionRecordBatch` or cancellation. Correctness must not depend on a total order between
@@ -746,8 +757,9 @@ and may contribute to tuple processing, but the count does not change.
 
 `CloseObservation`:
 
-1. ends incomplete source request and response assembly;
-2. sends any required `SourceResponseIncomplete` messages immediately;
+1. ends incomplete source-request assembly without creating a request or tuple;
+2. completes any source-response assembly with
+   `SourceResponseComplete(keptAlive=false)`;
 3. sends the ordered `AdmitCapturedClose` command to the applicable target-connection owner;
 4. marks the current process-local source lifetime closed; and
 5. prevents later observations from joining that lifetime.
@@ -759,6 +771,26 @@ Detection of later observations after the close is diagnostic and best effort. N
 closed-connection tombstone is kept after the committed cursor passes the close.
 
 `ConnectionExceptionObservation` and `DisconnectObservation` do not perform these steps.
+
+### 9.4 Intentional request-capture suppression
+
+`RequestIntentionallyDropped` records that the proxy deliberately stopped capturing one request.
+The proxy emits it only when some read observations for that request were already captured before
+the suppression decision became available; when the decision is available before any request byte
+is captured, no request observation or drop marker is emitted.
+
+The marker is valid only while replay intake is assembling that incomplete request. Replay intake:
+
+1. discards the request bytes accumulated so far;
+2. releases that request-assembly's record associations;
+3. advances the captured request ordinal exactly once;
+4. returns to the between-requests phase; and
+5. leaves the process-local source connection lifetime open.
+
+It creates no `ReplayRequestId`, target admission, source-response result, or tuple. A later request
+on the same connection reconstructs normally with the next ordinal. A marker received when no
+incomplete request is under assembly is a capture-protocol violation: it cannot truthfully describe
+the condition the marker exists to distinguish from accidental loss.
 
 ## 10. Writer heartbeat and broker time
 
