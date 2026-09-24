@@ -2,9 +2,7 @@ package org.opensearch.migrations;
 
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
@@ -13,6 +11,8 @@ import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_
 import org.opensearch.migrations.bulkload.version_os_2_11.IndexMetadataData_OS_2_11;
 import org.opensearch.migrations.cluster.ClusterWriterRegistry;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
+import org.opensearch.migrations.testfixtures.SupportedClusters;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;

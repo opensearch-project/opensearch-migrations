@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.framework;
+package org.opensearch.migrations.testfixtures;
 
 import java.io.File;
 import java.io.IOException;

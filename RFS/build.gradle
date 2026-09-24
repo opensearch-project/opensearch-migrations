@@ -85,6 +85,7 @@ dependencies {
     testImplementation libs.junit.jupiter.api
     testRuntimeOnly libs.junit.jupiter.engine
 
+    testFixturesApi testFixtures(project(':searchClusterTestFixtures'))
     testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))
     testFixturesImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene5').map { it.outputs.files }
