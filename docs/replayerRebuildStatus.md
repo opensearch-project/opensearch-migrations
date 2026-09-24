@@ -568,6 +568,21 @@ needs the same treatment. Two real gaps did survive the corrected run and were c
 `RUNNING`-window wakeup had no test at all, and the pause-ordering test could not see the ordering it was
 named for.
 
+### Fourth review pass, 2026-09-24 — verdicts
+
+| Claim | Verdict | Disposition |
+|---|---|---|
+| The reclaim of an in-flight async commit double-credits | **REAL** | An async submission cannot be taken back: Kafka runs its callback before the next `commitSync` returns, so it credited its own count and the synchronous commit credited it again. It is now left to be the single operation, which is what `§5.7` required. `PumpedKafkaSource` models Kafka's ordering guarantee so this is reachable in a test rather than only in production |
+| The injected grace wait violates its own contract | **REAL** | It returned `false` — meaning "the deadline passed" — whenever its queue was empty, so the revocation test could claim it waited out the interval while force-cancelling immediately. It now advances the injected clock to the deadline before returning `false` |
+| Deferred-mode tests bypass `isDumpMode` | **REAL** | They only exercised `validateDumpModeParams`, so removing `dump-http` from `isDumpMode` would have left them green while the mode fell through to the replay path. Dispatch and rejection are separate claims; both are asserted |
+| G1R has no heartbeat evidence | **REAL** | The proxy writes `WriterPartitionHeartbeat` on a timer rather than in response to traffic, so no test had seen one and a decoder dropping it would have passed everything. The fixture runs the proxy with `--heartbeat-interval-seconds 1` |
+| **The third retirement category contradicts the design** | **REAL** | Mine, unauthorized, and added one commit after red line 1 gained the check for exactly this. Removed; see the escalation section below. `§15.4` says two values and `§9.5` reads zero as the signal, so the code now does that |
+| Synchronous `OUTCOME_UNKNOWN` misclassified under the third category | **moot** | The category is gone. The underlying conflation is real and is the escalation's subject |
+
+**This is the pass that produced the review-policy change.** Five rounds, each finding real defects, with the
+later ones in code the earlier ones' fixes introduced — which is why `AGENTS.md` §3.1 no longer caps a
+milestone at one review and now gates closure on a pass with no unfixed design-conformance defect.
+
 ### Repair staging — four commits, and why they are grouped this way
 
 G2 does not close until the first three land. G3 waits on them, because findings 1, 4 and 11 are all on the
@@ -611,7 +626,7 @@ deviation was itself the error the escalation above describes.
 
 | Claim | Verdict | Disposition |
 |---|---|---|
-| Revocation bypasses the one-in-flight guard | **REAL** | A pending async submission could overlap a newer synchronous one, and the retirement count came up short when the async attempt failed while the newer position landed. Such a submission is already abandoned — its callback needs a poll this callback prevents — so it is **reclaimed** at revocation entry: record count returned, position re-staged unless a newer one exists. Sound either way it went, since re-committing is idempotent |
+| Revocation bypasses the one-in-flight guard | **REAL** | **Disposition superseded — the reclaim described here was itself wrong.** Removing an entry from the in-flight map does not cancel the Kafka operation, and Kafka runs a pending `commitAsync` callback before the following `commitSync` returns, so the "reclaimed" submission resolved during the synchronous commit and credited its count, which the synchronous commit credited again. It cannot be cancelled and cannot be waited for — its callback needs a poll the revocation callback is preventing — so it is left to be the one operation, which is what `§5.7`'s one-at-a-time rule required to begin with. Its positions are not re-offered, per `§5.7`'s discard-rather-than-retry rule. See the fourth-pass row below |
 | Unratified design edits to `kafkaLLD` | **REAL, escalated** | See the escalation section above. Current state is self-consistent; the decision is ratify or revert |
 | Grace wait still uses two clocks | **REAL** | Fixed rather than accepted. `GraceIntervalWait` returns only when the deadline's own clock says so |
 | `G1R` not fully closed | **REAL** | All four items closed and the heading corrected. The `assumeTrue` skip is gone |
@@ -726,6 +741,66 @@ error as the two above and is called out rather than quietly rewritten.
 **Superseded:** an earlier version of this section offered "design edits get their own commit" as the remedy.
 The owner rejected that — separate commits make an unauthorized edit easier to see, not less likely. The rule is
 prior authorization; the commit split and the check are only what make a breach visible.
+
+## "Committed nothing" versus "outcome unknown" — closed without a design change
+
+Raised by the fourth review pass. Closed with a per-generation diagnostic rather than a design change. This
+section previously contained a **wrong** explanation, corrected below, and the correction is the point worth
+reading.
+
+`kafkaLLD §15.4` records **two** values per retiring generation and `procCommit §9.5` reads zero committed as
+the signal to investigate. The owner does not infer a cause from the values: `§15.4` explicitly requires a
+generation that never became readable to report zero for both and says the owner “draws no conclusion from
+them.” The diagnostic therefore records only known commit-outcome uncertainty:
+
+| Diagnostic | Meaning |
+|---|---|
+| `NONE_OBSERVED` | No unresolved or unknown commit outcome is currently known. This does not diagnose why a count is zero |
+| `ASYNC_UNRESOLVED_AT_RETIREMENT` | An asynchronous submission was unresolved when the generation retired; it is uncreditable but may have landed |
+| `SYNC_OUTCOME_UNKNOWN` | A synchronous revocation commit returned an unknown outcome; it is uncreditable but may have landed |
+
+**What this section got wrong.** It claimed the cases were already separable by correlating
+`generationsRetiredWithoutCommit` against `lateCommitCallbacks` — flat late callbacks meaning a real stall.
+That is false for a synchronous unknown outcome, which produces a zero-commit retirement with no late callback.
+It was also too strong for `NONE_OBSERVED`: absence of known commit uncertainty is not proof of a head-of-line
+stall.
+
+**The fix is a diagnostic, not a metric.** `PartitionSourceState.CommitUncertainty` qualifies the retirement
+line while leaving the two designed measurements untouched. An operation-level synchronous unknown result marks
+every partition submitted in the batch. A retained partition restores and retries its position; acknowledgement
+of that retry clears the uncertainty because the acknowledged position covers the restored records. A revoked
+partition cannot retry, so its uncertainty remains on the state used to emit its retirement log.
+
+Marking the synchronous case explicitly is load-bearing rather than tidy: a synchronous submission never enters
+`inFlightCommitPositions`, so the unresolved check alone cannot see it.
+
+Five tests, one behaviour each, so a failure names its cause rather than a scenario containing it. They
+replaced two multi-scenario tests where every mutation failed the same method — and where an assertion failing
+mid-scenario left the shared `WakeupController` in the wrong phase, so the *next* scenario reported a confusing
+phase error instead of the real defect. One method per case also gets fresh fixtures free, since JUnit builds a
+new test instance per method.
+
+| Removing | Fails |
+|---|---|
+| The synchronous marking | `aSynchronousUnknownOutcomeIsReportedAtRetirement`, plus the two tests using it as a precondition |
+| The acknowledgement clear | `anAcknowledgedRetryClearsARetainedPartitionsUncertainty` alone |
+| The async-unresolved marking | `anUnresolvedAsyncSubmissionIsReportedAtRetirement` alone |
+| All-partition batch marking | `aBatchedUnknownOutcomeMarksEveryPartitionInTheOperation`, plus the retry precondition |
+
+Measured, not asserted: each mutation was applied and the failing set recorded. The overlaps are real
+dependencies rather than coupling — a test that asserts a precondition legitimately fails when the precondition
+breaks.
+
+**Two errors of mine here, and the second is the interesting one.** The first was adding a third *measurement*,
+which contradicts "two values" with no authorization, one commit after red line 1 gained the check for exactly
+that. The second was the correlation claim above — reasoning about observability from the mechanism I had just
+built rather than from what an operator would actually see, and stating a conclusion that held for the cases I
+had in mind. Being asked "is that the only way this is observable?" is what surfaced both.
+
+**Also corrected:** an earlier version described the revocation path as *reclaiming* an in-flight async commit.
+That was wrong and the code no longer does it — removing an entry from the in-flight map does not cancel the
+Kafka operation, and Kafka runs the pending callback before the next `commitSync` returns, so the "reclaim"
+double-credited. The operation is left to be the single one, per `§5.7`.
 
 ## Design changes — only ever on the owner's instruction
 

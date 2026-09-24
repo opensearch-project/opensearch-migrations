@@ -43,6 +43,7 @@ public final class PartitionSourceState {
     private long recordsCommitted;
     /** Finished records whose commit has not yet been acknowledged; credited when one is. */
     private long recordsAwaitingCommit;
+    private CommitUncertainty commitUncertainty = CommitUncertainty.NONE_OBSERVED;
 
     public PartitionSourceState(PartitionGenerationId generation) {
         this.generation = Objects.requireNonNull(generation, "generation");
@@ -157,6 +158,49 @@ public final class PartitionSourceState {
 
     public void setPendingCommit(boolean pending) {
         pendingCommit = pending;
+    }
+
+    /**
+     * Known uncertainty in this generation's credited commit count.
+     *
+     * <p>This is diagnostic only. {@code kafkaLLD §15.4}'s two retirement measurements remain authoritative,
+     * and {@code NONE_OBSERVED} does not diagnose why a committed count is zero.
+     *
+     * <p><strong>Last observed, not current.</strong> Only an acknowledgement clears this, so a partition whose
+     * unknown outcome is followed by repeated {@code RETRIABLE} results still reports
+     * {@code SYNC_OUTCOME_UNKNOWN} at retirement, even though by then the operative reason for a zero count is
+     * a broker that keeps refusing. That reading is conservative in the right direction — both say "do not treat
+     * this zero as proven absence of progress" — but it is not a live status, and a value here is a reason to
+     * look at the commit-outcome logs rather than a conclusion.
+     */
+    public enum CommitUncertainty {
+        /** No unresolved or unknown commit outcome is currently known for this generation. */
+        NONE_OBSERVED,
+        /** An asynchronous submission was still unresolved at retirement; its callback arrives afterwards. */
+        ASYNC_UNRESOLVED_AT_RETIREMENT,
+        /** A synchronous revocation commit returned an unknown outcome; it may have reached the broker. */
+        SYNC_OUTCOME_UNKNOWN
+    }
+
+    /** Records that a synchronous revocation commit for this generation returned an unknown outcome. */
+    public void markSyncCommitOutcomeUnknown() {
+        commitUncertainty = CommitUncertainty.SYNC_OUTCOME_UNKNOWN;
+    }
+
+    /** Records that a submission was still unresolved when this generation retired. */
+    public void markAsyncCommitUnresolved() {
+        commitUncertainty = CommitUncertainty.ASYNC_UNRESOLVED_AT_RETIREMENT;
+    }
+
+    /**
+     * Clears an earlier unknown outcome after an acknowledged retry covered the restored records.
+     */
+    public void clearCommitUncertainty() {
+        commitUncertainty = CommitUncertainty.NONE_OBSERVED;
+    }
+
+    public CommitUncertainty commitUncertainty() {
+        return commitUncertainty;
     }
 
     /** Counts a delivered record, for the retirement measurement {@code kafkaLLD §15.4} requires. */
