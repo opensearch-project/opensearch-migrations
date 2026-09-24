@@ -489,8 +489,6 @@ public final class KafkaSourceOwner {
                 return;
             }
 
-            reclaimInFlightCommits(revoked);
-
             var deadlineNanos = monotonicNanos.getAsLong() + cancellationGrace.toNanos();
             var deadline = new CancellationDeadline(deadlineNanos);
             generations.forEach(generation -> submitRequired(
@@ -521,16 +519,21 @@ public final class KafkaSourceOwner {
         // The old generation must not go on offering a commit: kafkaLLD §5.7 has it neither retrying nor
         // waiting, with the next assigned position deciding redelivery instead.
         stagedCommitPositions.remove(topicPartition);
-        inFlightCommitPositions.remove(topicPartition);
+        var unresolved = inFlightCommitPositions.remove(topicPartition);
         if (state == null) {
             return;
         }
         cleanupOutstanding.computeIfAbsent(topicPartition, ignored -> new LinkedHashSet<>())
             .add(state.generation());
+        // A submission still unresolved here has a genuinely unknown outcome: its callback arrives after this
+        // generation is gone, so it cannot be credited. Reporting that as "committed nothing" would be a false
+        // alarm on the one signal procCommit §9.5 tells operators to watch, since the commit may well have
+        // landed. It is reported as its own case instead, and the count stays uncredited either way.
         wakeupController.recordGenerationRetired(
             state.generation().toString(),
             state.recordsCommitted(),
-            state.recordsRead()
+            state.recordsRead(),
+            unresolved != null
         );
     }
 
@@ -572,45 +575,18 @@ public final class KafkaSourceOwner {
      * round-trip could still have committed — a revoked generation's position is discarded anyway once the
      * callback returns, so attempting is never the worse choice.
      */
-    /**
-     * Takes back any asynchronous commit still in flight for a partition being revoked.
-     *
-     * <p>Such a submission is already abandoned: its callback is delivered by a later {@code poll()}, and this
-     * callback returns before one happens, so by the time it arrives the generation is retired and it resolves
-     * as {@code LATE_CALLBACK}. Leaving it in the in-flight map would let the synchronous commit below overlap
-     * it, breaking {@code kafkaLLD §5.7}'s one-operation-at-a-time rule; leaving its record count detached
-     * would under-credit the generation's retirement measurement when the async attempt is the one that fails
-     * and the newer synchronous position is the one that lands.
-     *
-     * <p>Reclaiming is sound whichever way the abandoned attempt actually went. If it succeeded, the position
-     * committed below is the same or newer and committing it again is idempotent, and the count is credited
-     * once. If it failed, the count stays with the generation and is credited only if the synchronous attempt
-     * succeeds.
-     */
-    private void reclaimInFlightCommits(Collection<TopicPartition> revoked) {
-        for (var topicPartition : revoked) {
-            var inFlight = inFlightCommitPositions.remove(topicPartition);
-            if (inFlight == null) {
-                continue;
-            }
-            var state = partitions.get(topicPartition);
-            if (state == null || !state.generation().equals(inFlight.generation())) {
-                continue;
-            }
-            state.restoreRecordsAwaitingCommit(inFlight.recordsCovered());
-            // A position staged since the submission is newer, so it wins; a commit position only advances.
-            stagedCommitPositions.putIfAbsent(topicPartition, inFlight.nextPosition());
-        }
-    }
-
     private void submitRevocationCommit(CancellationDeadline deadline) {
         if (stagedCommitPositions.isEmpty()) {
             return;
         }
         if (!inFlightCommitPositions.isEmpty()) {
-            // §5.7 allows one commit operation at a time, and nothing here can wait for the outstanding one to
-            // resolve: its callback needs a poll that this callback is preventing. Reclaiming at revocation
-            // entry means this can only be an operation for a partition that is not being revoked.
+            // §5.7 allows one commit operation at a time, and an asynchronous one cannot be taken back: Kafka
+            // guarantees its callback runs before the next commitSync returns, so it resolves *during* any
+            // commit issued here — crediting its own record count, which this one would then credit again.
+            // Forgetting it locally does not cancel it. Waiting for it is not possible either, since its
+            // callback needs a poll that this callback is preventing, so the only sound choice is to let it be
+            // the operation that decides. Its positions are not re-offered: §5.7 has a revoked generation
+            // discard rather than retry, and the next assigned position decides redelivery.
             log.atDebug().setMessage("Not attempting a revocation commit while {} is in flight")
                 .addArgument(inFlightCommitPositions::keySet).log();
             return;
