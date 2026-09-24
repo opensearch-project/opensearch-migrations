@@ -73,9 +73,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConnectionCaptureSerializer<T> {
 
-    // 100 is the default size of netty connectionId and kafka nodeId along with serializationTags
-    private static final int MAX_ID_SIZE = 100;
-
     private boolean readObservationsAreWaitingForEom;
     private int eomsSoFar;
     private int numFlushesSoFar;
@@ -147,10 +144,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         @NonNull LongSupplier monotonicNanos
     ) {
         this.streamManager = streamLifecycleManager;
-        assert (writerNodeId == null
-            ? 0
-            : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, writerNodeId))
-            + CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId) <= MAX_ID_SIZE;
         this.connectionIdString = connectionId;
         this.writerNodeIdString = writerNodeId;
         this.trafficStreamFlushInterval = trafficStreamFlushInterval;
@@ -546,6 +539,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             RequestIntentionallyDropped.getDefaultInstance()
         );
         this.readObservationsAreWaitingForEom = false;
+        ++this.eomsSoFar;
         this.firstLineByteLength = -1;
         this.headersByteLength = -1;
     }

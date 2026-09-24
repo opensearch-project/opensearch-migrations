@@ -39,6 +39,8 @@ dependencies {
     testFixturesApi libs.testcontainers.toxiproxy
     testFixturesApi libs.junit.jupiter.api
     testFixturesApi testFixtures(project(path: ':testHelperFixtures'))
+    testFixturesImplementation project(':TrafficCapture:captureKafkaOffloader')
+    testFixturesImplementation libs.kafka.clients
     testFixturesImplementation libs.toxiproxy
     testFixturesImplementation libs.testcontainers.junit.jupiter
     testFixturesImplementation libs.slf4j.api

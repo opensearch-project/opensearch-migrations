@@ -104,13 +104,6 @@ jar {
 tasks.withType(Test).configureEach {
     // Allow lenient line parsing for compatibility with older clients and tests
     systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
-
-    // DELETE WITH MILESTONE PA2 (docs/replayerRebuildPlan.md section 3.2, item 2, which names this line).
-    // StreamChannelConnectionCaptureSerializer asserts its ids fit MAX_ID_SIZE = 100; real ids total about
-    // 111, so the assert fires on every captured connection and no test can capture through the real proxy.
-    // MAX_ID_SIZE is used nowhere else and production runs without -ea, so only tests are affected. The fix
-    // is the proxy module's, which AGENTS.md section 7 keeps in a separate conversation.
-    jvmArgs '-da:org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer'
 }
 
 // Scaffolding for the replayer rebuild: carried-but-not-yet-refactored code is marked in place, at the

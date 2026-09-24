@@ -255,7 +255,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | Deferred | From | To | Why | State |
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` | G1 | G3 | Source assembly was required first | proved — `SourceAssemblyEvidenceTest` |
-| Proxy dropped-request successor baseline | G3 | PA2 | Serializer does not increment `eomsSoFar`; proxy-owned repair | open — PA2 item 4 |
+| Proxy dropped-request successor baseline | G3 | PA2 | Serializer does not increment `eomsSoFar`; proxy-owned repair | implementation complete, review pending — `intentionallyDroppedRequestAdvancesSuccessorStreamBaseline` |
 | Typed source-interim observation producer | G3 | PA2 | Proxy must classify source `1xx` other than `101` and emit typed whole/segmented observations before G3 can interoperate; no compatibility path | open — PA2 item 5 |
 | Preserve target interim responses in tuples | G5 | POST1 | Owner deliberately placed the complete target-channel → aggregation → tuple chain after the rewrite | open |
 | Replace temporary per-connection tuple-writer placement and preserve stable sink index | G5 | G9 | G5 owns the complete logical transform/drop/retry/durability chain; G9 owns the configured bounded worker set, stable integer worker/sink index including S3 naming, per-worker transformer/sink construction, explicit close, and deletion of G5's per-connection placement | open |
@@ -290,10 +290,10 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | `REBUILD-LIMBO-NOTE` stand-ins | varies | named milestone in each note | open — 5 NOTE files measured 2026-09-25 |
 | Module `build.gradle` limbo note | G0 | last limbo region | open |
 | `KafkaSourceRootContext` | G2 | G3 | proved deleted |
-| Proxy Kafka tests missing `LogAppendTime` topic setup | inherited | PA2 item 1 | open; masks PA2 item 2 |
-| Proxy `MAX_ID_SIZE` assertion; replayer `-da:` workaround | inherited/G1 workaround | PA2 item 2; delete workaround in same repair | open |
-| In-process proxy `System.exit(78)` and broker-lifetime workaround | inherited/G1 workaround | PA2 item 3; delete workaround in same repair | open |
-| Proxy dropped-request successor baseline | inherited | PA2 item 4 | open |
+| Proxy Kafka tests missing `LogAppendTime` topic setup | inherited | PA2 item 1 | implementation complete, review pending — fixture creates/verifies `LogAppendTime`; real-proxy capability test captures a request |
+| Proxy `MAX_ID_SIZE` assertion; replayer `-da:` workaround | inherited/G1 workaround | PA2 item 2; delete workaround in same repair | implementation complete, review pending — assertion and workaround deleted; production-shaped identifiers round-trip |
+| In-process proxy `System.exit(78)` and broker-lifetime workaround | inherited/G1 workaround | PA2 item 3; delete workaround in same repair | implementation complete, review pending — JVM actions injected; in-process fatal exit observed as 78; fixture closes the broker |
+| Proxy dropped-request successor baseline | inherited | PA2 item 4 | implementation complete, review pending — drop advances `eomsSoFar`; successor baseline test proves one prior request |
 | Marked connection/context lifetime members | G2 carry | G5 | proved live refactor; trace-eligible predecessor members remain marked through the final completeness sweep |
 | Marked revocation/stale-assembly/cleanup members | G2 carry | G8 | open; preserve and refactor onto typed cancellation/cleanup |
 | Interrupted-source application-close member | G2 carry | G11 | open; process teardown only |

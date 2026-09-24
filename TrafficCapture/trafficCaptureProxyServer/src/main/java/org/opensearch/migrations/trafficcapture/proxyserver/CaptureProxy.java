@@ -23,6 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -526,6 +527,22 @@ public class CaptureProxy {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
+        run(args, LogManager::shutdown, code -> Runtime.getRuntime().halt(code));
+    }
+
+    /**
+     * Runs the proxy with explicit fatal diagnostic-flush and process-termination boundaries.
+     *
+     * <p>The production entry point flushes Log4j2 and calls {@link Runtime#halt(int)}. An in-process
+     * host supplies actions scoped to itself, because both production actions are JVM-wide.
+     */
+    public static void run(
+        String[] args,
+        Runnable flushCaptureFailureDiagnostics,
+        IntConsumer haltProcess
+    ) throws InterruptedException, IOException {
+        Objects.requireNonNull(flushCaptureFailureDiagnostics);
+        Objects.requireNonNull(haltProcess);
         System.err.println("Got args: " + String.join("; ", args));
         var processId = ProcessHelpers.getNodeInstanceName();
         var captureActivationId = newCaptureActivationId();
@@ -554,8 +571,8 @@ public class CaptureProxy {
             new CaptureFailureTerminator(
                 CAPTURE_FAILURE_EXIT_CODE,
                 CAPTURE_FAILURE_LOG_FLUSH_TIMEOUT,
-                LogManager::shutdown,
-                code -> Runtime.getRuntime().halt(code)
+                flushCaptureFailureDiagnostics,
+                haltProcess
             )
         );
         var proxy = new NettyScanningHttpProxy(
@@ -602,7 +619,7 @@ public class CaptureProxy {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
         }
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        var shutdownHook = new Thread(() -> {
             var watchdogExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
                 var thread = new Thread(runnable, "proxy-orderly-shutdown-watchdog");
                 thread.setDaemon(true);
@@ -642,10 +659,46 @@ public class CaptureProxy {
                     watchdogExecutor.shutdownNow();
                 }
             }
-        }));
+        });
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
         // This loop just gives the main() function something to do while the netty event loops
         // work in the background.
-        proxy.waitForClose();
+        try {
+            proxy.waitForClose();
+        } catch (InterruptedException e) {
+            stopInterruptedInProcessRun(proxy, connectionCaptureFactory);
+            throw e;
+        } finally {
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook);
+            } catch (IllegalStateException ignored) {
+                // JVM shutdown has already started and owns execution of the registered hook.
+            }
+        }
+    }
+
+    private static void stopInterruptedInProcessRun(
+        NettyScanningHttpProxy proxy,
+        IConnectionCaptureFactory<?> connectionCaptureFactory
+    ) {
+        try {
+            proxy.stopAcceptingNewConnections();
+            proxy.disconnectActiveConnections().join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            log.atWarn().setCause(e).setMessage("Unable to close proxy connections after interruption").log();
+        } finally {
+            try {
+                closeCaptureFactory(connectionCaptureFactory);
+            } finally {
+                try {
+                    proxy.stopEventLoops();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
     }
 
     static void awaitCaptureReadiness(

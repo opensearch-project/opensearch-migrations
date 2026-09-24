@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -184,6 +185,46 @@ public class KafkaConfigurationCaptureProxyTest {
                 averageNoProxyDuration.plus(acceptableProxyLatencyAdd).toMillis(),
                 averageRequestDurationWithProxy.toMillis()
             );
+        }
+    }
+
+    @Test
+    public void testLogAppendTimeTopicPassesCapabilityProbe() {
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                toxiproxyTestBase.getProxyUrlHttp(kafkaProxy)
+            )
+        ) {
+            captureProxy.start();
+            assertBasicCalls(captureProxy, 1);
+        }
+    }
+
+    @Test
+    public void testFatalKafkaFailureIsObservableWithoutHaltingTheTestJvm() throws Exception {
+        var topic = "fatal-kafka-failure-" + UUID.randomUUID();
+        kafkaTestBase.createTrafficTopic(topic);
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                () -> toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                () -> toxiproxyTestBase.getProxyUrlHttp(kafkaProxy),
+                Stream.of(
+                    "--kafkaTopic", topic,
+                    "--heartbeat-interval-seconds", "1",
+                    "--heartbeat-expiration-interval-seconds", "30"
+                )
+            )
+        ) {
+            captureProxy.start();
+            kafkaTestBase.rejectAllProducesToTopic(topic);
+
+            assertEquals(
+                CaptureProxy.CAPTURE_FAILURE_EXIT_CODE,
+                captureProxy.waitForFatalExit(Duration.ofSeconds(20))
+            );
+        } finally {
+            kafkaTestBase.deleteTopic(topic);
         }
     }
 
