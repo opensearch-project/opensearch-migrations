@@ -740,11 +740,15 @@ sends `SourceResponseUnavailableForRetry` before any observation in the crossing
 complete the response. The result is irreversible even if a still-later record has a lower
 timestamp.
 
-When a connection close or expiration ends an incomplete source response, replay intake sends
-`SourceResponseIncomplete`. No partial source-response bytes are represented as a complete
-response. If retry input is unresolved, the same transition also makes it unavailable. The
-connection owner routes every result immediately to the matching request-replay owner without
-placing it in a connection-order queue. 
+Source-response assembly ends at a terminal boundary: the first read observation of the next request
+on that connection, a captured close, or a connection exception. All three send
+`SourceResponseComplete`. The result carries `keptAlive`: true for the next-request boundary, which
+proves the source finished the response, and false for close or connection exception, where completion
+is unproven. Only expiration and generation cancellation send `SourceResponseIncomplete`; that result
+states that replay intake stopped assembling, not that the captured bytes are partial. If retry input
+is unresolved, the same transition also resolves or makes it unavailable as applicable. The connection
+owner routes every result immediately to the matching request-replay owner without placing it in a
+connection-order queue.
 For example, request 1’s source response should not wait behind request 2’s target send.
 
 Broker-time expiration ends only the incomplete request and response assembly currently held for known connections. Already-reconstituted requests and tuple work continue, and a later observation may start fresh reconstruction.
