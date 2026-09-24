@@ -462,6 +462,14 @@ capture. PA2 item 5 adds the typed whole and segmented observations and classifi
 than `101`; G3 consumes only that protocol. This is a protocol break with no decoder or fallback for captures
 written before PA2.
 
+**Inherited lifecycle evidence reassigned by responsibility.** G3 preserves the carried files but does not
+recreate the predecessor's synthetic-close mechanism. G3 proves same-generation source-lifetime reuse and
+fresh-lifetime separation directly. G5 receives connection-owner retirement and connection-context lifetime;
+G8 receives revocation cancellation, stale source-assembly release, cleanup acknowledgement, and successor
+read gating; G11 receives only the process-teardown assertion that an interrupted source cannot bypass
+application close. The register names the member-level split and the deferral ledger keeps all three receiving
+milestones visible.
+
 **Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* has exactly both
 associations, matching the `RecordScript` oracle; no record emits completion while an expected
 association remains; a source connection that dies mid-response produces source-assembly output that marks
@@ -546,6 +554,13 @@ discard `1xx` responses other than `101` throughout the rewrite. POST1, after G1
 with target aggregation and tuple serialization based on PR #3000. No target-interim state is added to the G5
 owner model as temporary scaffolding.
 
+**Inherited lifecycle evidence from G3.** Preserve the assertions that a connection is reused across
+keep-alive requests, that `ConnectionOwnerFinished` removes only the matching process-local connection owner,
+and that connection/tracing context is scoped to `ConnectionProcessingId` rather than reused across a fresh
+generation. Refactor the applicable members of `ActiveConnectionTrackingTest` and
+`PartitionRevocationStaleStateTest` onto the G5 owner chain; do not restore the predecessor's source-owned
+connection registry.
+
 **Exit:** every admitted request produces at most one turn completion and at most one processing
 completion, and a normal completion produces both in order with the second after tuple durability; with
 the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits;
@@ -553,7 +568,8 @@ the permit count at 1, exactly one target attempt is in flight and queued reques
 the process-failure boundary rather than becoming a value**. The real Kafka source → replay intake →
 connection/request path is constructed and reachable through its production queues, with no test-only caller
 standing in for a missing consumer. G5 does not claim target-interim tuple preservation; POST1 receives and
-proves that obligation after the rewrite. Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
+proves that obligation after the rewrite. The inherited connection-lifetime assertions above run against the
+new owner and context chain. Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
 
 ### G6 — Retry boundary and broker-time expiration
 
@@ -621,9 +637,19 @@ generations stay paused until `GenerationCleanupFinished`. `ProtocolViolationTer
 commit-ineligible, block commits at and past that offset, pause intake, fixed 60-second drain limit,
 terminate with a code distinct from 80, poison pill on restart.
 
+**Inherited lifecycle evidence from G3.** Refactor the revocation and synthetic-close tests into the typed
+generation-cancellation model: stale source assembly is released before successor-generation records apply,
+cleanup acknowledgement is generation-scoped and idempotent, and real reads resume only after every prior
+generation cleanup obligation settles. This receives the cancellation members of
+`StaleAccumulationCancelOnRejoinTest`, `StaleAccumulationCancelOnRejoinKafkaTest`,
+`PartitionRevocationStaleStateTest`, `TrafficSourceReaderInterruptedCloseWiringTest`, and
+`TrafficSourceReaderInterruptedCloseAccountingTest`. Preserve the assertions; do not restore
+`TrafficSourceReaderInterruptedClose`.
+
 **Exit:** cancellation cleanup cannot produce a commit request; a newer generation waits for the
 previous one's cleanup; unrelated partitions continue throughout; a corrupted record terminates within
-the drain limit without committing past the violating offset and stops at the same record on restart.
+the drain limit without committing past the violating offset and stops at the same record on restart. The
+inherited revocation/cleanup assertions above pass through typed cancellation and cleanup inputs.
 Contributes `R15`, `R16`, `R17`.
 
 Per `../AGENTS.md` §4 and the human's explicit direction: `R16` and `R17` must have solid, fast,
@@ -701,11 +727,14 @@ What remains under this heading is bookkeeping that the earlier milestones produ
 
 - Every `REBUILD-LIMBO` region resolved, so `grep -rl REBUILD-LIMBO-START src` is empty. This is the real
   completion signal for the whole rebuild, and it is checkable.
+- The `TrafficSourceReaderInterruptedCloseWiringTest` assertion that interrupted source teardown cannot skip
+  application close is refactored onto the final supervisor/application chain. Its revocation and cleanup
+  assertions belong to G8; G11 owns only this process-teardown member.
 - The `sonar-project.properties:274` path glob updated if `ClientConnectionPool` is gone.
 - The `REBUILD-LIMBO` scaffolding note in the module's `build.gradle` removed with the last region.
 
-**Exit:** the assembled application runs, the §2.3 contract surface is unchanged, and no marked region
-remains.
+**Exit:** the assembled application runs, the §2.3 contract surface is unchanged, interrupted source teardown
+still reaches application close, and no marked region remains.
 
 ### G12 — Ship gate
 

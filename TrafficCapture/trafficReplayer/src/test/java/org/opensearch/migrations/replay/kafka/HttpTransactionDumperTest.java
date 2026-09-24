@@ -8,30 +8,18 @@
 
 package org.opensearch.migrations.replay.kafka;
 
-// REBUILD-LIMBO(G11) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-
-// REBUILD-LIMBO-START(G11)
-/*
-
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.time.Instant;
 
-import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
-import org.opensearch.migrations.replay.tracing.ChannelContextManager;
-import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-import org.opensearch.migrations.testutils.TrafficStreamFixtures;
-import org.opensearch.migrations.tracing.ActiveContextTracker;
-import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
-import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
-import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
+import org.opensearch.migrations.replay.identity.CapturedConnectionId;
+import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
+import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
+
+import org.apache.kafka.common.TopicPartition;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -40,66 +28,63 @@ import org.junit.jupiter.api.Test;
 @Slf4j
 class HttpTransactionDumperTest {
 
-    private static final RootReplayerContext ROOT_CONTEXT = new RootReplayerContext(
-        RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(OtelCollectorEndpoints.empty(), "test", "test"),
-        new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+    private static final ConnectionProcessingId CONNECTION = new ConnectionProcessingId(
+        new PartitionGenerationId(new TopicPartition("traffic", 0), 3),
+        new CapturedConnectionId("node1", "conn1"),
+        2
     );
-
-    private PojoTrafficStreamAndKey wrapWithKafkaKey(TrafficStream ts, int partition, long offset) {
-        var channelContextManager = new ChannelContextManager(ROOT_CONTEXT);
-        var key = new TrafficStreamKeyWithKafkaRecordId(
-            tsk -> {
-                var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                return ROOT_CONTEXT.createTrafficStreamContextForKafkaSource(channelCtx, "key", 0);
-            },
-            ts,
-            new PojoKafkaCommitOffsetData(0, partition, offset)
-        );
-        return new PojoTrafficStreamAndKey(ts, key);
-    }
 
     @Test
     void testCompleteRequestResponse() {
         var baos = new ByteArrayOutputStream();
         var dumper = new HttpTransactionDumper(new PrintStream(baos));
+        var request = new HttpMessageAndTimestamp.Request(Instant.ofEpochSecond(100));
+        request.add("GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            .getBytes(StandardCharsets.UTF_8));
+        request.setLastPacketTimestamp(Instant.ofEpochSecond(101));
+        var response = new HttpMessageAndTimestamp.Response(Instant.ofEpochSecond(102));
+        response.add("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+            .getBytes(StandardCharsets.UTF_8));
+        response.setLastPacketTimestamp(Instant.ofEpochSecond(103));
+        var requestId = new ReplayRequestId(CONNECTION, 7);
 
-        var ts = TrafficStreamFixtures.makeHttpRequestResponseTrafficStream(
-            "node1",
-            "conn1",
-            "GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n",
-            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+        dumper.onRequestReconstituted(
+            requestId,
+            7,
+            request,
+            Instant.ofEpochSecond(100),
+            Instant.ofEpochSecond(101),
+            1_000L
         );
-
-        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-            Duration.ofSeconds(30), "test", dumper);
-        accumulator.accept(wrapWithKafkaKey(ts, 0, 42));
-        accumulator.close();
+        dumper.onSourceResponseComplete(requestId, response, true);
+        dumper.onCapturedClose(CONNECTION, Instant.ofEpochSecond(104));
 
         var output = baos.toString(StandardCharsets.UTF_8);
         log.info("dump-http output:\n{}", output);
 
         var lines = output.strip().split("\n");
-        // Should have REQ, RSP, and CLOSED lines
-        Assertions.assertTrue(lines.length >= 2, "Expected at least 2 lines, got: " + lines.length);
+        Assertions.assertEquals(3, lines.length, "REQ, RSP, and CLOSED must each be visible");
 
-        boolean hasReq = false, hasRsp = false;
+        boolean hasReq = false, hasRsp = false, hasClose = false;
         for (var line : lines) {
             if (line.contains("REQ")) {
                 hasReq = true;
                 Assertions.assertTrue(line.contains("GET /_cat/indices HTTP/1.1"));
                 Assertions.assertTrue(line.contains("nc:node1.conn1:"));
-                Assertions.assertTrue(line.contains("p:"));
-                Assertions.assertTrue(line.contains("o:"));
-                Assertions.assertTrue(line.contains("0"), "partition value");
-                Assertions.assertTrue(line.contains("42"), "offset value");
+                Assertions.assertTrue(line.contains("p:0"), "partition value");
+                Assertions.assertTrue(line.contains("o:      "), "a transaction has no single Kafka offset");
             }
             if (line.contains("RSP")) {
                 hasRsp = true;
                 Assertions.assertTrue(line.contains("HTTP/1.1 200 OK"));
             }
+            if (line.contains("CLOSED")) {
+                hasClose = true;
+            }
         }
         Assertions.assertTrue(hasReq, "Missing REQ line");
         Assertions.assertTrue(hasRsp, "Missing RSP line");
+        Assertions.assertTrue(hasClose, "Missing CLOSED line");
     }
 
     @Test
@@ -133,6 +118,3 @@ class HttpTransactionDumperTest {
         Assertions.assertEquals("PARTIAL", firstLine);
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G11)

@@ -65,6 +65,8 @@ public final class ReplayIntakeOwner {
         default void ownerStoppedAfterDraining() {}
         default void inputApplied(InputKind inputKind) {}
         default void recordApplied() {}
+        default void activeRecordTrackersChanged(int delta) {}
+        default void recordTrackerRetired() {}
         default void requestReconstituted() {}
         default void responseCompleted(boolean keptAlive) {}
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
@@ -299,7 +301,9 @@ public final class ReplayIntakeOwner {
         return new PartitionIntakeState(
             generation,
             this::isOwnerThreadOrUnstarted,
-            this::submitRecordProcessingFinished
+            this::submitRecordProcessingFinished,
+            metrics::activeRecordTrackersChanged,
+            metrics::recordTrackerRetired
         );
     }
 
@@ -473,14 +477,16 @@ public final class ReplayIntakeOwner {
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
             HttpMessageAndTimestamp.Request request,
-            Instant sourceEventTime,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
             delegate.onRequestReconstituted(
                 replayRequestId,
                 capturedRequestOrdinal,
                 request,
-                sourceEventTime,
+                requestFirstByteSourceTime,
+                requestEndOfMessageSourceTime,
                 requestCompletingLogAppendTime
             );
             metrics.requestReconstituted();

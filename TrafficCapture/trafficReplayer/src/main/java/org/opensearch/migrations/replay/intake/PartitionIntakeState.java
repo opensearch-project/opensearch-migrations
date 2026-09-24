@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -53,6 +54,8 @@ public final class PartitionIntakeState {
     private final OwnerThreadGuard ownerThreadGuard;
     /** Emits {@code RecordProcessingFinished} for a record whose work is done ({@code §7} step 9). */
     private final Consumer<KafkaRecordId> recordCompletionSink;
+    private final IntConsumer activeRecordTrackersChanged;
+    private final Runnable recordTrackerRetired;
 
     private final Map<KafkaRecordId, RecordWorkTracker> recordTrackersByKafkaRecordId =
         new LinkedHashMap<>();
@@ -92,11 +95,15 @@ public final class PartitionIntakeState {
     public PartitionIntakeState(
         @NonNull PartitionGenerationId generation,
         @NonNull BooleanSupplier currentThreadIsOwner,
-        @NonNull Consumer<KafkaRecordId> recordCompletionSink
+        @NonNull Consumer<KafkaRecordId> recordCompletionSink,
+        @NonNull IntConsumer activeRecordTrackersChanged,
+        @NonNull Runnable recordTrackerRetired
     ) {
         this.generation = generation;
         this.ownerThreadGuard = new OwnerThreadGuard("replay intake " + generation, currentThreadIsOwner);
         this.recordCompletionSink = recordCompletionSink;
+        this.activeRecordTrackersChanged = activeRecordTrackersChanged;
+        this.recordTrackerRetired = recordTrackerRetired;
     }
 
     public PartitionGenerationId generation() {
@@ -112,6 +119,7 @@ public final class PartitionIntakeState {
         if (recordTrackersByKafkaRecordId.putIfAbsent(recordId, new RecordWorkTracker(recordId)) != null) {
             throw new IllegalStateException("Kafka record was already registered: " + recordId);
         }
+        activeRecordTrackersChanged.accept(1);
     }
 
     public void associate(
@@ -187,21 +195,6 @@ public final class PartitionIntakeState {
         var tracker = requireTracker(recordId);
         tracker.closeToNewAssociations();
         emitCompletionIfEligible(tracker);
-    }
-
-    public Set<RecordAssociationId> associations(@NonNull KafkaRecordId recordId) {
-        ownerThreadGuard.requireOwnerThread();
-        return requireTracker(recordId).associations();
-    }
-
-    public boolean recordCompletionEmitted(@NonNull KafkaRecordId recordId) {
-        ownerThreadGuard.requireOwnerThread();
-        return requireTracker(recordId).completionEmitted();
-    }
-
-    public List<KafkaRecordId> recordsFor(@NonNull RecordAssociationId association) {
-        ownerThreadGuard.requireOwnerThread();
-        return List.copyOf(recordsByAssociation.getOrDefault(association, new LinkedHashSet<>()));
     }
 
     // ------------------------------------------------------------------ source connections
@@ -323,6 +316,11 @@ public final class PartitionIntakeState {
     private void emitCompletionIfEligible(RecordWorkTracker tracker) {
         if (tracker.claimCompletion()) {
             recordCompletionSink.accept(tracker.recordId());
+            if (!recordTrackersByKafkaRecordId.remove(tracker.recordId(), tracker)) {
+                throw new IllegalStateException("Completed Kafka record tracker was not registered: " + tracker);
+            }
+            activeRecordTrackersChanged.accept(-1);
+            recordTrackerRetired.run();
         }
     }
 }

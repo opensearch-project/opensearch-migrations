@@ -9,7 +9,6 @@
 package org.opensearch.migrations.replay.intake;
 
 import java.util.LinkedHashSet;
-import java.util.Set;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 
@@ -45,14 +44,6 @@ final class RecordWorkTracker {
         return recordId;
     }
 
-    boolean completionEmitted() {
-        return completionEmitted;
-    }
-
-    Set<RecordAssociationId> associations() {
-        return Set.copyOf(associationsByOperationId);
-    }
-
     /**
      * @return true if the association is new to this record, which is what tells the caller to add a
      *         reverse-index entry. {@code §8.1}: "For one record and one operation identity, replay intake
@@ -67,10 +58,6 @@ final class RecordWorkTracker {
             throw new IllegalStateException("Kafka record already emitted completion: " + recordId);
         }
         return associationsByOperationId.add(association);
-    }
-
-    boolean hasAssociation(@NonNull RecordAssociationId association) {
-        return associationsByOperationId.contains(association);
     }
 
     /**

@@ -10,7 +10,6 @@ package org.opensearch.migrations.replay.intake;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -105,12 +104,16 @@ class RecordAssociationAccumulatorTest {
         assignAndApply(script);
 
         var recordId = new KafkaRecordId(script.generation(0), 0);
-        script.assertAssociations(recordId, associationNames(associationsOf(script, recordId)));
-        Assertions.assertFalse(completionEmitted(script, recordId));
+        Assertions.assertEquals(
+            Set.of("request-0", "assembly-1"),
+            script.expectedAssociationsOf(recordId),
+            "the independent script oracle names the two operations that must hold this record"
+        );
+        Assertions.assertTrue(sourceCompletions().isEmpty());
 
         finishRequest(script, 0);
-        Assertions.assertFalse(
-            completionEmitted(script, recordId),
+        Assertions.assertTrue(
+            sourceCompletions().isEmpty(),
             "request N+1 assembly must continue to hold the mixed record"
         );
 
@@ -137,13 +140,10 @@ class RecordAssociationAccumulatorTest {
             .addTraffic(0, 1, Instant.ofEpochMilli(2_000), WRITER, response, "request-0");
         assignAndApply(script);
 
-        for (var scriptedRecord : script.records()) {
-            script.assertAssociations(
-                scriptedRecord.recordId(),
-                associationNames(associationsOf(script, scriptedRecord.recordId()))
-            );
-        }
-
+        script.records().forEach(record -> Assertions.assertEquals(
+            Set.of("request-0"),
+            script.expectedAssociationsOf(record.recordId())
+        ));
         Assertions.assertTrue(sourceCompletions().isEmpty());
         finishRequest(script, 0);
 
@@ -178,6 +178,23 @@ class RecordAssociationAccumulatorTest {
             sourceCompletions(),
             "a record that creates no work is finished by the application that registered it"
         );
+        var metrics = telemetry.getFinishedMetrics();
+        Assertions.assertEquals(
+            2,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                metrics,
+                ReplayIntakeMetrics.MetricNames.RECORD_TRACKERS_RETIRED
+            ),
+            "both accepted source-queue submissions retire their record trackers"
+        );
+        Assertions.assertEquals(
+            0,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                metrics,
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            ),
+            "tracker retirement is observable without exposing the partition's tracker map"
+        );
     }
 
     /**
@@ -198,9 +215,13 @@ class RecordAssociationAccumulatorTest {
             sourceEvents.stream().noneMatch(KafkaSourceInput.RecordProcessingFinished.class::isInstance),
             "the violating record must remain unfinished"
         );
-        Assertions.assertFalse(
-            completionEmitted(script, script.records().get(0).recordId()),
-            "intake itself must preserve the violating record, not depend on source-queue ordering"
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            ),
+            "the violating record must remain tracked without exposing the tracker map to the test"
         );
     }
 
@@ -343,14 +364,6 @@ class RecordAssociationAccumulatorTest {
         return owner.partitionState(script.generation(0)).orElseThrow();
     }
 
-    private Set<RecordAssociationId> associationsOf(RecordScript script, KafkaRecordId recordId) {
-        return intakeState(script).associations(recordId);
-    }
-
-    private boolean completionEmitted(RecordScript script, KafkaRecordId recordId) {
-        return intakeState(script).recordCompletionEmitted(recordId);
-    }
-
     private void finishRequest(RecordScript script, long capturedRequestOrdinal) {
         owner.applyOnCallingThread(new ReplayIntakeInput.RequestProcessingFinished(
             script.generation(0),
@@ -390,25 +403,6 @@ class RecordAssociationAccumulatorTest {
         return List.copyOf(drainedSourceInputs);
     }
 
-    // ---------------------------------------------------------------- oracle vocabulary
-
-    /**
-     * Renders associations the way {@link RecordScript} states them.
-     *
-     * <p>Deliberately lossy and deliberately literal: the script's expectations are written as strings so that
-     * neither side can be derived from the other.
-     */
-    private static Collection<String> associationNames(Set<RecordAssociationId> associations) {
-        return associations.stream().map(association -> switch (association) {
-            case RecordAssociationId.Request request ->
-                "request-" + request.replayRequestId().capturedRequestOrdinal();
-            case RecordAssociationId.RequestAssembly assembly ->
-                "assembly-" + assembly.capturedRequestOrdinal();
-            case RecordAssociationId.TerminalConnection terminal ->
-                "terminal-" + terminal.connectionProcessingId();
-        }).toList();
-    }
-
     // ---------------------------------------------------------------- fixtures
 
     /** Records what source assembly emitted, so a test can read the lifetime it allocated. */
@@ -423,7 +417,8 @@ class RecordAssociationAccumulatorTest {
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
             HttpMessageAndTimestamp.Request request,
-            Instant sourceEventTime,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
             reconstituted.add(replayRequestId);

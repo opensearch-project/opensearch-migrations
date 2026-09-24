@@ -85,6 +85,18 @@ class SourceReconstructionTest {
 
         Assertions.assertEquals(1, sink.requests.size(), "one request, however many records carried it");
         Assertions.assertEquals(REQUEST_BYTES, bytesOf(sink.requests.get(0)));
+        Assertions.assertEquals(
+            List.of(Instant.ofEpochSecond(1)),
+            sink.requestFirstByteSourceTimes
+        );
+        Assertions.assertEquals(
+            List.of(Instant.ofEpochSecond(3)),
+            sink.requestEndOfMessageSourceTimes
+        );
+        Assertions.assertEquals(
+            List.of(1_100L),
+            sink.requestCompletingLogAppendTimes
+        );
     }
 
     /**
@@ -489,7 +501,7 @@ class SourceReconstructionTest {
      * "prevents later observations from joining that lifetime".
      */
     @Test
-    void aCapturedCloseEndsTheLifetimeAndLaterObservationsDoNotJoinIt() {
+    void anObservationAfterACapturedCloseIsAProtocolViolation() {
         var script = new RecordScript(TOPIC).addTraffic(
             0,
             0,
@@ -508,6 +520,10 @@ class SourceReconstructionTest {
 
         applyAll(script);
 
+        var violations = drainSource().stream()
+            .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+            .toList();
+        Assertions.assertEquals(1, violations.size());
         Assertions.assertEquals(1, sink.closes.size(), "the close reaches the connection owner exactly once");
         Assertions.assertEquals(
             1,
@@ -531,6 +547,59 @@ class SourceReconstructionTest {
         Assertions.assertTrue(
             sink.incompleteResponses.isEmpty(),
             "incomplete is reserved for expiration and cancellation, which is the replayer giving up"
+        );
+    }
+
+    @Test
+    void aBareSegmentEndDuringRequestAssemblyIsIgnored() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                segmentEnd(2),
+                endOfMessage(3)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream()
+            .map(SourceReconstructionTest::bytesOf)
+            .toList());
+        Assertions.assertTrue(
+            drainSource().stream().noneMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+        );
+    }
+
+    @Test
+    void aBareSegmentEndDuringResponseAssemblyIsIgnored() {
+        var response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                segmentEnd(3),
+                write(4, response),
+                close(5)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(response), sink.responses.stream()
+            .map(SourceReconstructionTest::bytesOf)
+            .toList());
+        Assertions.assertTrue(
+            drainSource().stream().noneMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
         );
     }
 
@@ -590,6 +659,9 @@ class SourceReconstructionTest {
     private static final class RecordingSink implements SourceAssemblySink {
         private final List<HttpMessageAndTimestamp.Request> requests = new ArrayList<>();
         private final List<ReplayRequestId> requestIds = new ArrayList<>();
+        private final List<Instant> requestFirstByteSourceTimes = new ArrayList<>();
+        private final List<Instant> requestEndOfMessageSourceTimes = new ArrayList<>();
+        private final List<Long> requestCompletingLogAppendTimes = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<HttpMessageAndTimestamp.Response> responses = new ArrayList<>();
         /** Completed, but with nothing proving the source finished writing — {@code §9.2}'s {@code keptAlive}. */
@@ -602,11 +674,15 @@ class SourceReconstructionTest {
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
             HttpMessageAndTimestamp.Request request,
-            Instant sourceEventTime,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
             requests.add(request);
             requestIds.add(replayRequestId);
+            requestFirstByteSourceTimes.add(requestFirstByteSourceTime);
+            requestEndOfMessageSourceTimes.add(requestEndOfMessageSourceTime);
+            requestCompletingLogAppendTimes.add(requestCompletingLogAppendTime);
         }
 
         @Override

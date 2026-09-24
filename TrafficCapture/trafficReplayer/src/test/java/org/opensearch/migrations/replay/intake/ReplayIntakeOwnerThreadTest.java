@@ -247,7 +247,8 @@ class ReplayIntakeOwnerThreadTest {
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
             HttpMessageAndTimestamp.Request request,
-            Instant sourceEventTime,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
             everyCallbackUsedOwnerThread &= currentThreadIsOwner.getAsBoolean();

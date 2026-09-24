@@ -171,9 +171,13 @@ public final class SourceConnectionState {
         long logAppendTimeMillis
     ) {
         requireSequenceContiguous(observation);
-        if (lifetime != Lifetime.OPEN) {
-            // §9.3: a closed lifetime "prevents later observations from joining". Detection is "diagnostic
-            // and best effort" there, so this logs rather than failing the process.
+        if (lifetime == Lifetime.EXPLICITLY_CLOSED) {
+            throw new CaptureProtocolViolation(
+                "observation for " + connectionProcessingId + " arrived after CloseObservation: "
+                    + observation.getCaptureCase().name()
+            );
+        }
+        if (lifetime == Lifetime.EXPIRED) {
             log.atWarn().setMessage("Observation for {} arrived after the lifetime ended as {}: {}")
                 .addArgument(connectionProcessingId)
                 .addArgument(lifetime)
@@ -273,7 +277,11 @@ public final class SourceConnectionState {
                 ignoringInformationalWriteSegments = false;
                 return ObservationOutcome.none();
             }
-            requireRequestUnderAssembly().finalizeRequestSegments(timestamp);
+            var request = requireRequestUnderAssembly();
+            if (!request.hasInProgressSegment()) {
+                return ObservationOutcome.none();
+            }
+            request.finalizeRequestSegments(timestamp);
             return added(assembly);
         }
         if (observation.hasEndOfMessageIndicator()) {
@@ -307,7 +315,11 @@ public final class SourceConnectionState {
             return added(association);
         }
         if (observation.hasSegmentEnd()) {
-            responseUnderAssembly(timestamp).finalizeRequestSegments(timestamp);
+            var response = responseUnderAssembly(timestamp);
+            if (!response.hasInProgressSegment()) {
+                return ObservationOutcome.none();
+            }
+            response.finalizeRequestSegments(timestamp);
             return added(association);
         }
         if (observation.hasRead() || observation.hasReadSegment()) {
@@ -337,7 +349,7 @@ public final class SourceConnectionState {
 
     /** {@code §9.1}: the parser reconstituted a request, so it gains an identity and leaves this class. */
     private ObservationOutcome reconstituteRequest(
-        Instant sourceEventTime,
+        Instant requestEndOfMessageSourceTime,
         long requestCompletingLogAppendTime,
         KafkaRecordId containingRecord
     ) {
@@ -349,7 +361,10 @@ public final class SourceConnectionState {
         incomingRequest = null;
         ignoringInformationalWriteSegments = false;
         responseBeingAssembledFor = replayRequestId;
-        responseStateByRequest.put(replayRequestId, new HttpMessageAndTimestamp.Response(sourceEventTime));
+        responseStateByRequest.put(
+            replayRequestId,
+            new HttpMessageAndTimestamp.Response(requestEndOfMessageSourceTime)
+        );
         requestEverReconstituted = true;
         phase = Phase.ASSEMBLING_RESPONSE;
 
@@ -359,7 +374,8 @@ public final class SourceConnectionState {
             replayRequestId,
             currentCapturedRequestOrdinal,
             request,
-            sourceEventTime,
+            request.getFirstPacketTimestamp(),
+            requestEndOfMessageSourceTime,
             requestCompletingLogAppendTime
         );
         // The end-of-message record contributes to the request too, and its association is the request's

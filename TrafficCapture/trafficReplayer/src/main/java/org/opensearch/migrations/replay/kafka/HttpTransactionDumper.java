@@ -53,7 +53,8 @@ public class HttpTransactionDumper implements SourceAssemblySink {
         @NonNull ReplayRequestId replayRequestId,
         long capturedRequestOrdinal,
         @NonNull HttpMessageAndTimestamp.Request request,
-        @NonNull Instant sourceEventTime,
+        @NonNull Instant requestFirstByteSourceTime,
+        @NonNull Instant requestEndOfMessageSourceTime,
         long requestCompletingLogAppendTime
     ) {
         out.println(linePrefix

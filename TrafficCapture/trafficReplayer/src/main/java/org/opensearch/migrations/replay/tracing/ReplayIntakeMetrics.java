@@ -14,6 +14,7 @@ import org.opensearch.migrations.replay.intake.SourceAssemblySink;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
@@ -31,6 +32,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         public static final String OWNER_STOPPED_AFTER_DRAINING = "replayIntakeOwnerStoppedAfterDraining";
         public static final String INPUTS_APPLIED = "replayIntakeInputsApplied";
         public static final String RECORDS_APPLIED = "replayIntakeRecordsApplied";
+        public static final String ACTIVE_RECORD_TRACKERS = "replayIntakeActiveRecordTrackers";
+        public static final String RECORD_TRACKERS_RETIRED = "replayIntakeRecordTrackersRetired";
         public static final String REQUESTS_RECONSTITUTED = "replayIntakeRequestsReconstituted";
         public static final String RESPONSES_PROVEN_COMPLETE = "replayIntakeResponsesProvenComplete";
         public static final String RESPONSES_UNPROVEN_COMPLETE = "replayIntakeResponsesUnprovenComplete";
@@ -45,6 +48,8 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     private final LongCounter ownerStoppedAfterDraining;
     private final LongCounter inputsApplied;
     private final LongCounter recordsApplied;
+    private final LongUpDownCounter activeRecordTrackers;
+    private final LongCounter recordTrackersRetired;
     private final LongCounter requestsReconstituted;
     private final LongCounter responsesProvenComplete;
     private final LongCounter responsesUnprovenComplete;
@@ -58,6 +63,10 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
         ownerStoppedAfterDraining = counter(meter, MetricNames.OWNER_STOPPED_AFTER_DRAINING, "owners");
         inputsApplied = counter(meter, MetricNames.INPUTS_APPLIED, "inputs");
         recordsApplied = counter(meter, MetricNames.RECORDS_APPLIED, "records");
+        activeRecordTrackers = meter.upDownCounterBuilder(MetricNames.ACTIVE_RECORD_TRACKERS)
+            .setUnit("records")
+            .build();
+        recordTrackersRetired = counter(meter, MetricNames.RECORD_TRACKERS_RETIRED, "records");
         requestsReconstituted = counter(meter, MetricNames.REQUESTS_RECONSTITUTED, "requests");
         responsesProvenComplete = counter(meter, MetricNames.RESPONSES_PROVEN_COMPLETE, "responses");
         responsesUnprovenComplete = counter(meter, MetricNames.RESPONSES_UNPROVEN_COMPLETE, "responses");
@@ -86,6 +95,16 @@ public final class ReplayIntakeMetrics implements ReplayIntakeOwner.Metrics {
     @Override
     public void recordApplied() {
         recordsApplied.add(1);
+    }
+
+    @Override
+    public void activeRecordTrackersChanged(int delta) {
+        activeRecordTrackers.add(delta);
+    }
+
+    @Override
+    public void recordTrackerRetired() {
+        recordTrackersRetired.add(1);
     }
 
     @Override
