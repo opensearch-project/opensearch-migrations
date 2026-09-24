@@ -408,6 +408,42 @@ class SourceReconstructionTest {
         Assertions.assertEquals(SourceConnectionState.Lifetime.OPEN, lifetime.lifetime());
     }
 
+    /**
+     * {@code §9/§9.4}: fresh reconstruction reserves the inherited request's ordinal before seeing its tail.
+     * A suppression marker ends that discard; it does not describe a second request and must not increment
+     * the ordinal again.
+     */
+    @Test
+    void anIntentionallyDroppedInheritedTailEndsDiscardWithoutAdvancingAgain() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            resumedStream(
+                3,
+                read(1, "tail of the inherited request"),
+                requestIntentionallyDropped(2),
+                read(3, REQUEST_BYTES),
+                endOfMessage(4)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertTrue(
+            drainSource().stream().noneMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance),
+            "the marker is a valid boundary for the inherited request"
+        );
+        Assertions.assertEquals(1, sink.requests.size(), "the inherited tail must not become a replay request");
+        Assertions.assertEquals(REQUEST_BYTES, bytesOf(sink.requests.get(0)));
+        Assertions.assertEquals(
+            4L,
+            sink.requestIds.get(0).capturedRequestOrdinal(),
+            "three completed requests plus one inherited incomplete request occupy ordinals zero through three"
+        );
+    }
+
     /** A drop marker without the captured prefix it describes is a capture-protocol violation. */
     @Test
     void anIntentionallyDroppedMarkerWithoutARequestPrefixIsAProtocolViolation() {

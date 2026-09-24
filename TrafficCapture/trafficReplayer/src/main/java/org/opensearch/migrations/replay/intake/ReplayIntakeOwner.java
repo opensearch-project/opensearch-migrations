@@ -70,6 +70,7 @@ public final class ReplayIntakeOwner {
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
         default void capturedCloseAccepted() {}
         default void captureProtocolViolation() {}
+        default void recordBatchRejectedAfterProtocolViolation() {}
     }
 
     @FunctionalInterface
@@ -95,6 +96,8 @@ public final class ReplayIntakeOwner {
     private final CompletableFuture<Void> termination = new CompletableFuture<>();
 
     private final Map<PartitionGenerationId, PartitionIntakeState> partitions = new LinkedHashMap<>();
+    /** The first poison record. Non-null means §16's replay-wide record-admission cutoff is latched. */
+    private KafkaRecordId captureProtocolViolationRecord;
     private volatile boolean started;
 
     public ReplayIntakeOwner(
@@ -305,10 +308,13 @@ public final class ReplayIntakeOwner {
      * submit the next request."
      */
     private void applyRecordBatch(ReplayIntakeInput.PartitionRecordBatch batch) {
-        var state = requireGeneration(batch.requestId().generation());
-        if (state.hasCaptureProtocolViolation()) {
+        // §16: the first capture-protocol violation kills the whole replay. Completion and cleanup inputs may
+        // still drain already-admitted work, but no queued batch from any partition may admit another record.
+        if (captureProtocolViolationRecord != null) {
+            metrics.recordBatchRejectedAfterProtocolViolation();
             return;
         }
+        var state = requireGeneration(batch.requestId().generation());
         for (var record : batch.records()) {
             if (!applyRecord(state, record)) {
                 break;
@@ -447,6 +453,10 @@ public final class ReplayIntakeOwner {
     }
 
     private void submitProtocolViolation(KafkaRecordId recordId, String diagnostic) {
+        if (captureProtocolViolationRecord != null) {
+            return;
+        }
+        captureProtocolViolationRecord = recordId;
         metrics.captureProtocolViolation();
         submitRequired(new KafkaSourceInput.CaptureProtocolViolationDetected(recordId, diagnostic));
     }

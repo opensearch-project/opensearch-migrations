@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.tracing.ReplayIntakeMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -55,9 +56,10 @@ class RecordAssociationAccumulatorTest {
     private static final String CONNECTION = "connection";
     private static final Timestamp OBSERVATION_TIME = Timestamp.newBuilder().setSeconds(1).build();
 
-    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, false);
+    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, true);
+    private final RootReplayerContext rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
     private final WakeupController wakeupController =
-        new WakeupController(() -> {}, new RootReplayerContext(telemetry.openTelemetrySdk));
+        new WakeupController(() -> {}, rootContext);
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
     private final ReplayIntakeInputQueue intakeInputs = new ReplayIntakeInputQueue();
     private final RecordingSink sink = new RecordingSink();
@@ -65,7 +67,8 @@ class RecordAssociationAccumulatorTest {
         intakeInputs,
         sourceInputs,
         sink,
-        failure -> Assertions.fail("replay intake failed: " + failure.getMessage())
+        failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+        rootContext.replayIntakeMetrics
     );
 
     @AfterEach
@@ -246,6 +249,52 @@ class RecordAssociationAccumulatorTest {
         Assertions.assertTrue(
             sink.reconstituted.isEmpty(),
             "a new batch must not reopen record admission after a capture-protocol violation"
+        );
+    }
+
+    /**
+     * {@code §16}: the poison record terminates the replay, not only its partition. A batch already queued
+     * for another assigned partition cannot admit work after the replay-wide cutoff is latched.
+     */
+    @Test
+    void aProtocolViolationRejectsLaterBatchesFromEveryPartition() {
+        var violating = new RecordScript(TOPIC)
+            .addPayloadNotSet(0, 0, Instant.ofEpochMilli(1_000), WRITER);
+        var otherPartition = new RecordScript(TOPIC)
+            .addTraffic(
+                1,
+                0,
+                Instant.ofEpochMilli(2_000),
+                WRITER,
+                stream(0, read(1, "GET /must-not-run HTTP/1.1\r\n\r\n"), endOfMessage(2))
+            );
+
+        owner.applyOnCallingThread(
+            new ReplayIntakeInput.PartitionGenerationAssigned(violating.generation(0))
+        );
+        owner.applyOnCallingThread(
+            new ReplayIntakeInput.PartitionGenerationAssigned(otherPartition.generation(1))
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(violating.generation(0), 0),
+            violating.records()
+        ));
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(otherPartition.generation(1), 0),
+            otherPartition.records()
+        ));
+
+        Assertions.assertTrue(
+            sink.reconstituted.isEmpty(),
+            "a capture-protocol violation must stop record admission across the whole replay"
+        );
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.RECORD_BATCHES_REJECTED_AFTER_PROTOCOL_VIOLATION
+            ),
+            "the replay-wide cutoff must be observable when it rejects another partition's batch"
         );
     }
 

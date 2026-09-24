@@ -273,8 +273,8 @@ public final class PartitionIntakeState {
     /**
      * Latches the first record whose payload violates the capture protocol.
      *
-     * <p>{@code §16} leaves that record unfinished and permits only work admitted before it to drain. The
-     * generation therefore accepts no later record application while termination is pending.
+     * <p>{@code §16} leaves that record unfinished. This state retains the per-generation poison location;
+     * {@link ReplayIntakeOwner} owns the replay-wide cutoff that rejects later batches from every partition.
      */
     public void captureProtocolViolationAt(@NonNull KafkaRecordId recordId) {
         ownerThreadGuard.requireOwnerThread();
@@ -282,11 +282,6 @@ public final class PartitionIntakeState {
         if (captureProtocolViolationRecord == null) {
             captureProtocolViolationRecord = recordId;
         }
-    }
-
-    public boolean hasCaptureProtocolViolation() {
-        ownerThreadGuard.requireOwnerThread();
-        return captureProtocolViolationRecord != null;
     }
 
     // ------------------------------------------------------------------ internals
