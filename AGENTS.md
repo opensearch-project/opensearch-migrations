@@ -13,11 +13,14 @@ design, implement the design and report the plan defect.
 | `docs/replayerRebuildPlanB-inPlace.md` | Fallback sequencing plan; only on explicit instruction. |
 | `docs/replayerRebuildPlan.md` | Focused supplemental authority only: D1–D18 (§2), PA1–PA3 (§3.2), R1–R19 (§6.5), and deployed-configuration compatibility (§7). It owns proxy repair because Plan A excludes PA1–PA3. |
 | `docs/replayerRebuildStatus.md` | Live status and debt register. Update at every milestone exit. |
+| `tools/fresh-capture-replay-milestone.sop.md` | Non-authoritative reusable invocation checklist. It must defer to this file and be corrected when it conflicts. |
+| `tools/fresh-capture-replay-task-prompt.md` | Non-authoritative copy/paste entry prompt for the checklist above. |
 | `docs/archive/` | Non-authoritative history and rationale. Never a source of rules, behavior, status, or milestone ownership. |
 
 **Source order:** authoritative designs, this execution contract, then the selected sequencing plan plus
-the focused supplemental authority. Nothing else supplies process rules. A fourth document that appears to
-do so is drift to report, not an instruction.
+the focused supplemental authority. Nothing else supplies process rules. The two tools listed above only
+invoke this contract; their RFC-style language has no independent authority. Any other document that appears
+to supply process rules is drift to report, not an instruction.
 
 ## 1. Red lines — stop and ask
 
@@ -140,13 +143,15 @@ If the owner already ran the review externally, do not duplicate it.
 
 ## 4. Tests and observability
 
-The posture is integrate first, with observability as the debugging substrate; there are no coverage targets.
+The posture is integrate first, with observability as the debugging substrate. **There are no coverage
+targets; do not propose them.**
 
 - Every milestone must compile, be wired, include observability, escalate decisions, update the register, and
   prove its milestone-specific evidence. The inherited suite and coverage percentages are not exit criteria.
 - Implement each responsibility as a complete usable chain: producer, queue, owner, consumer, observability,
-  construction path, and evidence. A named shell may stand in for a missing consumer only when the register
-  names its replacement milestone.
+  construction path, and evidence. Another milestone mentioning one link is not a reason to defer it. Defer
+  only for a genuinely missing design decision or unavailable prerequisite, using §2's complete procedure. A
+  named shell may stand in for a missing consumer only when the register names its replacement milestone.
 - Add observability with the component, before integration. Metrics are conservation invariants.
 - Write a few deterministic, fast, high-leverage tests immediately: ownership transfer, observed ordering,
   exactly-once milestones, permit conservation, commit authority, cancellation races, fatal transitions,
@@ -190,12 +195,13 @@ working tree.
   timers, and cancellation; use a real `NioEventLoopGroup` and real time for integration.
   `TestEventLoop.register` must throw rather than leave an ignored failed future.
 - No mutable static state except a logging integration that cannot reasonably be injected. Telemetry, clocks,
-  counters, event loops, and termination behavior are instance-owned and injected.
+  counters, event loops, and termination behavior are instance-owned and injected. A test must be able to
+  stall only the event loop it owns.
 - Never sleep to wait. Await a latch, future, injected clock, or observable counter; add instrumentation when
   no signal exists. The sole exception is a deliberate dwell whose duration is asserted, so a false
   assumption fails rather than hides.
 - Never run tests concurrently when they share an event loop, port, static state, Gradle output, or external
-  process. Mark `@IsolatedTest`.
+  process. Mark `@IsolatedTest`. Fix shared ownership rather than widening test serialization.
 - When replacing a test, keep assertions conceptually stable while changing mechanics. Do not change
   production semantics, assertions, and test paradigm together.
 
@@ -205,13 +211,13 @@ deterministic tests, fix there, then rerun the large test once.
 
 ## 5. Build, commits, and workers
 
-Every Gradle command must include `-x spotlessJavaCheck -x spotlessJavaApply`. This is settled; do not
-re-litigate it. Use the narrowest module or `--tests` filter. Do not use the full historical suite as a
-progress oracle.
+Every agent Gradle invocation must go through `tools/gradle-evidence.sh`, which injects
+`-x spotlessJavaCheck -x spotlessJavaApply`, preserves the exit code, stores the full log under
+`/private/tmp`, and prints a compact result. This is settled; do not re-litigate it. Use the narrowest module
+or `--tests` filter. Do not use the full historical suite as a progress oracle.
 
 ```bash
-./gradlew :TrafficCapture:trafficReplayer:compileJava \
-  -x spotlessJavaCheck -x spotlessJavaApply \
+tools/gradle-evidence.sh :TrafficCapture:trafficReplayer:compileJava \
   --parallel --max-workers=18 --no-build-cache
 ```
 
@@ -244,7 +250,7 @@ Parallelism:
 - Keep at most four reusable worker worktrees; remove each after integration or rejection. Separate worktrees
   when Gradle outputs could overlap. Concurrent Gradle builds must total at most 16 workers.
 - Never parallelize shared event loops, ports, statics, Gradle output, or external processes. Go serial when
-  work is small or coupled.
+  work is small or coupled. Fix the ownership problem instead of compensating with broader serialization.
 - A worker reaching a red line returns one batched escalation table; it neither waits interactively nor decides.
 
 Direct Codex worker:
@@ -293,12 +299,29 @@ Where designs specify structure, they win. Otherwise:
   lifecycle concern.
 - Prefer compact deterministic transition histories over large repetitive tests and long waits.
 
-### 7.1 In-place limbo rules
+### 7.1 History-preserving carries
+
+Content arrives once, in one commit, as a move or copy from its legacy source. Strip or edit it in that commit
+or a later one; never delete it now and restore it later. A temporarily noncompiling carry commit is acceptable
+when needed to preserve attribution; a restore-deleted commit is not.
+
+Keep the first carry pairable with its source. Git's default rename threshold is 50%, so the initial move plus
+strip should ordinarily retain roughly half the original content. Carry every remaining inherited source by
+G11 while its legacy source still exists in the parent commit.
+
+Cross-file attribution remains an open verification task: push a disposable branch containing a representative
+cross-file copy and compare GitHub blame with local `git blame -C -C -C`. Until that measurement says otherwise,
+preserve UI-visible blame through move/copy-first sequencing.
+
+### 7.2 In-place limbo rules
 
 Carried undecided code remains at its final shipping path, member by member, inside
 `REBUILD-LIMBO-START(<milestone>)` / `REBUILD-LIMBO-END(<milestone>)` block-comment regions. There is one
 replayer module. Nothing is held elsewhere. Everything starts marked; promoting a member requires a recorded
-decision. Each marked member resolves to dead, keep, or refactor, and the marked set shrinks monotonically.
+decision. Every member is either live or marked, and every marked member resolves to dead, keep, or refactor;
+the marked set shrinks monotonically. Every non-blank code line inside a region remains exactly recoverable;
+marker padding may add blank lines. Unmarking removes only marker/escape lines, leaves that harmless padding,
+and does not alter a code line.
 
 Before creating a class, method, or test, search limbo for its name, responsibility, and existing tests.
 Restore/refactor a counterpart by default. When debugging new code, read its limbo predecessor before forming
@@ -316,8 +339,8 @@ Non-javadoc block comments use only the reversible `REBUILD-LIMBO-ESCAPED-LINE` 
 unguarded escape.
 
 `TrafficCapture/trafficReplayer/tools/unmark-limbo.awk` reconstructs marked code.
-`tools/verify-limbo-markers.sh` checks delimiter integrity and code-line recovery while intentionally ignoring
-unguarded blank-line padding. **Run it after every marking change.**
+`TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` checks delimiter integrity and code-line
+recovery while intentionally ignoring unguarded blank-line padding. **Run it after every marking change.**
 
 When a promoted member's consumer is deferred, retain every signature element that can compile. Mark an
 intentionally unused parameter in javadoc. Drop only a type that cannot compile, recording the exact call and
@@ -334,7 +357,7 @@ ambiguities before embedding them.
 
 **For each production milestone:** build and wire the final path; remove its predecessor; keep state
 instance-owned and event-loop confined; add observability and focused deterministic tests; run narrow Gradle
-commands with both Spotless exclusions; record broken inherited tests and repair owner; falsify timing/order
+evidence through `tools/gradle-evidence.sh`; record broken inherited tests and repair owner; falsify timing/order
 evidence; review until no verified conformance defect remains; update the register; commit with detailed owner
 DCO; push and update the PR ledger.
 

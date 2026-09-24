@@ -22,7 +22,8 @@ Start this milestone's Claude reviews with one fresh unique --name. Omit
 --no-session-persistence. Resume successive review passes with claude -p --resume <name>, repeating
 the complete read-only tool restrictions every time. Do not use --continue or --fork-session.
 
-Commit coherent progress as Greg Schohn <schohn@amazon.com> with DCO. Do not push or merge. Finish
-with Commits, Evidence, Findings and dispositions, and Status, including exact validation outcomes
-and clean-worktree state.
+Commit coherent progress as Greg Schohn <schohn@amazon.com> with DCO. Isolated workers do not push or
+merge; the coordinator follows AGENTS.md's integration, push, and PR-ledger rules. Finish with Commits,
+Evidence, Findings and dispositions, and Status, including exact validation outcomes and clean-worktree
+state.
 ```

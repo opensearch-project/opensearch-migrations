@@ -8,7 +8,9 @@ independent, direct-CLI, read-only reviewer whose session persists only across r
 selected milestone.
 
 The authoritative designs define behavior, `AGENTS.md` defines execution, and the selected plan
-section defines scope and evidence. This SOP does not summarize any of them.
+section defines scope and evidence. This SOP is only a reusable invocation checklist and has no independent
+process authority. If it conflicts with `AGENTS.md`, follow `AGENTS.md`, report the drift, and correct this
+file. It does not summarize the designs or plans.
 
 ## Parameters
 
@@ -45,8 +47,8 @@ Read the execution contract and only the source material needed for the selected
 - For a `PA` milestone, You MUST read only that milestone's owned text in
   `docs/replayerRebuildPlan.md` section 3.2: the shared proxy responsibility list needed to interpret
   the checkpoint, the selected `PA` checkpoint, and any backlog or exit text explicitly assigned to
-  that checkpoint. You MUST NOT treat section 3.1's superseded process rules as instructions because
-  `AGENTS.md` governs execution.
+  that checkpoint. You MUST NOT treat the archived full plan's former section 3.1 process rules as
+  instructions because `AGENTS.md` governs execution.
 - You MUST read every authoritative design section cited by the selected milestone in full.
 - You MUST read only live-register rows relevant to the selected milestone, its obligations,
   inherited broken tests, reversible decisions, deferrals, prior reviewer verdicts, and design
@@ -128,9 +130,9 @@ Commit genuine, independently reviewable progress without splitting one coherent
   evidence, and any durable register disposition.
 - You MUST run `tools/verify-design-authorization.sh` and `tools/verify-commit-scope.sh` before the
   milestone handoff.
-- You MUST NOT push, merge, force-update a branch, or rewrite shared history because those actions
-  require explicit owner authorization and publish or replace work outside this SOP's local
-  milestone authority.
+- An isolated worker MUST NOT push, merge, force-update a branch, or rewrite shared history. The coordinator
+  follows `AGENTS.md`'s regular push and PR-ledger cadence after verified integration, unless the owner directs
+  otherwise.
 
 ### 6. Run the milestone-scoped Claude review
 
@@ -217,7 +219,8 @@ Finish with durable evidence and a clean primary checkout.
 - `Findings and dispositions` MUST summarize impact, mitigation, Class A closure, Class B triage,
   Class C escalations, and any owner decision still required.
 - `Status` MUST state branch, final `HEAD`, `git status --short`, whether the checkout is clean, and
-  that no push or merge occurred unless the owner explicitly requested one.
+  what integration, push, merge, or PR-ledger action occurred. An isolated worker reports that none
+  occurred; the coordinator reports the actions required by `AGENTS.md` or the owner's direction.
 
 ## Examples
 

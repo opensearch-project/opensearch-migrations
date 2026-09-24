@@ -11,13 +11,16 @@ and `async` refer to files under `docs/captureAndReplay/`. R1–R19 and D1–D18
 
 ## Context footprint
 
-Archives are excluded. “Requested paths” means `AGENTS.md`, status, execution log, and supplemental plan.
-“Active corpus” also includes Plan A and Plan B.
+Active task-context membership changed intentionally: before compaction it included the live execution log
+and full supplemental plan; afterward the 75,197-byte execution log is archived and the supplemental plan
+contains only its four surviving authorities. The reduction therefore includes reclassification, not deletion.
+Archived bytes are retained and excluded from active context on both sides. “Active corpus” also includes
+Plan A and Plan B.
 
 | Measurement | Before | After |
 |---|---:|---:|
-| Requested paths | 443,332 bytes | 72,548 bytes |
-| Active corpus | 533,694 bytes | 162,849 bytes |
+| Active task context | 443,332 bytes | 95,755 bytes |
+| Active corpus | 533,694 bytes | 186,056 bytes |
 
 ## Current state and evidence
 
@@ -109,30 +112,41 @@ refuted. Full measurements remain in the archived status.
 | D-2 | No-response retries indefinitely; HTTP-response retries retain cap 4, lifted to top-level config | owner decided | G5/G9 |
 | D-3 | Record accounting is over `(generation, offset)` read events; retain the tiered and balancing equations in the metric table below | owner decided; AGENTS wording still needs owner-confirmed reconciliation | G4/G10/G12 |
 | D-4 | Preserve the five dashboard-pinned names only with identical semantics; changed semantics require a new name and escalation | owner decided | G9 |
-| Tuple writer | Transform off Netty loops on a bounded executor; one non-concurrently invoked transformer and sink per writer worker; explicit per-worker close; parallelism becomes a setting | owner decided | G9 |
+| Tuple writer | Transform off Netty loops on a bounded executor; one non-concurrently invoked transformer and sink per writer worker; explicit per-worker close; parallelism becomes a setting | reversible default, vetoable through G10 | G9 |
 | Image | `traffic_replayer` may remain broken during construction | reversible through G10 | G0 |
 | Branch/PR | Same branch and draft PR #3394 through red CI | owner decided | through swing |
 | History | Preserve blame by carrying content once, in place, before stripping; final reconstruction only if needed | owner decided | through G11/post-G12 |
 | Final cleanup | Remove `AGENTS.md`, `CLAUDE.md`, plans, and archived execution scaffolding only after durable rules migrate | deferred(final cleanup) | final |
 
+### History-preserving carry rule
+
+Inherited content arrives once, in one commit, as a move or copy from its legacy source. Strip or edit in that
+commit or later; never delete it and restore it later. A temporarily noncompiling carry commit is acceptable;
+a restore-deleted commit is not. Keep the first carry pairable near Git's default 50% rename threshold, and
+finish all carries by G11 while the legacy source still exists in the parent commit. Open measurement: push a
+representative cross-file-copy branch and compare GitHub blame with local `git blame -C -C -C`; until then,
+move/copy-first sequencing remains mandatory.
+
 ### Pull-over decisions still governing live limbo
 
-| Group | Disposition |
-|---|---|
-| P1 Netty/HTTP transform pipeline and JSON codec | carry; named legacy type/default strips only |
-| P2 Resource-ownership datatypes | carry; preserve one-shot transfer/release contracts |
-| P3 Target response aggregation | carry; absorb the one-use `AggregatedRawResult` split |
-| P4 Tuple content and user-facing output | carry; remove legacy identities and ambient print style |
-| P5 OpenSearch retry policy | carry; sealed `RetryDecision`; keep configurable response cap |
-| P6 Auth transformers | carry as-is |
-| P7 Utilities | carry; strip unsafe/redundant overloads |
-| P8 Observability adapters | carry owner adapters and `ReplayTransactionMetrics` as G5 baseline; rewrite roots while preserving D-4 names/semantics |
-| P9 Owner-discipline primitives | carry/refactor design-assigned primitives; leave mailbox wrappers; reshape permit provider per D-1 |
-| P10 Dump modes | carry Kafka dump contract; raw/HTTP/both remain user-facing |
-| P11 CLI and supervision | carry external option surface and supervision pieces; strip legacy wiring |
-| P12 Deterministic fixtures | carry/refactor, including exhaustive generator; remain Mockito-free |
+All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row names an earlier decision.
 
-### Additional active findings
+| Group | Disposition | Named strips / constraints |
+|---|---|---|
+| P1 Netty/HTTP transform pipeline and JSON codec | carry | Remove the `<R>` type parameter used only by `RequestPipelineOrchestrator<R>`, `consumeBytes(byte[])` default, no-op `abort` default, and assertions standing in for one-shot guards |
+| P2 Resource-ownership datatypes | carry | Preserve explicit owner transfer, release-on-accept/reject, and one-shot guards; remove `ByteBufListProducer`'s temporary compatibility base |
+| P3 Target response aggregation | carry | Keep watcher/sniffer/interim handlers; absorb zero-standalone-use `AggregatedRawResult` and its self-typed builder into `AggregatedRawResponse` |
+| P4 Tuple content and user-facing output | carry | Preserve source/target comparison and 1xx stripping; replace legacy identity/accumulator parameters with design values; remove `HttpByteBufFormatter`'s ambient `ThreadLocal` print style |
+| P5 OpenSearch retry policy | carry | Replace `RequestSenderOrchestrator.RetryDirective` with sealed `RetryDecision`; retain response-path `MAX_RETRIES`, lifted to top-level config default 4 |
+| P6 Auth transformers | carry as-is | Keep immediate-per-attempt signing and injected `Supplier<Clock>` |
+| P7 Utilities | carry | Keep only `Utils.setIfLater`; remove the `NettyFutureBinders` overload that schedules the same task twice |
+| P8 Observability adapters | carry with root rewrite | Preserve owner adapters and `ReplayTransactionMetrics` as G5's starting context/metric set; rewrite `ReplayContexts`/`RootReplayerContext`; preserve D-4 names only with identical semantics |
+| P9 Owner-discipline primitives | carry/refactor | Keep `CompletionGate`, `RequestLifecycleInput`, `ObservedRecordCommitQueue`, one-shot permit release, held-duration metric, and pending-acquisition cancellation. Strip lazy `OwnerThreadGuard.guard(Runnable)`, `OwnerTransitionRunner.applyNowOrPost`, `RecordWorkTracker.completedRecords` escape/comment deferring commit authority, `ReplayIntakeInputQueue` per-item `CompletableFuture`, mailbox wall clock, and permit `cost`. Reshape the permit provider into the D-1 application-owned atomic with fatal callback; leave mailbox wrappers |
+| P10 Dump modes | carry Kafka only | Preserve `dump-raw`/`dump-http`/`dump-both`, exhaustive payload handling, control records, broker time, and base epoch; strip fabricated commit data and no-commit per-record span. File input is retired and must not be restored |
+| P11 CLI and supervision | carry contract surface | Preserve the 54-option surface and aliases unless an explicit contract decision says otherwise. Strip tuple-writer/legacy consumer wiring, ownership-cap and ignored liveness arguments, and `RequestSenderOrchestrator.FatalReplayHandler` coupling |
+| P12 Deterministic fixtures | carry/refactor | Keep exhaustive generator and Mockito-free fixtures. Strip `RecordScript` inheritance and duplicate `RecordId`; `PumpedKafkaSource` duplicate generation/batch IDs; `ActorRequestTestUtils` permit-pool overload; two fixture sleeps; and synchronized/`AtomicInteger` array-cursor scaffolding |
+
+### Additional active and carried-predecessor findings
 
 | Finding | Owner | State / required result |
 |---|---|---|
@@ -144,8 +158,8 @@ refuted. Full measurements remain in the archived status.
 | Legacy “permit pool” names and metrics survive the renamed concept | G5/G9 | Apply red-line-3 decision; preserve externally contracted metric names only by explicit ruling |
 | Permit `cost` parameter permits state absent from the design; every caller passes one | G5 | Remove unless owner explicitly retains |
 | Permit release can precede asynchronous aborted-channel teardown | G5 | Close D6 residual; no replacement attempt while old bytes remain in flight |
-| `ChannelContextManager` release refcount is non-atomic and assert-dependent | G5 | Resolve in rewrite; do not apply an isolated legacy patch |
-| Default source generation zero lets lifetimes collide in legacy keys | G3/G5 | Final identities must use `ConnectionProcessingId`/real generation and prove no cross-route |
+| Latent marked `ChannelContextManager.RefCountedContext.release` at `:54-58`, reached from `releaseContextFor` at `:88-95`, is non-atomic and assert-dependent at `:56`/`:91` | G5 | Inert by construction today; resolve during rewrite and do not apply an isolated legacy patch |
+| Latent marked `ISourceTrafficChannelKey.getSourceGeneration` at `:23-25` defaults to zero and lets lifetimes collide in legacy keys | G3/G5 | Inert by construction today; final identities must use `ConnectionProcessingId`/real generation and prove no cross-route |
 | `SourceConnectionState.expire()` has no production caller | G6 | Wire broker-time expiration trigger; direct G3 transition test is prerequisite evidence only |
 | Live and marked predecessor files both use the name `ReplayIntakeInput` | G5/G7 owner promotion | Resolve when promoting `RequestLifecycleInput`; do not create an undesigned business-input variant |
 | Existing deprecated-option “parse-and-warn” adapter set does not exist | G9 | Build the exact compatibility behavior required by focused authority §7; do not claim preservation |
@@ -198,31 +212,31 @@ refuted. Full measurements remain in the archived status.
 
 Fixed-cardinality counters are pre-authorized; identity-cardinality attributes require escalation.
 
-| Metric | Meaning / owner |
-|---|---|
-| `kafkaSourceWakeupsAbsorbedByProtectedOperation` | Wakeup consumed by protected Kafka work |
-| `kafkaSourceRevocationsCleanedBeforeDeadline` / `kafkaSourceRevocationsReachingDeadline` | Grace-ceiling tuning pair |
-| `replayIntakeOwnerStarted` / `replayIntakeOwnerStoppedAfterDraining` | Owner lifecycle and FIFO stop |
-| `replayIntakeInputsApplied{inputKind}` / `replayIntakeRecordsApplied` | Applied input variants and records |
-| `replayIntakeRequestsReconstituted` | Requests delivered from source assembly |
-| `replayIntakeResponsesProvenComplete` / `replayIntakeResponsesUnprovenComplete` | Response confidence |
-| `replayIntakeResponsesIncomplete{incompleteReason}` | Expiration/cancellation-ended assembly |
-| `replayIntakeCapturedClosesAccepted` | Captured closes reaching a real sink |
-| `replayIntakeCaptureProtocolViolations` | First-invalid-record cutoff events |
-| `replayIntakeRecordBatchesRejectedAfterProtocolViolation` | Batches rejected after replay-wide cutoff |
+| Metric | Meaning | Owner |
+|---|---|---|
+| `kafkaSourceWakeupsAbsorbedByProtectedOperation` | Wakeup consumed by protected Kafka work | G2 |
+| `kafkaSourceRevocationsCleanedBeforeDeadline` / `kafkaSourceRevocationsReachingDeadline` | Grace-ceiling tuning pair | G2 |
+| `replayIntakeOwnerStarted` / `replayIntakeOwnerStoppedAfterDraining` | Owner lifecycle and FIFO stop | G3 |
+| `replayIntakeInputsApplied{inputKind}` / `replayIntakeRecordsApplied` | Applied input variants and records | G3 |
+| `replayIntakeRequestsReconstituted` | Requests delivered from source assembly | G3 |
+| `replayIntakeResponsesProvenComplete` / `replayIntakeResponsesUnprovenComplete` | Response confidence | G3 |
+| `replayIntakeResponsesIncomplete{incompleteReason}` | Expiration/cancellation-ended assembly | G3 |
+| `replayIntakeCapturedClosesAccepted` | Captured closes reaching a real sink | G3 |
+| `replayIntakeCaptureProtocolViolations` | First-invalid-record cutoff events | G3 |
+| `replayIntakeRecordBatchesRejectedAfterProtocolViolation` | Batches rejected after replay-wide cutoff | G3 |
 
 Conservation is per partition and generation and counts read **instances** `(generation, offset)`, including
 rereads in later generations.
 
-| Instrument | Type | Fires when |
-|---|---|---|
-| `records_read` | counter | one record instance is read |
-| `records_committed` | terminal counter | commit position advances across the instance |
-| `records_cancelled` | terminal counter | generation cancellation ends uncommitted work |
-| `records_abandoned_at_revocation{cause}` | terminal counter | ownership ends after rejected/unknown/unsubmitted commit |
-| `records_commit_ineligible` | terminal counter | protocol violation blocks the instance |
-| `records_outstanding` | gauge | read instance has no terminal disposition |
-| `commit_attempts_rejected` | diagnostic counter, not equation term | one commit attempt is rejected |
+| Instrument | Type | Fires when | Owner |
+|---|---|---|---|
+| `records_read` | counter | one record instance is read | G4 |
+| `records_committed` | terminal counter | commit position advances across the instance | G4 |
+| `records_cancelled` | terminal counter | generation cancellation ends uncommitted work | G4/G8 |
+| `records_abandoned_at_revocation{cause}` | terminal counter | ownership ends after rejected/unknown/unsubmitted commit | G4; rejected/unknown source distinction was assigned to G2 and remains unresolved below |
+| `records_commit_ineligible` | terminal counter | protocol violation blocks the instance | G4 |
+| `records_outstanding` | gauge | read instance has no terminal disposition | G4 |
+| `commit_attempts_rejected` | diagnostic counter, not equation term | one commit attempt is rejected | G4 |
 
 | Invariant | Scope |
 |---|---|
@@ -230,6 +244,12 @@ rereads in later generations.
 | `records_read == records_committed` | happy case with no rebalance/reread |
 | `records_read == records_committed + records_cancelled + records_abandoned_at_revocation + records_commit_ineligible + records_outstanding` | full accounting |
 | commit-position advancement equals records committed | per partition/generation; preserves sequence continuity |
+
+G4 owns the complete conservation instrumentation chain; G10/G12 assert the equations. Rejected and unknown
+outcomes have opposite meanings: rejected proves the offset did not move, while unknown means it may have.
+The inherited no-callback `commitSync` path cannot distinguish them, so completing that split changes commit
+issuance rather than merely adding a counter. The split was assigned to G2 alongside commit submission but was
+not proved before G2 closed; the open-decisions table requires an explicit ownership/deferral correction.
 
 Dashboard-pinned names requiring identical semantics: `lagBetweenSourceAndTargetRequests`,
 `bytesWrittenToTarget`, `bytesReadFromTarget`, `tupleComparison`, and the `kafkaCommit` span behind
@@ -266,10 +286,15 @@ Every row records explicit owner authorization. The detailed rationale is retain
 |---|---|---|
 | G3 review decisions listed above | open; blocks G3 | Batch for owner, amend any deferral endpoints, then resume same uniquely named Claude milestone session |
 | Conservation wording mismatch between AGENTS equation and D-3 decision | open, non-blocking | Owner confirmation required before semantic reconciliation |
+| Rejected-versus-unknown commit outcome split was assigned to G2 but not proved | open; milestone ownership discrepancy | Do not silently reassign it: amend G2 and a named receiving milestone plus this ledger under AGENTS §2 before closure |
+| `FinalTargetWriteSubmitted` was added as a second milestone by implication | open owner veto | Retain unless the owner rejects it; first-write still owns channel reuse while final-write owns graceful-cancellation completion |
+| Relocate `utils/TrackedFutureJsonFormatter.java` and `trafficcapture/protos/TrafficStreamUtils.java` to owning modules | open owner decision | Avoid split packages; remove `TrackedFutureJsonFormatter`'s mutable static `ObjectMapper` during the owning-module move |
+| Tuple-writer parallelism setting | reversible through G10 | Default remains bounded executor with one non-concurrently invoked transformer/sink per worker and explicit close |
+| Cross-file blame behavior in GitHub UI | open measurement, due before G11 | Push a disposable representative branch and compare GitHub blame with local `git blame -C -C -C` |
 | Fuse and ship-gate acceptance detail | deferred(G10) | Revisit at G9 boundary |
 | Whether G12 is required alongside R1–R19 | deferred(G10) | Owner decision |
 | Doc-count does not directly prove ordering | open(G12) | Stateful out-of-order replay should surface as comparison mismatch |
-| Published `testFixtures` contract beyond visible consumers | open(G11) | External consumers are not visible from repository search |
+| Published `testFixtures` contract beyond measured consumers | open(G11) | Measured direct imports are exactly `replay.TestCapturePacketToHttpHandler`, `replay.TestUtils`, and `tracing.InstrumentationTest`, plus transitive `tracing.TestContext`; external consumers remain unknown |
 | Git history cleanup and seven-signoff repair | deferred(post-G12) | One final evidence-based rewrite decision |
 | Two dependency gaps: `libs.jackson.databind`, Guava | open at first consuming promotion | Add only with the code that needs each dependency |
 | Final deletion of execution scaffolding | deferred(final cleanup) | Execution log already archived; active rules must migrate before deleting AGENTS/CLAUDE/plans |

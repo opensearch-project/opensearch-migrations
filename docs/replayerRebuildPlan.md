@@ -2,13 +2,20 @@
 
 This file is intentionally limited to the four still-active authorities inherited from the archived full
 plan: D1–D18 (§2), PA1–PA3 (§3.2), R1–R19 (§6.5), and deployed-configuration compatibility (§7).
-The sections below are preserved without semantic change from
+Their authority content is preserved from
 [`archive/replayerRebuildPlan-full.md`](archive/replayerRebuildPlan-full.md). Use
 [`replayerRebuildPlanA-inPlace.md`](replayerRebuildPlanA-inPlace.md), or explicitly selected Plan B, for
 sequencing. The authoritative designs remain under `captureAndReplay/`.
 
 The preserved §3.2 phrase “the execution log tracks” now points procedurally to the live status register;
-the archived execution log is non-source. This routing note does not change PA1–PA3.
+the archived execution log is non-source. The historical-S routing note below and the current marked-source
+citations in §2 are editorial maintenance corrections. They do not change any obligation.
+
+Within §2, the authoritative content is each defect's identity, description, mechanism, and consequence;
+the `Fixed by` `S` labels and the sentence referring to §4 are historical provenance, not current ownership.
+Within §6.5, each obligation and minimum proof remains authoritative; its `Implementation steps` `S` labels
+are likewise historical. Current sequencing and ownership come only from the selected Plan A/Plan B section
+and the live register.
 
 ## 2. Starting-branch defects
 
@@ -35,10 +42,11 @@ Ordered by severity. "Fixed by" refers to §4 steps.
 | D17 | The connection owner forgets a request at turn end | `lifecycle/ConnectionActor.settleRequest` (`:508-528`) removes the command, untracks the obligation, and completes the single future; `runOrderedClose` (`:552`) terminates with no registry check | A connection owner terminates while tuple writes from it are outstanding, so later completion has no owner to route through — which is *why* the code routes commit authority around the connection owner into `ReplayTransaction`. D17 and D2 are the same defect from either end | S5 |
 | D18 | Work is admitted under a fabricated partition identity | `TrafficReplayerCore.java:881-887` invents `new SourcePartitionKey("unpartitioned-session", 0, ...)` when no partition is known | That work is outside every real generation, so cancellation never matches it and the generation can be reported clean while it still runs — the precise condition that lets a commit pass an unfinished record | S3 |
 
-Non-blocking but worth folding into the relevant step: `tracing/ChannelContextManager.java:127` does a
-non-atomic read-modify-write on a refcount; `datatypes/ISourceTrafficChannelKey.java:12-14` supplies
+Non-blocking latent findings in carried, currently marked source: `ChannelContextManager.RefCountedContext.release`
+(`:54-58`), reached from `releaseContextFor` (`:88-95`), does a non-atomic read-modify-write and relies on
+assertions at `:56` and `:91`; `ISourceTrafficChannelKey.getSourceGeneration` (`:23-25`) supplies
 `default int getSourceGeneration() { return 0; }`, which lets two lifetimes of one captured
-connection collide on `ClientConnectionPool`'s default key path (`:46,:127`).
+connection collide on `ClientConnectionPool`'s default key path.
 
 ### 3.2 Proxy posture and audit
 
