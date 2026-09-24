@@ -714,7 +714,7 @@ every path, so one operation's failure never strands the slot that the next need
 mechanism that *does* block all of them categorically, which is why moving a recognised failure out of that
 branch matters more than which outcome it becomes.
 
-### C2 — open, because closing it edits the design
+### C2 — closed by the owner 2026-09-24
 
 This is the one that needs a decision rather than an implementation, and it is a **documentation** gap, not a
 behavioural one. Three facts:
@@ -737,8 +737,22 @@ explicit word before anyone writes it:
 > cleanup has completed, and it creates no state. The Kafka source therefore submits it unconditionally,
 > including when the grace wait returned early because every revoked generation had already reported cleanup.
 
-Recorded rather than written, per red line 1: being right is not permission, and the owner's ruling on the
-*behaviour* is not authorization to edit the document that describes it.
+**The owner approved that text verbatim on 2026-09-24** and it is now in `§4.1`, in its own commit with a dated
+row in the design-changes table.
+
+**The amendment created a tension I under-counted when proposing it.** I checked two statements tying force
+cancellation to the deadline and told the owner it was "two sentences against two"; there are **five**, across
+three documents — `kafkaLLD:180` and `§15.2:960`, `procCommit §9.2` step 6, and two in
+`captureAndReplayArchitecture` (`:1152`, `§14.6:1371`). A Codex review quoted them and concluded the *code* was
+wrong. It was not, but only one of the five needed changing and the reason is worth keeping: `:180` is a table
+column defining **what the value reports**, so the wording was a false statement about the message rather than a
+description of a path. The other four describe the normal trigger, and a specific clause qualifying a general one
+is prose, not contradiction. `:180` is now the imperative.
+
+**The lesson is about the proposal, not the finding.** Before proposing a design amendment, grep the corpus for
+every statement of the rule being changed — three documents restate this one, and an amendment in the most
+specific of them leaves the others reading the old way. Recording it here rather than writing it first was the point: being right is not
+permission, and his ruling on the *behaviour* was not authorization to edit the document that describes it.
 
 ### A G2 commit that carried 600 lines of G3, and the rule it broke
 
@@ -756,6 +770,13 @@ owner reading the diff rather than by any check.
 time a staging habit has produced a mixed commit — `da7787ebf` mixed a design edit with implementation, which is
 what `tools/verify-design-authorization.sh` now catches. The same shape, one category wider.
 
+**The commit history was consolidated on 2026-09-24**, 95 commits down to 36, on the owner's instruction: policy
+changes — the design documents and the `AGENTS.md` rules — left standing on their own, and the work commits grouped
+by concern with the ~24 register-only commits absorbed into the commits whose work they record. Verified by the
+final tree being identical to the pre-consolidation branch and by no commit mixing a design edit with
+implementation. The split that fixed the mixed commit above therefore no longer appears as two commits; the point
+of it was that the milestone grouping be right, which the consolidation makes right by construction.
+
 `tools/verify-commit-scope.sh` is the check for this one. It fails a commit whose subject names one milestone
 while the commit **adds** a file under a package another milestone owns, and it reports `3c3472d06`'s two files
 when run against that commit. Deliberately narrow: added files only, because a *modification* in another
@@ -763,6 +784,10 @@ milestone's file is often mechanical — repointing an import after a package mo
 buried work — while a new file under another milestone's package never is. Package ownership is listed only
 where it is unambiguous; `replay/intake/` is G3's and `replay/kafkasource/` is G2's, and a package with no row is
 not checked.
+
+**`G0` is exempt**, and the consolidation is what surfaced why: G0 is the milestone that puts every file in the
+module at the path it will ship from, marked, so it necessarily adds files under packages later milestones own.
+Without the exemption the check fires on the one commit that is *supposed* to span the whole tree.
 
 **Not added to `AGENTS.md`.** That file is the owner's; the check exists and is named here, and whether §5 should
 point at it the way §1 points at the design-authorization check is his call.
@@ -799,11 +824,9 @@ is convenience rather than dependency.
 
 - `§17.4`'s nine demand cases, deferred to `G7` with a ledger row each. Not a gap.
 - Production wiring, deferred to `G9`, which un-marks `runReplayMode`. Not a gap.
-- **`C2`** — the `§4.1` row `ForceGenerationCancellation` is missing. A design edit, with the amendment written
-  out above and awaiting the owner's word. The behaviour it would describe is already decided and implemented.
-
-`C1`, `C3`, `C4` and `C5` are closed by the owner's rulings above. Nothing else is outstanding as a piece of
-work.
+All five owner questions `C1`–`C5` are closed. **Nothing is outstanding against G2 as a piece of work or as a
+decision**; what remains is the deferred `§17.4` demand half and the `G9` wiring above, both with receiving
+milestones.
 
 The single-clock residue is **closed**, not accepted: `GraceIntervalWait` makes the waiting injectable so the
 deadline is measured by one clock, which is what `§15.1` requires. Recording my own acceptance of that
@@ -997,6 +1020,8 @@ was added so it can be vetoed on reading.
 
 | Date | Section | What was added | Why it was not already there |
 |---|---|---|---|
+| 2026-09-24 | `kafkaLLD §4.1` | `ForceGenerationCancellation`'s meaning restated as the **imperative** — "Cancellation of everything remaining in this generation is now required" — with the grace interval's end demoted from the definition to one of two triggers, the deadline or early cleanup. | The cell said "The revocation grace period ended", which after the unconditional-submission amendment was a trigger that has *not* happened on the early-return path. The value was being sent with a stated meaning that was false whenever cleanup finished first. Inert today because intake ignores the meaning; the hazard is `G8`, where an implementer could log "grace expired" or count off it. Found by a Codex review that read the old wording and drew the wrong conclusion from it — the code was right, the cell was not. |
+| 2026-09-24 | `kafkaLLD §4.1` | That duplicate or already-cleaned delivery of `ForceGenerationCancellation` is **inert** — distributed to every remaining owner in the generation, which is the empty set once cleanup completed, creating no state — and that the Kafka source therefore submits it **unconditionally**, including when the grace wait returned early. | `§4.1` requires every input's design to state its duplicate, stale-generation and already-cleaned handling, and this input's row did not. The gap mattered because the unconditional submission makes already-cleaned delivery the *normal* case on every early return, not an edge one. This is `C2`. |
 | 2026-09-23 | `kafkaLLD §5.7` | That the five commit outcomes describe the **operation, not individual partitions**; that a batched operation may apply to some partitions and not others with the client reporting one result for the whole thing; and that a failed operation is therefore not evidence that nothing was committed. | A fact about the Kafka client, verified in its 4.2.0 sources, that §5.7 was silent on. Silence let an implementation read a single failure as "none committed", which is wrong. |
 | 2026-09-23 | `kafkaLLD §5.7` | That a revocation commit has **no minimum remaining interval** below which it declines to attempt — stated, rather than merely not mentioned. | The owner's ruling on the unratified-edit escalation, and his reasoning rather than mine: the work whose position this commits has already been sent to the target and cannot be recalled, so every remaining millisecond is worth spending on recording it completely, and declining to try is not a saving but a guaranteed re-send of traffic the target has already seen. Stated explicitly so the absence is a decision rather than a gap someone later fills with a floor — which is exactly what happened once. |
 | 2026-09-23 | `kafkaLLD §5.7`, `§17.4`, `§17.5` | **The commit outcome list is rewritten to name the retry decision instead of ownership, and the submission mode is split: asynchronous in the ordinary loop, bounded synchronous inside `onPartitionsRevoked`.** Outcomes become acknowledged / retriable / generation-stale / outcome-unknown / late-callback, with structurally invalid commits leaving the list entirely as process-fatal. Also added: at most one operation in flight; revocation begins at callback *entry*; and that the source never infers which partition failed. | Three separate causes. (1) The old names described *ownership* while the decision the owner makes is *retry or discard*, and Kafka draws exactly that line — `RebalanceInProgressException` means the generation is intact, `CommitFailedException` means it is gone — which the implementation was conflating in one catch block, giving opposite semantics the same outcome. (2) The structural failures (authorization, oversized metadata, invalid offset size) are unfixable by retry, and `commitSync` already absorbs every genuinely transient error internally, so nothing retriable reaches us as itself; treating them as an outcome means reading on while never committing. (3) **The design already said commits are asynchronous** — `procCommit §5.1` lists "commit callback handling", `§137` assigns the owner "commit callbacks", and `captureArch:1177` says it "neither retries the commit nor waits indefinitely for its callback" — while the implementation was synchronous in the loop. That is a latent `D5` outside the callback: `commitSync` blocks up to `default.api.timeout.ms` without polling, which can exceed `max.poll.interval.ms` and trigger a rebalance. It also meant `LATE_CALLBACK` looked dead and was nearly deleted, which would have ratified the simplification silently — red line 3. |

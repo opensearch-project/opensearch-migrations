@@ -36,6 +36,10 @@ while read -r sha; do
   subject=$(git log -1 --format=%s "$sha")
   milestone=$(printf '%s' "$subject" | sed -n 's/^\(G[0-9][0-9]*\)[:.].*/\1/p')
   [ -n "$milestone" ] || continue
+  # G0 is exempt by definition: it is the milestone that puts every file in the module at the path it will
+  # ship from, marked, so it necessarily adds files under packages later milestones own. Anything else adding
+  # a file outside its own package is the buried-work shape this checks for.
+  [ "$milestone" = "G0" ] && continue
   while read -r status path; do
     [ "$status" = "A" ] || continue
     owner=$(owner_of "$path")
