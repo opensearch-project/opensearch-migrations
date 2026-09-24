@@ -696,6 +696,33 @@ policy explicitly denies `bedrock-mantle:CreateInference` for the role `codex-DO
 the model call never happens. Credentials are valid — the deny is an org policy. The reviewer was `claude -p`
 plus an in-session read-only subagent, both with the calibrated prompt.
 
+### A G2 commit that carried 600 lines of G3, and the rule it broke
+
+`3c3472d06` was the adapter's wakeup fix. Its diff also contained
+`SourceConnectionState`, `SourceAssemblySink` and the `HttpMessageAndTimestamp` promotion — about six hundred
+lines of G3 — and its message mentioned none of it. Cause: `git add -A <module>` while unrelated work sat in
+the tree, rather than staging the paths the commit was about.
+
+Split into `87200ef8e` (G2) and `c84b2fe74` (G3) with the six later commits replayed, verified by the tree
+being byte-identical to the pre-split branch and by no commit mixing the two milestones' paths. This is exactly
+what `AGENTS.md` §5's "do not *bury* an unrelated fix inside another change" forbids, and it was caught by the
+owner reading the diff rather than by any check.
+
+**It is checkable, which is why it is worth recording rather than resolving to be careful.** This is the second
+time a staging habit has produced a mixed commit — `da7787ebf` mixed a design edit with implementation, which is
+what `tools/verify-design-authorization.sh` now catches. The same shape, one category wider.
+
+`tools/verify-commit-scope.sh` is the check for this one. It fails a commit whose subject names one milestone
+while the commit **adds** a file under a package another milestone owns, and it reports `3c3472d06`'s two files
+when run against that commit. Deliberately narrow: added files only, because a *modification* in another
+milestone's file is often mechanical — repointing an import after a package move is a one-line edit and is not
+buried work — while a new file under another milestone's package never is. Package ownership is listed only
+where it is unambiguous; `replay/intake/` is G3's and `replay/kafkasource/` is G2's, and a package with no row is
+not checked.
+
+**Not added to `AGENTS.md`.** That file is the owner's; the check exists and is named here, and whether §5 should
+point at it the way §1 points at the design-authorization check is his call.
+
 ### Open questions for the owner — added by the seventh pass
 
 | # | Question | Current behaviour | Why it is not mine to decide |
