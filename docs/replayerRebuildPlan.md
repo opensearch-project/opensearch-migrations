@@ -919,8 +919,8 @@ hard-coded item count: update the table only after consulting me if the authorit
 |---|---|---|---|
 | R1 | Each mutable value has one named owner | S3, S5, S8, S12, S13 | Owner-state inventory plus per-owner transition-table tests proving owner-thread enforcement and impossible transition → `ProcessSupervisor` |
 | R2 | Every admitted request has at most one connection-turn and one processing completion; normal completion has both | S5, S7 | Request-state transition tests and durable-tuple component test |
-| R3 | At most one outstanding batch request per partition generation | S8, S11 | Pumped Kafka-source state test |
-| R4 | Every delivered batch matches one request and is fully applied before another request | S8, S11 | Batch request/delivery transition test |
+| R3 | At most one intake-issued batch request is outstanding per partition generation; assignment may also hold its one bootstrap entitlement | S8, S11 | Pumped Kafka-source state test |
+| R4 | Every delivered batch matches its bootstrap or explicit entitlement and batches are fully applied in delivery order | S8, S11 | Batch entitlement/delivery transition test |
 | R5 | Demand remains open while retry-ready supply is below `N` | S10, S11 | Demand arithmetic tests across all recomputation inputs |
 | R6 | Fast responses satisfy supply before `B + W`; slow or missing responses keep it open until resolved | S10, S11 | Explicit broker-time `RecordScript` tests |
 | R7 | Target-finished or cancelled requests cannot re-enter supply | S10, S11, S13 | Out-of-order completion and retry-input tests |
