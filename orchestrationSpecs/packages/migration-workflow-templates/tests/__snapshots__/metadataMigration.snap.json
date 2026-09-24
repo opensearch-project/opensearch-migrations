@@ -125,16 +125,6 @@
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "resources": {
-            "limits": {
-              "cpu": "500m",
-              "memory": "1800Mi"
-            },
-            "requests": {
-              "cpu": "500m",
-              "memory": "1800Mi"
-            }
-          },
           "command": [
             "/root/metadataMigration/bin/MetadataMigration"
           ],
@@ -157,7 +147,7 @@
             "karpenter.sh/do-not-disrupt": "true"
           }
         },
-        "podSpecPatch": "{{=toJSON(sprig.dict(\"volumes\", sprig.concat([sprig.dict(\"name\", 'test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", true))], sprig.dig('fileSourceVolumes', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"containers\", [sprig.dict(\"name\", 'main', \"volumeMounts\", sprig.concat([sprig.dict(\"name\", 'test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], sprig.dig('fileSourceVolumeMounts', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"resources\", sprig.dig('resources', sprig.dict(\"limits\", sprig.dict(\"cpu\", '500m', \"memory\", '1800Mi'), \"requests\", sprig.dict(\"cpu\", '500m', \"memory\", '1800Mi')), fromJSON(inputs.parameters.metadataMigrationConfig)))]))}}",
+        "podSpecPatch": "{{=toJSON(sprig.dict(\"volumes\", sprig.concat([sprig.dict(\"name\", 'test-creds', \"configMap\", sprig.dict(\"name\", 'localstack-test-creds', \"optional\", true))], sprig.dig('fileSourceVolumes', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"containers\", [sprig.dict(\"name\", 'main', \"volumeMounts\", sprig.concat([sprig.dict(\"name\", 'test-creds', \"mountPath\", '/config/credentials', \"readOnly\", true)], sprig.dig('fileSourceVolumeMounts', [], fromJSON(inputs.parameters.metadataMigrationConfig))), \"resources\", fromJSON(inputs.parameters.metadataMigrationConfig)['resources'])]))}}",
         "retryStrategy": {
           "limit": "3",
           "retryPolicy": "OnError",
