@@ -302,6 +302,17 @@ work, not deferred work. Status for each lives in `docs/replayerRebuildStatus.md
    with the real cause only in the log above it. Needs an injectable exit hook so a test can observe the
    fatal transition instead of dying with it. PA3's real-Kafka scenarios will need this to assert on
    capture-failure behavior at all.
+4. **Intentional capture suppression does not advance the successor stream's request baseline.**
+   `StreamChannelConnectionCaptureSerializer.cancelCaptureForCurrentRequest` emits
+   `RequestIntentionallyDropped` and resets request-assembly fields but does not increment `eomsSoFar`.
+   A later `TrafficStream` therefore serializes `priorRequestsReceived` one request too low even though
+   `proxyCaptureProtocol §4.1` says the marker advances the request sequence. Increment the same
+   connection-owned counter used by `commitEndOfHttpMessageIndicator`, and add a serializer test that flushes
+   after the drop and proves the successor stream carries the advanced baseline.
+
+**PA2 Exit:** all four focused repairs above have direct tests, their temporary replayer-side workarounds are
+deleted, and intentional suppression followed by a stream boundary preserves the successor
+`priorRequestsReceived` ordinal.
 
 If one agent owns both proxy and replayer, these are explicit scheduled checkpoints, not fictional
 parallelism. Proxy work may be interleaved with replayer work, but PA3 cannot be deferred into final

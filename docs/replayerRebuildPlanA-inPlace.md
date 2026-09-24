@@ -443,6 +443,12 @@ exists — `HttpTransactionDumper` consumes reconstruction callbacks and is carr
 still needs a tracing context is a G3 question: it required `ChannelContextManager` and
 `RootReplayerContext` only because the *legacy* accumulator did.
 
+**Deferred to PA2 — proxy sequence accounting after intentional capture suppression.** G3 consumes
+`RequestIntentionallyDropped` and advances or preserves the captured ordinal exactly as `§9.4` requires, but
+the proxy producer currently emits the marker without incrementing the `eomsSoFar` value later serialized as
+`TrafficStream.priorRequestsReceived`. Repairing that proxy-side protocol mismatch is PA2 item 4 in
+`docs/replayerRebuildPlan.md`; it is not delivered by G3.
+
 **Exit:** a record carrying `read+EOM` for request *N* and `read` for request *N+1* has exactly both
 associations, matching the `RecordScript` oracle; no record emits completion while an expected
 association remains; a source connection that dies mid-response produces a tuple that says so. No owner
@@ -454,8 +460,9 @@ reconstruction honesty stated as something a person can read. This criterion pre
 close-truncated response to be visible *as truncated*, which `§9.2` establishes is not detectable: the capture
 protocol marks the end of a request and not of a response, and the owner ruled against adding response parsing
 to the proxy. Unproven is the strongest claim the output can make, and a claim that can be made truthfully is
-worth more than one that cannot. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`,
-`R12`, `R13`.
+worth more than one that cannot. G3 does **not** claim that the proxy's successor
+`priorRequestsReceived` baseline includes an intentionally dropped request; PA2 repairs and proves that
+producer-side obligation. Covers `D2`, `D4`, `D8`, `D11`, `D18`; contributes `R11`, `R12`, `R13`.
 
 ### G4 — Commit authority
 
