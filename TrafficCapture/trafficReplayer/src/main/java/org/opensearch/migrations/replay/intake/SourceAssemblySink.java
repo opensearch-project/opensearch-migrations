@@ -46,25 +46,37 @@ public interface SourceAssemblySink {
         long requestCompletingLogAppendTime
     );
 
-    /** A source response that reached its end ({@code §9.2}). */
-    void onSourceResponseComplete(ReplayRequestId replayRequestId, HttpMessageAndTimestamp.Response response);
+    /**
+     * A source response that reached a terminal boundary ({@code §9.2}).
+     *
+     * @param keptAlive true when the next request's read observation on the same connection ended this
+     *                  response, which proves the source finished it. False when a close or a connection
+     *                  exception ended it, where completion is unproven — nothing else can prove it, because
+     *                  the capture protocol carries an end-of-message indication for requests only and the
+     *                  replayer deliberately does not parse response framing. A consumer needing certainty
+     *                  reads this rather than inferring from the outcome type
+     */
+    void onSourceResponseComplete(
+        ReplayRequestId replayRequestId,
+        HttpMessageAndTimestamp.Response response,
+        boolean keptAlive
+    );
 
     /**
-     * A source response that will never be complete ({@code §9.2}).
+     * Replay intake stopped assembling this response ({@code §9.2}).
      *
-     * <p>Carries no bytes. {@code §9.2} requires that partial bytes are never "represented as complete", and
-     * the honest way to guarantee that is for the incomplete signal to be unable to carry them at all.
+     * <p>This states something about the replayer, not about the captured bytes: {@code §9.2} reserves it for
+     * expiration and generation cancellation, the two cases where intake gives up rather than observing an end.
+     * It carries no bytes, because a signal that cannot carry them cannot misrepresent them.
      */
     void onSourceResponseIncomplete(ReplayRequestId replayRequestId, IncompleteReason reason);
 
-    /** Why a source response ended without completing. */
+    /** Why replay intake stopped assembling. Both are the replayer's own doing. */
     enum IncompleteReason {
-        /** {@code CloseObservation} arrived while the response was still assembling ({@code §9.3}). */
-        CAPTURED_CLOSE,
-        /** The connection lifetime expired on broker time ({@code §9}). */
+        /** The connection lifetime expired on broker time ({@code §9}, {@code §10.3}). */
         EXPIRED,
-        /** {@code ConnectionExceptionObservation} was recorded for the captured connection. */
-        CONNECTION_EXCEPTION
+        /** The partition generation was cancelled at revocation ({@code §15.1}, {@code §15.2}). */
+        GENERATION_CANCELLED
     }
 
     /** The captured close for one source-connection lifetime ({@code §9.3} step 3). */

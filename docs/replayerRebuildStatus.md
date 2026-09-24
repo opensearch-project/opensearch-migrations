@@ -1020,6 +1020,7 @@ was added so it can be vetoed on reading.
 
 | Date | Section | What was added | Why it was not already there |
 |---|---|---|---|
+| 2026-09-24 | `kafkaLLD §9.2` | Source-response assembly ends at a terminal boundary — the next request's first read, a captured close, or a connection exception — and all three send `SourceResponseComplete`, which now carries `keptAlive`. Only expiration and generation cancellation send `SourceResponseIncomplete`, and "incomplete" is defined as replay intake having stopped assembling rather than as a claim that the bytes are partial. The absence of response framing parsing, and why, is recorded in the section. | The old wording — "expiration or captured close sends `SourceResponseIncomplete` without partial bytes represented as complete" — is a promise the replayer cannot keep: a clean close on a close-delimited body is byte-identical to a truncated one, and the protocol carries an end-of-message indication for requests only. The owner ruled against adding response parsing to the proxy, on the grounds that its request parser is optimized for memory footprint. Found by G3's exit-evidence test, which showed every proxy-captured response being reported incomplete. |
 | 2026-09-24 | `captureArch §13.2`, `§13.3`; `replayerLLD §2`; `kafkaLLD §2`, `§3`, `§4.1`, `§4.2`, `§5.1`–`§5.3`, `§6`, `§13`, `§15.1`, `§15.3`, `§17.4`; `procCommit §1`, `§3.3`, `§5.1`, `§5.2`, `§8`, `§8.1`, `§9.3`, `§13.4` | A new assignment installs one source-local bootstrap batch entitlement and submits `PartitionGenerationAssigned` before that entitlement may admit records. Replay intake then performs its ordinary end-of-input demand pass over every assigned generation and may add one explicit `RequestNextPartitionBatch` while bootstrap remains open. The resulting bounded two-batch overshoot is accepted; the source consumes bootstrap first, every transmitted batch is real and nonempty, and prior-generation cleanup remains an independent read gate. Repeated assignment and revocation waits for every earlier local generation still cleaning up. | The owner identified the missing induction base case and directed the least-synchronization amendment: assignment must put data on the line immediately without suppressing replay intake's normal demand calculation. The prior text described only intake-issued requests, leaving a first-ever assignment unable to start. Two intermediate amendments incorrectly chose between bootstrap and ordinary demand; the owner required both, accepting a possible second indeterminately sized batch instead of adding deduplication coordination. |
 | 2026-09-24 | `kafkaLLD §4.1` | `ForceGenerationCancellation`'s meaning restated as the **imperative** — "Cancellation of everything remaining in this generation is now required" — with the grace interval's end demoted from the definition to one of two triggers, the deadline or early cleanup. | The cell said "The revocation grace period ended", which after the unconditional-submission amendment was a trigger that has *not* happened on the early-return path. The value was being sent with a stated meaning that was false whenever cleanup finished first. Inert today because intake ignores the meaning; the hazard is `G8`, where an implementer could log "grace expired" or count off it. Found by a Codex review that read the old wording and drew the wrong conclusion from it — the code was right, the cell was not. |
 | 2026-09-24 | `kafkaLLD §4.1` | That duplicate or already-cleaned delivery of `ForceGenerationCancellation` is **inert** — distributed to every remaining owner in the generation, which is the empty set once cleanup completed, creating no state — and that the Kafka source therefore submits it **unconditionally**, including when the grace wait returned early. | `§4.1` requires every input's design to state its duplicate, stale-generation and already-cleaned handling, and this input's row did not. The gap mattered because the unconditional submission makes already-cleaned delivery the *normal* case on every early return, not an edge one. This is `C2`. |
@@ -1140,6 +1141,23 @@ question.
 the granularity was off by one level. Worth recording because the verdict was written from reading the code
 against the design and still missed it: the field list matched exactly, which is what made the containing
 type's meaning easy to skip past.
+
+### G3's exit criterion asked for something undetectable
+
+Plan A required "a close-truncated response is visible as truncated" in the dump output. It is not detectable:
+`kafkaLLD §9.2` now states that only a following request on the same connection proves a response finished, and
+the owner ruled against the proxy-side change that would have made it decidable. The criterion is amended to
+`UNPROVEN` visibility, which is the strongest claim the output can make truthfully.
+
+**The test found this, on its first real-topic run, by failing.** Every deterministic G3 test passed against the
+oracle while the live path reported every proxy-captured response incomplete — because assembly only completed
+when a *subsequent* request arrived, and a closing connection has none. That is the class of defect an oracle
+cannot catch: the oracle asserts the associations, and nothing in it exercises a connection that ends.
+
+**It is also the shape §8a warns about.** The legacy accumulator's rule was `close ⇒ COMPLETE`, and the state
+machine was carried over faithfully while that one verdict was quietly replaced with a stricter-sounding one.
+The stricter version was wrong in the common case, and the register's own G3 verdict had called the carried code
+"already §9 in all but name" — which was true of its structure and not of this decision.
 
 ## Deferral ledger — work moved between milestones
 

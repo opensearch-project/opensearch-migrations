@@ -284,11 +284,53 @@ class SourceReconstructionTest {
             sink.requests.size(),
             "an observation after the close must not become a request on the closed lifetime"
         );
+        // §9.2: a captured close is a boundary the replayer observed, so the response completes. What it
+        // cannot know is whether the source had finished writing, and keptAlive=false is that admission.
+        // Reporting it incomplete would describe the capture rather than the replayer, and would label every
+        // response on a closing connection unusable -- which is most of them.
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0)),
+            sink.completeResponses,
+            "a close ends response assembly, so the response is complete"
+        );
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0)),
+            sink.unprovenResponses,
+            "nothing proved the source finished writing it, so it must be marked unproven"
+        );
+        Assertions.assertTrue(
+            sink.incompleteResponses.isEmpty(),
+            "incomplete is reserved for expiration and cancellation, which is the replayer giving up"
+        );
+    }
+
+    /**
+     * Expiration is the case that genuinely is incomplete: replay intake stopped assembling rather than
+     * observing an end.
+     *
+     * <p>This is the contrast that gives {@code §9.2}'s two outcomes their meaning. Both this and the captured
+     * close end a response that was mid-assembly, and only one of them is something the replayer did.
+     */
+    @Test
+    void anExpiredLifetimeReportsItsResponseIncomplete() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0, 0, Instant.ofEpochMilli(1_000), WRITER,
+            stream(0, read(1, REQUEST_BYTES), endOfMessage(2), write(3, "HTTP/1.1 200 OK\r\n"))
+        );
+        applyAll(script);
+        var lifetime = owner.partitionState(script.generation(0)).orElseThrow()
+            .lifetimeOf(sink.requestIds.get(0).connectionProcessingId()).orElseThrow();
+
+        lifetime.expire();
+
         Assertions.assertEquals(
             List.of(sink.requestIds.get(0)),
             sink.incompleteResponses,
-            "the response was still assembling when the close arrived, so §9.2 requires it be reported"
-                + " incomplete rather than left outstanding"
+            "expiration is the replayer stopping, which is what incomplete states"
+        );
+        Assertions.assertTrue(
+            sink.completeResponses.isEmpty(),
+            "an expired response must not be reported complete, proven or otherwise"
         );
     }
 
@@ -318,6 +360,9 @@ class SourceReconstructionTest {
     private static final class RecordingSink implements SourceAssemblySink {
         private final List<HttpMessageAndTimestamp.Request> requests = new ArrayList<>();
         private final List<ReplayRequestId> requestIds = new ArrayList<>();
+        private final List<ReplayRequestId> completeResponses = new ArrayList<>();
+        /** Completed, but with nothing proving the source finished writing — {@code §9.2}'s {@code keptAlive}. */
+        private final List<ReplayRequestId> unprovenResponses = new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
 
@@ -336,8 +381,13 @@ class SourceReconstructionTest {
         @Override
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
-            HttpMessageAndTimestamp.Response response
+            HttpMessageAndTimestamp.Response response,
+            boolean keptAlive
         ) {
+            completeResponses.add(replayRequestId);
+            if (!keptAlive) {
+                unprovenResponses.add(replayRequestId);
+            }
         }
 
         @Override

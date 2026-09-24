@@ -185,9 +185,10 @@ public final class SourceConnectionState {
             return applyCapturedClose(containingRecord);
         }
         if (observation.hasConnectionException()) {
-            // §9.3: ConnectionExceptionObservation does not perform the close steps. It abandons the request
-            // being assembled and leaves the lifetime open.
-            return abandonRequestInAssembly(SourceAssemblySink.IncompleteReason.CONNECTION_EXCEPTION);
+            // §9.3: ConnectionExceptionObservation does not perform the close steps, so the lifetime stays
+            // open. It is still a boundary the replayer observed, which §9.2 makes a completion with
+            // completion unproven.
+            return endAssemblyAtBoundary();
         }
         if (observation.hasRequestDropped()) {
             return applyRequestDropped();
@@ -213,7 +214,7 @@ public final class SourceConnectionState {
         if (lifetime != Lifetime.OPEN) {
             return ObservationOutcome.none();
         }
-        var outcome = abandonRequestInAssembly(SourceAssemblySink.IncompleteReason.EXPIRED);
+        var outcome = stopAssembling(SourceAssemblySink.IncompleteReason.EXPIRED);
         lifetime = Lifetime.EXPIRED;
         return new ObservationOutcome(
             outcome.associationsToAdd(),
@@ -274,12 +275,13 @@ public final class SourceConnectionState {
         }
         if (observation.hasWrite() || observation.hasWriteSegment()) {
             // A response with no end-of-message for its request: the request is truncated and must not be
-            // replayed. §9.2's honesty rule is why the bytes are dropped rather than sent as a request.
+            // replayed. Requests are the case the protocol *does* mark, so this is knowable rather than
+            // inferred, and the partial bytes are dropped rather than sent.
             log.atWarn().setMessage("Response bytes arrived for {} before its request ended; discarding the"
                     + " partial request rather than replaying it")
                 .addArgument(connectionProcessingId)
                 .log();
-            return abandonRequestInAssembly(SourceAssemblySink.IncompleteReason.CONNECTION_EXCEPTION);
+            return endAssemblyAtBoundary();
         }
         return ObservationOutcome.none();
     }
@@ -308,7 +310,9 @@ public final class SourceConnectionState {
         if (observation.hasRead() || observation.hasReadSegment()) {
             // Keep-alive: the next request begins, which is what ends the previous response. The response's
             // association stays until its tuple is durable, so nothing is finished here.
-            var completed = completeResponse();
+            // §9.2: the next request's read is the boundary that proves the source finished the previous
+            // response. It is the only evidence of that available anywhere in the protocol.
+            var completed = completeResponse(true);
             phase = Phase.ASSEMBLING_REQUEST;
             currentCapturedRequestOrdinal++;
             var next = applyToRequest(observation, containingRecord, logAppendTimeMillis);
@@ -362,19 +366,25 @@ public final class SourceConnectionState {
         );
     }
 
-    private ObservationOutcome completeResponse() {
+    /**
+     * Ends response assembly at a terminal boundary ({@code §9.2}).
+     *
+     * @param keptAlive whether the next request's read observation ended it, which is the only thing that
+     *                  proves the source finished the response
+     */
+    private ObservationOutcome completeResponse(boolean keptAlive) {
         var requestId = responseBeingAssembledFor;
         var response = responseStateByRequest.remove(requestId);
         responseBeingAssembledFor = null;
         if (response != null) {
-            sink.onSourceResponseComplete(requestId, response);
+            sink.onSourceResponseComplete(requestId, response, keptAlive);
         }
         return ObservationOutcome.none();
     }
 
     private ObservationOutcome applyCapturedClose(KafkaRecordId containingRecord) {
         var terminal = new RecordAssociationId.TerminalConnection(connectionProcessingId);
-        var abandoned = abandonRequestInAssembly(SourceAssemblySink.IncompleteReason.CAPTURED_CLOSE);
+        var abandoned = endAssemblyAtBoundary();
         lifetime = Lifetime.EXPLICITLY_CLOSED;
         sink.onCapturedClose(connectionProcessingId, latestObservationTime);
         return new ObservationOutcome(
@@ -395,13 +405,37 @@ public final class SourceConnectionState {
     }
 
     /**
-     * Ends whatever is part-assembled without pretending it is complete.
+     * Ends assembly at an observed terminal boundary — a captured close or a connection exception.
      *
-     * <p>{@code §9.2}: "expiration or captured close sends {@code SourceResponseIncomplete} without partial
-     * bytes represented as complete". A request that never reached end-of-message has no identity at all, so
-     * there is nothing to notify and its assembly association is simply released ({@code §8.2}).
+     * <p>{@code §9.2} makes both of these <em>complete</em> with {@code keptAlive = false}: the response
+     * reached an end the replayer observed, and whether the source had finished writing it is unprovable.
+     * Reporting it incomplete instead would be the replayer describing the capture rather than itself, and
+     * would label every response on a closing connection — which is most of them — as unusable.
+     *
+     * <p>A request that never reached end-of-message has no identity at all, so nothing is notified about it
+     * and its assembly association is simply released ({@code §8.2}).
      */
-    private ObservationOutcome abandonRequestInAssembly(SourceAssemblySink.IncompleteReason reason) {
+    private ObservationOutcome endAssemblyAtBoundary() {
+        var finished = new java.util.ArrayList<RecordAssociationId>();
+        if (incomingRequest != null) {
+            finished.add(currentAssemblyId());
+            incomingRequest = null;
+        }
+        if (responseBeingAssembledFor != null) {
+            completeResponse(false);
+        }
+        phase = Phase.BETWEEN_REQUESTS;
+        return new ObservationOutcome(List.of(), finished, List.of(), false);
+    }
+
+    /**
+     * Ends assembly because replay intake stopped, not because an end was observed.
+     *
+     * <p>{@code §9.2} reserves {@code SourceResponseIncomplete} for expiration and generation cancellation.
+     * Both are the replayer's own doing, which is the whole content of the word: it says nothing about whether
+     * the captured bytes are partial, because nothing here can know that.
+     */
+    private ObservationOutcome stopAssembling(SourceAssemblySink.IncompleteReason reason) {
         var finished = new java.util.ArrayList<RecordAssociationId>();
         if (incomingRequest != null) {
             finished.add(currentAssemblyId());

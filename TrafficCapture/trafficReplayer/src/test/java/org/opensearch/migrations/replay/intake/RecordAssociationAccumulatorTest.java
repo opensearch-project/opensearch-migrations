@@ -299,7 +299,8 @@ class RecordAssociationAccumulatorTest {
         @Override
         public void onSourceResponseComplete(
             ReplayRequestId replayRequestId,
-            HttpMessageAndTimestamp.Response response
+            HttpMessageAndTimestamp.Response response,
+            boolean keptAlive
         ) {
             completeResponses.add(replayRequestId);
         }

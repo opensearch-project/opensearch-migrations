@@ -65,17 +65,28 @@ public class HttpTransactionDumper implements SourceAssemblySink {
             + " " + extractFirstLine(request));
     }
 
+    /**
+     * Prints a response, and marks it {@code UNPROVEN} when nothing proved the source finished writing it.
+     *
+     * <p>{@code kafkaLLD §9.2}: only a following request on the same connection proves completion. A response
+     * ended by a close or a connection exception may have been truncated and there is no way to tell, so the
+     * line says so rather than presenting it as though it were whole. That marker is the honest form of what
+     * Plan A asks this output to show.
+     */
     @Override
     public void onSourceResponseComplete(
         @NonNull ReplayRequestId replayRequestId,
-        @NonNull HttpMessageAndTimestamp.Response response
+        @NonNull HttpMessageAndTimestamp.Response response,
+        boolean keptAlive
     ) {
         out.println(linePrefix
             + buildPrefix(
                 replayRequestId.connectionProcessingId(),
                 response.getFirstPacketTimestamp(),
                 response.getLastPacketTimestamp())
-            + " RSP[" + messageSize(response) + "] " + extractFirstLine(response));
+            + " RSP[" + messageSize(response) + "]"
+            + (keptAlive ? "" : " UNPROVEN")
+            + " " + extractFirstLine(response));
     }
 
     @Override
