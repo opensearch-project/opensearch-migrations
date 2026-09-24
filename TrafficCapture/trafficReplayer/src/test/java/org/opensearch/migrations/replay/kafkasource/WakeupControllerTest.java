@@ -10,6 +10,7 @@ package org.opensearch.migrations.replay.kafkasource;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
@@ -64,6 +65,58 @@ class WakeupControllerTest {
             wakeups.get(),
             "the deferred wakeup must be issued on callback exit; it was coalesced into the one the commit had"
                 + " already consumed"
+        );
+    }
+
+    /**
+     * Only the protected operation itself may report absorbing a wakeup.
+     *
+     * <p>Outside that phase the outstanding flag belongs to the poll boundary, and clearing it from anywhere else
+     * consumes a wakeup {@link WakeupController#leavePollAndConsumeWakeup()} still has to see — leaving the
+     * controller free to issue a second one into a Kafka operation, which {@code kafkaLLD §5.4} forbids.
+     */
+    @Test
+    void onlyAProtectedOperationMayReportAbsorbingAWakeup() {
+        controller.enterPoll();
+        Assertions.assertTrue(controller.onInputSubmitted(), "precondition: one wakeup is outstanding");
+
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            controller::onWakeupAbsorbedByProtectedOperation,
+            "a caller outside a protected operation must not consume the poll boundary's wakeup"
+        );
+        Assertions.assertTrue(
+            controller.isWakeupOutstanding(),
+            "the rejected call must leave the wakeup for the poll boundary to consume"
+        );
+    }
+
+    /**
+     * Absorption is counted, because no other series records it.
+     *
+     * <p>The wakeup was issued, so {@code WAKEUPS_ISSUED} has it; the poll it was meant to shorten was never
+     * woken, so {@code POLLS_WOKEN_BY_QUEUED_INPUT} correctly does not. Without its own counter, a commit
+     * repeatedly swallowing wakeups is indistinguishable from a run with no wakeups at all — which is exactly
+     * the state that produced two defects on this path.
+     */
+    @Test
+    void absorbingAWakeupIsCounted() {
+        controller.enterPoll();
+        Assertions.assertTrue(controller.onInputSubmitted(), "precondition: one wakeup is outstanding");
+        controller.enterRebalanceCallback();
+        controller.enterProtectedOperation();
+
+        controller.onWakeupAbsorbedByProtectedOperation();
+
+        controller.leaveProtectedOperation();
+        controller.leaveRebalanceCallback();
+        Assertions.assertEquals(
+            1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                IKafkaConsumerContexts.MetricNames.WAKEUPS_ABSORBED_BY_PROTECTED_OPERATION
+            ),
+            "an absorbed wakeup must be visible as its own series"
         );
     }
 

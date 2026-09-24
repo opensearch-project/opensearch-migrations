@@ -240,6 +240,18 @@ public final class KafkaSourceOwner {
         wakeupController.enterProtectedOperation();
         try {
             port.commitAsync(positionsOf(submitted), outcome -> onCommitResolved(submitted, outcome));
+        } catch (WakeupException absorbedByTheSubmission) {
+            // §5.4 leaves this owner as the only interpreter of a wakeup, which is why the adapter propagates it
+            // rather than classifying it. Resolving it here is what releases the one-in-flight slot §5.7 permits
+            // only one of; a propagating exception would strand that slot for the life of the process, and a
+            // submission interrupted before it registered a callback has nothing else that can resolve it.
+            //
+            // The outcome is the conservative reading rather than a stated rule: §5.7 names a wakeup as an
+            // unknown outcome for a *bounded synchronous* commit, and says nothing about an interrupted
+            // asynchronous submission. Unknown is right either way — the operation may already have reached the
+            // broker — and it keeps a still-owned partition's position and re-offers it.
+            wakeupController.onWakeupAbsorbedByProtectedOperation();
+            onCommitResolved(submitted, KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN);
         } finally {
             wakeupController.leaveProtectedOperation();
         }
@@ -523,14 +535,16 @@ public final class KafkaSourceOwner {
                 new ReplayIntakeInput.GracefulGenerationCancellation(generation, deadline)
             ));
 
-            awaitGraceDeadlineProcessingInputs(deadline, generations);
+            wakeupController.recordGraceWaitEnded(
+                awaitGraceDeadlineProcessingInputs(deadline, generations)
+            );
 
-            // Submitted unconditionally. procCommit:1308 states the early return -- "if the generation has no
-            // unfinished work, the callback returns immediately" -- but nothing states that the submission may
-            // then be skipped, and §9.2 step 7 makes accepting it what releases the callback. Skipping it on the
-            // strength of combining those two sentences would be deciding a design-silent question, so the
-            // conforming behaviour is to return early *and* still submit. Whether it is skippable is an open
-            // question in the register.
+            // Submitted unconditionally, never conditioned on whether the wait ended early. Cancelling the
+            // generation's work is this source's obligation, and a successor assignment of the same partition
+            // waits on it; whether anything remains to cancel is intake's to determine, and on this path it is
+            // nothing -- §4.1 distributes force cancellation "to every remaining connection and request owner in
+            // the generation", which is the empty set once cleanup has completed. A caller that tried to predict
+            // that answer would be holding up the successor to save an inert message.
             generations.forEach(generation -> submitRequired(
                 new ReplayIntakeInput.ForceGenerationCancellation(generation)
             ));

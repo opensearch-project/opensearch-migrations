@@ -194,6 +194,7 @@ public class KafkaConsumerContexts {
             public final LongCounter wakeupsIssued;
             public final LongCounter wakeupsCoalesced;
             public final LongCounter wakeupsDeferred;
+            public final LongCounter wakeupsAbsorbedByProtectedOperation;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
@@ -210,6 +211,8 @@ public class KafkaConsumerContexts {
                     IKafkaConsumerContexts.MetricNames.WAKEUPS_COALESCED).build();
                 wakeupsDeferred = meter.counterBuilder(
                     IKafkaConsumerContexts.MetricNames.WAKEUPS_DEFERRED).build();
+                wakeupsAbsorbedByProtectedOperation = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.WAKEUPS_ABSORBED_BY_PROTECTED_OPERATION).build();
             }
         }
 
@@ -248,6 +251,8 @@ public class KafkaConsumerContexts {
             public final LongCounter generationsRetiredWithoutCommit;
             public final LongCounter retiredGenerationRecordsCommitted;
             public final LongCounter retiredGenerationRecordsRead;
+            public final LongCounter revocationsCleanedBeforeDeadline;
+            public final LongCounter revocationsReachingDeadline;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
@@ -261,6 +266,10 @@ public class KafkaConsumerContexts {
                     IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_COMMITTED).build();
                 retiredGenerationRecordsRead = meter.counterBuilder(
                     IKafkaConsumerContexts.MetricNames.RETIRED_GENERATION_RECORDS_READ).build();
+                revocationsCleanedBeforeDeadline = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.REVOCATIONS_CLEANED_BEFORE_DEADLINE).build();
+                revocationsReachingDeadline = meter.counterBuilder(
+                    IKafkaConsumerContexts.MetricNames.REVOCATIONS_REACHING_DEADLINE).build();
             }
         }
 
@@ -281,6 +290,13 @@ public class KafkaConsumerContexts {
         @Override
         public void onIssuedDeferredWakeupOnExit() {
             meterIncrementEvent(getMetrics().deferredWakeupsIssuedOnExit);
+        }
+
+        @Override
+        public void onGraceWaitEnded(boolean everyGenerationReportedCleanup) {
+            meterIncrementEvent(everyGenerationReportedCleanup
+                ? getMetrics().revocationsCleanedBeforeDeadline
+                : getMetrics().revocationsReachingDeadline);
         }
 
         /**

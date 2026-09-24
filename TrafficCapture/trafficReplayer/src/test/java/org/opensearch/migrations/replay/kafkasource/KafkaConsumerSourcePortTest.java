@@ -199,6 +199,32 @@ class KafkaConsumerSourcePortTest {
         );
     }
 
+    /**
+     * A local timeout on an asynchronous submission is an unknown outcome, not a fatal error.
+     *
+     * <p>A timeout says the client stopped waiting, not that the commit is invalid — and on
+     * {@code group.protocol=consumer} the request is already with the background thread when it is raised, so
+     * the operation may have reached the broker. The synchronous path has always classified a timeout this way.
+     * Killing the process on the asynchronous one abandons every partition's progress over one partition's slow
+     * commit, which is the opposite of finishing an outgoing partition's work on a good-effort basis.
+     */
+    @Test
+    void aLocalTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal() {
+        var port = new KafkaConsumerSourcePort(
+            new ScriptedCommitConsumer(null, null, new TimeoutException("stopped waiting")),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+
+        Assertions.assertEquals(
+            List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
+            resolutions,
+            "the same failure type the synchronous path calls unknown must not be fatal here"
+        );
+    }
+
     @Test
     void anAcknowledgedCommitCarriesThePositionsItWasGiven() {
         var consumer = new ScriptedCommitConsumer(null, null, null);
@@ -212,6 +238,73 @@ class KafkaConsumerSourcePortTest {
             Optional.of(11L),
             Optional.ofNullable(consumer.syncCommits.get(0).get(PARTITION)).map(OffsetAndMetadata::offset),
             "the offset committed is the next position to read, not the last one read"
+        );
+    }
+
+    /**
+     * A wakeup out of an <em>asynchronous</em> submission reaches the owner too.
+     *
+     * <p>Same reasoning as the synchronous case: {@code §5.4} has {@code WakeupException} "caught only at the
+     * poll-loop boundary", and {@code §5.7} names a wakeup as an outcome, which excludes it from the set that
+     * section sends to the process-failure path. Without an explicit clause it is a {@code KafkaException} and
+     * so a {@code RuntimeException}, and the classifier makes a routine queued input fatal.
+     */
+    @Test
+    void aWakeupOutOfAnAsynchronousSubmissionReachesTheOwnerRatherThanTheFatalBranch() {
+        var port = new KafkaConsumerSourcePort(
+            new ScriptedCommitConsumer(null, new WakeupException(), null),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        Assertions.assertThrows(
+            WakeupException.class,
+            () -> port.commitAsync(Map.of(PARTITION, 11L), resolutions::add),
+            "a wakeup must reach the owner; classifying it here makes a routine queued input fatal"
+        );
+        Assertions.assertEquals(
+            List.of(),
+            resolutions,
+            "the owner resolves a propagated wakeup itself; resolving here too would double-release the slot"
+        );
+    }
+
+    /**
+     * A consumer that resolves its callback and <em>then</em> throws, which the real client can do: it registers
+     * the callback partway through {@code commitAsync} and its closing {@code pollNoWakeup} can still raise
+     * interrupt and metadata errors.
+     */
+    private static final class ThrowsAfterRegisteringConsumer extends MockConsumer<String, byte[]> {
+        private ThrowsAfterRegisteringConsumer() {
+            super("earliest");
+        }
+
+        @Override
+        public synchronized void commitAsync(
+            Map<TopicPartition, OffsetAndMetadata> offsets,
+            OffsetCommitCallback callback
+        ) {
+            callback.onComplete(offsets, new RetriableCommitFailedException("retry"));
+            throw new RebalanceInProgressException("raised after the callback was registered and run");
+        }
+    }
+
+    /**
+     * {@code §5.7} allows one commit operation at a time and the caller releases that slot when a submission
+     * resolves, so a second resolution for one submission releases a slot the next operation holds — and
+     * re-stages or credits the same positions twice.
+     */
+    @Test
+    void aSubmissionThatBothResolvesAndThrowsResolvesExactlyOnce() {
+        var port = new KafkaConsumerSourcePort(new ThrowsAfterRegisteringConsumer(), Duration.ofSeconds(1));
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+
+        Assertions.assertEquals(
+            List.of(KafkaSourcePort.CommitOutcome.RETRIABLE),
+            resolutions,
+            "one submission resolves once; a second resolution credits or re-stages the same positions twice"
         );
     }
 }

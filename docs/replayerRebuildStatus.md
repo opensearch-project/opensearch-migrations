@@ -542,9 +542,10 @@ wrong, which leaves the record accurate without rewriting pushed history.
 
 ### G2 falsification pass — `AGENTS.md §4.1`, 2026-09-23, extended 2026-09-24
 
-Thirteen properties broken one at a time in a throwaway worktree. **All thirteen caught**, seven of them only
-after the rounds below added the tests that see them. The last two mutate the Kafka adapter, which the harness
-never touched until a fatal defect in it survived eleven green mutations.
+Twenty-one properties broken one at a time in a throwaway worktree. **All twenty-one caught**, fifteen of them
+only after the rounds below added the tests that see them. Four mutate the Kafka adapter, which the harness never
+touched until a fatal defect in it survived eleven green mutations — and the harness itself had to be fixed
+before any of this counted, because it could report full coverage from a dirty tree.
 
 | Property removed | Caught by |
 |---|---|
@@ -561,6 +562,14 @@ never touched until a fatal defect in it survived eleven green mutations.
 | Force cancellation skipped on the early-return path | `aGenerationWhoseCleanupCompletesEarlyReturnsWithoutWaitingOutTheInterval` |
 | Adapter no longer re-throws `WakeupException` | `aWakeupInterruptingACommitReachesTheOwnerRatherThanTheFatalBranch` |
 | An async submission refused before registration never resolves | `anAsynchronousSubmissionRefusedBeforeRegistrationStillResolvesOnce` |
+| Adapter classifies an async-submission wakeup instead of propagating it | `aWakeupOutOfAnAsynchronousSubmissionReachesTheOwnerRatherThanTheFatalBranch` |
+| Adapter resolves one submission twice | `aSubmissionThatBothResolvesAndThrowsResolvesExactlyOnce` |
+| Batch request served for a partition on its way out | `aBatchRequestIsRefusedAfterIntakeHasPermanentlyEnded` |
+| Async local timeout treated as a structural failure | `aLocalTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal` |
+| Absorbed wakeup not counted | `absorbingAWakeupIsCounted` |
+| Grace wait always reported as ending early | `howTheGraceWaitEndedIsCounted` |
+| Interrupted loop submission never resolves | `aWakeupInterruptingTheLoopSubmissionReleasesTheInFlightSlot` |
+| Absorption reportable from any phase | `onlyAProtectedOperationMayReportAbsorbingAWakeup` |
 
 **The first run of this pass reported all six as surviving, and was wrong three times over.** Worth recording,
 because each failure mode makes the tool claim safety it has not established:
@@ -652,55 +661,111 @@ enforce on one of them.
 prompt. Recorded because `AGENTS.md` §3.1a describes calibrating Codex specifically, and the owner runs those
 passes himself.
 
-### Open questions for the owner — G2, from the sixth pass
+### Owner rulings on C1–C5, 2026-09-24
 
-Three, all of them design silence rather than defects. None blocks G3; each is currently implemented the
-conservative way, which is stated so a ruling either ratifies or changes one line.
+All five answered. Four are closed; `C2` stays open because closing it is a design edit.
 
-| # | Question | Current behaviour | Why it is not mine to decide |
-|---|---|---|---|
-| C1 | May `ForceGenerationCancellation` be skipped when the grace wait returned early because every revoked generation already reported cleanup? | Submitted unconditionally | `procCommit:1308` gives the early return and `§9.2` step 7 makes accepting force cancellation what releases the callback. Neither says the submission is skippable; combining them to conclude it is would be inference |
-| C2 | `§4.1` requires each input's design to state its duplicate, stale and already-cleaned handling. `ForceGenerationCancellation`'s row does not. | Intake is assumed to tolerate a force cancellation for a generation whose cleanup it has already reported | The design states the requirement and then does not meet it for this input. That is a gap in the design, which only the owner may close |
-| C3 | May `RequestNextPartitionBatch` be applied to source state during the grace wait? | Applied, but no poll results from it | `§15.1` says the callback processes queued inputs; `§5.3` has a batch request resume a partition. Whether "process" includes a request that would resume reading during a revocation is not stated |
+**C1 — force cancellation is always submitted.** Ratified, and the reason is a distinction the question had
+blurred. There are two contracts and only the outer one was ever in doubt:
 
-### Seventh review pass, 2026-09-24 — the fix was worse than the defect
+- **External**, the Kafka source's obligation: submit it, always. The owner: "The caller should know if it is
+  its responsibility and always call then." Work must be cancelled, and quickly, so a recurring assignment of
+  the same partition is not held up. That is what the code does; the conditional it was tempting to add is gone
+  for good.
+- **Internal**, what intake does on receipt: "it would depend on if there were more cancellation dependencies
+  to push downward." On the early-return path there are none — `§4.1` has it distributed "to every remaining
+  connection and request owner in the generation", which is the empty set once cleanup completed — so it is
+  inert rather than special-cased.
 
-| Claim | Verdict | Disposition |
-|---|---|---|
-| **The sixth pass's wakeup repair makes a wakeup-interrupted commit process-fatal** | **REAL, critical, and mine** | `WakeupException extends KafkaException extends RuntimeException`, verified against the `kafka-clients` 4.2.0 class files. Removing it from `commitSync`'s multi-catch did not make it propagate — it fell into the broad `RuntimeException` clause, matched neither retriable nor stale, and reached the branch `§5.7` reserves for authorization failure, oversized metadata, an invalid offset size and *unrecognized* failures. A wakeup is recognized and named in `§5.7`'s outcome list, so it is excluded from that set by name. Now re-thrown explicitly |
-| A `commitAsync` that throws before registering a callback strands the one-in-flight slot | **REAL** | No callback means no resolution, and `§5.7` allows one operation at a time, so the source never commits again for the life of the process. The adapter classifies the synchronous throw like any other commit failure, which makes "exactly one resolution per submission" true of every path |
-| `onWakeupAbsorbedByProtectedOperation` has no phase guard | **REAL** | The only transition without one, and it clears a flag the poll boundary owns. Guarded |
-| The fixture's interrupted commit runs no pending callbacks and consumes no time | **REAL** | The real client invokes completed commit callbacks at the top of `commitOffsetsSync`, before the poll that raises the wakeup, and a real commit cannot be interrupted having taken none. Both fixed |
-| Two fixture scripting methods have no caller | **REAL** | Deleted; the survivor is renamed for what it does |
-| Two test comments claim mechanisms they do not use | **REAL** | One claimed a commit had cleared staged positions when nothing had been staged; one claimed a submission point was uniquely discriminating when a second point would do as well. Both corrected — the properties held, the explanations did not |
-| A counter for wakeup absorption | **design silent** | The class's own javadoc says every decision gets a counter, but a counter is a metric name and those are the owner's. Open question C4 below. The reviewer's related claim that `POLLS_WOKEN_BY_QUEUED_INPUT` undercounts does **not** survive: the absorbed wakeup was spent by the commit, so that poll genuinely was not woken by queued input |
+The split is worth keeping because it is the general shape: an unconditional caller obligation plus a callee
+that decides whether anything remains. A caller that tries to predict the callee's answer is the thing that
+produced the original question.
 
-**Three consecutive rounds found the defect in the previous round's fix of the same concern**, all on the
-wakeup-absorption path. That is `AGENTS.md` §3.1b's sharper signal, not its third-revision trigger, and the
-owner called it: the next round asks the reviewer for a **patch** rather than a finding. Recorded here because
-it applies to the rest of G2, not just to one round.
+**C3 — a batch request during the grace wait is dropped only for the partition leaving.** The owner's rule:
+"Any batch wait for a partition in limbo should be dropped. Any batch wait for a partition being processed
+still should continue to be handled as it normally would." He also asked whether batch requests are marked by
+generation — **they are**, `PartitionBatchRequestId(PartitionGenerationId, long)` in `§2`, which is what makes
+the rule decidable rather than guessed. The implementation already behaved this way. It now has a test for the
+half that needed one — the partition the rebalance *keeps*, whose request must survive another partition's
+revocation and be resumed once the callback returns. **The dropping half is proved elsewhere**, by the
+pre-existing ended-intake test that mutation 18 catches; the new test does not catch it, because a revoked
+generation retires moments later and cannot be resumed whether it accepted the request or not. That is recorded
+rather than smoothed over: the test was first named for both halves and falsification showed it was evidence for
+one, which is the fourth time a test here has been named for more than it observes. `§15.1`'s "commit-related and lifecycle" enumeration is therefore not a
+restriction on which inputs may be *applied*; it describes what the wait is for, and the grace wait is a
+downstream push that the rest of the processing model continues around.
 
-**Why eleven caught mutations said nothing about this.** The falsification harness mutated
-`KafkaSourceOwner.java` and `WakeupController.java` and never `KafkaConsumerSourcePort.java`, and there was no
-test for that file at all. The division is the reason: a fixture decides *what* to throw, the adapter decides
-what a throw *means*, so no fixture-driven test can reach the classifier — `PumpedKafkaSource.commitSync`
-throws `WakeupException` directly and bypasses it. `KafkaConsumerSourcePortTest` now covers all six
-classifications and the harness mutates the adapter.
+**C4 — counters with fixed cardinality need no ask.** Standing ruling, beyond this one counter: "It's fine to
+add more counters — those are decisions you never have to ask me for if the cardinality is fixed." The
+absorption counter is added. It was the one wakeup decision no series recorded, on the path that has produced
+two defects.
 
-**The general lesson, which is not about wakeups.** A component whose only tests run through a fake of its
-collaborator is untested at exactly the boundary where it does its work. Worth checking before the next
-milestone's fakes are written, because G3 introduces `SourceAssemblySink`, which is the same shape.
+**C5 — a local timeout must not be fatal, and finishing an outgoing partition's work is a good-effort
+obligation.** The owner: "TimeoutException -> Fatal exceptions sounds like a major escalation that shouldn't be
+happening", and "finalizing work/commits for partitions that are on their way out should be … 'good effort'. If
+we can't get every case of follow-up commits in, that's fine. Ideally we don't categorically block all of them."
+`commitAsync` now classifies a timeout as an unknown outcome, as `commitSync` always has.
 
-**Codex could not run this pass either.** `codex exec` fails with a 403: the organization's service-control
-policy explicitly denies `bedrock-mantle:CreateInference` for the role `codex-DO-NOT-DELETE` resolves to, so
-the model call never happens. Credentials are valid — the deny is an org policy. The reviewer was `claude -p`
-plus an in-session read-only subagent, both with the calibrated prompt.
+**"Good effort, and never categorically blocked" is the rule to check the commit path against**, not just this
+one classification. Three things in the current implementation are that rule already, and naming them together
+is what makes the next change checkable against it: a commit is attempted however little grace remains; a
+still-owned partition keeps and re-offers a position after an unknown outcome; and every submission resolves on
+every path, so one operation's failure never strands the slot that the next needs. A fatal throw is the one
+mechanism that *does* block all of them categorically, which is why moving a recognised failure out of that
+branch matters more than which outcome it becomes.
 
-### Open questions for the owner — added by the seventh pass
+### C2 — open, because closing it edits the design
 
-| # | Question | Current behaviour | Why it is not mine to decide |
-|---|---|---|---|
-| C4 | Should wakeup absorption inside a protected operation have its own counter? | Not counted. `WakeupController`'s javadoc says "every decision a counter", and every sibling decision has one | A counter is a new metric series, and metric names are a contract the owner owns (red line 2). The absorption is visible in the retirement log's path but not as a series |
+This is the one that needs a decision rather than an implementation, and it is a **documentation** gap, not a
+behavioural one. Three facts:
+
+1. `§4.1` requires it. "Any future input must be a named immutable value and its design must state: … how
+   duplicate, stale-generation, and already-cleaned-generation delivery is handled".
+2. `ForceGenerationCancellation`'s row does not state it. It says what the input reports — "The revocation grace
+   period ended" — and what intake changes — "Records forced cancellation and distributes it to every remaining
+   connection and request owner in the generation". Nothing about receiving one for a generation already cleaned.
+3. `C1`'s answer creates that case on **every** early return. The source submits unconditionally, and on the
+   early-return path cleanup has by definition already completed, so the already-cleaned delivery is the normal
+   case rather than an edge one.
+
+So the design mandates a statement, the statement is missing, and the behaviour it would describe is now
+decided. **The proposed amendment is two sentences**, to follow `§4.1`'s input table, and it needs the owner's
+explicit word before anyone writes it:
+
+> Duplicate or already-cleaned delivery of `ForceGenerationCancellation` is inert. It is distributed to every
+> remaining connection and request owner in the generation, which is the empty set once that generation's
+> cleanup has completed, and it creates no state. The Kafka source therefore submits it unconditionally,
+> including when the grace wait returned early because every revoked generation had already reported cleanup.
+
+Recorded rather than written, per red line 1: being right is not permission, and the owner's ruling on the
+*behaviour* is not authorization to edit the document that describes it.
+
+### A G2 commit that carried 600 lines of G3, and the rule it broke
+
+`3c3472d06` was the adapter's wakeup fix. Its diff also contained
+`SourceConnectionState`, `SourceAssemblySink` and the `HttpMessageAndTimestamp` promotion — about six hundred
+lines of G3 — and its message mentioned none of it. Cause: `git add -A <module>` while unrelated work sat in
+the tree, rather than staging the paths the commit was about.
+
+Split into `87200ef8e` (G2) and `c84b2fe74` (G3) with the six later commits replayed, verified by the tree
+being byte-identical to the pre-split branch and by no commit mixing the two milestones' paths. This is exactly
+what `AGENTS.md` §5's "do not *bury* an unrelated fix inside another change" forbids, and it was caught by the
+owner reading the diff rather than by any check.
+
+**It is checkable, which is why it is worth recording rather than resolving to be careful.** This is the second
+time a staging habit has produced a mixed commit — `da7787ebf` mixed a design edit with implementation, which is
+what `tools/verify-design-authorization.sh` now catches. The same shape, one category wider.
+
+`tools/verify-commit-scope.sh` is the check for this one. It fails a commit whose subject names one milestone
+while the commit **adds** a file under a package another milestone owns, and it reports `3c3472d06`'s two files
+when run against that commit. Deliberately narrow: added files only, because a *modification* in another
+milestone's file is often mechanical — repointing an import after a package move is a one-line edit and is not
+buried work — while a new file under another milestone's package never is. Package ownership is listed only
+where it is unambiguous; `replay/intake/` is G3's and `replay/kafkasource/` is G2's, and a package with no row is
+not checked.
+
+**Not added to `AGENTS.md`.** That file is the owner's; the check exists and is named here, and whether §5 should
+point at it the way §1 points at the design-authorization check is his call.
 
 ### Repair staging — four commits, and why they are grouped this way
 
@@ -730,12 +795,15 @@ G1R is landed pending its real-broker run. What remains open against G2 is liste
 Everything except G2R-a is unblocked. G2R-b, -c, -d and G1R are disjoint by package, so ordering among them
 is convenience rather than dependency.
 
-**Still open against G2 after three repair rounds:**
+**Still open against G2 after eight review rounds:**
 
 - `§17.4`'s nine demand cases, deferred to `G7` with a ledger row each. Not a gap.
 - Production wiring, deferred to `G9`, which un-marks `runReplayMode`. Not a gap.
-- **The two unratified `kafkaLLD` edits above.** The only thing genuinely outstanding, and it is the owner's
-  decision, not a piece of work.
+- **`C2`** — the `§4.1` row `ForceGenerationCancellation` is missing. A design edit, with the amendment written
+  out above and awaiting the owner's word. The behaviour it would describe is already decided and implemented.
+
+`C1`, `C3`, `C4` and `C5` are closed by the owner's rulings above. Nothing else is outstanding as a piece of
+work.
 
 The single-clock residue is **closed**, not accepted: `GraceIntervalWait` makes the waiting injectable so the
 deadline is measured by one clock, which is what `§15.1` requires. Recording my own acceptance of that
@@ -1308,6 +1376,20 @@ driving the real serializer is the point. Carry-over count is therefore **119**,
 | D-2 | **Whether the target-*response* retry path keeps an attempt cap** | **No response at all → indefinite retries, no cap** (matches connLLD §9.1). **Some HTTP response → `MAX_RETRIES = 4`**, and that value **should become a top-level config setting** rather than a constant | P5 no longer strips `MAX_RETRIES` from `DefaultRetry`; it keeps the cap and lifts it to configuration. The new option is **additive** — a new CLI/config key defaulting to 4, i.e. current behavior — so it is not a red-line-2 break, but it does extend the §2.3 CLI surface and belongs in the G9 option inventory. P5 is unblocked |
 | D-3 | **The terminal-disposition vocabulary for the conservation identity** | `records_read == records_replayed + records_skipped + records_failed` was written in `AGENTS.md:173-185` as an **example**, not a required identity. The premise above it — every record read reaches exactly one terminal disposition — **is true and stays**; what is not guaranteed is that the disposition gets *recorded*, because a commit can be **rejected**, and when commits stop working we do not learn exactly when they stopped. Both conditions are **non-happy-path only**. So the invariant is three tiers: **(i) always, the inequality `records_read >= records_committed`** — nothing is created; **(ii) in the happy case, the equality `records_read == records_committed`** — nothing is dropped, and this is assertable; **(iii) per partition, commit-position advancement equals the number of records committed**, which also carries sequence continuity. The final scale test **assumes the happy case** when validating metrics. A three-way terminal split is not the right shape, since `records_skipped` is not decidable at a single point | Do **not** build a three-label terminal-disposition counter. Build instead: (a) the inequality as a permanently-armed assertion, since a violation means a record was committed that was never read; (b) the happy-case equality as the scale test's metric oracle; (c) the commit-advancement identity per partition and generation, which `ObservedRecordCommitQueue` is already positioned to assert since it computes `nextCommitOffset = lastRemoved.offset() + 1` from head-contiguous removal; (d) exact expected values in the deterministic happy-case tests. Add the missing `partition`/`generation` attribute to the read counter — `kafkaRecordsRead` has none today. **Owner approved 2026-09-22: count rejected commits and cancelled records as their own metrics.** That closes the tier-1 inequality back into a balancing equality with named slack terms, which localizes a loss instead of merely detecting one: `records_read == records_committed + records_cancelled + records_abandoned_at_revocation + records_commit_ineligible + records_outstanding`. See "Conservation instruments" below |
 | D-4 | **The five dashboard-pinned metric names live in a file being rewritten** | **Keep all five, and they must match the same semantics.** If the new semantics differ even slightly, **introduce a wholly new name instead** and raise it for discussion rather than reusing the old string | Rule to apply mechanically during the `ReplayContexts` rewrite: for each of `lagBetweenSourceAndTargetRequests`, `bytesWrittenToTarget`, `bytesReadFromTarget`, `tupleComparison`, and the `kafkaCommit` span behind `kafkaCommitCount` — either reproduce the name *and* its measured quantity exactly, or pick a new name and escalate. Silent reuse under changed semantics is the failure mode this forbids, and it is worse than a rename because three dashboard copies keep rendering a plausible wrong number |
+
+### Metrics added under the owner's standing counter ruling
+
+"Counters with fixed cardinality are decisions you never have to ask me for" (2026-09-24). Recorded here rather
+than escalated, so the set stays enumerable:
+
+| Metric | What it answers |
+|---|---|
+| `kafkaSourceWakeupsAbsorbedByProtectedOperation` | How often a Kafka call consumed a wakeup meant for a poll. The one wakeup decision no other series records: the wakeup was issued so `WAKEUPS_ISSUED` has it, and the poll was never woken so `POLLS_WOKEN_BY_QUEUED_INPUT` correctly excludes it. A commit swallowing wakeups was indistinguishable from a run with none |
+| `kafkaSourceRevocationsCleanedBeforeDeadline` / `kafkaSourceRevocationsReachingDeadline` | **How to tune the grace ceiling**, which is why that ceiling is a command-line option. Nearly all early means the ceiling exceeds what the work needs; nearly all at the deadline means revocations are held for their full interval and a longer one costs more than it buys. Neither number says anything alone, which is why they are a pair |
+
+The second pair also closed a loose end: `awaitGraceDeadlineProcessingInputs` returned how the wait ended and
+**nothing read it**. A discarded return value on that method is an invitation to re-derive the conditional that
+`C1` just ruled out, so it now feeds the counters instead of being dropped.
 
 ### Conservation instruments — the D-3 metric set
 

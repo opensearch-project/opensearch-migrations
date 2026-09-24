@@ -21,6 +21,24 @@ C=TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/
 A=TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/kafkasource/KafkaConsumerSourcePort.java
 RESULTS="$W/TrafficCapture/trafficReplayer/build/test-results/test"
 
+# Each mutation is reverted with `git checkout`, which would silently destroy an uncommitted production edit --
+# and then report every later mutation as CAUGHT by the tests that are really failing against the reverted
+# baseline. Refusing to start is the only way that cannot be mistaken for coverage.
+if ! git diff --quiet -- "$O" "$C" "$A"; then
+  echo "REFUSING: $O, $C or $A has uncommitted changes."
+  echo "  Each mutation is reverted with 'git checkout', which would discard them and then attribute the"
+  echo "  resulting failures to the mutations. Commit in the throwaway worktree first."
+  exit 3
+fi
+
+# A mutation is only evidence if the unmutated tree is green. Otherwise every mutation reports CAUGHT.
+rm -rf "$RESULTS"
+if ! ./gradlew :TrafficCapture:trafficReplayer:test --tests '*kafkasource*' --tests '*ReplayerFixtureSelfTest*' \
+     -x spotlessJavaCheck -x spotlessJavaApply > /tmp/falsify-baseline.log 2>&1; then
+  echo "REFUSING: the unmutated baseline does not pass; see /tmp/falsify-baseline.log"
+  exit 4
+fi
+
 run() {
   label="$1"
   if git diff --quiet -- "$O" "$C" "$A"; then
@@ -93,7 +111,7 @@ perl -pi -e 's/if \(remainingNanos <= 0\) \{/if (false) {/' "$O"
 run "revocation commit started with no grace remaining"
 
 # 11. Skip force cancellation when every generation reported cleanup early (procCommit §9.2 step 7).
-perl -pi -e 's/^            awaitGraceDeadlineProcessingInputs\(deadline, generations\);$/            var cleanEarly = awaitGraceDeadlineProcessingInputs(deadline, generations);/' "$O"
+perl -0pi -e 's/            wakeupController\.recordGraceWaitEnded\(\n                awaitGraceDeadlineProcessingInputs\(deadline, generations\)\n            \);/            var cleanEarly = awaitGraceDeadlineProcessingInputs(deadline, generations);\n            wakeupController.recordGraceWaitEnded(cleanEarly);/' "$O"
 perl -0pi -e 's/(            generations\.forEach\(generation -> submitRequired\(\n                new ReplayIntakeInput\.ForceGenerationCancellation\(generation\)\n            \)\);)/            if (!cleanEarly) {\n$1\n            }/' "$O"
 run "force cancellation skipped on the early-return path"
 
@@ -104,5 +122,41 @@ perl -0pi -e 's/        \} catch \(WakeupException absorbedByTheCommit\) \{\n(?:
 run "adapter no longer re-throws WakeupException"
 
 # 13. Drop the resolution for an async submission the client refuses outright, which strands the one-in-flight slot.
-perl -0pi -e 's/        \} catch \(RuntimeException refusedBeforeSubmission\) \{\n(?:            \/\/[^\n]*\n)+            onResolved\.accept\(classifyAsync\(refusedBeforeSubmission\)\);\n        \}/        } catch (RuntimeException refusedBeforeSubmission) {\n            \/\/ swallowed\n        }/' "$A"
+perl -0pi -e 's/        \} catch \(RuntimeException refusedBeforeSubmission\) \{\n(?:            \/\/[^\n]*\n)+            resolveOnce\.accept\(classifyAsync\(refusedBeforeSubmission\)\);\n        \}/        } catch (RuntimeException refusedBeforeSubmission) {\n            \/\/ swallowed\n        }/' "$A"
 run "async submission refused before registration never resolves"
+
+# 14. Let the adapter classify a wakeup out of an *asynchronous* submission. Same mechanism as 12: WakeupException
+#     is a RuntimeException, so dropping the clause routes a routine wakeup into the structural-failure branch.
+perl -0pi -e 's/        \} catch \(WakeupException absorbedByTheSubmission\) \{\n(?:            \/\/[^\n]*\n)+            throw absorbedByTheSubmission;\n//' "$A"
+run "adapter classifies an async-submission wakeup instead of propagating it"
+
+# 15. Resolve the submission more than once, which releases the one-in-flight slot the next operation holds.
+perl -0pi -e 's/            if \(resolvedAlready\.compareAndSet\(false, true\)\) \{\n                onResolved\.accept\(outcome\);\n            \}/            onResolved.accept(outcome);/' "$A"
+run "adapter resolves one submission twice"
+
+# 16. Drop the owner's resolution of an interrupted asynchronous submission, stranding the in-flight slot.
+perl -0pi -e 's/        \} catch \(WakeupException absorbedByTheSubmission\) \{\n(?:            \/\/[^\n]*\n)+            wakeupController\.onWakeupAbsorbedByProtectedOperation\(\);\n            onCommitResolved\(submitted, KafkaSourcePort\.CommitOutcome\.OUTCOME_UNKNOWN\);\n//' "$O"
+run "interrupted loop submission never resolves"
+
+# 17. Remove the phase guard on absorption reporting, letting any caller consume the poll boundary's wakeup.
+perl -0pi -e 's/^        requirePhase\(Phase\.PROTECTED_OPERATION, "onWakeupAbsorbedByProtectedOperation"\);\n//m' "$C"
+run "absorption reportable from any phase"
+
+# 18. Serve a batch request for a generation whose intake has permanently ended, so a partition in limbo is
+#     resumed for a request whose offsets have already moved past it.
+perl -0pi -e 's/        if \(!state\.get\(\)\.lifecycleAllowsIntake\(\)\) \{\n(?:            [^\n]*\n)+        \}\n//' "$O"
+run "batch request served for a partition on its way out"
+
+# 19. Classify a local timeout on an asynchronous submission as structural, which kills the process over one
+#     partition's slow commit and abandons every other partition's progress.
+perl -0pi -e 's/        if \(failure instanceof TimeoutException\) \{\n(?:            \/\/[^\n]*\n)+            return CommitOutcome\.OUTCOME_UNKNOWN;\n        \}\n//' "$A"
+run "async local timeout treated as a structural failure"
+
+# 20. Stop counting an absorbed wakeup, which makes a commit swallowing them look like a run with none.
+perl -0pi -e 's/        pollInstruments\(\)\.wakeupsAbsorbedByProtectedOperation\.add\(1\);\n//' "$C"
+run "absorbed wakeup not counted"
+
+# 21. Report every grace wait as having ended early, which leaves the counter pair unable to answer the one
+#     question it exists for -- whether the grace ceiling is tuned.
+perl -0pi -e 's/            wakeupController\.recordGraceWaitEnded\(\n                awaitGraceDeadlineProcessingInputs\(deadline, generations\)\n            \);/            awaitGraceDeadlineProcessingInputs(deadline, generations);\n            wakeupController.recordGraceWaitEnded(true);/' "$O"
+run "grace wait always reported as ending early"

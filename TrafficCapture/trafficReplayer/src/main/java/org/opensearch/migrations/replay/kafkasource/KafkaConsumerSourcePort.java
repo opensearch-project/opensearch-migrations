@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
@@ -112,16 +113,31 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         Map<TopicPartition, Long> nextPositions,
         java.util.function.Consumer<CommitOutcome> onResolved
     ) {
+        // One resolution per submission, enforced rather than assumed. The client registers its callback partway
+        // through the call and can still throw after that -- ConsumerCoordinator's closing pollNoWakeup raises
+        // interrupt and metadata errors -- so a throw does not prove no callback was registered. §5.7 allows one
+        // commit operation at a time and the caller releases that slot on resolution, so resolving twice would
+        // release a slot the next operation holds.
+        var resolvedAlready = new AtomicBoolean();
+        java.util.function.Consumer<CommitOutcome> resolveOnce = outcome -> {
+            if (resolvedAlready.compareAndSet(false, true)) {
+                onResolved.accept(outcome);
+            }
+        };
         try {
             consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) ->
-                onResolved.accept(classifyAsync(failure))
+                resolveOnce.accept(classifyAsync(failure))
             );
+        } catch (WakeupException absorbedByTheSubmission) {
+            // Propagated for the same reason commitSync propagates it: §5.4 leaves the owner as the only
+            // boundary that may interpret a wakeup. Classifying it here would instead reach the structural
+            // branch, because WakeupException is a KafkaException and therefore a RuntimeException, and kill the
+            // process on a routine queued input. The owner records the absorption and resolves the submission.
+            throw absorbedByTheSubmission;
         } catch (RuntimeException refusedBeforeSubmission) {
-            // A throw here means no callback was ever registered, so the caller would otherwise wait forever
-            // for a resolution that cannot arrive -- and §5.7 allows it one commit operation at a time, so
-            // waiting forever means never committing again. Classified like any other commit failure, which
-            // keeps "exactly one resolution per submission" true of every path out of this method.
-            onResolved.accept(classifyAsync(refusedBeforeSubmission));
+            // A refused submission must still resolve: §5.7 allows one commit operation at a time, so a caller
+            // waiting for a resolution that cannot arrive never commits again.
+            resolveOnce.accept(classifyAsync(refusedBeforeSubmission));
         }
     }
 
@@ -139,6 +155,14 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         }
         if (isGenerationStale(failure)) {
             return CommitOutcome.GENERATION_STALE;
+        }
+        if (failure instanceof TimeoutException) {
+            // A timeout says the client stopped waiting, not that the commit is invalid. On
+            // `group.protocol=consumer` the request is already with the background thread when this is raised,
+            // so the operation may well have reached the broker -- which is what an unknown outcome means. The
+            // synchronous path has always classified a timeout this way; killing the process on the
+            // asynchronous one would abandon every partition's progress over one partition's slow commit.
+            return CommitOutcome.OUTCOME_UNKNOWN;
         }
         throw structurallyInvalid(failure);
     }
