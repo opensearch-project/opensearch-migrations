@@ -304,6 +304,11 @@ The posture is **integrate first, observability as the debugging substrate.** No
   Stabilize the production end-to-end path first; decide where outside-in tests give the most leverage
   once production is coherent.
 - **Metrics are conservation invariants** — see the definition below.
+- **A counter with fixed cardinality needs no approval.** Owner, 2026-09-24: "It's fine to add more counters —
+  those are decisions you never have to ask me for if the cardinality is fixed." So adding one is not a red-line-2
+  contract decision and does not go in an escalation table; record it in the register's metric list and move on.
+  *Fixed* cardinality is the whole condition: a counter whose attributes include a generation, partition,
+  connection or request identity is one series per identity forever, and that **is** a decision to bring.
 
 ### 4.1 Falsification — a test that cannot fail is not evidence
 

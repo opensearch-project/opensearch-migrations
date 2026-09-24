@@ -155,3 +155,8 @@ run "async local timeout treated as a structural failure"
 # 20. Stop counting an absorbed wakeup, which makes a commit swallowing them look like a run with none.
 perl -0pi -e 's/        pollInstruments\(\)\.wakeupsAbsorbedByProtectedOperation\.add\(1\);\n//' "$C"
 run "absorbed wakeup not counted"
+
+# 21. Report every grace wait as having ended early, which makes the pair of counters unable to say whether the
+#     ceiling is tuned -- the one question they exist to answer.
+perl -pi -e 's/            wakeupController\.recordGraceWaitEnded\(\n?/            wakeupController.recordGraceWaitEnded(true); if (false) recordGraceWaitEndedUnused(\n/' "$O"
+run "grace wait always reported as ending early"
