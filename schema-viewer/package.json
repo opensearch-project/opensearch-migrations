@@ -6,10 +6,12 @@
   "scripts": {
     "fetch-schemas": "bash fetch-schemas.sh",
     "dev": "npx serve .",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "test:nocov": "vitest run"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
     "jsondiffpatch": "^0.7.2",
     "vitest": "^4.1.9"
   }

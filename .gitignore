@@ -47,7 +47,7 @@ DocumentsFromSnapshotMigration/docker/snapshots/
 transformation/standardJavascriptTransforms/coverage/
 transformation/standardJavascriptTransforms/node_modules/
 schema-viewer/node_modules/
-schema-viewer/package-lock.json
+schema-viewer/coverage/
 schema-viewer/schemas/
 orchestrationSpecs/k8sResources/
 orchestrationSpecs/dist/
