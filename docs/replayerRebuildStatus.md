@@ -674,10 +674,32 @@ caller exists yet.
 R18 row once. `AGENTS.md` §6 forbids implementing from a paraphrase, and a stale line cite is how someone
 reads the wrong bullets while believing they read the design.
 
-## Unratified design edits — open escalation, 2026-09-23
+## Unratified design edits — resolved 2026-09-23
+
+**Resolved: the owner ratified the removal**, with a stronger argument than the one it originally rested on —
+the work whose position a revocation commit records has already been sent to the target and cannot be recalled,
+so every remaining millisecond is worth spending on recording it completely. Declining to try is not a saving
+but a guaranteed re-send of traffic the target has already seen. `§5.7` now states that there is **no** minimum
+remainder, so the absence is a decision rather than a gap someone later fills.
+
+His second point was that separating design edits into their own commit does not fix anything: *"Design edits
+only happen when I ok them."* Correct, and the proposed remedy was a visibility aid presented as a fix. What
+changed instead:
+
+- `AGENTS.md` red line 1 now states the rule in its narrowest form — no edit to `docs/captureAndReplay/`
+  without the owner having approved *that thing* — and names the three ways it was misread: a sentence added
+  inside an authorization he did give, one's own reasoning being sound, and the owner not objecting.
+- Accepting a *deviation* is named as the same act as changing the design, since it decides the design's
+  meaning. That is what the grace-wait entry did.
+- `tools/verify-design-authorization.sh` checks it mechanically: every design document changed since
+  `docs/captureAndReplay/APPROVED-AT` must have a dated row here, and no commit may mix a design edit with
+  implementation. It found the real violation on its first run.
+
+The record of what went wrong is kept below, because the next agent reading red line 1 benefits more from the
+two concrete misreadings than from the rule restated.
 
 **Two edits to `kafkaLLD` that the owner did not authorize.** Raised by the second review pass against
-`AGENTS.md:17` and correct. Both are mine, and the remedy is the owner's call, not mine.
+`AGENTS.md:17` and correct. Both are mine.
 
 The owner authorized the `§5.7` amendment in substance: the outcome reshape and the asynchronous-loop /
 synchronous-revocation split, both of which were on the table as an explicit recommendation when he said to
@@ -693,12 +715,7 @@ the interval it reserved is an in-memory queue submit that needs no reserve, and
 of a position an attempt might have committed. But a sound argument is not authorization, and red line 1 is
 absolute rather than conditional on being right.
 
-**Current state is self-consistent** — no floor in the design, none in the code — so nothing is broken. What
-is missing is the owner's decision between:
-
-- **Ratify**, and this row becomes two ordinary entries in the table below; or
-- **Revert both edits**, restoring `§5.7`/`§17.5` to their pre-floor wording, which is the state before
-  `7a29d1747` on that one point and leaves the code unchanged.
+**Ratified as removed**, per the reasoning above.
 
 **A third, separate misstep, already corrected in code.** The register previously recorded the grace wait's
 real-time-versus-injected-clock behaviour as *accepted*, with me as the one accepting it. Accepting a deviation
@@ -706,8 +723,9 @@ from `§15.1` is not mine to do either. `GraceIntervalWait` now satisfies the si
 so there is no deviation to accept and no decision pending — but the earlier entry was the same category of
 error as the two above and is called out rather than quietly rewritten.
 
-**Process change taken without needing a decision:** design edits go in their own commit from here, never
-mixed with implementation, so that a reviewer sees exactly one kind of change per commit.
+**Superseded:** an earlier version of this section offered "design edits get their own commit" as the remedy.
+The owner rejected that — separate commits make an unauthorized edit easier to see, not less likely. The rule is
+prior authorization; the commit split and the check are only what make a breach visible.
 
 ## Design changes — only ever on the owner's instruction
 
@@ -718,7 +736,8 @@ was added so it can be vetoed on reading.
 | Date | Section | What was added | Why it was not already there |
 |---|---|---|---|
 | 2026-09-23 | `kafkaLLD §5.7` | That the five commit outcomes describe the **operation, not individual partitions**; that a batched operation may apply to some partitions and not others with the client reporting one result for the whole thing; and that a failed operation is therefore not evidence that nothing was committed. | A fact about the Kafka client, verified in its 4.2.0 sources, that §5.7 was silent on. Silence let an implementation read a single failure as "none committed", which is wrong. |
-| 2026-09-23 | `kafkaLLD §5.7`, `§17.4` | **The commit outcome list is rewritten to name the retry decision instead of ownership, and the submission mode is split: asynchronous in the ordinary loop, bounded synchronous inside `onPartitionsRevoked`.** Outcomes become acknowledged / retriable / generation-stale / outcome-unknown / late-callback, with structurally invalid commits leaving the list entirely as process-fatal. Also added: at most one operation in flight; revocation begins at callback *entry*; and that the source never infers which partition failed. | Three separate causes. (1) The old names described *ownership* while the decision the owner makes is *retry or discard*, and Kafka draws exactly that line — `RebalanceInProgressException` means the generation is intact, `CommitFailedException` means it is gone — which the implementation was conflating in one catch block, giving opposite semantics the same outcome. (2) The structural failures (authorization, oversized metadata, invalid offset size) are unfixable by retry, and `commitSync` already absorbs every genuinely transient error internally, so nothing retriable reaches us as itself; treating them as an outcome means reading on while never committing. (3) **The design already said commits are asynchronous** — `procCommit §5.1` lists "commit callback handling", `§137` assigns the owner "commit callbacks", and `captureArch:1177` says it "neither retries the commit nor waits indefinitely for its callback" — while the implementation was synchronous in the loop. That is a latent `D5` outside the callback: `commitSync` blocks up to `default.api.timeout.ms` without polling, which can exceed `max.poll.interval.ms` and trigger a rebalance. It also meant `LATE_CALLBACK` looked dead and was nearly deleted, which would have ratified the simplification silently — red line 3. |
+| 2026-09-23 | `kafkaLLD §5.7` | That a revocation commit has **no minimum remaining interval** below which it declines to attempt — stated, rather than merely not mentioned. | The owner's ruling on the unratified-edit escalation, and his reasoning rather than mine: the work whose position this commits has already been sent to the target and cannot be recalled, so every remaining millisecond is worth spending on recording it completely, and declining to try is not a saving but a guaranteed re-send of traffic the target has already seen. Stated explicitly so the absence is a decision rather than a gap someone later fills with a floor — which is exactly what happened once. |
+| 2026-09-23 | `kafkaLLD §5.7`, `§17.4`, `§17.5` | **The commit outcome list is rewritten to name the retry decision instead of ownership, and the submission mode is split: asynchronous in the ordinary loop, bounded synchronous inside `onPartitionsRevoked`.** Outcomes become acknowledged / retriable / generation-stale / outcome-unknown / late-callback, with structurally invalid commits leaving the list entirely as process-fatal. Also added: at most one operation in flight; revocation begins at callback *entry*; and that the source never infers which partition failed. | Three separate causes. (1) The old names described *ownership* while the decision the owner makes is *retry or discard*, and Kafka draws exactly that line — `RebalanceInProgressException` means the generation is intact, `CommitFailedException` means it is gone — which the implementation was conflating in one catch block, giving opposite semantics the same outcome. (2) The structural failures (authorization, oversized metadata, invalid offset size) are unfixable by retry, and `commitSync` already absorbs every genuinely transient error internally, so nothing retriable reaches us as itself; treating them as an outcome means reading on while never committing. (3) **The design already said commits are asynchronous** — `procCommit §5.1` lists "commit callback handling", `§137` assigns the owner "commit callbacks", and `captureArch:1177` says it "neither retries the commit nor waits indefinitely for its callback" — while the implementation was synchronous in the loop. That is a latent `D5` outside the callback: `commitSync` blocks up to `default.api.timeout.ms` without polling, which can exceed `max.poll.interval.ms` and trigger a rebalance. It also meant `LATE_CALLBACK` looked dead and was nearly deleted, which would have ratified the simplification silently — red line 3. |
 | 2026-09-23 | `connLLD §8`, `§17.1`, `§19.5`; `procCommit §9.2`; `kafkaLLD §15.1`, `§17.5`; `captureArch §11` | **The graceful-cancellation boundary moves from the first request write to the final one**, and `FinalTargetWriteSubmitted` joins `FirstTargetWriteSubmitted` as a second write milestone. A request partway through sending is now cancelled immediately rather than waited on. Also stated: the grace interval relaxes no commit condition — a record commits only with its response obtained, no retry outstanding, and its tuple durable. | Owner's instruction, and the design could not express it: `§8` defined only the *first* write and `§17.1` keyed the wait on it, so a request with one byte on the wire was waited on for the full interval although finishing it requires further target writes that graceful cancellation will not issue. **The second milestone is not redundant, which the instruction did not say and I added by implication — flag if unwanted.** First-write is still the only thing that can answer whether a cancelled request's channel is reusable: once any byte reaches the target the HTTP stream's framing is undefined, so that channel must be closed rather than returned to the pool. The two milestones bracket a state with both properties — unfinishable and channel-poisoned — which is the case the old single boundary silently mishandled. |
 | 2026-09-23 | `procCommit §9.5` (new), `captureArch §11` | **Forward progress across revocations, and the two measurements that make it observable.** A revocation commits the contiguous prefix of finished records, so a partition whose *earliest* uncommitted record outlives the grace interval commits nothing; revocations arriving faster than that record finishes stall the committed position indefinitely. Each retiring generation now reports `recordsCommittedInGeneration` and `recordsReadInGeneration`. | The owner raised the case directly: 1K records mid-flush to S3, revoked, and with frequent rebalances "I might not make forward progress". A grep of all nine designs for repeated rebalance, successive, thrash, livelock and starvation found nothing — the corpus was silent on the condition. The owner chose observable over adaptive: an adaptive deadline that waits for in-flight work stalls every retained partition and holds the group's rebalance open for as long as the slowest tuple chain, trading one partition's progress for every partition's throughput. |
 | 2026-09-23 | `procCommit §9.2`, `captureArch §11`, `kafkaLLD §15.1` | **Grace default drops from five seconds to one, and becomes a command-line option** (`--cancellation-grace-ms`, alias `--cancellationGraceMs`). Both documents now state why the smallest useful default is right: the callback stalls reading on *every* partition the consumer holds, not only the revoked ones, and blocks the whole group's rebalance while it runs. Also that the poll interval it must stay below **is** the rebalance timeout, so exceeding it fences the member and converts a graceful revocation into a lost one. | The design had a five-second default "lowerable to one second" and no option name — `procCommit §1.1` deferred the name to the lower design, where it had never been written. Starting at the least disruptive value and raising it on evidence is what §9.5's measurements are for; starting generous means paying the stall on every rebalance to cover a case you have not measured. |
