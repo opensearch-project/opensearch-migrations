@@ -252,7 +252,8 @@ Beyond `../AGENTS.md`:
 
 ## 4. Milestones
 
-Dependency order, not a schedule. Each milestone is one bounded review unit.
+Dependency order, not a schedule. Each milestone is one review unit -- reviewed repeatedly until it conforms,
+not reviewed once (`../AGENTS.md` §3.1).
 
 > **How to read the milestone descriptions below. This matters more than anything else in this document.**
 >
@@ -682,7 +683,8 @@ Every milestone, in addition to its own exit condition:
 3. Every decision hitting an `../AGENTS.md` red line was escalated, and the reversible ones were
    recorded with their defaults.
 4. The status table is updated: obligations proved, open, deferred, blocked.
-5. One bounded review, findings triaged and reported.
+5. Review repeated until a pass returns no unfixed design-conformance defect, per `../AGENTS.md` §3.1. Other
+   findings triaged once and reported.
 6. **Its cited required-test sections have been read**, and each case in them is either covered, or
    listed in the status table as deferred or won't-fix with a reason. This is not a coverage metric — it
    is a finite enumerated list the design already wrote, and the honest options are "done", "deferred to
@@ -718,6 +720,12 @@ rather than at final acceptance.
 Codex is the reviewer, invoked per milestone against the milestone diff **and the design sections named in
 that milestone's `Design refs:` line**, with the specific invariants to check. Findings come back to the human as a summary with impact and mitigations,
 not as raw output. See `../AGENTS.md` §3.
+
+**Repeated, not single.** `../AGENTS.md` §3.1 gates closure on a pass returning no unfixed
+design-conformance defect, and every production change — including one made to fix a finding — re-opens the
+review. `G0`–`G2` took five passes, and the later ones found defects in the earlier ones' fixes. Use
+`../tools/review-prompt-design-conformance.md`: the prompt is the instrument, and each of its requirements
+corresponds to a way a pass here has actually gone wrong.
 
 The review pass also runs the **falsification check** of `../AGENTS.md` §4.1 as a separate subagent in a
 throwaway worktree: it breaks one timing, ordering, interruption or waiting property at a time and

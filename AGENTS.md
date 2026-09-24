@@ -132,19 +132,72 @@ defect and silently becomes the design.
 
 Three different things are called "review" and they have different rules.
 
-### 3.1 Agent review — per milestone
+### 3.1 Agent review — per milestone, repeated until conformance
 
-Codex or a subagent reviewing a diff. This is what the bullets below govern.
+Codex or a subagent reviewing a diff against the designs.
 
-- **No review on sub-slices.** One bounded review per milestone.
-- **Bounded means bounded.** One pass. Findings are triaged into blocker / register / won't-fix. Only
-  blockers are fixed in-milestone. There is no confirmation round and no "review until no findings
-  remain" — an agent asked to find problems will always find some, so that loop cannot terminate.
-- **Scope it precisely.** Give the reviewer a specific diff, the named invariants it must not violate,
-  and specific questions with verdicts expected. Do not ask it to "find problems" or "suggest
-  improvements" — an open-ended prompt returns style notes you then have to read and discard.
+**This section previously said one bounded pass per milestone, and that was wrong.** Five successive
+review passes over `G0`–`G2` each produced real, high-value design-conformance defects — one critical, several
+major — and the last round's findings were mostly in code the previous round's fixes had introduced. A fix is
+new code. Expecting it to be correct because it was written in response to a review is exactly the assumption
+the reviews kept disproving.
+
+What the old rule got right is that **"review until no findings remain" cannot terminate**, because an agent
+asked for problems will always produce some. The answer is not a cap on rounds but a termination criterion
+tied to the *class* of finding, since one class is objectively checkable against a finite document and the
+rest are not.
+
+**Two classes, two dispositions.**
+
+1. **Design-conformance defects — unbounded rounds, every one must be fixed.** A finding qualifies only if
+   the reviewer **quotes the design text it contradicts**, with document and section. Every such defect is
+   fixed in-milestone. There is no "won't-fix" for this class and no triage into the register as a way of
+   not doing it. It may be *deferred* only under §2.1's full procedure — a named receiving milestone that
+   owns the component, both plan ends amended, a ledger row — and never to a milestone chosen because it is
+   far away.
+
+2. **Everything else — one pass, triaged.** Test-fidelity gaps, plan bookkeeping, naming, structure,
+   efficiency. Triaged into blocker / register / won't-fix exactly as before, once.
+
+**Termination.** A milestone's review is complete when a pass returns **no unfixed design-conformance
+defects**. That is reachable, because the design is finite and each round removes real contradictions rather
+than opinions. **Any production change re-opens it** — including a change made to fix a finding. If a round
+produces fixes, the next round reviews those fixes.
+
+**Guard against the failure mode this creates.** An unbounded loop invites a reviewer to reclassify
+preferences as conformance defects to make them mandatory. Two things prevent that: the verbatim quote
+requirement, and that **a finding is verified before it is accepted.** Across those five passes, three
+claims did not survive verification — one cited a rule whose trigger condition was absent, one counted
+correctly but drew a conclusion the plan already contradicted, and one **prescribed behavior the design
+forbids**, which would have introduced a defect had it been applied. Verifying is not optional politeness;
+it is what stops a review from doing damage.
+
+- **Scope it precisely.** Give the reviewer a specific diff, the named invariants it must not violate, and
+  specific questions with verdicts expected. Do not ask it to "find problems" or "suggest improvements".
 - Reviewers are for **checking**, not deciding. A reviewer's findings are input to an escalation, never
-  authority to change course.
+  authority to change course — and never authority to change a design.
+
+### 3.1a Calibrating a design-conformance review
+
+The prompt is the whole instrument. These requirements exist because each corresponds to a way a real review
+pass in this project went wrong, and `tools/review-prompt-design-conformance.md` is the current text.
+
+- **Quote the design, verbatim, with section.** A finding with no quote is not a conformance defect, whatever
+  else it may be. This is the load-bearing requirement: it is what makes the class objectively bounded.
+- **Say when the design is SILENT, and stop there.** Silence is an owner escalation under red line 1, never a
+  defect and never a licence to infer the intent. Several findings were really "the design does not say",
+  which is a different and more important report.
+- **Trace reachability in the live code, and say plainly when something is unreachable by construction.** A
+  latent defect behind an impossible precondition is worth recording and is not the same as a live one.
+- **Check the prescribed fix against the design too.** The most dangerous finding this project received was
+  correct that the code was wrong and prescribed a remedy `kafkaLLD §5.7` forbids.
+- **Exclude `REBUILD-LIMBO` regions.** That code is deliberately inert; reviewing it produces findings about
+  code that does not run.
+- **Ask specifically whether tests and fakes can fail.** In this project that has been the single
+  highest-yield question — four separate cases of a test asserting a property it could not observe, or a fake
+  violating the contract it stood in for. §4.1 attacks the same problem from the other side.
+- **Read-only, per §3.2a.** The one exception is §4.1's falsification pass, which mutates by design and is
+  therefore confined to a throwaway worktree.
 
 ### 3.2 Agent review — one full correctness review at production-complete
 
@@ -595,7 +648,8 @@ embedded in code.
 **For each production milestone:** build the final-form production path and remove the path it replaces;
 keep state instance-owned and event-loop confined; add observability and a few focused deterministic
 tests; run the narrow compile and tests with `-x spotless`; record known-broken inherited tests with their
-repair milestone; perform the one bounded review; commit with a detailed message and the owner's DCO;
+repair milestone; review until a pass returns no unfixed design-conformance defect (§3.1); commit with a
+detailed message and the owner's DCO;
 push and update the PR ledger.
 
 **At a major integration boundary:** verify there is exactly one live correctness model; check that no
