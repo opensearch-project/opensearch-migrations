@@ -25,27 +25,22 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 
-// REBUILD-LIMBO-START(G3)
-// Imports used only by the deferred HTTP-reconstruction members below. They come back with those
-// members in G3; see docs/replayerRebuildPlanA-inPlace.md G3.
+// REBUILD-LIMBO-START(G9)
+// Imports used only by the deferred file-input path.
 /*
 
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
-import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-
 */
-// REBUILD-LIMBO-END(G3)
+// REBUILD-LIMBO-END(G9)
 /**
  * Encapsulates all dump-mode logic (dump-raw, dump-http, dump-both) for both
  * Kafka and file-based sources. Keeps Kafka-specific details out of TrafficReplayer.
  *
- * <p>The file source is still deferred: it needs {@code ISimpleTrafficCaptureSource}, which is G5's.
+ * <p>The file source is still deferred: G9 restores it with startup source wiring and CLI compatibility.
  *
  * <p>Reading here uses a plain {@link KafkaConsumer} with {@code assign}, no consumer group, an explicit
  * seek and no commit. Dumping needs no ownership and no commit authority, which is why it can run without
@@ -102,10 +97,10 @@ public class KafkaTopicDumper {
         }
     }
 
-// REBUILD-LIMBO-START(G3)
+// REBUILD-LIMBO-START(G9)
 // runDumpFromSource -- the file-input dump path. Blocked on ISimpleTrafficCaptureSource and
-// ITrafficStreamWithKey (G5's source abstraction) for every mode, and additionally on the accumulator
-// for the non-raw modes. Deferred to G3 with the rest of HTTP reconstruction; the open question of
+// ITrafficStreamWithKey for every mode, and additionally on the source-assembly adapter for the non-raw
+// modes. Deferred to G9 with startup source wiring; the open question of
 // whether the file source speaks bare base64 TrafficStream or a CaptureRecord envelope is settled
 // there, and is listed in the deferral ledger in docs/replayerRebuildStatus.md.
 /*
@@ -169,7 +164,7 @@ public class KafkaTopicDumper {
     }
 
 */
-// REBUILD-LIMBO-END(G3)
+// REBUILD-LIMBO-END(G9)
     private void seekToStart(KafkaConsumer<String, byte[]> consumer,
                              java.util.List<TopicPartition> partitions,
                              Long startOffset, Long startTime) {
@@ -217,7 +212,7 @@ public class KafkaTopicDumper {
         var sourceInputs = new org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue(
             new org.opensearch.migrations.replay.kafkasource.WakeupController(
                 () -> {},
-                new org.opensearch.migrations.replay.tracing.KafkaSourceRootContext(
+                new org.opensearch.migrations.replay.tracing.RootReplayerContext(
                     io.opentelemetry.api.OpenTelemetry.noop())
             )
         );
@@ -354,49 +349,6 @@ public class KafkaTopicDumper {
         }
     }
 
-// REBUILD-LIMBO-START(G3)
-// runHttpFromKafka -- the Kafka dump-http/dump-both driver. Blocked on
-// CapturedTrafficToHttpTransactionAccumulator, ChannelContextManager and RootReplayerContext.
-// To restore: un-mark this and processHttpRecords, add a RootReplayerContext parameter to
-// runDumpFromKafka, and replace the throw in its else branch with
-//     boolean emitRaw = "dump-both".equals(mode);
-//     runHttpFromKafka(consumer, endOffsets, endOffset, endTime, previewBytesRead, previewBytesWrite,
-//         emitRaw, observedPacketConnectionTimeout, packetTimeoutParamName, topContext);
-// The context is constructed by the marked region in TrafficReplayer.runDumpMode.
-/*
-    @SuppressWarnings("java:S1854")
-    private void runHttpFromKafka(
-        KafkaConsumer<String, byte[]> consumer,
-        Map<TopicPartition, Long> endOffsets,
-        Long endOffset, Long endTime,
-        int previewBytesRead, int previewBytesWrite,
-        boolean emitRaw,
-        int observedPacketConnectionTimeout, String packetTimeoutParamName,
-        RootReplayerContext topContext
-    ) {
-        var channelContextManager = new ChannelContextManager(topContext);
-        var dumper = new HttpTransactionDumper(System.out, "msg ");
-        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-            Duration.ofSeconds(observedPacketConnectionTimeout),
-            "(see command line option " + packetTimeoutParamName + ")",
-            dumper
-        );
-        try {
-            while (!isAtEnd(consumer, endOffsets)) {
-                var polled = consumer.poll(Duration.ofSeconds(2));
-                if (processHttpRecords(polled, endOffset, endTime, endOffsets,
-                    emitRaw, previewBytesRead, previewBytesWrite,
-                    accumulator, dumper, channelContextManager, topContext)) {
-                    return;
-                }
-            }
-        } finally {
-            accumulator.close();
-        }
-    }
-
-*/
-// REBUILD-LIMBO-END(G3)
     /**
      * The dump loop terminates only when every assigned partition's current
      * position has reached the endOffset snapshot taken at startup. Using
@@ -418,85 +370,9 @@ public class KafkaTopicDumper {
         return true;
     }
 
-// REBUILD-LIMBO-START(G3)
-// processHttpRecords -- applies each record to the accumulator, and carries the exhaustive
-// CaptureRecord.payload switch for the HTTP path. Blocked on the accumulator, PojoTrafficStreamAndKey,
-// TrafficStreamKeyWithKafkaRecordId, PojoKafkaCommitOffsetData and RootReplayerContext. Note the switch
-// already matches kafkaLLD 7.1 exactly, so G3 refactors its identities rather than its shape.
+// REBUILD-LIMBO-START(G9)
+// Formatting for the deferred file-input path.
 /*
-    private boolean processHttpRecords(
-        ConsumerRecords<String, byte[]> records,
-        Long endOffset, Long endTime,
-        Map<TopicPartition, Long> endOffsets,
-        boolean emitRaw, int previewBytesRead, int previewBytesWrite,
-        CapturedTrafficToHttpTransactionAccumulator accumulator,
-        HttpTransactionDumper dumper,
-        ChannelContextManager channelContextManager,
-        RootReplayerContext topContext
-    ) {
-        for (var rec : records) {
-            if (pastEnd(rec, endOffset, endTime, endOffsets)) return true;
-            try {
-                var captureRecord = CaptureRecord.parseFrom(rec.value());
-                switch (captureRecord.getPayloadCase()) {
-                    case TRAFFICSTREAM -> {
-                        var trafficStream = captureRecord.getTrafficStream();
-                        getBaseEpoch(trafficStream);
-                        dumper.setBaseEpochSeconds(baseEpoch);
-                        if (emitRaw) {
-                            System.out.println("RAW " + TrafficStreamDumper.format(
-                                captureRecord,
-                                rec.partition(),
-                                rec.offset(),
-                                previewBytesRead,
-                                previewBytesWrite,
-                                baseEpoch
-                            ));
-                        }
-                        accumulator.accept(new PojoTrafficStreamAndKey(
-                            trafficStream,
-                            new TrafficStreamKeyWithKafkaRecordId(
-                                tsk -> {
-                                    var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                                    return topContext.createTrafficStreamContextForKafkaSource(
-                                        channelCtx,
-                                        rec.key(),
-                                        0
-                                    );
-                                },
-                                trafficStream,
-                                new PojoKafkaCommitOffsetData(0, rec.partition(), rec.offset())
-                            )
-                        ));
-                    }
-                    case WRITERPARTITIONHEARTBEAT, CAPTURECAPABILITYPROBE -> {
-                        if (emitRaw) {
-                            System.out.println("RAW " + TrafficStreamDumper.format(
-                                captureRecord,
-                                rec.partition(),
-                                rec.offset(),
-                                previewBytesRead,
-                                previewBytesWrite,
-                                baseEpoch
-                            ));
-                        }
-                    }
-                    case PAYLOAD_NOT_SET -> throw new CaptureRecordProtocolViolationException(
-                        "CaptureRecord.payload is not set at "
-                            + rec.topic()
-                            + "-"
-                            + rec.partition()
-                            + "@"
-                            + rec.offset()
-                    );
-                }
-            } catch (InvalidProtocolBufferException e) {
-                throw protocolViolation(rec, e);
-            }
-        }
-        return false;
-    }
-
     private String formatSourceInput(
         ITrafficStreamWithKey sourceInput,
         int previewBytesRead,
@@ -524,7 +400,7 @@ public class KafkaTopicDumper {
     }
 
 */
-// REBUILD-LIMBO-END(G3)
+// REBUILD-LIMBO-END(G9)
     private static CaptureRecordProtocolViolationException protocolViolation(
         ConsumerRecord<String, byte[]> record,
         InvalidProtocolBufferException cause

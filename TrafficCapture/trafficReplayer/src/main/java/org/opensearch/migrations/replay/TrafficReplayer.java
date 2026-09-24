@@ -547,7 +547,7 @@ public class TrafficReplayer {
         if (params.inputFilename != null) {
             throw new ParameterException(
                 "dump modes read from Kafka only for now; file input needs the source abstraction that"
-                    + " milestone G5 builds. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
+                    + " milestone G9 wires. Use --kafka-traffic-brokers and --kafka-traffic-topic.");
         }
     }
     /** Runs a dump mode against a Kafka topic. */
@@ -566,9 +566,9 @@ public class TrafficReplayer {
             System.exit(2);
         }
     }
-// REBUILD-LIMBO-START(G3)
+// REBUILD-LIMBO-START(G9)
 // The file-input branch of runDumpMode, and the tracing context it needs. Blocked on
-// TrafficCaptureSourceFactory and RootReplayerContext; returns with runDumpFromSource in G3, which is also
+// TrafficCaptureSourceFactory; returns with runDumpFromSource in G9, which is also
 // where the open question in the ledger is settled -- whether the file source speaks bare base64
 // TrafficStream or a CaptureRecord envelope.
 /*
@@ -589,7 +589,7 @@ public class TrafficReplayer {
             }
         }
 */
-// REBUILD-LIMBO-END(G3)
+// REBUILD-LIMBO-END(G9)
 
     /**
      * Parse and validate the replay target URI and timing params. On invalid input this prints the

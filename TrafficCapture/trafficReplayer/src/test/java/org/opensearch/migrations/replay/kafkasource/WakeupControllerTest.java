@@ -11,7 +11,7 @@ package org.opensearch.migrations.replay.kafkasource;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
 import org.junit.jupiter.api.AfterEach;
@@ -25,8 +25,7 @@ class WakeupControllerTest {
     private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(true, true);
     private final WakeupController controller = new WakeupController(
         wakeups::incrementAndGet,
-        // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
-        new KafkaSourceRootContext(telemetry.openTelemetrySdk)
+        new RootReplayerContext(telemetry.openTelemetrySdk)
     );
 
     @AfterEach

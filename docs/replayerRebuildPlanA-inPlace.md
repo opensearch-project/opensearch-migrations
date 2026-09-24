@@ -344,15 +344,15 @@ The cheapest possible end-to-end evidence, deliberately placed first.
   which is exactly why this milestone can precede G2. The only member it needs from the marked
   `KafkaTrafficCaptureSource` is the self-contained static `buildKafkaProperties`.
 
-**Deferred out of G1 to G3 — `dump-http` and `dump-both`.** Both require HTTP transaction reconstruction,
-whose closure is the legacy accumulator, `ChannelContextManager`, `RootReplayerContext`, and the
-`IReplayContexts` identity chain. Rebuilding those here would be the lateral milestone expansion §6
-forbids. G3 is where source assembly is rebuilt, so that is where these modes return — see G3. Both mode
-names stay in the CLI, because §2.3 makes them a contract; invoking them in the interim fails with a
-message naming G3 rather than producing output that does not match the mode requested. The **file** input
-path defers with them, which also postpones the format question in that region's own note — whether the
-file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope is not a G1 decision once G1
-is Kafka-only.
+**Deferred out of G1 — Kafka `dump-http` and `dump-both` to G3; file input to G9.** The HTTP modes require
+HTTP transaction reconstruction, whose closure was the legacy accumulator and tracing identity chain.
+Rebuilding those here would be the lateral milestone expansion §6 forbids. G3 rebuilds source assembly, so
+the Kafka-backed modes return there — see G3. The **file** input path needs the source construction and
+configuration compatibility G9 owns, so it returns there instead; G9 also settles whether that source speaks
+bare base64 `TrafficStream` or a `CaptureRecord` envelope. All three mode names and the file-input option stay
+in the CLI because §2.3 and the deployed-configuration inventory make them contracts; invoking unavailable
+combinations in the interim fails with a message naming the receiving milestone rather than producing output
+that does not match the mode requested.
 
 **Exit:** the module reads and dumps a topic written by the **current, unmodified proxy** via `dump-raw`,
 and every envelope case is handled explicitly, `PAYLOAD_NOT_SET` included. This is the milestone that
@@ -433,7 +433,7 @@ reconstruction — is provable without instrumentation. G5 repairs that defect a
 Everything else about observability in this milestone is unchanged; this names one component, not a licence to
 ship G3 uninstrumented.
 
-**Inherited from G1 — restore `dump-http` and `dump-both`.** G1 deferred them because HTTP transaction
+**Inherited from G1 — restore Kafka `dump-http` and `dump-both`.** G1 deferred them because HTTP transaction
 reconstruction was the legacy accumulator's job, and this is the milestone that rebuilds it. They belong
 here rather than anywhere later because they are the cheapest possible observation of what this milestone
 builds: run source assembly over a real topic and print each reconstructed transaction. The sink already
@@ -611,14 +611,20 @@ config surface from previous-plan §7, including every deprecated parse-and-warn
 have no production construction site until this milestone un-marks it. `AGENTS.md` §4 permits that only
 while the register names the replacing milestone, which it does; this line is the other half.
 
+**Inherited from G1 via G3 — the file-input dump path.** Restore file-backed `dump-raw`, `dump-http`, and
+`dump-both` while rebuilding source construction, and settle whether the file source decodes bare base64
+`TrafficStream` values or `CaptureRecord` envelopes. The Kafka-backed modes are already live; this obligation
+is only the file-input branch and its compatibility evidence.
+
 **Inherited from G0 — the shells for `TupleWriter` and `TupleWriteResult`**, which G0 never declared. The
 threading contract that must survive is in the register's `TupleWriter` row.
 
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
 dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
-behavioral effect, and does not fail as an unrecognized key; **the replay path constructs the Kafka source
-owner and its port for real, so no replayer component remains unwired**. Covers `D13`, `D14`; contributes
-`R1`, `R19`.
+behavioral effect, and does not fail as an unrecognized key; **file-backed `dump-raw`, `dump-http`, and
+`dump-both` work again with the explicitly selected file-envelope format**; **the replay path constructs the
+Kafka source owner and its port for real, so no replayer component remains unwired**. Covers `D13`, `D14`;
+contributes `R1`, `R19`.
 
 ### G9.5 — Full correctness review at production-complete
 

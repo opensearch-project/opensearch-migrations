@@ -13,7 +13,7 @@ import java.util.function.Consumer;
 
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.KafkaConsumerContexts;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 
 /**
  * Decides when {@code KafkaConsumer.wakeup()} may be issued.
@@ -60,8 +60,7 @@ public final class WakeupController {
     }
 
     private final Consumer<Void> issueWakeup;
-    // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
-    private final KafkaSourceRootContext rootContext;
+    private final RootReplayerContext rootContext;
 
     private Phase phase = Phase.RUNNING;
     /** Where {@link #leaveProtectedOperation()} returns to, since a commit nests inside either phase. */
@@ -77,7 +76,7 @@ public final class WakeupController {
      *                    a broker, and because the controller must not depend on the consumer itself
      * @param rootContext the scope its phase contexts hang off, which is where the instruments live
      */
-    public WakeupController(Runnable issueWakeup, KafkaSourceRootContext rootContext) {
+    public WakeupController(Runnable issueWakeup, RootReplayerContext rootContext) {
         Objects.requireNonNull(issueWakeup, "issueWakeup");
         this.issueWakeup = ignored -> issueWakeup.run();
         this.rootContext = Objects.requireNonNull(rootContext, "rootContext");

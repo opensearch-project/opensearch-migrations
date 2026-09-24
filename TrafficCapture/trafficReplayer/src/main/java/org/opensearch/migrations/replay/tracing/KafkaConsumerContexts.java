@@ -14,7 +14,7 @@ public class KafkaConsumerContexts {
 
     private KafkaConsumerContexts() {}
 
-// REBUILD-LIMBO-START(G3)
+// REBUILD-LIMBO-START(G5)
 // LivenessScanContext: dead. Nothing measures a liveness scan.
 // AsyncListeningContext, TouchScopeContext: blocked on RootReplayerContext. TouchScopeContext also belongs to
 // the back-pressure model G5 replaces. To restore either, retarget its root as the live contexts below are.
@@ -182,11 +182,9 @@ public class KafkaConsumerContexts {
     }
 
 */
-// REBUILD-LIMBO-END(G3)
-    // REBUILD-LIMBO-NOTE(G3): root type stands in for RootReplayerContext, which already declares
-    // pollInstruments, commitInstruments and kafkaCommitInstruments under these names.
+// REBUILD-LIMBO-END(G5)
     public static class PollScopeContext extends BaseNestedSpanContext<
-        KafkaSourceRootContext,
+        RootReplayerContext,
         IScopedInstrumentationAttributes> implements IKafkaConsumerContexts.IPollScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public final LongCounter pollsEntered;
@@ -226,7 +224,7 @@ public class KafkaConsumerContexts {
         }
 
         public PollScopeContext(
-            @NonNull KafkaSourceRootContext rootScope,
+            @NonNull RootReplayerContext rootScope,
             IScopedInstrumentationAttributes enclosingScope
         ) {
             super(rootScope, enclosingScope);
@@ -240,9 +238,8 @@ public class KafkaConsumerContexts {
         }
     }
 
-    // REBUILD-LIMBO-NOTE(G3): root type; RootReplayerContext also needs a rebalanceCallbackInstruments field.
     public static class RebalanceCallbackScopeContext extends BaseNestedSpanContext<
-        KafkaSourceRootContext,
+        RootReplayerContext,
         IScopedInstrumentationAttributes> implements IKafkaConsumerContexts.IRebalanceCallbackScopeContext {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
@@ -282,7 +279,7 @@ public class KafkaConsumerContexts {
             return getRootInstrumentationScope().rebalanceCallbackInstruments;
         }
 
-        public RebalanceCallbackScopeContext(@NonNull KafkaSourceRootContext rootScope) {
+        public RebalanceCallbackScopeContext(@NonNull RootReplayerContext rootScope) {
             super(rootScope, null);
             initializeSpan();
         }
@@ -327,9 +324,8 @@ public class KafkaConsumerContexts {
         }
     }
 
-    // REBUILD-LIMBO-NOTE(G3): root type stands in for RootReplayerContext.
     public static class CommitScopeContext extends BaseNestedSpanContext<
-        KafkaSourceRootContext,
+        RootReplayerContext,
         IScopedInstrumentationAttributes> implements IKafkaConsumerContexts.ICommitScopeContext {
 
         @Override
@@ -362,7 +358,7 @@ public class KafkaConsumerContexts {
         }
 
         public CommitScopeContext(
-            @NonNull KafkaSourceRootContext rootScope,
+            @NonNull RootReplayerContext rootScope,
             IScopedInstrumentationAttributes enclosingScope
         ) {
             super(rootScope, enclosingScope);
@@ -370,9 +366,8 @@ public class KafkaConsumerContexts {
         }
     }
 
-    // REBUILD-LIMBO-NOTE(G3): root type stands in for RootReplayerContext.
     public static class KafkaCommitScopeContext extends DirectNestedSpanContext<
-        KafkaSourceRootContext,
+        RootReplayerContext,
         KafkaConsumerContexts.CommitScopeContext,
         IKafkaConsumerContexts.ICommitScopeContext> implements IKafkaConsumerContexts.IKafkaCommitScopeContext {
         public static class MetricInstruments extends CommonScopedMetricInstruments {

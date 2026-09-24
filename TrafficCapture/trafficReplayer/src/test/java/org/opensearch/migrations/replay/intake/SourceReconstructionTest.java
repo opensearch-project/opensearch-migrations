@@ -21,7 +21,7 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -46,9 +46,8 @@ class SourceReconstructionTest {
     private static final String REQUEST_BYTES = "GET /thing HTTP/1.1\r\nHost: source\r\n\r\n";
 
     private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, false);
-    // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
     private final WakeupController wakeupController =
-        new WakeupController(() -> {}, new KafkaSourceRootContext(telemetry.openTelemetrySdk));
+        new WakeupController(() -> {}, new RootReplayerContext(telemetry.openTelemetrySdk));
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
     private final RecordingSink sink = new RecordingSink();
     private final ReplayIntakeOwner owner = new ReplayIntakeOwner(

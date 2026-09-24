@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
@@ -121,8 +121,7 @@ class WakeupAgainstRealKafkaTest {
     private WakeupController controllerFor(KafkaConsumer<String, byte[]> target) {
         return new WakeupController(
             target::wakeup,
-            // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
-            new KafkaSourceRootContext(telemetry.openTelemetrySdk)
+            new RootReplayerContext(telemetry.openTelemetrySdk)
         );
     }
 

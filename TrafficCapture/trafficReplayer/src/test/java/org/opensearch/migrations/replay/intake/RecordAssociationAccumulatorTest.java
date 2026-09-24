@@ -22,7 +22,7 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -55,9 +55,8 @@ class RecordAssociationAccumulatorTest {
     private static final Timestamp OBSERVATION_TIME = Timestamp.newBuilder().setSeconds(1).build();
 
     private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, false);
-    // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
     private final WakeupController wakeupController =
-        new WakeupController(() -> {}, new KafkaSourceRootContext(telemetry.openTelemetrySdk));
+        new WakeupController(() -> {}, new RootReplayerContext(telemetry.openTelemetrySdk));
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
     private final ReplayIntakeInputQueue intakeInputs = new ReplayIntakeInputQueue();
     private final RecordingSink sink = new RecordingSink();
