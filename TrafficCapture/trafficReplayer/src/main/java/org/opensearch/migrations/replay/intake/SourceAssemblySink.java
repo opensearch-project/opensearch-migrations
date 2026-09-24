@@ -33,8 +33,8 @@ public interface SourceAssemblySink {
     /**
      * A request the parser reconstituted ({@code §9.1}).
      *
-     * @param sourceEventTime      the request's frozen source event time, which {@code §3.1} uses to
-     *                             calculate the nominal target send time
+     * @param requestFirstByteSourceTime the first request byte's source event time
+     * @param requestEndOfMessageSourceTime the request end marker's source event time
      * @param requestCompletingLogAppendTime {@code §9.1}'s "request-completing record {@code LogAppendTime
      *                             B}", frozen here because {@code §11}'s retry boundary is measured from it
      */
@@ -42,7 +42,8 @@ public interface SourceAssemblySink {
         ReplayRequestId replayRequestId,
         long capturedRequestOrdinal,
         HttpMessageAndTimestamp.Request request,
-        Instant sourceEventTime,
+        Instant requestFirstByteSourceTime,
+        Instant requestEndOfMessageSourceTime,
         long requestCompletingLogAppendTime
     );
 
@@ -79,6 +80,9 @@ public interface SourceAssemblySink {
         GENERATION_CANCELLED
     }
 
-    /** The captured close for one source-connection lifetime ({@code §9.3} step 3). */
+    /**
+     * The captured close for a source-connection lifetime that reconstituted at least one request
+     * ({@code §9.3} step 3). A request-less lifetime has no connection owner to receive this command.
+     */
     void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime);
 }

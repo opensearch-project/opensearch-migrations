@@ -235,11 +235,17 @@ public final class RecordScript {
         return writer;
     }
 
-    public void assertAssociations(KafkaRecordId recordId, Collection<String> actualAssociations) {
+    /** The literal operation names supplied when this record was added to the script. */
+    public Set<String> expectedAssociationsOf(KafkaRecordId recordId) {
         var expected = associationsByRecord.get(Objects.requireNonNull(recordId));
         if (expected == null) {
             throw new AssertionError("No association expectation for " + recordId);
         }
+        return expected;
+    }
+
+    public void assertAssociations(KafkaRecordId recordId, Collection<String> actualAssociations) {
+        var expected = expectedAssociationsOf(recordId);
         var actual = Set.copyOf(new LinkedHashSet<>(actualAssociations));
         if (!expected.equals(actual)) {
             throw new AssertionError(

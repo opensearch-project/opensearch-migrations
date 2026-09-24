@@ -65,6 +65,8 @@ public final class ReplayIntakeOwner {
         default void ownerStoppedAfterDraining() {}
         default void inputApplied(InputKind inputKind) {}
         default void recordApplied() {}
+        default void activeRecordTrackersChanged(int delta) {}
+        default void recordTrackerRetired() {}
         default void requestReconstituted() {}
         default void responseCompleted(boolean keptAlive) {}
         default void responseIncomplete(SourceAssemblySink.IncompleteReason reason) {}
@@ -299,7 +301,9 @@ public final class ReplayIntakeOwner {
         return new PartitionIntakeState(
             generation,
             this::isOwnerThreadOrUnstarted,
-            this::submitRecordProcessingFinished
+            this::submitRecordProcessingFinished,
+            metrics::activeRecordTrackersChanged,
+            metrics::recordTrackerRetired
         );
     }
 
@@ -421,7 +425,13 @@ public final class ReplayIntakeOwner {
     ) {
         var capturedConnectionId =
             new CapturedConnectionId(trafficStream.getNodeId(), trafficStream.getConnectionId());
-        var connection = state.connectionFor(capturedConnectionId, trafficStream, assemblySink);
+        SourceConnectionState connection;
+        try {
+            connection = state.connectionFor(capturedConnectionId, trafficStream, assemblySink);
+        } catch (SourceConnectionState.CaptureProtocolViolation violation) {
+            submitProtocolViolation(record.recordId(), violation.getMessage());
+            return false;
+        }
         for (var observation : trafficStream.getSubStreamList()) {
             SourceConnectionState.ObservationOutcome outcome;
             try {
@@ -473,14 +483,16 @@ public final class ReplayIntakeOwner {
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
             HttpMessageAndTimestamp.Request request,
-            Instant sourceEventTime,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
             delegate.onRequestReconstituted(
                 replayRequestId,
                 capturedRequestOrdinal,
                 request,
-                sourceEventTime,
+                requestFirstByteSourceTime,
+                requestEndOfMessageSourceTime,
                 requestCompletingLogAppendTime
             );
             metrics.requestReconstituted();

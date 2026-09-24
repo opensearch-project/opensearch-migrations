@@ -13,9 +13,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -40,8 +40,10 @@ import lombok.NonNull;
  * <p>REBUILD-LIMBO-NOTE(G6): {@code §6} also lists {@code writerTimeStateByWriterNodeId} and
  * {@code unresolvedRetryBoundaries}. Both need types {@code §10.2} and {@code §11} define, and the
  * {@code §10.1} fatal backward-skew check belongs with them; {@link #observeLogAppendTime} is where it lands.
- * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code retryReadyRequestSupplyCount} and
- * {@code partitionBatchState = idle | requested | applying}, which are {@code §13}'s demand model.
+ * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code requestStateByReplayRequestId},
+ * {@code retryReadyRequestSupplyCount}, {@code bootstrapBatchState = pending | applying | consumed}, and
+ * {@code requestedBatchState = idle | requested | applying}, which are {@code §9.1} and {@code §13}'s
+ * request bookkeeping and demand model.
  * <p>REBUILD-LIMBO-NOTE(G8): {@code §6}'s {@code cancellationState} and {@code GenerationCleanupTracker},
  * which are {@code §15.2} and {@code §15.3}.
  */
@@ -51,6 +53,12 @@ public final class PartitionIntakeState {
     private final OwnerThreadGuard ownerThreadGuard;
     /** Emits {@code RecordProcessingFinished} for a record whose work is done ({@code §7} step 9). */
     private final Consumer<KafkaRecordId> recordCompletionSink;
+    /**
+     * REBUILD-LIMBO-NOTE(G8): generation cleanup decrements this for every tracker it removes without ordinary
+     * completion, so the process-wide gauge remains balanced when a generation is cancelled.
+     */
+    private final IntConsumer activeRecordTrackersChanged;
+    private final Runnable recordTrackerRetired;
 
     private final Map<KafkaRecordId, RecordWorkTracker> recordTrackersByKafkaRecordId =
         new LinkedHashMap<>();
@@ -69,12 +77,21 @@ public final class PartitionIntakeState {
     /**
      * {@code §6}: this "points only to the current source-assembly lifetime". A fresh lifetime for the same
      * captured connection replaces the value here and does not touch the lifetime it replaced.
+     *
+     * <p>An explicitly closed lifetime keeps its entry, because that entry is the terminal cutoff
+     * {@code §9.3} needs: {@link #connectionFor} rejects a later {@code TrafficStream} for the same captured
+     * identity instead of opening a successor. The cutoff therefore lasts exactly as long as the lifetime
+     * state it points at and is never a separate or durable identity tombstone.
+     *
+     * <p>REBUILD-LIMBO-NOTE(G5): {@code ConnectionOwnerFinished} drops a closed lifetime's entry here together
+     * with its {@link #activeConnectionProcessingById} entry, which is where post-close rejection for that
+     * captured identity stops.
      */
     private final Map<CapturedConnectionId, SourceConnectionState>
         activeSourceConnectionsByCapturedConnectionId = new LinkedHashMap<>();
     /**
      * {@code §6}: "Older expired {@code ConnectionProcessingId} values may remain here while their target and
-     * tuple work finishes." An entry therefore outlives its captured-identity mapping.
+     * tuple work finishes." An expired lifetime's entry therefore outlives its captured-identity mapping.
      *
      * <p>REBUILD-LIMBO-NOTE(G5): removed on {@code ConnectionOwnerFinished} ({@code §4.1}), which is the event
      * that reports the owner has nothing left. Until G5 sends it, an ended lifetime stays here for the
@@ -90,11 +107,15 @@ public final class PartitionIntakeState {
     public PartitionIntakeState(
         @NonNull PartitionGenerationId generation,
         @NonNull BooleanSupplier currentThreadIsOwner,
-        @NonNull Consumer<KafkaRecordId> recordCompletionSink
+        @NonNull Consumer<KafkaRecordId> recordCompletionSink,
+        @NonNull IntConsumer activeRecordTrackersChanged,
+        @NonNull Runnable recordTrackerRetired
     ) {
         this.generation = generation;
         this.ownerThreadGuard = new OwnerThreadGuard("replay intake " + generation, currentThreadIsOwner);
         this.recordCompletionSink = recordCompletionSink;
+        this.activeRecordTrackersChanged = activeRecordTrackersChanged;
+        this.recordTrackerRetired = recordTrackerRetired;
     }
 
     public PartitionGenerationId generation() {
@@ -110,6 +131,7 @@ public final class PartitionIntakeState {
         if (recordTrackersByKafkaRecordId.putIfAbsent(recordId, new RecordWorkTracker(recordId)) != null) {
             throw new IllegalStateException("Kafka record was already registered: " + recordId);
         }
+        activeRecordTrackersChanged.accept(1);
     }
 
     public void associate(
@@ -187,21 +209,6 @@ public final class PartitionIntakeState {
         emitCompletionIfEligible(tracker);
     }
 
-    public Set<RecordAssociationId> associations(@NonNull KafkaRecordId recordId) {
-        ownerThreadGuard.requireOwnerThread();
-        return requireTracker(recordId).associations();
-    }
-
-    public boolean recordCompletionEmitted(@NonNull KafkaRecordId recordId) {
-        ownerThreadGuard.requireOwnerThread();
-        return requireTracker(recordId).completionEmitted();
-    }
-
-    public List<KafkaRecordId> recordsFor(@NonNull RecordAssociationId association) {
-        ownerThreadGuard.requireOwnerThread();
-        return List.copyOf(recordsByAssociation.getOrDefault(association, new LinkedHashSet<>()));
-    }
-
     // ------------------------------------------------------------------ source connections
 
     /**
@@ -210,9 +217,13 @@ public final class PartitionIntakeState {
      *
      * <p>{@code §2}: {@code ConnectionProcessingId.localSequence} "is allocated whenever replay intake begins
      * fresh process-local source assembly for a captured connection. It distinguishes a later fresh lifetime
-     * from an expired lifetime whose target or tuple work is still finishing." So a captured connection whose
-     * lifetime has ended gets a new sequence rather than rejoining the old one — {@code §17.2} requires the two
+     * from an expired lifetime whose target or tuple work is still finishing." So an expired captured
+     * connection gets a new sequence rather than rejoining the old one — {@code §17.2} requires the two
      * to "coexist without sharing state or messages", and sharing an identity is the one way they could not.
+     *
+     * <p>An explicit close admits no successor while its existing process-local lifetime remains retained:
+     * a later {@code TrafficStream} for the same captured identity is a protocol violation rather than fresh
+     * reconstruction.
      */
     public SourceConnectionState connectionFor(
         @NonNull CapturedConnectionId capturedConnectionId,
@@ -221,8 +232,15 @@ public final class PartitionIntakeState {
     ) {
         ownerThreadGuard.requireOwnerThread();
         var existing = activeSourceConnectionsByCapturedConnectionId.get(capturedConnectionId);
-        if (existing != null && existing.lifetime() == SourceConnectionState.Lifetime.OPEN) {
-            return existing;
+        if (existing != null) {
+            if (existing.lifetime() == SourceConnectionState.Lifetime.EXPLICITLY_CLOSED) {
+                throw new SourceConnectionState.CaptureProtocolViolation(
+                    "TrafficStream for " + capturedConnectionId + " arrived after CloseObservation"
+                );
+            }
+            if (existing.lifetime() == SourceConnectionState.Lifetime.OPEN) {
+                return existing;
+            }
         }
         var lifetime = new SourceConnectionState(
             new ConnectionProcessingId(generation, capturedConnectionId, nextConnectionLocalSequence++),
@@ -235,14 +253,21 @@ public final class PartitionIntakeState {
     }
 
     /**
-     * Stops routing new observations for a captured connection to a lifetime that has ended.
+     * Frees a captured connection for fresh reconstruction once its lifetime expired.
      *
      * <p>Only if the mapping still points at that lifetime: a fresh lifetime may already have replaced it, and
      * {@code §6} says replacing "does not mutate the old lifetime" — the converse holds too, so an old
      * lifetime ending must not unmap its successor.
+     *
+     * <p>An explicitly closed lifetime keeps its mapping, which carries {@code §9.3}'s process-local terminal
+     * cutoff past the record that held the close. G5 removes both retained references when the connection
+     * owner reports it has no remaining work.
      */
     public void retireLifetime(@NonNull SourceConnectionState endedLifetime) {
         ownerThreadGuard.requireOwnerThread();
+        if (endedLifetime.lifetime() == SourceConnectionState.Lifetime.EXPLICITLY_CLOSED) {
+            return;
+        }
         var capturedConnectionId = endedLifetime.connectionProcessingId().capturedConnectionId();
         activeSourceConnectionsByCapturedConnectionId.remove(capturedConnectionId, endedLifetime);
     }
@@ -321,6 +346,11 @@ public final class PartitionIntakeState {
     private void emitCompletionIfEligible(RecordWorkTracker tracker) {
         if (tracker.claimCompletion()) {
             recordCompletionSink.accept(tracker.recordId());
+            if (!recordTrackersByKafkaRecordId.remove(tracker.recordId(), tracker)) {
+                throw new IllegalStateException("Completed Kafka record tracker was not registered: " + tracker);
+            }
+            activeRecordTrackersChanged.accept(-1);
+            recordTrackerRetired.run();
         }
     }
 }

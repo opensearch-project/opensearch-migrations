@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -58,14 +59,12 @@ class PartitionIntakeStateTest {
         intake.associate(RECORD, REQUEST);
         intake.closeRecordToNewAssociations(RECORD);
 
-        Assertions.assertEquals(java.util.Set.of(ASSEMBLY, REQUEST), intake.associations(RECORD));
-        Assertions.assertFalse(intake.recordCompletionEmitted(RECORD));
+        Assertions.assertTrue(completions.isEmpty());
 
         intake.associationFinished(RECORD, ASSEMBLY);
-        Assertions.assertFalse(intake.recordCompletionEmitted(RECORD));
+        Assertions.assertTrue(completions.isEmpty());
         intake.associationFinished(RECORD, REQUEST);
 
-        Assertions.assertTrue(intake.recordCompletionEmitted(RECORD));
         Assertions.assertEquals(List.of(RECORD), completions);
     }
 
@@ -83,8 +82,6 @@ class PartitionIntakeStateTest {
 
         intake.relabelAll(ASSEMBLY, REQUEST);
 
-        Assertions.assertEquals(java.util.Set.of(REQUEST), intake.associations(earlier));
-        Assertions.assertEquals(java.util.Set.of(REQUEST), intake.associations(RECORD));
         Assertions.assertTrue(completions.isEmpty(), "relabel must not create an empty-association gap");
 
         intake.closeRecordToNewAssociations(RECORD);
@@ -109,8 +106,38 @@ class PartitionIntakeStateTest {
     }
 
     @Test
+    void aRecordTrackerIsNotRetiredWhenTheRequiredSourceSubmissionIsRejected() {
+        var activeTrackers = new AtomicInteger();
+        var retiredTrackers = new AtomicInteger();
+        var intake = new PartitionIntakeState(
+            GENERATION,
+            () -> true,
+            ignored -> {
+                throw new IllegalStateException("source queue rejected required submission");
+            },
+            activeTrackers::addAndGet,
+            retiredTrackers::incrementAndGet
+        );
+
+        intake.registerRecord(RECORD);
+
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> intake.closeRecordToNewAssociations(RECORD)
+        );
+        Assertions.assertEquals(1, activeTrackers.get());
+        Assertions.assertEquals(0, retiredTrackers.get());
+    }
+
+    @Test
     void mutationOffOwnerThreadIsRejected() {
-        var intake = new PartitionIntakeState(GENERATION, () -> false, ignored -> {});
+        var intake = new PartitionIntakeState(
+            GENERATION,
+            () -> false,
+            ignored -> {},
+            ignored -> {},
+            () -> {}
+        );
 
         Assertions.assertThrows(IllegalStateException.class, () -> intake.registerRecord(RECORD));
     }
@@ -136,7 +163,6 @@ class PartitionIntakeStateTest {
 
         intake.associationFinished(first);
 
-        Assertions.assertEquals(Set.of(second), intake.associations(RECORD));
         Assertions.assertTrue(
             completions.isEmpty(),
             () -> "the record still carries request 8; completions: " + completions
@@ -323,7 +349,12 @@ class PartitionIntakeStateTest {
     }
 
     private static PartitionIntakeState ownerState(List<KafkaRecordId> completions) {
-        return new PartitionIntakeState(GENERATION, () -> true, completions::add);
+        return new PartitionIntakeState(
+            GENERATION,
+            () -> true,
+            completions::add,
+            ignored -> {},
+            () -> {}
+        );
     }
 }
-

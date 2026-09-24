@@ -399,11 +399,11 @@ same way:
 |---|---|---|
 | `TrackingKafkaConsumerTest`, `KafkaTrafficCaptureSourceTest` — `onAssigned`/`onRevoked`/`onRetired`/`commitSync` | **dead**: same subject, and the design's version of each is covered by `KafkaSourceOwnerTest` against `kafkaLLD §17.4` | — |
 | `KafkaCommitsWorkBetweenLongPollsTest` — commits and reads keep working across long polls | **dead**: not in `§17.4`, and its guarantee is now split across the wakeup cases and the commit-prefix case, both covered | — |
-| `StaleAccumulationCancelOnRejoinTest`, `StaleAccumulationCancelOnRejoinKafkaTest` — synthetic closes precede new-generation records after revoke and reassign | **refactor**: the generation-bump half is G2's and holds (a new generation gets a new `PartitionSourceState` and a new commit queue); the accumulation half is source assembly | G3 |
-| `PartitionRevocationStaleStateTest` — stale accumulation and stale channel context discarded on generation bump | **refactor** | G3 |
-| `ActiveConnectionTrackingTest` — connections tracked across keep-alive, removed on accumulation complete | **refactor** | G3 |
+| `StaleAccumulationCancelOnRejoinTest`, `StaleAccumulationCancelOnRejoinKafkaTest` — synthetic closes precede new-generation records after revoke and reassign | **refactor**: G2 proves the source generation changes; G8 replaces synthetic closes with typed generation cancellation, stale-assembly release, cleanup completion, and successor gating | G8 |
+| `PartitionRevocationStaleStateTest` — stale accumulation and stale channel context discarded on generation bump | **split by member**: G3 proves fresh source-lifetime separation; G5 proves connection/context lifetime; G8 proves revocation cancellation and stale-assembly release | G5 / G8 |
+| `ActiveConnectionTrackingTest` — connections tracked across keep-alive, removed on accumulation complete | **split by responsibility**: G3 proves same-lifetime keep-alive reuse; G5 proves owner-registry removal on `ConnectionOwnerFinished` | G5 |
 | `QuiescentConnectionTest`, `ReplayEngineQuiescentTest` — quiescent tagging of resumed connections | **refactor** | G5 |
-| `TrafficSourceReaderInterruptedCloseWiringTest`, `TrafficSourceReaderInterruptedCloseAccountingTest` — synthetic close accounting | **refactor** | G3 |
+| `TrafficSourceReaderInterruptedCloseWiringTest`, `TrafficSourceReaderInterruptedCloseAccountingTest` — synthetic close accounting | **split by member**: G8 owns typed cancellation, generation-scoped cleanup acknowledgement, and read gating; G11 owns only the assertion that interrupted source teardown cannot bypass application close | G8 / G11 |
 | `KafkaKeepAliveTests`, `KafkaTrafficCaptureSourceLongTermTest`, `e2etests/KafkaRestartingTrafficReplayerTest` | **refactor**: end-to-end behaviour that needs the full replay path wired | G9 |
 
 `PumpedKafkaSource` now implements `KafkaSourcePort`, so the owner drives it. `SourceOwnerDriver` and
@@ -1023,7 +1023,7 @@ was added so it can be vetoed on reading.
 | Date | Section | What was added | Why it was not already there |
 |---|---|---|---|
 | 2026-09-24 | `kafkaLLD §9`, `§9.4`, `§16`; `procCommit §5.2`, `§10.2` | An inherited incomplete request reserves one captured ordinal; its EOM, response write, or intentional-drop marker ends inherited-tail discard without advancing again. The first capture-protocol violation also latches a replay-wide cutoff: no later queued record batch from any partition applies another record, only target/tuple side effects admitted before the violation may drain for 60 seconds, and then the whole replay terminates. | The owner chose 1a and 2c on 2026-09-24. The designs did not say whether the inherited request consumed an ordinal or whether its drop marker was valid, and “No later record may pass the violating offset” left the cutoff's scope ambiguous across partitions. The owner clarified that the violation kills the whole replay; the bounded period drains already-admitted side effects rather than admitting more source records. |
-| 2026-09-24 | `kafkaLLD §9`; `procCommit §5.2` | A source write observed before the captured request's end-of-message marker is treated as an informational response such as `100 Continue`: replay intake ignores the write observation, or its complete segmented sequence, and continues assembling the request without advancing the ordinal or creating response state. | The owner chose option 1a on 2026-09-24 after the G3 review found the designs silent. The current implementation discarded the incomplete request and early write, silently losing a valid `Expect: 100-continue` request; the carried predecessor ignored the early write and preserved request assembly. |
+| 2026-09-24 | `kafkaLLD §9`; `procCommit §5.2` | **Superseded later the same day.** This amendment encoded a pre-EOM ordinary source `Write` as an informational response fallback. The owner subsequently required typed whole/segmented interim-response observations based on PR #3000 and explicitly rejected all pre-change-capture compatibility support. | Historical record only. The typed protocol is now assigned to PA2 item 5 and G3; the authoritative sections still need a separately authorized amendment before the obsolete fallback can be removed from production. |
 | 2026-09-24 | `kafkaLLD §9.3` | A captured close now explicitly discards only incomplete request assembly and completes any source-response assembly with `SourceResponseComplete(keptAlive=false)` before admitting the ordered close. | The owner chose option 1a on 2026-09-24. The earlier authorized `§9.2` amendment changed close-ended responses from incomplete to unproven-complete, but `§9.3` steps 1–2 retained the superseded wording and contradicted it. |
 | 2026-09-24 | `proxyProtocol §4.1`; `kafkaLLD §9.4`; `procCommit §5.2` | `RequestIntentionallyDropped` means configured proxy capture suppression became known only after a request prefix had already been captured. Replay intake discards that incomplete request, releases its associations, advances the ordinal once, creates no replay request or tuple, and leaves the connection open; a marker with no incomplete request is a protocol violation. | The owner chose option 3a and clarified the feature's purpose on 2026-09-24: the proxy intentionally does not capture all traffic, but sometimes capture has already begun and cannot be pulled back. The protobuf and proxy implementation carried that history, while the authoritative designs were silent. |
 | 2026-09-24 | `kafkaLLD §4.1`; `procCommit §5.2`, `§10.1` | Orderly replay-intake termination uses a FIFO stop-after-draining queue-control marker outside the nine-value `ReplayIntakeInput` family. Requesting it atomically stops acceptance and appends the marker; removing it proves every preceding accepted input was applied, ends the owner loop, and completes termination. Fatal shutdown does not wait for it. | The owner chose option 2a on 2026-09-24. G3's complete-chain audit found no way for a bounded producer to prove queued work applied and terminate the owner cleanly without either reviving the deleted per-item completion side channel or adding a tenth business input with no generation identity. |
@@ -1089,14 +1089,16 @@ carried `RootReplayerContext`. `ChannelContextManager` is not promoted merely to
 accumulator's tracing shape; its separate refcount defect remains G5 work only if G5's connection-owner tracing
 needs that component.
 
-## G3 — implementation complete, review pending
+## G3 — implementation and conformance review complete; typed-interim closure blocked
 
 All three units of the approved split are implemented. The complete-chain correction additionally puts the
 Kafka-backed HTTP dump modes through the real queue and owner thread, instruments intake and assembly, and
 adds orderly FIFO termination. Unit 3 deleted `ReplayIdentity` and consolidated the temporary Kafka root into
 the carried `RootReplayerContext`. The owner retired the separate file-backed dumper branch on 2026-09-24; it
-is removed rather than deferred to any milestone. The milestone remains open until the corrected production
-diff passes its narrow evidence, falsification rerun, and repeated design-conformance review.
+is removed rather than deferred to any milestone. The corrected production diff has passed its narrow
+evidence, falsification rerun, and repeated design-conformance review. The milestone remains open only because
+the authoritative design still specifies the superseded ordinary-`Write` interim fallback and PA2 item 5's
+typed producer/consumer interoperability has not landed.
 
 ### Landed
 
@@ -1108,7 +1110,7 @@ diff passes its narrow evidence, falsification rerun, and repeated design-confor
 | `SourceConnectionState` | `§9`'s assembly, refactored from `Accumulation` and the accumulator's observation state machine. Two design-driven differences from what it replaces: response state keyed by `ReplayRequestId`, and the connection-local observation sequence validated for baseline and contiguity |
 | `ReplayIntakeOwner` | Thread and queue discipline carried; `§7` steps 1–3 and 6–9 plus `§7.1`'s exhaustive payload switch are implemented. Steps 4–5 need G6's retry-boundary and broker-time state; step 10 needs G7's demand state, and both sites are marked at the exact insertion point. The pull-from-a-traffic-source model is gone with `StartSourceRead` and its four siblings, since `§3` pushes `PartitionRecordBatch` instead |
 | `ReplayIntakeInputQueue` | Carries only immutable business inputs plus an internal FIFO stop-after-draining control marker. Requesting stop atomically rejects later submissions; the owner seeing the marker proves every earlier accepted input was removed and applied |
-| `ReplayIntakeMetrics` | Fixed-cardinality counters for owner start/orderly stop, input kinds, records applied, requests reconstructed, response confidence/incompletion, captured closes, and protocol violations. Constructed from the carried `RootReplayerContext` |
+| `ReplayIntakeMetrics` | Fixed-cardinality counters for owner start/orderly stop, input kinds, records applied, active and retired record trackers, requests reconstructed, final-response confidence/incompletion, captured closes, and protocol violations. Record accounting and terminal-response evidence come from the designed lifecycle messages and owner-transition metrics rather than a second event stream. Constructed from the carried `RootReplayerContext` |
 | `SourceAssemblySink` | Named shell for `connLLD §3`'s `ConnectionInput`. **G5 replaces it**; two fields of `AdmitReconstitutedRequest` are transformation metadata and an activity-monitor identity that G5 defines, so the value type cannot be built yet without inventing them |
 | `HttpMessageAndTimestamp`, `RawPackets` | Promoted as-is |
 | `ReplayIdentity` | Deleted |
@@ -1123,9 +1125,10 @@ finishing *N* leaves it held by *N+1*'s assembly.
 `§17.2` — all five cases, plus the captured close because `§9.3`'s "prevents later observations from joining"
 is an absence assertion.
 
-`tools/falsify-g3.sh` — seven mutations, **all seven caught**. Parsing the inherited tail, not counting it,
-accepting a sequence gap, joining a closed lifetime, reusing an expired lifetime's identity, relabelling in the
-order `§8.2` forbids, and reversing `§7` steps 7 and 8.
+The original `tools/falsify-g3.sh` pass at `ecea185e0` caught all seven mutations that matched that revision.
+It is historical evidence, not the closure harness: mutation 7 no longer matches the conditional
+`applyPayload` call, and current falsification runs through one direct ephemeral Codex CLI worker against an
+exact committed revision.
 
 The expanded falsification pass tried fourteen mutations: twelve failed the intended test and two survived.
 The survivors were exactly the missing evidence later found in review — changing a next-request response from
@@ -1191,10 +1194,11 @@ one design silence:
    `kafkaLLD §4.1` requires the ordinary demand pass. The implementation remains correctly prerequisite-blocked
    on G7's supply and explicit-request state, and the exact insertion point now says so rather than contradicting
    the design.
-3. The designs were silent on source writes before request EOM. The owner chose option 1a: preserve request
-   assembly and ignore the early informational response, matching the carried predecessor. The authorized
-   design amendment is commit `25833dc34`; production now handles both whole writes and complete segmented-write
-   sequences without changing request identity, ordinal, response state, or phase.
+3. The designs were silent on source writes before request EOM. The owner initially chose option 1a and
+   authorized commit `25833dc34`, which made ordinary whole and segmented writes an informational-response
+   fallback. **That ruling is now superseded:** PA2 and G3 will use only typed interim-response observations,
+   with no pre-change-capture compatibility path. The old implementation remains only until the authoritative
+   design amendment and PA2 protobuf producer land.
 
 The pass's one-pass evidence findings were also corrected:
 
@@ -1237,8 +1241,132 @@ falsified in the same direct-CLI style against committed code in one clean `/pri
    `RecordAssociationAccumulatorTest.aProtocolViolationRejectsLaterBatchesFromEveryPartition` fail because a
    later batch from another partition is admitted.
 
-Every mutation was restored and each worker ended with a clean worktree. Production changes reopen review, so
-G3 remains open pending the current read-only conformance pass.
+Every mutation was restored and each worker ended with a clean worktree. Production changes reopen review;
+the next pass is recorded below rather than treating the preceding falsification as milestone closure.
+
+### Third G3 design-conformance review — disposition
+
+| Finding | Class | Disposition | Evidence / impact |
+|---|---|---|---|
+| A request-less captured close sent `AdmitCapturedClose` despite no connection owner existing | A | fixed, review reopened | `SourceConnectionState` now records whether the lifetime ever reconstituted a request and emits the ordered close only in that case. The close-only record still finishes through source-side settlement; the focused source/association suite passes |
+| `SourceConnectionState` does not directly store the `contributing record identities` named by `kafkaLLD §9` | A | owner ruled — satisfied by placement | `PartitionIntakeState` remains the sole source of contributing-record identity and reverse-association data; `SourceConnectionState` does not duplicate it. Production association add/remove spans let the `RecordScript` oracle reconstruct the exact live set without exposing either map |
+| A `WakeupException` after an async commit callback can resolve one submission twice | A, G4 component | open — route through §2.1 before G3 closes | Commit authority is G4's responsibility. Its full chain must share one resolution latch rather than add a G3-only patch |
+| The checked-in G3 shell harness no longer applies mutation 7 and conflicts with the direct-CLI worker rule | B | open — owner deletion decision | The historical claim above is corrected. Current closure evidence comes from a clean exact-commit Codex worker |
+| Six carried lifecycle tests still name G3 in the verdict table although their marked members are assigned elsewhere | B | fixed | The verdict table now splits member-level responsibilities across G5, G8, and G11; all three receiving plan sections and exits name their inherited evidence, and the deferral ledger has one row per receiving milestone |
+| `HttpTransactionDumper` has isolated real-topic evidence but its carried deterministic test remains marked | B | fixed | `HttpTransactionDumperTest` was refactored in place onto the live `SourceAssemblySink`, preserving request/response/close and first-line assertions while proving that a reconstructed transaction intentionally has no single Kafka offset |
+| `§17.2` did not prove response bytes survive periodic record boundaries | B | fixed | `SourceReconstructionTest.aResponseSplitAcrossRecordsReconstructsTheSameBytesAsOneRecord` now splits one response over two records and compares the reconstructed bytes exactly |
+| G7 insertion points omitted request-state bookkeeping and named one combined batch state | B | fixed | Notes now name `requestStateByReplayRequestId`, `bootstrapBatchState`, and `requestedBatchState` at their exact construction/application sites |
+| Five new accessors and two private parameters have no caller | B | fixed | The tracker-introspection accessors and unused tracker methods were removed. Tests use typed lifecycle inputs, emitted record completions, and tracker-conservation metrics rather than production state leaked for assertions; the follow-up review named only one unused import, which was removed |
+| Marked `replay/lifecycle/ReplayIntakeInput` references two deleted enclosing predecessor types | B | open — owner deletion/retention decision | The file is inert, but can no longer be restored by marker deletion alone; either retire it as dead or restore enough predecessor shape to preserve mechanical reconstruction |
+| `replayIntakeInputsApplied` includes a rejected post-violation batch | B | won't-fix | The input was applied to the terminal-state rule; `replayIntakeRecordsApplied` stays unchanged and `replayIntakeRecordBatchesRejectedAfterProtocolViolation` reports the rejection separately |
+| The record-association fixture labelled its first batch as explicit sequence 1 | B | fixed | The helper now uses bootstrap sequence 0, matching `kafkaLLD §2` and the production producer |
+| Observations after a known captured close | C | fixed after follow-up review | `PartitionIntakeState` keeps the explicitly closed `SourceConnectionState` as the current captured-identity mapping while that already-retained lifetime remains knowable; it does not add a second identity tombstone. `SourceConnectionState` independently rejects a later observation in the same stream. Separate deterministic tests cover both paths and prove the replay-wide poison input is emitted |
+| Request timing evidence | C | fixed | `SourceAssemblySink` now carries request first-byte source time, request-EOM source time, and request-completing Kafka `LogAppendTime`; the split-record reconstruction test asserts all three exact values |
+| `SegmentEnd` with no active segmented value | C | fixed | Request and response assembly ignore a marker unless their message has an in-progress segment. Separate deterministic tests prove both phases continue and emit no protocol violation |
+| Duplicate/out-of-order batch validation | C | withdrawn | The source producer already enforces registration and offset ordering through `ObservedRecordCommitQueue`; no second speculative validation model will be added |
+
+### Fourth G3 correction checkpoint — owner feedback implemented
+
+The independent G3 corrections now form one complete source-assembly/accounting change:
+
+- observations after an explicit captured close enter the replay-wide protocol-violation path while that
+  terminal cutoff remains in process-local state;
+- a bare segment end is inert unless the current request or response has an in-progress segment;
+- request admission carries first-byte source time, request-EOM source time, and request-completing Kafka
+  `LogAppendTime`;
+- a completed `RecordWorkTracker` is removed only after `RecordProcessingFinished` is accepted by the required
+  source-input queue, with active and retired tracker metrics proving the lifetime without exposing the map;
+- `HttpTransactionDumperTest` is restored in place against the live source-assembly sink; and
+- inherited lifecycle members are assigned to G5, G8, and G11 by responsibility, with both plan ends and the
+  deferral ledger updated.
+
+The focused compile and 53 deterministic and fixture tests pass. The tracker-retirement, post-close,
+three-time, and bare-segment properties were falsified with compiling inversions in a clean direct-CLI
+worktree. Production changed after the follow-up review, so the cross-record close cutoff and association-span
+evidence still require falsification and another read-only design-conformance pass.
+Typed source-interim consumption also remains blocked on PA2's shared protobuf/producer change and on aligning
+the authoritative design text that still describes ordinary `Write` as an informational-response fallback.
+
+### Fifth G3 design-conformance review — 2026-09-25 disposition
+
+| Finding | Class | Disposition | Evidence / impact |
+|---|---|---|---|
+| Post-close detection worked only when later observations shared the closing `TrafficStream` | A | fixed, review reopened | The retained process-local closed lifetime remains the current captured-identity mapping and is checked before a fresh source lifetime can be allocated. The test places the later observation in the next Kafka record |
+| Association-oracle assertions compared literals only to the fixture's copy of those literals | B | fixed | The mixed-record test now drives the two expected `RequestProcessingFinished` lifecycle results around a cross-record assembly-to-request relabel. It fails on early completion, missing completion, duplicate completion, or a hidden extra association, and tracker conservation must return to zero. No parallel association-event model remains |
+| G3 evidence did not directly assert the one-final-source-response-result invariant | B | fixed | A keep-alive response followed by the next request's prefix and a captured close now proves the later close neither replaces nor duplicates the first request's already-completed result, even though no later request reaches EOM to replace its response slot. Complete/incomplete result identities exactly cover the requests that reached a terminal boundary. The same script asserts `requests reconstructed = proven complete + unproven complete + incomplete`, deriving observability from those owner transitions rather than a second accounting model |
+| Active-record-tracker gauge has no cleanup decrement before G8 exists | A, unreachable by construction | deferred to G8 under §2.1 | G8's scope and exit require every tracker removed by generation cleanup to decrement the process-wide gauge; the code carries a `REBUILD-LIMBO-NOTE(G8)` and the deferral ledger names the obligation |
+| `SourceAssemblySink` Javadoc cited `connLLD §3.1` as choosing first-byte time for pacing | design silent | fixed without choosing behavior | The unsupported design attribution was removed. All three values remain preserved; choosing the nominal-send anchor remains an owner decision before G5/G7 consumes them |
+| Unused `Set` import in `PartitionIntakeState` | B | fixed | Removed |
+| Zero-valued active-tracker metric assertion also passed when the metric was absent | B | fixed | The test first requires the instrument to exist, then checks that its value balances to zero |
+
+### Sixth G3 design-conformance review — 2026-09-25 disposition
+
+| Finding | Class | Disposition | Evidence / impact |
+|---|---|---|---|
+| The dedicated closed-identity set contradicted the owner ruling against an indefinite tombstone introduced only for detection | owner-ruling conflict, blocking | fixed from the required reviewer patch proposal; review reopened | The set is removed. An explicitly closed `SourceConnectionState` stays in the existing current-lifetime mapping while G5-bound owner work keeps that lifetime knowable; expiry still unmaps and permits a fresh lifetime. The cross-record test is unchanged |
+| The mixed-record test's zero-valued active-tracker assertion could pass when the metric was absent | B | fixed | The test first requires the instrument to exist, then checks its value is zero |
+| Early, missing, duplicate, and metric-projection inversions were absent from the register | B | finding premise corrected; register fixed | The exact-commit direct worker had already run them. The rows below record the observed failures rather than repeating the old claim |
+| G3 Exit still claimed `RecordScript` association-oracle evidence after the parallel association stream was removed | B | fixed | Exit now states the typed lifecycle behavior actually proved: request *N* cannot release the mixed record while request *N+1* still owns it, and the record finishes exactly once after both lifecycle results |
+| `RecordAssociationAccumulatorTest` still described and populated unused association-oracle literals | B | fixed | The stale class contract and inert literals are removed; `RecordScript` remains only the immutable traffic fixture |
+| G4's monotonic-restaging sentence omitted the revocation qualifier | B | fixed | The exit now says monotonic preservation/advance applies while the generation remains owned and that revocation discards its staged state |
+
+The tombstone correction changes production and therefore reopens the read-only conformance loop. Its
+cross-record rejection was falsified again against the retained-lifetime implementation before the final
+review pass.
+
+### G3 falsification evidence — 2026-09-25
+
+| Property inverted | Required test failure | Result |
+|---|---|---|
+| Retire `RecordWorkTracker` before required source-queue acceptance | rejected submission must retain one active, zero retired | failed `expected 1 but was 0` |
+| Ignore a post-close observation instead of poisoning replay | protocol-violation count must be one | failed `expected 1 but was 0` |
+| Unmap an explicitly closed retained lifetime so the next Kafka record opens a fresh one | cross-record protocol-violation count must be one | failed `expected 1 but was 0`; the subsequent amend changed only this status record, so the final commit contains the same production and test tree that was falsified |
+| Replace request first-byte time with request-EOM time | exact first-byte timestamp must remain one second | failed `expected 00:00:01Z but was 00:00:03Z` |
+| Treat a bare request `SegmentEnd` as non-inert | request must still reconstruct | failed at request reconstruction |
+| Treat a bare response `SegmentEnd` as non-inert | response must still reconstruct | failed at response reconstruction |
+| Retain a completed response identity so a later close can resolve it again | one final response result per request | failed `expected 1 but was 2` |
+| Suppress the final-response metric emitted by the lifecycle sink | requests reconstructed must equal all final response dispositions | failed `expected 1 but was 0` |
+| Drop the new request association during cross-record relabeling | the mixed record must remain unfinished after request *N* completes | failed immediately after the relabel |
+
+Every inversion compiled with the repository Gradle wrapper and required Spotless exclusions. Both direct
+workers restored their mutations; the throwaway worktree ended clean.
+
+### Seventh G3 design-conformance review — 2026-09-25 disposition
+
+The final read-only pass found no production-code design-conformance defect. It also ran the three directly
+affected test classes: 39 tests passed. The retained-lifetime close cutoff, one-final-response-result
+invariant, lifecycle-derived metrics, mixed-record evidence, G4 revocation qualifier, and recorded
+falsification mutations all conformed.
+
+One plan/design mismatch still blocks milestone closure. G3's Exit requires typed whole and segmented
+source-interim observations and forbids ordinary `Write` as their encoding, but the authoritative
+`kafkaLLD §9` still directs replay intake to ignore a pre-EOM ordinary `Write` as an informational response,
+and the protobuf has no typed interim observations. Production correctly follows the current design. The
+owner has already ruled that the fallback must not survive and assigned the protocol break to PA2 item 5, but
+the corresponding design amendment and PA2 producer/consumer interoperability have not landed. Closing G3
+before resolving that mismatch requires an owner sequencing ruling; an implementation agent cannot silently
+accept the deviation or rewrite the design.
+
+### Owner rulings after the third G3 review — 2026-09-24
+
+| Concern | Ruling | Durable consequence |
+|---|---|---|
+| Source interim-response encoding | Break the protocol and add typed whole and segmented source-interim observations based on PR #3000. There is no backward-compatibility contract | PA2 item 5 owns the proxy producer; G3 consumes only the typed observations. Ordinary `Write` is never a fallback encoding |
+| Target interim responses in tuples | Preserve as a TODO after the rewrite workstream | Plan A `POST1` owns the complete target channel → aggregation → tuple chain; G5 explicitly excludes it. `InterimHttpResponseHandler` carries the PR-3000 pointer until POST1 removes the discard |
+| Record association state | Keep one source of truth | `PartitionIntakeState` owns contributing-record identity and reverse-association data; do not duplicate it in `SourceConnectionState` |
+| Post-close traffic | Protocol violation | Detection is required while retained close state makes the condition knowable; no indefinite identity tombstone is introduced only to detect it |
+| Request timestamps | Preserve all three | Carry request first-byte source time, request-EOM source time, and the request-completing record's Kafka `LogAppendTime` |
+| Bare segment end | Ignore | A marker can be detached from its preceding segments by ordinary serializer flushing or restart after those records committed; absence of an active segment is not itself a violation |
+| `RecordWorkTracker` retirement | Remove after the required source-queue submission is accepted | Prove retirement through fixed-cardinality metrics/spans and emitted messages, never by leaking production state for a test |
+| Generation observability | Generation is not a metric dimension | Use fixed-cardinality progress counters; put concrete generation identity in structured logs, exceptions, or spans rather than creating an unbounded metric series |
+| Carried lifecycle tests | Preserve until replacement behavior is proved | Do not delete inherited tests merely because their production predecessor is marked or being replaced |
+| Async commit double resolution | Principle settled; G4 implementation still open | When outcome is uncertain, stage a monotonic recommit and never backpedal. The complete owner/callback one-shot chain must land together in G4 rather than as a G3 patch |
+
+### Owner attention after the fifth G3 review
+
+| Decision | Options | Contract | Reversible | Recommendation |
+|---|---|---|---|---|
+| Which preserved source timestamp determines the nominal target send time | first request byte; request EOM; another explicit formula using both | `connLLD §3.1`, `kafkaLLD §9.1` are silent on which preserved source event anchors pacing | No once G5/G7 wires scheduling | Use first request byte because it represents when the captured request began, while preserving EOM time separately for message-boundary diagnostics; authorize the corresponding design amendment before the consumer is implemented |
 
 ### Findings
 
@@ -1284,6 +1412,13 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 |---|---|---|---|---|
 | Kafka-backed `dump-http` and `dump-both` CLI modes | G1 | G3 | HTTP transaction reconstruction was the legacy accumulator's job. G3 rebuilt source assembly and uses these modes as its real-topic exit evidence. Mode names stayed in the CLI throughout (§2.3 contract) | proved — `SourceAssemblyEvidenceTest` |
 | Proxy `RequestIntentionallyDropped` successor-baseline repair | G3 | PA2 | G3 now consumes the marker according to `kafkaLLD §9.4`, but the proxy serializer emits it without incrementing the connection's `eomsSoFar`; the next stream can therefore understate `priorRequestsReceived`. Proxy repair belongs to the proxy milestone rather than Plan A's replayer implementation | open — PA2 item 4 |
+| Typed source-interim observation producer | G3 | PA2 | G3 owns intake and source assembly, but the proxy must classify source `1xx` responses other than `101` and emit the typed whole or segmented observations first. PA2 item 5 owns that producer and direct tests; G3 closes only after real interoperability. There is no ordinary-`Write` or pre-change-capture compatibility path | open — PA2 item 5 |
+| Preserve target interim responses in tuples | G5 | POST1 | G5 builds the target response and tuple-input ownership chain, but the owner placed target-side `1xx` preservation after the rewrite. POST1 receives the complete target channel → aggregation → tuple serialization chain and removes the temporary discard/TODO using PR #3000 as its starting point | open |
+| Inherited connection-owner and context-lifetime assertions | G3 | G5 | G3 proves source-lifetime reuse and separation, but owner-registry removal and connection/tracing context lifetime require the connection owner G5 builds. Applicable members of `ActiveConnectionTrackingTest` and `PartitionRevocationStaleStateTest` remain carried until G5 refactors them onto that chain | open |
+| Inherited revocation, stale-assembly, cleanup-acknowledgement, and successor-gating assertions | G3 | G8 | The predecessor expressed generation cancellation as synthetic closes. G8 owns the typed graceful/force cancellation and cleanup chain that replaces it, so applicable members of the five carried revocation/interrupted-close files move there without restoring `TrafficSourceReaderInterruptedClose` | open |
+| Active-record-tracker gauge cleanup balance | G3 | G8 | Ordinary record completion decrements the process-wide gauge now. Only G8's `GenerationCleanupTracker` can remove unfinished trackers during cancellation, so G8 must decrement once per removed tracker and prove the gauge returns to its pre-generation value without a generation metric dimension | open |
+| One-shot asynchronous commit resolution under callback/wakeup races | G3 | G4 | G3 review found that the Kafka source can resolve one accepted asynchronous submission twice when callback completion and wakeup propagation meet. G4 owns commit authority and must build the submission identity, one-in-flight state, callback owner, monotonic recommit behavior, observability, and deterministic race evidence as one chain | open |
+| Interrupted source teardown still reaches application close | G3 | G11 | This one member of `TrafficSourceReaderInterruptedCloseWiringTest` is process-teardown behavior rather than generation cleanup. G11 owns it against the final supervisor/application chain while G8 owns the file's revocation members | open |
 | Real replay construction: Kafka source owner and port → source queue → replay-intake queue and owner → connection/request consumer | G2 | G5 | G2's source component exists, but its real downstream connection/request consumer is unavailable until G5. G5 is therefore the first milestone that can construct the responsibility's complete production chain; G9 only places that integrated application under supervision and deployed configuration | open |
 | `§17.4` case 1 — demand requests another batch while fewer than `N` requests have resolved retry input and unfinished target turns | G2 | G7 | `N = P * T_threads` and the supply count are `kafkaLLD §13`, which G7 builds. No symbol in §13 exists in the module | open |
 | `§17.4` case 2 — request reconstitution with unresolved retry input does not increment supply | G2 | G7 | §13 transition 1, per-request intake bookkeeping created at reconstitution. Needs G3's reconstitution first | open |

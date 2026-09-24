@@ -21,6 +21,7 @@ import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInput;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
+import org.opensearch.migrations.replay.tracing.ReplayIntakeMetrics;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.generator.RecordScript;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -48,16 +49,18 @@ class SourceReconstructionTest {
     private static final String CONNECTION = "connection";
     private static final String REQUEST_BYTES = "GET /thing HTTP/1.1\r\nHost: source\r\n\r\n";
 
-    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, false);
+    private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, true);
+    private final RootReplayerContext rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
     private final WakeupController wakeupController =
-        new WakeupController(() -> {}, new RootReplayerContext(telemetry.openTelemetrySdk));
+        new WakeupController(() -> {}, rootContext);
     private final KafkaSourceInputQueue sourceInputs = new KafkaSourceInputQueue(wakeupController);
     private final RecordingSink sink = new RecordingSink();
     private final ReplayIntakeOwner owner = new ReplayIntakeOwner(
         new ReplayIntakeInputQueue(),
         sourceInputs,
         sink,
-        failure -> Assertions.fail("replay intake failed: " + failure.getMessage())
+        failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
+        rootContext.replayIntakeMetrics
     );
 
     @AfterEach
@@ -85,6 +88,38 @@ class SourceReconstructionTest {
 
         Assertions.assertEquals(1, sink.requests.size(), "one request, however many records carried it");
         Assertions.assertEquals(REQUEST_BYTES, bytesOf(sink.requests.get(0)));
+        Assertions.assertEquals(
+            List.of(Instant.ofEpochSecond(1)),
+            sink.requestFirstByteSourceTimes
+        );
+        Assertions.assertEquals(
+            List.of(Instant.ofEpochSecond(3)),
+            sink.requestEndOfMessageSourceTimes
+        );
+        Assertions.assertEquals(
+            List.of(1_100L),
+            sink.requestCompletingLogAppendTimes
+        );
+    }
+
+    /**
+     * {@code §17.2}: periodic record boundaries must not change response reconstruction either.
+     */
+    @Test
+    void aResponseSplitAcrossRecordsReconstructsTheSameBytesAsOneRecord() {
+        var responseBytes = "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody";
+        var firstHalf = responseBytes.substring(0, 20);
+        var secondHalf = responseBytes.substring(20);
+        var script = new RecordScript(TOPIC)
+            .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER,
+                stream(0, read(1, REQUEST_BYTES), endOfMessage(2), write(3, firstHalf)))
+            .addTraffic(0, 1, Instant.ofEpochMilli(1_100), WRITER,
+                stream(1, write(4, secondHalf), close(5)));
+
+        applyAll(script);
+
+        Assertions.assertEquals(1, sink.responses.size(), "one response, however many records carried it");
+        Assertions.assertEquals(responseBytes, bytesOf(sink.responses.get(0)));
     }
 
     /**
@@ -374,6 +409,48 @@ class SourceReconstructionTest {
     }
 
     /**
+     * {@code procCommit §3.5}: a request receives exactly one final source-response result, and a later
+     * connection event cannot replace or repeat an already completed result.
+     */
+    @Test
+    void aLaterCloseDoesNotReplaceOrDuplicateAnAlreadyCompletedResponse() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
+                read(4, "GET /next HTTP/1.1\r\n"),
+                close(5)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            1,
+            sink.requestIds.size(),
+            "the closing request prefix never reached its request boundary"
+        );
+        Assertions.assertEquals(
+            sink.requestIds,
+            sink.completeResponses,
+            "the close must not repeat the response already completed by the next request's first read"
+        );
+        Assertions.assertTrue(
+            sink.unprovenResponses.isEmpty(),
+            "the following request read already proved the source finished the completed response"
+        );
+        Assertions.assertTrue(sink.incompleteResponses.isEmpty());
+        sink.assertExactlyOneFinalResponseResultPerRequest();
+        assertFinalResponseMetricsBalance();
+    }
+
+    /**
      * {@code §9.4}: the proxy may discover capture suppression after recording a request prefix. The marker
      * discards that prefix, advances the source ordinal, and leaves the connection available for later
      * captured requests.
@@ -469,25 +546,39 @@ class SourceReconstructionTest {
      * "prevents later observations from joining that lifetime".
      */
     @Test
-    void aCapturedCloseEndsTheLifetimeAndLaterObservationsDoNotJoinIt() {
-        var script = new RecordScript(TOPIC).addTraffic(
-            0,
-            0,
-            Instant.ofEpochMilli(1_000),
-            WRITER,
-            stream(
+    void anObservationAfterACapturedCloseIsAProtocolViolation() {
+        var script = new RecordScript(TOPIC)
+            .addTraffic(
                 0,
-                read(1, REQUEST_BYTES),
-                endOfMessage(2),
-                write(3, "HTTP/1.1 200 OK\r\n\r\n"),
-                close(4),
-                read(5, "GET /after-the-close HTTP/1.1\r\n\r\n"),
-                endOfMessage(6)
+                0,
+                Instant.ofEpochMilli(1_000),
+                WRITER,
+                stream(
+                    0,
+                    read(1, REQUEST_BYTES),
+                    endOfMessage(2),
+                    write(3, "HTTP/1.1 200 OK\r\n\r\n"),
+                    close(4)
+                )
             )
-        );
+            .addTraffic(
+                0,
+                1,
+                Instant.ofEpochMilli(2_000),
+                WRITER,
+                stream(
+                    1,
+                    read(5, "GET /after-the-close HTTP/1.1\r\n\r\n"),
+                    endOfMessage(6)
+                )
+            );
 
         applyAll(script);
 
+        var violations = drainSource().stream()
+            .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+            .toList();
+        Assertions.assertEquals(1, violations.size());
         Assertions.assertEquals(1, sink.closes.size(), "the close reaches the connection owner exactly once");
         Assertions.assertEquals(
             1,
@@ -511,6 +602,96 @@ class SourceReconstructionTest {
         Assertions.assertTrue(
             sink.incompleteResponses.isEmpty(),
             "incomplete is reserved for expiration and cancellation, which is the replayer giving up"
+        );
+        sink.assertExactlyOneFinalResponseResultPerRequest();
+    }
+
+    /**
+     * The same cutoff must fire before the current {@link SourceConnectionState} can apply another observation,
+     * not only when a later Kafka record attempts to allocate a fresh lifetime.
+     */
+    @Test
+    void anObservationLaterInTheClosingTrafficStreamIsAProtocolViolation() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                write(3, "HTTP/1.1 200 OK\r\n\r\n"),
+                close(4),
+                read(5, "GET /after-the-close HTTP/1.1\r\n\r\n"),
+                endOfMessage(6)
+            )
+        );
+
+        applyAll(script);
+
+        var violations = drainSource().stream()
+            .filter(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+            .toList();
+        Assertions.assertEquals(1, violations.size());
+        Assertions.assertEquals(1, sink.closes.size(), "the close reaches the connection owner exactly once");
+        Assertions.assertEquals(
+            1,
+            sink.requests.size(),
+            "the observation following the close must not become another request"
+        );
+    }
+
+    @Test
+    void aBareSegmentEndDuringRequestAssemblyIsIgnored() {
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                segmentEnd(2),
+                endOfMessage(3)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream()
+            .map(SourceReconstructionTest::bytesOf)
+            .toList());
+        Assertions.assertTrue(
+            drainSource().stream().noneMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
+        );
+    }
+
+    @Test
+    void aBareSegmentEndDuringResponseAssemblyIsIgnored() {
+        var response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, REQUEST_BYTES),
+                endOfMessage(2),
+                segmentEnd(3),
+                write(4, response),
+                close(5)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(List.of(response), sink.responses.stream()
+            .map(SourceReconstructionTest::bytesOf)
+            .toList());
+        Assertions.assertTrue(
+            drainSource().stream().noneMatch(KafkaSourceInput.CaptureProtocolViolationDetected.class::isInstance)
         );
     }
 
@@ -542,6 +723,7 @@ class SourceReconstructionTest {
             sink.completeResponses.isEmpty(),
             "an expired response must not be reported complete, proven or otherwise"
         );
+        sink.assertExactlyOneFinalResponseResultPerRequest();
     }
 
     // ---------------------------------------------------------------- driving
@@ -559,6 +741,32 @@ class SourceReconstructionTest {
         return sourceInputs.drain();
     }
 
+    private void assertFinalResponseMetricsBalance() {
+        var metrics = telemetry.getFinishedMetrics();
+        var requests = InMemoryInstrumentationBundle.getMetricValueOrZero(
+            metrics,
+            ReplayIntakeMetrics.MetricNames.REQUESTS_RECONSTITUTED
+        );
+        var finalResponses =
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                metrics,
+                ReplayIntakeMetrics.MetricNames.RESPONSES_PROVEN_COMPLETE
+            )
+                + InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    ReplayIntakeMetrics.MetricNames.RESPONSES_UNPROVEN_COMPLETE
+                )
+                + InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    ReplayIntakeMetrics.MetricNames.RESPONSES_INCOMPLETE
+                );
+        Assertions.assertEquals(
+            requests,
+            finalResponses,
+            "terminal source-response metrics must be a projection of the same one-result-per-request lifecycle"
+        );
+    }
+
     private static String bytesOf(HttpMessageAndTimestamp message) {
         var joined = new StringBuilder();
         message.stream().forEach(packet -> joined.append(new String(packet, StandardCharsets.UTF_8)));
@@ -570,6 +778,9 @@ class SourceReconstructionTest {
     private static final class RecordingSink implements SourceAssemblySink {
         private final List<HttpMessageAndTimestamp.Request> requests = new ArrayList<>();
         private final List<ReplayRequestId> requestIds = new ArrayList<>();
+        private final List<Instant> requestFirstByteSourceTimes = new ArrayList<>();
+        private final List<Instant> requestEndOfMessageSourceTimes = new ArrayList<>();
+        private final List<Long> requestCompletingLogAppendTimes = new ArrayList<>();
         private final List<ReplayRequestId> completeResponses = new ArrayList<>();
         private final List<HttpMessageAndTimestamp.Response> responses = new ArrayList<>();
         /** Completed, but with nothing proving the source finished writing — {@code §9.2}'s {@code keptAlive}. */
@@ -582,11 +793,15 @@ class SourceReconstructionTest {
             ReplayRequestId replayRequestId,
             long capturedRequestOrdinal,
             HttpMessageAndTimestamp.Request request,
-            Instant sourceEventTime,
+            Instant requestFirstByteSourceTime,
+            Instant requestEndOfMessageSourceTime,
             long requestCompletingLogAppendTime
         ) {
             requests.add(request);
             requestIds.add(replayRequestId);
+            requestFirstByteSourceTimes.add(requestFirstByteSourceTime);
+            requestEndOfMessageSourceTimes.add(requestEndOfMessageSourceTime);
+            requestCompletingLogAppendTimes.add(requestCompletingLogAppendTime);
         }
 
         @Override
@@ -610,6 +825,30 @@ class SourceReconstructionTest {
         @Override
         public void onCapturedClose(ConnectionProcessingId connectionProcessingId, Instant closeTime) {
             closes.add(connectionProcessingId);
+        }
+
+        private void assertExactlyOneFinalResponseResultPerRequest() {
+            var finalResults = new ArrayList<ReplayRequestId>(
+                completeResponses.size() + incompleteResponses.size()
+            );
+            finalResults.addAll(completeResponses);
+            finalResults.addAll(incompleteResponses);
+            var distinctRequests = new java.util.HashSet<>(requestIds);
+            Assertions.assertEquals(
+                requestIds.size(),
+                distinctRequests.size(),
+                "each reconstituted request must have a distinct identity"
+            );
+            Assertions.assertEquals(
+                requestIds.size(),
+                finalResults.size(),
+                "every reconstituted request must receive one final source-response result"
+            );
+            Assertions.assertEquals(
+                distinctRequests,
+                new java.util.HashSet<>(finalResults),
+                "final source-response results must neither omit nor invent a request"
+            );
         }
     }
 

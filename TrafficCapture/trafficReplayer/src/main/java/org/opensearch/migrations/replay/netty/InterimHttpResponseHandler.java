@@ -12,6 +12,10 @@ import io.netty.util.ReferenceCountUtil;
  * <p>HTTP 101 is intentionally preserved because it changes protocols instead of preceding another
  * HTTP response. The replayer does not support the upgraded protocol, but treating 101 as terminal
  * allows that exchange to fail promptly instead of waiting for a response that will never arrive.
+ *
+ * <p>TODO(POST1): Preserve target interim responses through target aggregation and tuple output instead of
+ * discarding them here. Use https://github.com/opensearch-project/opensearch-migrations/pull/3000 as the
+ * implementation starting point.
  */
 public class InterimHttpResponseHandler extends ChannelInboundHandlerAdapter {
     private boolean discardingInterimResponse;

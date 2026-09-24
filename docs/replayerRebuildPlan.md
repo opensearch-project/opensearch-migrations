@@ -309,10 +309,19 @@ work, not deferred work. Status for each lives in `docs/replayerRebuildStatus.md
    `proxyCaptureProtocol §4.1` says the marker advances the request sequence. Increment the same
    connection-owned counter used by `commitEndOfHttpMessageIndicator`, and add a serializer test that flushes
    after the drop and proves the successor stream carries the advanced baseline.
+5. **Source interim responses need their own capture-protocol observations.** Integrate the source-side
+   protocol model from PR #3000: add whole and segmented interim-response observations, using protobuf field
+   numbers `17` and `19` because this branch already assigns `18` to
+   `connectionObservationSequence`; classify source `1xx` responses other than `101` into those observations;
+   and prove both forms directly. Ordinary `Write` observations remain source-response bytes and are never
+   reinterpreted as interim responses. There is no compatibility decoder or fallback for captures written
+   before this protocol change. G3 consumes the typed observations and keeps request assembly active until
+   its request end marker.
 
-**PA2 Exit:** all four focused repairs above have direct tests, their temporary replayer-side workarounds are
-deleted, and intentional suppression followed by a stream boundary preserves the successor
-`priorRequestsReceived` ordinal.
+**PA2 Exit:** all five focused repairs above have direct tests, their temporary replayer-side workarounds are
+deleted, intentional suppression followed by a stream boundary preserves the successor
+`priorRequestsReceived` ordinal, and source interim responses are emitted only as the typed whole or segmented
+observations consumed by G3, with no ordinary-`Write` compatibility path.
 
 If one agent owns both proxy and replayer, these are explicit scheduled checkpoints, not fictional
 parallelism. Proxy work may be interleaved with replayer work, but PA3 cannot be deferred into final
@@ -335,6 +344,7 @@ The final implementation must obey this boundary:
 | `E` and `S` | Proxy and replayer receive the same run configuration and reject invalid values at startup |
 | `F` | Proxy-local record-detachment deadline; it creates record boundaries but is not replayer expiration input |
 | Connection lifecycle | Only `CloseObservation` is terminal; disconnect and connection-exception observations remain diagnostic |
+| Source interim response (`1xx`, excluding `101`) | Encode only as the typed whole or segmented interim-response observation added by PA2 item 5; G3 consumes it without ending request assembly. Ordinary `Write` is never an alternate encoding |
 | Kafka headers | Diagnostic only unless a future approved protocol version explicitly assigns semantics |
 
 The proxy may be changed where this audit finds a protocol mismatch or rough implementation edge.
