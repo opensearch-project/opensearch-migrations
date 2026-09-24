@@ -1,0 +1,23 @@
+#!/bin/bash
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+set -u
+
+: "${FAKE_GRADLE_ARGS_FILE:?FAKE_GRADLE_ARGS_FILE must name the argument capture file}"
+: "${FAKE_GRADLE_EXIT_CODE:=0}"
+
+printf '%s\n' "$@" > "$FAKE_GRADLE_ARGS_FILE"
+
+if [ "$FAKE_GRADLE_EXIT_CODE" -eq 0 ]; then
+    echo "> Task :fake"
+    echo "BUILD SUCCESSFUL in 1s"
+    echo "1 actionable task: 1 executed"
+else
+    echo "> Task :fake FAILED"
+    echo "FAILURE: Build failed with an exception."
+    echo "* What went wrong:"
+    echo "Synthetic failure from fake gradlew"
+fi
+
+exit "$FAKE_GRADLE_EXIT_CODE"

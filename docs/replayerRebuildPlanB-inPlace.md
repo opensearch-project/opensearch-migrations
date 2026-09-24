@@ -5,9 +5,10 @@
 **Primary:** [`replayerRebuildPlanA-inPlace.md`](replayerRebuildPlanA-inPlace.md) — selected
 2026-09-22. Read that first; this document assumes it and describes what changes if it is abandoned.
 
-**Supersedes:** [`replayerRebuildPlan.md`](replayerRebuildPlan.md) for sequencing and per-step
-procedure. That document remains authoritative for the `D1`–`D18` defect analysis (§2), the `R1`–`R19`
-traceability matrix (§6.5), and deployed-configuration compatibility (§7).
+**Supplemented by:** [`replayerRebuildPlan.md`](replayerRebuildPlan.md), which contains no competing
+sequencing and is authoritative only for the `D1`–`D18` defect analysis (§2), the PA1–PA3 proxy
+milestones (§3.2), the `R1`–`R19` traceability matrix (§6.5), and deployed-configuration compatibility
+(§7).
 
 **Governed by:** [`../AGENTS.md`](../AGENTS.md). Its red lines, escalation format, review policy, test
 policy, and `-x spotless` rule apply to every milestone below and are not restated here.
