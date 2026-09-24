@@ -700,6 +700,11 @@ The state uses `TrafficStream.priorRequestsReceived` and
 HTTP message. It discards that tail until the next captured request boundary rather than parsing it
 as a new request.
 
+An inherited incomplete request occupies one captured request ordinal. Fresh reconstruction reserves
+that ordinal once when `lastObservationWasUnterminatedRead` is true. Its end-of-message marker, a source
+write that proves the request boundary was crossed, or `RequestIntentionallyDropped` ends inherited-tail
+discard and returns to the between-requests phase without advancing the ordinal again.
+
 If the source writes response bytes before the captured request reaches its end-of-message marker,
 replay intake treats that write as an informational response such as `100 Continue`: it ignores the
 write observation, or the complete write-segment sequence through its segment-end marker, and
@@ -786,7 +791,9 @@ The proxy emits it only when some read observations for that request were alread
 the suppression decision became available; when the decision is available before any request byte
 is captured, no request observation or drop marker is emitted.
 
-The marker is valid only while replay intake is assembling that incomplete request. Replay intake:
+The marker is valid while replay intake is assembling that incomplete request or discarding an
+inherited incomplete request whose prefix predates process-local reconstruction. For a process-local
+assembly, replay intake:
 
 1. discards the request bytes accumulated so far;
 2. releases that request-assembly's record associations;
@@ -795,9 +802,11 @@ The marker is valid only while replay intake is assembling that incomplete reque
 5. leaves the process-local source connection lifetime open.
 
 It creates no `ReplayRequestId`, target admission, source-response result, or tuple. A later request
-on the same connection reconstructs normally with the next ordinal. A marker received when no
-incomplete request is under assembly is a capture-protocol violation: it cannot truthfully describe
-the condition the marker exists to distinguish from accidental loss.
+on the same connection reconstructs normally with the next ordinal. For an inherited tail, the marker
+only ends discard: there are no process-local request associations to release, and fresh reconstruction
+already reserved its ordinal. A marker received when neither an incomplete request is under assembly nor
+an inherited tail is being discarded is a capture-protocol violation: it cannot truthfully describe the
+condition the marker exists to distinguish from accidental loss.
 
 ## 10. Writer heartbeat and broker time
 
@@ -1120,13 +1129,16 @@ The grace interval is configuration, never adapted at runtime (§9.5).
 On a detected capture-protocol violation, replay intake:
 
 1. leaves the violating record unfinished;
-2. reports its partition and offset to `KafkaSourceOwner`;
-3. causes the source to pause further Kafka intake;
-4. emits the required diagnostics and alarm;
-5. allows only already-admitted target and tuple side effects to drain for 60 seconds; and
-6. terminates.
+2. latches a replay-wide protocol-violation cutoff before applying another record batch;
+3. reports the violating partition and offset to `KafkaSourceOwner`;
+4. causes the source to pause further Kafka intake;
+5. emits the required diagnostics and alarm;
+6. allows only target and tuple side effects admitted before the violation to drain for 60 seconds; and
+7. terminates the whole replay application.
 
-No later record may pass the violating offset.
+After the cutoff is latched, replay intake applies no record from any later queued batch on any
+partition. Completion and cleanup inputs for side effects already admitted before the violation may
+still run during the bounded drain. Nothing admitted after the violating record may join that drain.
 
 An unexpected owner failure, failed required message submission, timestamp-bound violation,
 owner-thread violation, or corrupted internal state bypasses that protocol-drain path and invokes

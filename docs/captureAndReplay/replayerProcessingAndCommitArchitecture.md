@@ -355,6 +355,11 @@ continues HTTP assembly that began before the process-local reconstruction, and 
 incomplete preceding request or response until the next captured request boundary. If the first
 available data begins at such a boundary, ordinary reconstruction begins immediately.
 
+An inherited incomplete request occupies one captured request ordinal. Fresh reconstruction reserves
+that ordinal once when `lastObservationWasUnterminatedRead` is true. Its end-of-message marker, a source
+write that proves the request boundary was crossed, or `RequestIntentionallyDropped` ends inherited-tail
+discard without advancing the ordinal again.
+
 The first `connectionObservationSequence` encountered by fresh reconstruction establishes its
 process-local sequence baseline. Every later observation for that reconstruction must follow
 contiguously. Sequence validation therefore detects gaps after the fresh starting point without
@@ -699,7 +704,10 @@ expiration, request, target, tuple, or record-completion state.
 known only after some bytes of the request had already been recorded. Replay intake discards that
 incomplete request assembly, releases its associations, advances the captured request ordinal, and
 keeps the source connection lifetime open. It creates no replay request, target admission, source
-response, or tuple. Receiving the marker without an incomplete request under assembly is a
+response, or tuple. While replay intake is discarding an inherited incomplete request, the marker
+ends that discard without another ordinal advance because fresh reconstruction already reserved the
+inherited request's ordinal and created no process-local associations for it. Receiving the marker
+without either an incomplete request under assembly or an inherited tail under discard is a
 capture-protocol violation.
 
 For a bring-your-own archive declared `finalized`, the import workflow sends one partition-end
@@ -1491,10 +1499,12 @@ For a capture-protocol violation, the replayer:
 1. emits loud error logs, metrics, and an operator-visible alarm;
 2. makes the violating record ineligible for commit;
 3. blocks commits from advancing past that offset;
-4. pauses further Kafka intake;
-5. allows the fixed `protocolViolationDrainLimit` of 60 seconds for the top-level protocol's
-   bounded drain of already-admitted target and tuple side effects; and
-6. terminates.
+4. latches a replay-wide cutoff that prevents every later queued record batch, on every partition,
+   from applying another record;
+5. pauses further Kafka intake;
+6. allows the fixed `protocolViolationDrainLimit` of 60 seconds for the top-level protocol's
+   bounded drain of target and tuple side effects admitted before the violation; and
+7. terminates the whole replay application.
 
 The drain does not change the violating record's outcome. Restarting without correcting or
 deliberately bypassing the record encounters the same poison pill.
