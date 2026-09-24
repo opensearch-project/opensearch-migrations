@@ -5,11 +5,11 @@ import java.util.Scanner;
 import java.util.concurrent.CompletableFuture;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs.MetadataCustomTransformationParams;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testfixtures.SearchClusterContainer;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
