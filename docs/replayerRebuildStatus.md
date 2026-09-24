@@ -770,6 +770,13 @@ owner reading the diff rather than by any check.
 time a staging habit has produced a mixed commit — `da7787ebf` mixed a design edit with implementation, which is
 what `tools/verify-design-authorization.sh` now catches. The same shape, one category wider.
 
+**The commit history was consolidated on 2026-09-24**, 95 commits down to 36, on the owner's instruction: policy
+changes — the design documents and the `AGENTS.md` rules — left standing on their own, and the work commits grouped
+by concern with the ~24 register-only commits absorbed into the commits whose work they record. Verified by the
+final tree being identical to the pre-consolidation branch and by no commit mixing a design edit with
+implementation. The split that fixed the mixed commit above therefore no longer appears as two commits; the point
+of it was that the milestone grouping be right, which the consolidation makes right by construction.
+
 `tools/verify-commit-scope.sh` is the check for this one. It fails a commit whose subject names one milestone
 while the commit **adds** a file under a package another milestone owns, and it reports `3c3472d06`'s two files
 when run against that commit. Deliberately narrow: added files only, because a *modification* in another
@@ -777,6 +784,10 @@ milestone's file is often mechanical — repointing an import after a package mo
 buried work — while a new file under another milestone's package never is. Package ownership is listed only
 where it is unambiguous; `replay/intake/` is G3's and `replay/kafkasource/` is G2's, and a package with no row is
 not checked.
+
+**`G0` is exempt**, and the consolidation is what surfaced why: G0 is the milestone that puts every file in the
+module at the path it will ship from, marked, so it necessarily adds files under packages later milestones own.
+Without the exemption the check fires on the one commit that is *supposed* to span the whole tree.
 
 **Not added to `AGENTS.md`.** That file is the owner's; the check exists and is named here, and whether §5 should
 point at it the way §1 points at the design-authorization check is his call.
