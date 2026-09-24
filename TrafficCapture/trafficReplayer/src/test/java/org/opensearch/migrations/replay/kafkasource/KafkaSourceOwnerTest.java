@@ -21,7 +21,7 @@ import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
 import org.opensearch.migrations.replay.kafka.PumpedKafkaSource;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
@@ -49,9 +49,8 @@ class KafkaSourceOwnerTest {
     private final InMemoryInstrumentationBundle telemetry = new InMemoryInstrumentationBundle(false, true);
     private final AtomicLong clockNanos = new AtomicLong();
     private final ReplayIntakeInputQueue intakeInputs = new ReplayIntakeInputQueue();
-    // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
-    private final KafkaSourceRootContext rootContext =
-        new KafkaSourceRootContext(telemetry.openTelemetrySdk);
+    private final RootReplayerContext rootContext =
+        new RootReplayerContext(telemetry.openTelemetrySdk);
     /** Counts issuance, which is the only observable form of "a wakeup was not coalesced into a spent one". */
     private final java.util.concurrent.atomic.AtomicInteger wakeupsIssued =
         new java.util.concurrent.atomic.AtomicInteger();

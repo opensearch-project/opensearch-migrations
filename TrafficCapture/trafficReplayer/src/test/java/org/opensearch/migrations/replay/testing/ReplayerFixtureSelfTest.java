@@ -27,7 +27,7 @@ import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInputQueue;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.replay.kafkasource.ApplicationKafkaRecord;
 import org.opensearch.migrations.replay.kafkasource.PolledKafkaRecord;
@@ -316,8 +316,7 @@ class ReplayerFixtureSelfTest {
         var telemetry = new InMemoryInstrumentationBundle(false, false);
         try {
             var port = new PumpedKafkaSource(List.of(topicPartition));
-            // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
-            var rootContext = new KafkaSourceRootContext(telemetry.openTelemetrySdk);
+            var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
             // A counting action, not a no-op: with a no-op this test cannot distinguish zero wakeups from
             // several, which is exactly the observability G0 claims.
             var wakeupsIssued = new java.util.concurrent.atomic.AtomicInteger();

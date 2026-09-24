@@ -37,14 +37,14 @@ Rows marked **[corrected]** replaced a claim in the previous revision that measu
 |---|---|
 | Branch | `stableAndScalableLiveReplay` |
 | Remote | `origin` = `github.com/gregschohn/opensearch-migrations` (a fork, **not** `opensearch-project`) |
-| Local vs origin | **Pushed and level** at `0fe180eed`. The tracking ref is trustworthy again: the owner added the missing refspec on 2026-09-23, so `origin/stableAndScalableLiveReplay` now tracks and a plain `--force-with-lease` works. Historical note, because the symptom is baffling if it recurs on another branch: `remote.origin.fetch` listed only `integrating3231`, so this branch's tracking ref stayed frozen at `2c4f305f3` through any number of fetches, and `--force-with-lease` refused a clean fast-forward with "stale info". If that appears again, measure with `git ls-remote origin refs/heads/<branch>` and check the refspec before assuming divergence |
+| Local vs origin | **Local work is ahead of `origin/stableAndScalableLiveReplay`; G3 review is still pending.** The tracking ref is trustworthy again: the owner added the missing refspec on 2026-09-23, so `origin/stableAndScalableLiveReplay` now tracks and a plain `--force-with-lease` works. Historical note, because the symptom is baffling if it recurs on another branch: `remote.origin.fetch` listed only `integrating3231`, so this branch's tracking ref stayed frozen at `2c4f305f3` through any number of fetches, and `--force-with-lease` refused a clean fast-forward with "stale info". If that appears again, measure with `git ls-remote origin refs/heads/<branch>` and check the refspec before assuming divergence |
 | Pull request | #3394, open and **already a draft** (`isDraft: true`), base `main`, **126 commits**. Every check fails: DCO, Spotless, `publishToMavenLocal`, 30 `gradle-tests` shards, macOS build, Sonar, `docker-compose-e2e-test`, `full-es68-e2e-aws-test`, both `all-*-checks-pass` gates. **[corrected]** — the register previously asked whether #3394 should become a draft; it already is one |
 | DCO debt | **7 of the 126 PR commits** lack `Signed-off-by`, and they are exactly the seven a prior note named: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`. All seven are **ancestors of `origin/integrating3231`** — inherited history, not this branch's work. All **24** commits in `origin/integrating3231..HEAD` are signed. Earliest offender is `6fb2cb040` (2026-09-16), so one rebase touches **31** commits. **[corrected]** — the "24 of 48" claim was wrong on both numbers. Any rewrite must preserve trees, topology, messages, authorship, and original dates, behind a backup ref, pushed with `--force-with-lease` |
 | Test compilation | **Green.** 108 tests pass, 0 failures. The 61-error breakage inherited from S6b is resolved: the files carrying it are marked, so they no longer compile and no longer fail. The count rose from 95 as `ReplayerFixtureSelfTest` was promoted |
-| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 228 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 226 whole-file-marked ones. Run it after any marking change |
+| Marking integrity | **PASS.** `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh` — 217 marked files, all regions well-formed, reconstruction clean, every code line recovered against history for the 211 whole-file-marked ones. Run it after any marking change |
 | Production compile | Passes — see the verified invocation in `AGENTS.md` §5 |
 | S6b review | **Performed 2026-09-22** as part of the G0 pull-over pass, covering all eight listed hotspots. Eight findings; see "S6b review findings" below. Five hotspots came back clean |
-| File counts | One module. **340 files** under `TrafficCapture/trafficReplayer/src` (**327** Java); **228** carry `REBUILD-LIMBO` regions, of which **2** are partial — `TrafficReplayer` (8 regions) and `ReplayIdentity` (1). `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. The earlier "333 files / 232 marked" figures were measured differently; use the command, not the number |
+| File counts | One module. **360 files** under `TrafficCapture/trafficReplayer/src` (**347** Java); **217** carry `REBUILD-LIMBO` regions, of which **6** are partial. `grep -rl REBUILD-LIMBO-START TrafficCapture/trafficReplayer/src \| wc -l` is the single outstanding-work measure and the rebuild is complete when it reads 0. Historical counts were measured at earlier milestones; use the command, not the number |
 | `stash@{0}` | `09df7b9a4` — S6 pre-commit backup, redundant. Do not apply |
 | `stash@{1}` | `f676a7bc7` — ~3,000 lines of an abandoned test/harness direction. Do not merge wholesale; inspect only if explicitly asked. **Note:** the four G0 fixtures it was thought to hold already exist on the branch in `src/testFixtures` |
 | Other checkout | `/Users/schohn/dev/replayerCommitHardening` holds an earlier copy of the docs. This repo is authoritative |
@@ -1079,10 +1079,14 @@ non-atomic refcount defect already open against G5, and unit 1 needs no tracing 
 `AGENTS.md` §4 makes observability a deliverable of the milestone that creates a component, so this is a
 real deferral and is in the ledger below with G5 as its receiver — not an omission.
 
-## G3 — landed, and what it does not yet deliver
+## G3 — implementation complete, review pending
 
-Units 1 and 2 of the approved three-unit split are complete with their evidence. Unit 3 is half done:
-`ReplayIdentity` is deleted, the dump modes are not restored.
+All three units of the approved split are complete with their evidence. Unit 3 restored the Kafka-backed
+HTTP dump modes, deleted `ReplayIdentity`, and consolidated the temporary Kafka root into the carried
+`RootReplayerContext`. The file-input branch was a separate G1 obligation hidden in the same marked region;
+the owner assigned it to G9 on 2026-09-24, where source construction and CLI compatibility are wired. The
+milestone remains open until the required design-conformance review terminates with no unfixed Class A
+findings.
 
 ### Landed
 
@@ -1111,20 +1115,30 @@ is an absence assertion.
 accepting a sequence gap, joining a closed lifetime, reusing an expired lifetime's identity, relabelling in the
 order `§8.2` forbids, and reversing `§7` steps 7 and 8.
 
+The final Unit 3 integration pass also proved:
+
+- the narrowed intake, owner, wakeup, association, reconstruction, and fixture suite passes;
+- `SourceAssemblyEvidenceTest` passes all three real-proxy/real-topic cases; and
+- the limbo verifier recovers every carried whole-file region exactly, including the inherited
+  `RootReplayerContext` members promoted in place.
+
 One assertion was written so it could not fail — an empty list compared against an empty list — and was found
 by re-reading rather than by the harness. `§4.1`'s rule catches the class; it does not catch every instance.
 
-### Not delivered, and where it goes
+### Unit 3 closure
 
-**`dump-http` and `dump-both` remain unrestored. This is G3's, not a deferral**, and the milestone cannot be
-closed until it lands: Plan A names it as the exit evidence, and it is the only evidence that runs source
-assembly end to end against a real topic. What it needs is known: `HttpTransactionDumper`'s formatting carries
-over verbatim, but its `AccumulationCallbacks` interface does not — that surface is typed on
-`IReplayContexts` and `ITrafficStreamKey`, which are exactly the tracing chain G3 deferred to G5. The dumper is
-refactored onto `SourceAssemblySink`, which needs none of it.
+**Kafka `dump-http` and `dump-both` are restored.** `SourceAssemblyEvidenceTest` drives source assembly from a
+real topic and proves both reconstructed output and the `UNPROVEN` response marker; `dump-both` keeps the raw
+and reconstructed views interleaved.
 
-**The `RootReplayerContext` consolidation is also still open** — thirteen `REBUILD-LIMBO-NOTE(G3)` sites, all
-of them `KafkaSourceRootContext` standing in for it. `grep -rn 'REBUILD-LIMBO-NOTE(G3)' src` is the list.
+**`RootReplayerContext` is the single live instrumentation root.** Its carried declaration and Kafka
+instrument fields were promoted in place; later-owner members remain marked at their original lines.
+`KafkaSourceRootContext`, introduced only as G2/G3 scaffolding, is removed and every live caller now uses the
+carried root.
+
+**The file-input dump path is deferred to G9.** Unlike the Kafka-backed modes, it requires the startup source
+construction and deployed-configuration compatibility that G9 owns. Both Plan A endpoints and the ledger name
+that receiver.
 
 ### Findings
 
@@ -1168,8 +1182,9 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 
 | Deferred | From | To | Why | State |
 |---|---|---|---|---|
-| `dump-http` and `dump-both` CLI modes, and the file-input dump path | G1 | G3 | HTTP transaction reconstruction is the legacy accumulator's job, whose closure is `ChannelContextManager` → `RootReplayerContext` → the `IReplayContexts` identity chain. Rebuilding that inside G1 is the lateral expansion `AGENTS.md` §6 forbids. G3 rebuilds source assembly, so the modes return there as that milestone's cheapest evidence. Mode names stay in the CLI (§2.3 contract); invoking them fails with a message naming G3 | open |
-| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G3 | Recorded in `TrafficReplayer.java`'s `REBUILD-LIMBO(G1)` note as a G1 blocker. It is not one: with G1 scoped to Kafka, no file path is promoted, so nothing forces the answer yet. It must be settled when the file dump path returns | open |
+| Kafka-backed `dump-http` and `dump-both` CLI modes | G1 | G3 | HTTP transaction reconstruction was the legacy accumulator's job. G3 rebuilt source assembly and uses these modes as its real-topic exit evidence. Mode names stayed in the CLI throughout (§2.3 contract) | proved — `SourceAssemblyEvidenceTest` |
+| File-backed `dump-raw`, `dump-http`, and `dump-both` | G1 | G9 | The file branch requires source construction and deployed-configuration compatibility. G9 already owns both and is the first milestone that can restore the branch without reviving the legacy pull-based replay source | open |
+| Whether the file source speaks bare base64 `TrafficStream` or a `CaptureRecord` envelope | G1 | G9 | No file path is live, so G1 and G3 did not force the compatibility decision. G9 must settle it when the file-input contract becomes reachable again | open |
 | Tracing for replay intake and source assembly — `ChannelContextManager` and the accumulator's instrumentation contexts | G3 | G5 | `ChannelContextManager` carries the non-atomic refcount defect already open against G5 (`:39-43` reached from `:73-83`), and repairing it inside G3 would mean fixing a G5 defect to add observability G3's own evidence does not need. Record accounting is provable without it. `AGENTS.md` §4 otherwise makes observability a deliverable of the creating milestone, which is why this is recorded rather than simply left out | open |
 | `§17.4` case 1 — demand requests another batch while fewer than `N` requests have resolved retry input and unfinished target turns | G2 | G7 | `N = P * T_threads` and the supply count are `kafkaLLD §13`, which G7 builds. No symbol in §13 exists in the module | open |
 | `§17.4` case 2 — request reconstitution with unresolved retry input does not increment supply | G2 | G7 | §13 transition 1, per-request intake bookkeeping created at reconstitution. Needs G3's reconstitution first | open |
@@ -1192,7 +1207,7 @@ A deferral with no row here, or with no receiving milestone named in the plan, i
 | Scaffold | Introduced | Removal | State |
 |---|---|---|---|
 | `REBUILD-LIMBO` regions marking carried-but-undecided members in place | G0 | as each member resolves | open — `grep -rl REBUILD-LIMBO-START src \| wc -l` is the count; **238 files** at G0 |
-| `KafkaSourceRootContext` — holds the Kafka source's metric instruments under the same field names `RootReplayerContext` already uses (`pollInstruments`, `commitInstruments`, `kafkaCommitInstruments`). That class is the real home but aggregates instruments for ~30 contexts and is typed on `ISourceTrafficChannelKey`/`ITrafficStreamKey`, so promoting it means promoting the whole chain. Contexts keep their shape, so G3 deletes this and repoints them | G3 |
+| `KafkaSourceRootContext` — temporary Kafka-only instrumentation root | G2 | G3 | proved — deleted after promoting the carried `RootReplayerContext` in place and repointing every live caller |
 | The `REBUILD-LIMBO` note in the module's `build.gradle` | G0 | with the last region | open |
 
 Resolved and removed on 2026-09-23, recorded because they were previously tracked here: the

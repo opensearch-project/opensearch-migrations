@@ -1,35 +1,47 @@
 package org.opensearch.migrations.replay.tracing;
 
-// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: ISourceTrafficChannelKey ITrafficStreamKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
 
-// REBUILD-LIMBO-START(G2)
+// REBUILD-LIMBO-START(G5)
+// Legacy context factories below still use these identities.
 /*
-
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
+*/
+// REBUILD-LIMBO-END(G5)
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
+import lombok.NonNull;
 
 @Getter
-public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
+// REBUILD-LIMBO-NOTE(G5): implements IRootReplayerContext after that legacy interface is reduced to the
+// final owner-facing context API.
+public class RootReplayerContext extends RootOtelContext {
     public static final String SCOPE_NAME = "replayer";
 
+// REBUILD-LIMBO-START(G5)
+// These contexts return with the source and connection tracing chain.
+/*
     public final KafkaConsumerContexts.LivenessScanContext.MetricInstruments livenessScanInstruments;
     public final KafkaConsumerContexts.AsyncListeningContext.MetricInstruments asyncListeningInstruments;
     public final KafkaConsumerContexts.TouchScopeContext.MetricInstruments touchInstruments;
+*/
+// REBUILD-LIMBO-END(G5)
     public final KafkaConsumerContexts.PollScopeContext.MetricInstruments pollInstruments;
     public final KafkaConsumerContexts.CommitScopeContext.MetricInstruments commitInstruments;
     public final KafkaConsumerContexts.KafkaCommitScopeContext.MetricInstruments kafkaCommitInstruments;
+    public final KafkaConsumerContexts.RebalanceCallbackScopeContext.MetricInstruments
+        rebalanceCallbackInstruments;
+
+// REBUILD-LIMBO-START(G5)
+// Instruments for owners and operations built in G5 and later.
+/*
     public final AsyncPermitPoolMetrics permitPoolMetrics;
     public final ConnectionActorMetrics connectionActorMetrics;
     public final TargetExchangeStateMetrics targetExchangeStateMetrics;
@@ -57,17 +69,37 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public final ReplayContexts.ReceivingHttpResponseContext.MetricInstruments receivingHttpInstruments;
     public final ReplayContexts.TupleHandlingContext.MetricInstruments tupleHandlingInstruments;
     public final ReplayContexts.SocketContext.MetricInstruments socketInstruments;
+*/
+// REBUILD-LIMBO-END(G5)
 
-    public RootReplayerContext(OpenTelemetry sdk, IContextTracker contextTracker) {
+    public RootReplayerContext(@NonNull OpenTelemetry sdk) {
+        this(
+            sdk,
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
+    }
+
+    public RootReplayerContext(@NonNull OpenTelemetry sdk, @NonNull IContextTracker contextTracker) {
         super(SCOPE_NAME, contextTracker, sdk);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
+// REBUILD-LIMBO-START(G5)
+// Construction returns with the contexts above.
+/*
         livenessScanInstruments = KafkaConsumerContexts.LivenessScanContext.makeMetrics(meter);
         asyncListeningInstruments = KafkaConsumerContexts.AsyncListeningContext.makeMetrics(meter);
         touchInstruments = KafkaConsumerContexts.TouchScopeContext.makeMetrics(meter);
+*/
+// REBUILD-LIMBO-END(G5)
         pollInstruments = KafkaConsumerContexts.PollScopeContext.makeMetrics(meter);
         commitInstruments = KafkaConsumerContexts.CommitScopeContext.makeMetrics(meter);
         kafkaCommitInstruments = KafkaConsumerContexts.KafkaCommitScopeContext.makeMetrics(meter);
+        rebalanceCallbackInstruments =
+            KafkaConsumerContexts.RebalanceCallbackScopeContext.makeMetrics(meter);
+
+// REBUILD-LIMBO-START(G5)
+// Construction returns with the owner and operation instruments above.
+/*
         permitPoolMetrics = new AsyncPermitPoolMetrics(meter);
         connectionActorMetrics = new ConnectionActorMetrics(meter);
         targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
@@ -95,8 +127,13 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         waitingForHttpResponseInstruments = ReplayContexts.WaitingForHttpResponseContext.makeMetrics(meter);
         receivingHttpInstruments = ReplayContexts.ReceivingHttpResponseContext.makeMetrics(meter);
         tupleHandlingInstruments = ReplayContexts.TupleHandlingContext.makeMetrics(meter);
+*/
+// REBUILD-LIMBO-END(G5)
     }
 
+// REBUILD-LIMBO-START(G5)
+// Legacy source and channel factories are refactored with their consumers.
+/*
     @Override
     public TrafficSourceContexts.ReadChunkContext createReadChunkContext() {
         return new TrafficSourceContexts.ReadChunkContext(this, null);
@@ -105,11 +142,24 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     public IReplayContexts.IChannelKeyContext createChannelContext(ISourceTrafficChannelKey tsk) {
         return new ReplayContexts.ChannelKeyContext(this, null, tsk);
     }
+*/
+// REBUILD-LIMBO-END(G5)
+
+    public IKafkaConsumerContexts.IPollScopeContext createPollContext() {
+        return new KafkaConsumerContexts.PollScopeContext(this, null);
+    }
 
     public IKafkaConsumerContexts.ICommitScopeContext createCommitContext() {
         return new KafkaConsumerContexts.CommitScopeContext(this, null);
     }
 
+    public IKafkaConsumerContexts.IRebalanceCallbackScopeContext createRebalanceCallbackContext() {
+        return new KafkaConsumerContexts.RebalanceCallbackScopeContext(this);
+    }
+
+// REBUILD-LIMBO-START(G5)
+// Legacy traffic-stream factories are refactored with their consumers.
+/*
     public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForStreamSource(
         IReplayContexts.IChannelKeyContext channelCtx,
         ITrafficStreamKey tsk
@@ -124,7 +174,6 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
     ) {
         return new ReplayContexts.KafkaRecordContext(this, channelCtx, recordId, kafkaRecordSize);
     }
-}
-
 */
-// REBUILD-LIMBO-END(G2)
+// REBUILD-LIMBO-END(G5)
+}

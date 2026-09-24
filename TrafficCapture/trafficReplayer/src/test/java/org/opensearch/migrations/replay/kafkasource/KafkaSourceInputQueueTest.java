@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
-import org.opensearch.migrations.replay.tracing.KafkaSourceRootContext;
+import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.identity.PartitionBatchRequestId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -40,8 +40,7 @@ class KafkaSourceInputQueueTest {
     private final KafkaSourceInputQueue queue = new KafkaSourceInputQueue(wakeupController);
 
     private WakeupController newController(Runnable issueWakeup) {
-        // REBUILD-LIMBO-NOTE(G3): becomes RootReplayerContext.
-        return new WakeupController(issueWakeup, new KafkaSourceRootContext(telemetry.openTelemetrySdk));
+        return new WakeupController(issueWakeup, new RootReplayerContext(telemetry.openTelemetrySdk));
     }
 
     private static KafkaSourceInput request(long sequence) {
