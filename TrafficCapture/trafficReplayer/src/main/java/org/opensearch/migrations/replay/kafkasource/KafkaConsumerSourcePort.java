@@ -119,8 +119,8 @@ public final class KafkaConsumerSourcePort implements KafkaSourcePort {
         var callbackDelivered = new boolean[] { false };
         try {
             consumer.commitAsync(toOffsets(nextPositions), (offsets, failure) -> {
-                callbackDelivered[0] = true;
                 onResolved.accept(classifyAsync(failure));
+                callbackDelivered[0] = true;
             });
             return AsyncCommitSubmission.acceptedByClient();
         } catch (WakeupException absorbedByTheSubmission) {

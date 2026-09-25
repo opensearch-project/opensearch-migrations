@@ -31,9 +31,10 @@ Plan A and Plan B.
 | G1 | proved | Kafka `dump-raw` reaches `TrafficReplayer.main`; real proxy/topic envelope evidence; multi-partition bounds and metadata checked |
 | G2 | proved | Kafka source owner, wakeup boundary, generation/commit handling, and repeated design-conformance/falsification review; R9 proved |
 | G3 | `blocked(PA2/design)` | Implementation, falsification, and repeated conformance review complete through `3dbec52cf`; the committed focused six-class validation reports 56 passing tests, and the final review found no production-code conformance defect. Closure waits only on PA2 item 5's typed producer/interoperability and the exact authorized design amendment removing ordinary-`Write` fallback semantics |
+| G4 | proved | Commit authority complete through `49dd4cea0`: ordered observed-record head, one operation-level resolution latch, monotonic recommit, rejected/unknown distinction, revocation conservation, fixed-cardinality telemetry, 65-test focused validation, exact-revision falsification, and resumed Claude conformance review |
 | Production compile | proved | Last recorded passing with the required Gradle Spotless exclusions |
 | Compiled test set | proved | Last recorded 108 tests, 0 failures; inherited unresolved tests remain marked and owned below |
-| Limbo regions | open | Measured 2026-09-25: 215 files with `REBUILD-LIMBO-START`; 6 files with `REBUILD-LIMBO-NOTE`; 220 files with either marker; 349 Java / 362 total files under `TrafficCapture/trafficReplayer/src`. Historical counts drift; the START grep is authoritative |
+| Limbo regions | open | Measured 2026-09-25: 213 files with `REBUILD-LIMBO-START`; historical counts drift and the START grep is authoritative |
 | Limbo integrity | proved | `TrafficCapture/trafficReplayer/tools/verify-limbo-markers.sh`; rerun after every marking change |
 | PR strategy | decided | Keep draft PR #3394 and the same branch through the red-CI stretch; repair CI at the swing |
 | DCO debt | `deferred(post-G12)` | Seven inherited PR commits lack sign-off: `5150f20ed`, `d7aa79540`, `34d286154`, `68cf95444`, `997a6c44f0`, `139853523`, `6fb2cb040`; preserve history during the eventual rewrite |
@@ -71,7 +72,7 @@ refuted. Full measurements remain in the archived status.
 |---|---|---|---|---|
 | D1 | Replayer cannot read its own capture topic | G1 | open, reworded | New path decodes envelopes; remaining proof covers broker time, control records, and observation sequence |
 | D2 | A request can own zero Kafka records | G3 | open | |
-| D3 | Ordinary target failures select Retain and halt | G4 | open | |
+| D3 | Ordinary target failures select Retain and halt | G4 | proved | Commit authority accepts only `RecordProcessingFinished(KafkaRecordId)`; no target result or policy can advance or retain a commit position |
 | D4 | Mixed records structurally unrepresentable | G3 | open | |
 | D5 | Blocking commit in revocation before cancellation | G2 | open proof obligation | New owner path reviewed; final absence remains part of acceptance |
 | D6 | Target-concurrency bound is false | G5 | open residual | Abort currently releases before asynchronous channel teardown completes; configured default is effectively non-binding |
@@ -111,6 +112,25 @@ refuted. Full measurements remain in the archived status.
 | Active-record-tracker gauge during generation cancellation | A, unreachable before G8 | deferred(G8) | Every unfinished tracker removed by `GenerationCleanupTracker` decrements the process-wide gauge once; prove return to the pre-generation value without generation metric attributes |
 | G3 final review | conformance | proved | Seventh pass found no production-code design-conformance defect; only the typed-interim plan/design mismatch remains |
 
+## G4 latest dispositions
+
+| Finding / decision | Class | State | Required disposition |
+|---|---|---|---|
+| Accepted synchronous `RETRIABLE`/`GENERATION_STALE` was classified as proof that no offset moved | A | fixed | Only pre-acceptance async refusal is rejected; every failed accepted operation restores coverage as unknown |
+| Late protocol violation after generation cleanup had no specified fatal style | C / owner decision | fixed(1a) | Preserve `CaptureProtocolViolation`; mutate commit state and conservation metrics only for the matching live generation |
+| Submission-time timeout test exercised the callback branch | B | fixed | Separate construction-time and callback-delivered timeout tests; both classify as accepted unknown outcomes |
+| Bounded synchronous uncertainty had no falsifying test | B | fixed | Completion arrives inside the revocation callback, forcing bounded `commitSync`; reverting rejected/unknown classification fails |
+| Zero-grace rejected leg depended on the no-remainder boundary | B | fixed | Test comment records that zero grace intentionally preserves pre-acceptance rejection evidence |
+| `commit_resolutions{outcome}` absent from metric register | B | fixed | Registered as a fixed-cardinality diagnostic event counter |
+| `commit_resolutions` includes operation, duplicate, and late-callback events | B | wontfix(event-counter semantics) | Unit is events; it is diagnostic and excluded from conservation equations |
+| Redundant synchronous uncertainty pre-mark | B | fixed | Removed the duplicate pre-mark; the common operation-resolution path owns uncertainty restoration and classification |
+| Structurally invalid synchronous callback could be mistaken for a completed callback | A | fixed | Mark callback delivery only after classification and owner resolution return, so structural failures remain process-fatal |
+| Structural callback failure is wrapped twice at the adapter boundary | B | wontfix(diagnostic-only) | Fatal propagation and cause chain are preserved; removing the redundant message layer does not change commit authority |
+| Seven-argument owner constructor can omit metrics | B | wontfix(no live callers) | All current constructions pass metrics; G5 owns the production startup construction |
+| Test-side aggregate conservation helper mirrors emitted deltas | B | wontfix(supplemental assertion) | Queue-derived production invariant and explicit terminal-bucket assertions are load-bearing |
+| G4 conformance review | conformance | proved | Fresh named Claude session resumed through the final production correction; no unfixed Class A finding remains |
+| G4 falsification | test fidelity | proved | Exact committed revisions cleanly detected callback/wakeup double resolution, backpedaling, rejected/unknown collapse, retirement omissions, timeout misclassification, poison-prefix loss, and ordered-head violations |
+
 ## Standing implementation decisions
 
 | Key | Decision | Owner / state | Milestone |
@@ -126,7 +146,8 @@ refuted. Full measurements remain in the archived status.
 | Record tracker retirement | Ordinary completion removes only after required source-queue submission is accepted; cancellation removal and gauge balance belong to G8; prove via emitted messages and fixed-cardinality metrics, not map accessors | owner decided | G3/G8 |
 | Generation observability | Generation identity belongs in logs/exceptions/spans, never as a metric dimension | owner decided | G3+ |
 | Carried lifecycle evidence | Preserve inherited assertions until replacement behavior is proved; split members by responsibility | owner decided | G5/G8/G11 |
-| Async commit uncertainty | Stage monotonic recommit and never backpedal; land the owner/callback one-shot chain together | owner decided; implementation open | G4 |
+| Async commit uncertainty | Stage monotonic recommit and never backpedal; one owner-confined operation identity resolves callback/wakeup races once | owner decided; proved | G4 |
+| Late protocol violation after generation cleanup | Preserve the existing `CaptureProtocolViolation` path; when its generation is already gone, do not mutate commit state or conservation metrics. Do not reopen protocol crash-style refinements before the working component chains are complete | owner decided | G4+ |
 | Tuple writer | Transform off Netty loops on a bounded executor; one non-concurrently invoked transformer and sink per writer worker; explicit per-worker close; parallelism becomes a setting | reversible default, vetoable through G10 | G9 |
 | Image | `traffic_replayer` may remain broken during construction | reversible through G10 | G0 |
 | Branch/PR | Same branch and draft PR #3394 through red CI | owner decided | through swing |
@@ -208,8 +229,8 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | `ConnectionAdmissionEntry`, `TargetChannelPort`, `RequestPreparationResult`, `RetryDecision` shells | G0 | G5 | Land with first real consumer | open |
 | `TupleWriter`, `TupleWriteResult` shells | G0 | G9 | Land with tuple path and threading contract | open |
 | `PartitionIntakeState` shell | G0 | G3 | Land with source assembly | proved; implementation and conformance review complete |
-| One-shot asynchronous commit resolution under callback/wakeup races | G3 | G4 | G4 owns the complete submission identity, in-flight state, callback owner, monotonic recommit, observability, and deterministic race evidence | open |
-| Rejected-versus-unknown commit outcome split | G2 | G4 | G2 closed without proving the distinction; G4 owns issuance, operation-level resolution, revocation abandonment, conservation instrumentation, and deterministic evidence | accepted by G4; implementation open |
+| One-shot asynchronous commit resolution under callback/wakeup races | G3 | G4 | G4 owns the complete submission identity, in-flight state, callback owner, monotonic recommit, observability, and deterministic race evidence | proved |
+| Rejected-versus-unknown commit outcome split | G2 | G4 | G2 closed without proving the distinction; G4 owns issuance, operation-level resolution, revocation abandonment, conservation instrumentation, and deterministic evidence | proved |
 
 ## Scaffolding and known-broken-test ownership
 
@@ -265,6 +286,7 @@ lifecycle-result metrics; suppressing a terminal-result metric fails the focused
 | `records_commit_ineligible` | terminal counter | protocol violation blocks the instance | G4 |
 | `records_outstanding` | gauge | read instance has no terminal disposition | G4 |
 | `commit_attempts_rejected` | diagnostic counter, not equation term | one commit attempt is rejected | G4 |
+| `commit_resolutions{outcome}` | diagnostic event counter, not equation term | one operation resolution or late/duplicate resolution event is observed | G4 |
 
 | Invariant | Scope |
 |---|---|
@@ -275,9 +297,9 @@ lifecycle-result metrics; suppressing a terminal-result metric fails the focused
 
 G4 owns the complete conservation instrumentation chain; G10/G12 assert the equations. Rejected and unknown
 outcomes have opposite meanings: rejected proves the offset did not move, while unknown means it may have.
-The inherited no-callback `commitSync` path cannot distinguish them, so completing that split changes commit
-issuance rather than merely adding a counter. The split was assigned to G2 alongside commit submission but was
-not proved before G2 closed; the open-decisions table requires an explicit ownership/deferral correction.
+G4 distinguishes them at issuance: only a pre-acceptance asynchronous refusal is rejected; every
+non-acknowledged accepted operation, including bounded synchronous revocation commits, is unknown. The
+G2-to-G4 ownership correction is recorded in the deferral ledger and proved by deterministic evidence.
 
 Dashboard-pinned names requiring identical semantics: `lagBetweenSourceAndTargetRequests`,
 `bytesWrittenToTarget`, `bytesReadFromTarget`, `tupleComparison`, and the `kafkaCommit` span behind

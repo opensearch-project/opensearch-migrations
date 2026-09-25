@@ -213,7 +213,7 @@ class KafkaConsumerSourcePortTest {
     @Test
     void aLocalTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal() {
         var port = new KafkaConsumerSourcePort(
-            new ScriptedCommitConsumer(null, null, new TimeoutException("stopped waiting")),
+            new ScriptedCommitConsumer(null, new TimeoutException("stopped waiting"), null),
             Duration.ofSeconds(1)
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
@@ -229,6 +229,23 @@ class KafkaConsumerSourcePortTest {
             submission.accepted(),
             "a timeout after the consumer-group event was accepted is uncertain, not a proven rejection"
         );
+    }
+
+    @Test
+    void aCallbackTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal() {
+        var port = new KafkaConsumerSourcePort(
+            new ScriptedCommitConsumer(null, null, new TimeoutException("broker answer timed out")),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        var submission = port.commitAsync(Map.of(PARTITION, 11L), resolutions::add);
+
+        Assertions.assertEquals(
+            List.of(KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN),
+            resolutions
+        );
+        Assertions.assertTrue(submission.accepted());
     }
 
     @Test
@@ -295,6 +312,21 @@ class KafkaConsumerSourcePortTest {
         }
     }
 
+    private static final class StructurallyInvalidSynchronousCallbackConsumer
+        extends MockConsumer<String, byte[]> {
+        private StructurallyInvalidSynchronousCallbackConsumer() {
+            super("earliest");
+        }
+
+        @Override
+        public synchronized void commitAsync(
+            Map<TopicPartition, OffsetAndMetadata> offsets,
+            OffsetCommitCallback callback
+        ) {
+            callback.onComplete(offsets, new IllegalArgumentException("invalid commit metadata"));
+        }
+    }
+
     /**
      * {@code §5.7} allows one commit operation at a time and the caller releases that slot when a submission
      * resolves, so a second resolution for one submission releases a slot the next operation holds — and
@@ -313,5 +345,25 @@ class KafkaConsumerSourcePortTest {
             "one submission resolves once; a second resolution credits or re-stages the same positions twice"
         );
         Assertions.assertTrue(submission.accepted());
+    }
+
+    @Test
+    void aStructurallyInvalidSynchronousCallbackRemainsFatal() {
+        var port = new KafkaConsumerSourcePort(
+            new StructurallyInvalidSynchronousCallbackConsumer(),
+            Duration.ofSeconds(1)
+        );
+        var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();
+
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> port.commitAsync(Map.of(PARTITION, 11L), resolutions::add)
+        );
+
+        Assertions.assertEquals(
+            List.of(),
+            resolutions,
+            "a structurally invalid callback is process-fatal, not an accepted unresolved operation"
+        );
     }
 }

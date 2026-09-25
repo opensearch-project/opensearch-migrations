@@ -388,7 +388,8 @@ class WakeupAgainstRealKafkaTest {
      */
     @Test
     void theOwnerAbsorbsAWakeupRatherThanUnwindingItsIteration() throws Exception {
-        var controller = controllerFor(consumer);
+        var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
+        var controller = new WakeupController(consumer::wakeup, rootContext);
         var sourceInputs = queueFor(controller);
         var owner = new KafkaSourceOwner(
             new KafkaConsumerSourcePort(consumer, LONG_POLL),
@@ -398,7 +399,8 @@ class WakeupAgainstRealKafkaTest {
             Duration.ofMillis(200),
             System::nanoTime,
             // The production wait, since this test runs against a real broker on real time.
-            GraceIntervalWait.blockingOn(sourceInputs, System::nanoTime)
+            GraceIntervalWait.blockingOn(sourceInputs, System::nanoTime),
+            rootContext.kafkaCommitStateMetrics
         );
 
         var submitter = new Thread(() -> {

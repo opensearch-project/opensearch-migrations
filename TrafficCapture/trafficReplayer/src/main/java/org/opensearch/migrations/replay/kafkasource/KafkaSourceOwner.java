@@ -255,16 +255,17 @@ public final class KafkaSourceOwner {
     private void applyProtocolViolation(KafkaSourceInput.CaptureProtocolViolationDetected violation) {
         // Blocks commits at and past the violating offset so a restart stops at the same record rather than
         // skipping it. Ending intake is what stops later records being admitted.
-        var state = currentStateFor(violation.generation()).orElseThrow(() ->
-            new IllegalStateException("protocol violation arrived for inactive generation " + violation.generation())
-        );
-        state.endIntake();
-        state.commitQueue().markCommitIneligible(violation.recordId());
-        metrics.recordsCommitIneligible(1);
-        metrics.recordsOutstandingChanged(-1);
-        // A position already staged is necessarily before the violating record, because only
-        // RecordProcessingFinished advances the prefix. Preserve that valid progress; the ineligible entry
-        // remains in the deque and blocks every position at or beyond itself.
+        currentStateFor(violation.generation()).ifPresent(state -> {
+            state.endIntake();
+            state.commitQueue().markCommitIneligible(violation.recordId());
+            metrics.recordsCommitIneligible(1);
+            metrics.recordsOutstandingChanged(-1);
+            // A position already staged is necessarily before the violating record, because only
+            // RecordProcessingFinished advances the prefix. Preserve that valid progress; the ineligible entry
+            // remains in the deque and blocks every position at or beyond itself.
+        });
+        // An already-retired generation has no commit state left to classify. Preserve the same bounded
+        // protocol-fatal path as an active generation without mutating a successor generation's accounting.
         throw new CaptureProtocolViolation(violation);
     }
 
@@ -866,20 +867,10 @@ public final class KafkaSourceOwner {
         } finally {
             wakeupController.leaveProtectedOperation();
         }
-        if (outcome == KafkaSourcePort.CommitOutcome.OUTCOME_UNKNOWN) {
-            // Synchronous submissions never enter inFlightCommitOperation, so the retirement check cannot
-            // reconstruct this outcome. The operation-level result applies to every submitted partition.
-            submitted.keySet().forEach(topicPartition -> {
-                var state = partitions.get(topicPartition);
-                if (state != null) {
-                    state.markSyncCommitOutcomeUnknown();
-                }
-            });
-        }
-        var rejectedWithoutBrokerMovement =
-            outcome == KafkaSourcePort.CommitOutcome.RETRIABLE
-                || outcome == KafkaSourcePort.CommitOutcome.GENERATION_STALE;
-        resolveCommitOperation(operation, outcome, rejectedWithoutBrokerMovement);
+        // The synchronous call was accepted by the client. A failed batched operation may have applied some
+        // positions, so no returned outcome proves the broker position stayed put. The common resolution path
+        // restores that uncertain coverage and marks each still-live generation accordingly.
+        resolveCommitOperation(operation, outcome, false);
     }
 
     /**
