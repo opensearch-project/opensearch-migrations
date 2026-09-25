@@ -128,9 +128,10 @@ class RequestReplayOwnerTest {
     }
 
     @Test
-    void responsePathStopsAfterTheConfiguredFourAttempts() {
+    void responsePathStopsAfterTheConfiguredFourRetries() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();
         fixture.retryPolicy.decisions.addAll(List.of(
+            new ReplayOutcomes.RetryDecision.RetryRequired(),
             new ReplayOutcomes.RetryDecision.RetryRequired(),
             new ReplayOutcomes.RetryDecision.RetryRequired(),
             new ReplayOutcomes.RetryDecision.RetryRequired(),
@@ -142,19 +143,19 @@ class RequestReplayOwnerTest {
         fixture.completeSource(6, "source");
         fixture.eventLoop.runUntilIdle();
 
-        for (int attempt = 0; attempt < 4; attempt++) {
+        for (int attempt = 0; attempt < 5; attempt++) {
             fixture.targetChannel.attempt(attempt).targetResponse("target-" + attempt);
             fixture.eventLoop.runUntilIdle();
-            if (attempt < 3) {
+            if (attempt < 4) {
                 fixture.eventLoop.advance(java.time.Duration.ofSeconds(1));
             }
         }
 
-        Assertions.assertEquals(4, fixture.targetChannel.attempts.size());
-        Assertions.assertEquals(4, fixture.retryPolicy.observedSources.size());
+        Assertions.assertEquals(5, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(5, fixture.retryPolicy.observedSources.size());
         Assertions.assertEquals(List.of("turn:6"), fixture.lifecycleEvents);
         Assertions.assertEquals(
-            List.of("source-6|target-3|source"),
+            List.of("source-6|target-4|source"),
             fixture.tupleSink.writes
         );
         Assertions.assertTrue(fixture.fatalFailures.isEmpty());
