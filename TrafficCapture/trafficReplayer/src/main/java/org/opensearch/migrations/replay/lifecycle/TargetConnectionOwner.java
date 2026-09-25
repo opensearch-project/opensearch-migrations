@@ -24,6 +24,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.identity.CancellationDeadline;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
@@ -31,6 +32,8 @@ import org.opensearch.migrations.replay.identity.PartitionGenerationId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.OperationType;
 import org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.WaitReason;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
 import org.opensearch.migrations.replay.sink.TupleWriter;
 
@@ -114,16 +117,16 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull CancellationException cause
     ) implements ConnectionInput<S, F> {}
 
-    public sealed interface InputResult
-        permits RequestAdmissionAccepted, RequestAdmissionRejected, InputApplied {}
+    public sealed interface RequestAdmissionResult
+        permits RequestAdmissionAccepted, RequestAdmissionRejected {}
 
-    public record RequestAdmissionAccepted() implements InputResult {}
+    public record RequestAdmissionAccepted() implements RequestAdmissionResult {}
 
     public record RequestAdmissionRejected(
         @NonNull CancellationException cause
-    ) implements InputResult {}
+    ) implements RequestAdmissionResult {}
 
-    public record InputApplied() implements InputResult {}
+    public record InputApplied() {}
 
     public interface LifecycleSink {
         CompletionStage<Void> connectionRequestFinished(
@@ -139,6 +142,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         );
 
         CompletionStage<Void> connectionOwnerFinished(
+            PartitionGenerationId partitionGenerationId,
+            ConnectionProcessingId connectionProcessingId
+        );
+
+        CompletionStage<Void> connectionCleanupFinished(
             PartitionGenerationId partitionGenerationId,
             ConnectionProcessingId connectionProcessingId
         );
@@ -187,7 +195,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         private final RequestReplayOwner<S, P, R, F, T> owner;
         private boolean firstTargetWriteSubmitted;
         private boolean finalTargetWriteSubmitted;
+        private boolean targetTurnStarted;
         private boolean connectionTurnFinished;
+        private boolean connectionRequestFinishedSubmitted;
 
         private RequestEntry(
             ReplayRequestId requestId,
@@ -336,17 +346,71 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             eventLoop,
             clock,
             fatalHandler::onFatal,
-            countHook
+            (operationType, typeCount, totalCount) -> {
+                countHook.operationCountChanged(operationType, typeCount, totalCount);
+                if (totalCount == 0) {
+                    tryFinishOwner();
+                }
+            }
         );
     }
 
-    public CompletionStage<InputResult> submit(@NonNull ConnectionInput<S, F> input) {
-        var completion = new CompletableFuture<InputResult>();
+    public CompletionStage<RequestAdmissionResult> submit(
+        @NonNull AdmitReconstitutedRequest<S, F> admission
+    ) {
+        return submitInput(admission, () -> applyRequestAdmission(admission));
+    }
+
+    public CompletionStage<InputApplied> submit(@NonNull AdmitCapturedClose<S, F> input) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(@NonNull SourceResponseComplete<S, F> input) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(
+        @NonNull SourceResponseUnavailableForRetry<S, F> input
+    ) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(@NonNull SourceResponseIncomplete<S, F> input) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(@NonNull CapturedConnectionExpired<S, F> input) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(
+        @NonNull GracefulConnectionCancellation<S, F> input
+    ) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(
+        @NonNull ForceConnectionCancellation<S, F> input
+    ) {
+        return submitNonAdmissionInput(input);
+    }
+
+    private CompletionStage<InputApplied> submitNonAdmissionInput(
+        ConnectionInput<S, F> input
+    ) {
+        return submitInput(input, () -> applyNonAdmissionInput(input));
+    }
+
+    private <V> CompletionStage<V> submitInput(
+        ConnectionInput<S, F> input,
+        Supplier<V> transition
+    ) {
+        var completion = new CompletableFuture<V>();
         try {
             eventLoop.execute(() -> {
                 try {
                     requireOwnerThread();
-                    completion.complete(applyInput(input));
+                    completion.complete(transition.get());
                 } catch (Throwable failure) {
                     completion.completeExceptionally(failure);
                     impossible(
@@ -356,11 +420,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 }
             });
         } catch (Throwable failure) {
-            if (input instanceof AdmitReconstitutedRequest<S, F>) {
-                completion.complete(new RequestAdmissionRejected(rejectionCause(failure)));
-            } else {
-                completion.completeExceptionally(failure);
-            }
+            completion.completeExceptionally(failure);
             reportFatal("required connection-input submission", failure);
         }
         return completion.minimalCompletionStage();
@@ -383,11 +443,13 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return requestRegistry.size();
     }
 
-    private InputResult applyInput(ConnectionInput<S, F> input) {
+    private InputApplied applyNonAdmissionInput(ConnectionInput<S, F> input) {
         requireOwnerThread();
         return switch (input) {
-            case AdmitReconstitutedRequest<S, F> admission ->
-                applyRequestAdmission(admission);
+            case AdmitReconstitutedRequest<S, F> ignored ->
+                throw new IllegalArgumentException(
+                    "request admission requires the typed admission submission path"
+                );
             case AdmitCapturedClose<S, F> close -> {
                 applyCapturedClose(close);
                 yield new InputApplied();
@@ -434,9 +496,20 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         };
     }
 
-    private InputResult applyRequestAdmission(AdmitReconstitutedRequest<S, F> admission) {
-        if (!matchesIdentity(admission)
-            || sourceLifetime != SourceLifetime.OPEN) {
+    private RequestAdmissionResult applyRequestAdmission(
+        AdmitReconstitutedRequest<S, F> admission
+    ) {
+        if (!matchesIdentity(admission)) {
+            throw new IllegalArgumentException(
+                "request admission identity "
+                    + admission.connectionProcessingId()
+                    + " / "
+                    + admission.partitionGenerationId()
+                    + " does not match "
+                    + connectionProcessingId
+            );
+        }
+        if (sourceLifetime != SourceLifetime.OPEN) {
             return new RequestAdmissionRejected(
                 rejectionCause(new IllegalStateException(
                     "connection is not accepting request admissions"
@@ -444,10 +517,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             );
         }
         if (!admission.requestId().connectionProcessingId().equals(connectionProcessingId)) {
-            return new RequestAdmissionRejected(
-                rejectionCause(new IllegalArgumentException(
-                    "request belongs to " + admission.requestId().connectionProcessingId()
-                ))
+            throw new IllegalArgumentException(
+                "request belongs to " + admission.requestId().connectionProcessingId()
             );
         }
         if (admission.requestId().capturedRequestOrdinal()
@@ -458,15 +529,13 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                     + " does not match admitted ordinal "
                     + admission.capturedRequestOrdinal()
             );
-            impossible("request admission identity", failure);
-            return new RequestAdmissionRejected(rejectionCause(failure));
+            throw failure;
         }
         if (requestRegistry.containsKey(admission.requestId())) {
             var failure = new IllegalStateException(
                 "request is already registered: " + admission.requestId()
             );
-            impossible("duplicate request admission", failure);
-            return new RequestAdmissionRejected(rejectionCause(failure));
+            throw failure;
         }
         if (!acceptCapturedOrdinal(admission.capturedRequestOrdinal())) {
             var failure = new IllegalStateException(
@@ -475,8 +544,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                     + " did not follow "
                     + lastCapturedOrdinal
             );
-            impossible("request admission ordering", failure);
-            return new RequestAdmissionRejected(rejectionCause(failure));
+            throw failure;
         }
         var nominalTargetTime = Objects.requireNonNull(
             replayTimeMapper.apply(admission.requestFirstByteSourceTime()),
@@ -676,14 +744,15 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             impossible("permit acquisition submission", failure);
             return;
         }
-        pendingPermit = new PendingPermit<>(
+        var expected = new PendingPermit<>(
             request,
             acquisition,
             registration,
             retryDelivery
         );
+        pendingPermit = expected;
         acquisition.completion().whenComplete((result, failure) ->
-            postPermitResult(pendingPermit, result, unwrap(failure))
+            postPermitResult(expected, result, unwrap(failure))
         );
     }
 
@@ -746,23 +815,24 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
         switch (result) {
             case TargetAttemptPermitProvider.PermitAcquired acquired -> {
+                operations.complete(expected.registration());
                 if (sourceLifetime == SourceLifetime.CANCELLING
                     && !expected.request.finalTargetWriteSubmitted) {
                     acquired.permit().close();
                 } else {
+                    expected.request.targetTurnStarted = true;
                     expected.request.owner.acceptAttemptPermit(acquired.permit());
                 }
-                operations.complete(expected.registration());
                 if (expected.retryDelivery() != null) {
                     expected.retryDelivery().complete(null);
                 }
             }
             case TargetAttemptPermitProvider.AcquisitionCancelled cancelled -> {
+                operations.complete(expected.registration());
                 if (expected.retryDelivery() != null) {
                     expected.retryDelivery().complete(null);
                 }
                 expected.request.owner.forceCancel(cancelled.cause());
-                operations.complete(expected.registration());
             }
         }
     }
@@ -891,17 +961,25 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             || pendingPermit != null
             || !requestRegistry.isEmpty()
             || admissionTimer != null
-            || executionTimer != null) {
+            || executionTimer != null
+            || operations.activeCount() != 0) {
             return;
         }
         ownerFinishedSubmitted = true;
         requiredLifecycleDelivery(
             null,
-            "connection-owner completion",
-            () -> lifecycleSink.connectionOwnerFinished(
-                partitionGenerationId,
-                connectionProcessingId
-            ),
+            sourceLifetime == SourceLifetime.CANCELLING
+                ? "connection cleanup completion"
+                : "connection-owner completion",
+            () -> sourceLifetime == SourceLifetime.CANCELLING
+                ? lifecycleSink.connectionCleanupFinished(
+                    partitionGenerationId,
+                    connectionProcessingId
+                )
+                : lifecycleSink.connectionOwnerFinished(
+                    partitionGenerationId,
+                    connectionProcessingId
+                ),
             () -> {}
         );
     }
@@ -972,9 +1050,9 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             return;
         }
         switch (result) {
-            case RequestPreparationResult.Ready<?> ignored ->
+            case RequestPreparationReady<?> ignored ->
                 execution.readiness = PreparationReadiness.READY;
-            case RequestPreparationResult.Cancelled<?> ignored ->
+            case RequestPreparationCancelled<?> ignored ->
                 execution.readiness = PreparationReadiness.CANCELLED;
         }
         evaluateExecutionHead();
@@ -1031,9 +1109,13 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         request.finalTargetWriteSubmitted = true;
     }
 
-    private CompletionStage<Void> connectionTurnFinished(ReplayRequestId requestId) {
+    private CompletionStage<Void> connectionTurnFinished(
+        ReplayRequestId requestId,
+        RequestReplayOwner.ConnectionTurnCompletion completion
+    ) {
         var request = requireRegistered(requestId);
-        if (activeTurn != request
+        if (!request.targetTurnStarted
+            || activeTurn != request
             || executionQueue.isEmpty()
             || !(executionQueue.peekFirst()
                 instanceof RequestExecutionEntry<?, ?, ?, ?, ?> execution)
@@ -1055,6 +1137,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         activeTurn = null;
         executionQueue.removeFirst();
         evaluateExecutionHead();
+        if (completion
+            == RequestReplayOwner.ConnectionTurnCompletion.CANCELLATION_ENDED_STARTED_TURN) {
+            return CompletableFuture.completedFuture(null);
+        }
+        request.connectionRequestFinishedSubmitted = true;
         return requiredLifecycleDelivery(
             requestId,
             "connection-request completion",
@@ -1069,7 +1156,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
 
     private CompletionStage<Void> requestProcessingFinished(ReplayRequestId requestId) {
         var request = requireRegistered(requestId);
-        if (!request.connectionTurnFinished) {
+        if (!request.connectionTurnFinished
+            || !request.connectionRequestFinishedSubmitted) {
             var failure = new IllegalStateException(
                 "request processing completed before connection turn: " + requestId
             );
@@ -1106,6 +1194,13 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         CancellationException cause
     ) {
         var request = requireRegistered(requestId);
+        if (activeTurn == request && request.targetTurnStarted) {
+            var failure = new IllegalStateException(
+                "started target turn was not finished before request cleanup: " + requestId
+            );
+            impossible("request cleanup", failure);
+            return CompletableFuture.failedFuture(failure);
+        }
         admissionQueue.remove(request);
         executionQueue.removeIf(entry ->
             entry instanceof RequestExecutionEntry<?, ?, ?, ?, ?> execution
@@ -1211,6 +1306,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                     }
                     afterAcceptance.run();
                     operations.complete(registration);
+                    tryFinishOwner();
                     completion.complete(null);
                 }
             )
@@ -1336,8 +1432,14 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         }
 
         @Override
-        public CompletionStage<Void> connectionTurnFinished(ReplayRequestId requestId) {
-            return TargetConnectionOwner.this.connectionTurnFinished(requestId);
+        public CompletionStage<Void> connectionTurnFinished(
+            ReplayRequestId requestId,
+            RequestReplayOwner.ConnectionTurnCompletion completion
+        ) {
+            return TargetConnectionOwner.this.connectionTurnFinished(
+                requestId,
+                completion
+            );
         }
 
         @Override
