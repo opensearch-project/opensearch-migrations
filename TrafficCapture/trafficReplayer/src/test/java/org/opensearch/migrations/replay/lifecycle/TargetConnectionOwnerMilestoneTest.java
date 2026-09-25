@@ -106,6 +106,42 @@ class TargetConnectionOwnerMilestoneTest {
     }
 
     @Test
+    void expectedTransformationFallbackRunsTargetAttemptAndTupleChain() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(5, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.fallback(5);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.targetChannel.attempts.size());
+        Assertions.assertEquals(1, fixture.activePermits.get());
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+
+        fixture.completeSource(5, "source-response");
+        fixture.targetChannel.attempt(0).targetResponse("target-response");
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(List.of("turn:5"), fixture.lifecycleEvents);
+        Assertions.assertEquals(
+            List.of("source-5|target-response|source-response"),
+            fixture.tupleSink.writes
+        );
+        Assertions.assertTrue(
+            fixture.tupleInputs.getFirst().transformationStatus().isError()
+        );
+
+        fixture.tupleSink.durableNext();
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(
+            List.of("turn:5", "processing:5"),
+            fixture.lifecycleEvents
+        );
+        Assertions.assertEquals(0, registeredRequests(fixture));
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
     void retrySourceWaitHoldsTurnWithoutPermitAndRetryReacquiresOne() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();
         fixture.retryPolicy.requiresSourceResponse = true;

@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -61,6 +62,7 @@ import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -72,6 +74,8 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -489,6 +493,257 @@ class TrafficReplayerTopLevelConstructionTest {
             transformer.close();
             contexts.close();
         }
+    }
+
+    @Test
+    void deployedRequestPreparerDrivesInheritedTransformationMetrics() {
+        var generation = new PartitionGenerationId(TOPIC_PARTITION, 10);
+        var connection = new ConnectionProcessingId(
+            generation,
+            new CapturedConnectionId("writer", "connection"),
+            1
+        );
+        var requestId = new ReplayRequestId(connection, 3);
+        var sourceRequest = request(
+            "POST /index HTTP/1.1\r\n"
+                + "Host: source.example\r\n"
+                + "Content-Type: text/plain\r\n"
+                + "Content-Length: 15\r\n"
+                + "\r\n"
+                + "This is a test\r\n"
+        );
+        var transformerConfig = "[{\"JsonJoltTransformerProvider\":{\"script\":"
+            + "{\"operation\":\"modify-overwrite-beta\",\"spec\":{\"payload\":"
+            + "{\"inlinedTextBody\":\"ReplacedPlainText\"}}}}}]";
+        try (var telemetry = new InMemoryInstrumentationBundle(true, true)) {
+            var root = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var record = root.createKafkaRecordContext(
+                new KafkaRecordId(generation, 2),
+                0
+            );
+            var traffic = record.createTrafficStreamContext(2);
+            var requestContext = traffic.createRequestContext(requestId, Instant.EPOCH);
+            requestContext.onRequestReconstituted();
+            var transformationContext = requestContext.createTransformationContext();
+            NettyPacketToHttpConsumer.PreparedRequest prepared = null;
+            try {
+                var preparer = TrafficReplayerTopLevel.deployedRequestPreparer(
+                    () -> new TransformationLoader()
+                        .getTransformerFactoryLoader(transformerConfig),
+                    null,
+                    Duration.ZERO
+                );
+                var result = preparer.begin(
+                    requestId,
+                    sourceRequest,
+                    transformationContext
+                ).completion().toCompletableFuture().join();
+                var ready = Assertions.assertInstanceOf(
+                    RequestPreparationReady.class,
+                    result
+                );
+                prepared = Assertions.assertInstanceOf(
+                    NettyPacketToHttpConsumer.PreparedRequest.class,
+                    ready.value()
+                );
+                Assertions.assertTrue(ready.transformationStatus().isCompleted());
+            } finally {
+                transformationContext.close();
+                if (prepared != null) {
+                    prepared.close();
+                }
+                requestContext.close();
+                traffic.close();
+                record.complete(IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE);
+            }
+
+            var metrics = telemetry.getFinishedMetrics();
+            Assertions.assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    IReplayContexts.MetricNames.TRANSFORM_HEADER_PARSE
+                )
+            );
+            Assertions.assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    IReplayContexts.MetricNames.TRANSFORM_TEXT_SUCCEEDED
+                )
+            );
+            Assertions.assertEquals(
+                1,
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    IReplayContexts.MetricNames.TRANSFORM_SUCCESS
+                )
+            );
+            Assertions.assertTrue(
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    IReplayContexts.MetricNames.TRANSFORM_BYTES_IN
+                ) > 0
+            );
+            Assertions.assertTrue(
+                InMemoryInstrumentationBundle.getMetricValueOrZero(
+                    metrics,
+                    IReplayContexts.MetricNames.TRANSFORM_BYTES_OUT
+                ) > 0
+            );
+        }
+    }
+
+    @Test
+    void deployedTupleFactoryPopulatesComparisonAttributesFromActualMessages() {
+        var generation = new PartitionGenerationId(TOPIC_PARTITION, 11);
+        var connection = new ConnectionProcessingId(
+            generation,
+            new CapturedConnectionId("writer", "connection"),
+            1
+        );
+        var requestId = new ReplayRequestId(connection, 4);
+        var sourceRequest = request(
+            "POST /index HTTP/1.1\r\n"
+                + "Host: source.example\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        );
+        var sourceResponse = response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+        );
+        var targetRequestBytes = (
+            "POST /index HTTP/1.1\r\n"
+                + "Host: target.example\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        ).getBytes(StandardCharsets.UTF_8);
+        var targetResponseBytes = (
+            "HTTP/1.1 503 Service Unavailable\r\n"
+                + "Content-Length: 0\r\n\r\n"
+        ).getBytes(StandardCharsets.UTF_8);
+        var targetRequestBuffer = Unpooled.wrappedBuffer(targetRequestBytes);
+        var targetRequestPackets = new ByteBufList(targetRequestBuffer);
+        targetRequestBuffer.release();
+        var prepared = new NettyPacketToHttpConsumer.PreparedRequest(
+            ByteBufListProducer.of(targetRequestPackets),
+            Duration.ZERO
+        );
+        var targetResponse = new AggregatedRawResponse(
+            null,
+            targetResponseBytes.length,
+            Duration.ofMillis(2),
+            List.of(new AbstractMap.SimpleEntry<>(
+                Instant.EPOCH.plusMillis(2),
+                targetResponseBytes
+            )),
+            null
+        );
+        var terminal = new TargetAttemptOutcome.TargetResponseObtained<>(
+            targetResponse
+        );
+        try (var telemetry = new InMemoryInstrumentationBundle(true, true)) {
+            var root = new RootReplayerContext(telemetry.openTelemetrySdk);
+            var record = root.createKafkaRecordContext(
+                new KafkaRecordId(generation, 3),
+                0
+            );
+            var traffic = record.createTrafficStreamContext(3);
+            var requestContext = traffic.createRequestContext(requestId, Instant.EPOCH);
+            requestContext.onRequestReconstituted();
+            var tupleContext = requestContext.createTupleContext();
+            try {
+                var result = new RequestReplayOwner.RequestResult<>(
+                    requestId,
+                    sourceRequest,
+                    prepared,
+                    HttpRequestTransformationStatus.completed(),
+                    List.of(terminal),
+                    terminal,
+                    new RequestReplayOwner.CompleteFinalSourceResponse<>(
+                        sourceResponse,
+                        true
+                    )
+                );
+                var tuple = TrafficReplayerTopLevel.deployedTupleFactory().create(
+                    tupleContext,
+                    result
+                );
+                Assertions.assertEquals(
+                    200,
+                    ((Map<?, ?>) tuple.get("sourceResponse"))
+                        .get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY)
+                );
+                var targetResponses = (List<?>) tuple.get("targetResponses");
+                Assertions.assertEquals(
+                    503,
+                    ((Map<?, ?>) targetResponses.getLast())
+                        .get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY)
+                );
+            } finally {
+                tupleContext.close();
+                prepared.close();
+                requestContext.close();
+                traffic.close();
+                record.complete(IReplayContexts.RecordDisposition.COMMIT_INELIGIBLE);
+            }
+
+            assertLongPoint(
+                telemetry.getFinishedMetrics(),
+                IReplayContexts.MetricNames.TUPLE_COMPARISON,
+                Attributes.builder()
+                    .put(
+                        IReplayContexts.ITupleHandlingContext.SOURCE_STATUS_CODE_KEY,
+                        200L
+                    )
+                    .put(
+                        IReplayContexts.ITupleHandlingContext.TARGET_STATUS_CODE_KEY,
+                        500L
+                    )
+                    .put(IReplayContexts.ITupleHandlingContext.METHOD_KEY, "POST")
+                    .put(
+                        IReplayContexts.ITupleHandlingContext.STATUS_CODE_MATCH_KEY,
+                        false
+                    )
+                    .build(),
+                1
+            );
+        }
+    }
+
+    private static HttpMessageAndTimestamp.Request request(String text) {
+        var request = new HttpMessageAndTimestamp.Request(Instant.EPOCH);
+        request.add(text.getBytes(StandardCharsets.UTF_8));
+        request.setLastPacketTimestamp(Instant.EPOCH);
+        return request;
+    }
+
+    private static HttpMessageAndTimestamp.Response response(String text) {
+        var response = new HttpMessageAndTimestamp.Response(
+            Instant.EPOCH.plusMillis(1)
+        );
+        response.add(text.getBytes(StandardCharsets.UTF_8));
+        response.setLastPacketTimestamp(Instant.EPOCH.plusMillis(1));
+        return response;
+    }
+
+    private static void assertLongPoint(
+        Iterable<MetricData> metrics,
+        String name,
+        Attributes attributes,
+        long expectedValue
+    ) {
+        for (var metric : metrics) {
+            if (metric.getName().equals(name)) {
+                var point = metric.getLongSumData()
+                    .getPoints()
+                    .stream()
+                    .filter(candidate -> candidate.getAttributes().equals(attributes))
+                    .findFirst()
+                    .orElseThrow();
+                Assertions.assertEquals(expectedValue, point.getValue());
+                return;
+            }
+        }
+        throw new AssertionError("Missing metric " + name);
     }
 
     private static RequestReplayOwner.RequestPreparer<

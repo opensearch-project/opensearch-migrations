@@ -1,15 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: IReplayContexts . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
 
-// REBUILD-LIMBO-START(G5)
-/*
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -36,8 +27,15 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
-*/
-// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// constructor/consumeBytes/finalizeRequest/redrive/signing helpers -> same-named live pipeline.
+// predecessor transformation-context creation/close -> RequestReplayOwner begin/applyPreparationResult.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// deployedRequestPreparer supplies the request-owned transformation context and consumes the typed
+// result; parser, fallback, filter, signing, byte, and transformation-status behavior remains here.
+// REBUILD-TRACE-END(G5,target)
+
 /**
  * This class implements a packet consuming interface by using an EmbeddedChannel to write individual
  * packets through handlers that will parse the request's HTTP headers, determine what may need to
@@ -57,26 +55,20 @@ import lombok.extern.slf4j.Slf4j;
  * the network.  If a partial response comes back, should that be reported to the user?  What if the
  * error was due to transformation, how would we be able to tell?
  */
-// REBUILD-LIMBO-START(G5)
-/*
 @Slf4j
 public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsumer<TransformedOutputAndResult<R>> {
     public static final int HTTP_MESSAGE_NUM_SEGMENTS = 2;
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
-    private IReplayContexts.IRequestTransformationContext transformationContext;
+    private final IReplayContexts.IRequestTransformationContext transformationContext;
     private Exception lastConsumeException;
 
-*/
-// REBUILD-LIMBO-END(G5)
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
      * are used to chop results up on the way back out.
      * Divide the chunk tracking into headers (index=0) and payload (index=1).
      */
-// REBUILD-LIMBO-START(G5)
-/*
     private final List<List<Integer>> chunkSizes;
     // This is here for recovery, in case anything goes wrong with a transformation & we want to
     // just dump it directly. Notice that we're already storing all of the bytes until the response
@@ -88,9 +80,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         IJsonTransformer transformer,
         IAuthTransformerFactory authTransformerFactory,
         IPacketFinalizingConsumer<R> transformedPacketReceiver,
-        IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext
+        IReplayContexts.IRequestTransformationContext transformationContext
     ) {
-        transformationContext = httpTransactionContext.createTransformationContext();
+        this.transformationContext = transformationContext;
         chunkSizes = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS);
         chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS));
         chunks = new ArrayList<>(HTTP_MESSAGE_NUM_SEGMENTS + EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS);
@@ -149,7 +141,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             channel.finishAndReleaseAll();
             channel.close();
             transformationContext.onTransformSkip();
-            transformationContext.close();
             return TextTrackedFuture.completedFuture(
                 new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
                 () -> "HttpJsonTransformingConsumer.filteredRequest"
@@ -160,7 +151,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 channel.finishAndReleaseAll();
                 channel.close();
                 transformationContext.onTransformSkip();
-                transformationContext.close();
                 return TextTrackedFuture.completedFuture(
                     new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
                     () -> "HttpJsonTransformingConsumer.filteredRequest"
@@ -224,8 +214,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             );
 
             transformationContext.onTransformSuccess();
-            transformationContext.close();
-
             // R is ByteBufListProducer in production — this cast is safe because
             // SigningByteBufListProducer extends ByteBufListProducer
             var result = (TransformedOutputAndResult<R>) (TransformedOutputAndResult<?>)
@@ -302,11 +290,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 if (t instanceof NoContentException) {
                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                 } else {
-                    transformationContext.close();
                     throw new CompletionException(t);
                 }
             } else {
-                transformationContext.close();
                 transformationContext.onTransformSuccess();
                 return TextTrackedFuture.completedFuture(v, () -> "transformedHttpMessageValue");
             }
@@ -340,7 +326,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             } else {
                 transformationContext.onTransformSkip();
             }
-            transformationContext.close();
         }, () -> "HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 
@@ -357,6 +342,3 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return false;
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G5)

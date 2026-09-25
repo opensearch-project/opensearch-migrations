@@ -1,15 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: IReplayContexts . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
 
-// REBUILD-LIMBO-START(G5)
-/*
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,8 +25,13 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-*/
-// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// constructor and every add/remove pipeline method -> same-named live transformation behavior.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// HttpJsonTransformingConsumer invokes this pipeline with RequestReplayOwner's transformation context.
+// REBUILD-TRACE-END(G5,target)
+
 /**
  * This class is meant to be the single place for all pipeline manipulations for HttpRequests.
  * Comments are strewn through pipeline additions that show the types of messages that are
@@ -47,18 +43,12 @@ import lombok.extern.slf4j.Slf4j;
  * Each handler where the content may undergo changes will show an incremented value for a nonce
  * for that type.  e.g. &quot;HttpContent(1)&quot; vs &quot;HttpContent(2)&quot;.
  */
-// REBUILD-LIMBO-START(G5)
-/*
 @Slf4j
 public class RequestPipelineOrchestrator<R> {
-*/
-// REBUILD-LIMBO-END(G5)
     /**
      * Set this to of(LogLevel.ERROR) or whatever level you'd like to get logging between each handler.
      * Set this to Optional.empty() to disable intra-handler logging.
      */
-// REBUILD-LIMBO-START(G5)
-/*
     private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
     public static final String OFFLOADING_HANDLER_NAME = "OFFLOADING_HANDLER";
     public static final String HTTP_REQUEST_DECODER_NAME = "HTTP_REQUEST_DECODER";
@@ -239,6 +229,3 @@ public class RequestPipelineOrchestrator<R> {
         PIPELINE_LOGGING_OPTIONAL.ifPresent(logLevel -> pipeline.addLast(new LoggingHandler("t" + name, logLevel)));
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G5)

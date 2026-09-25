@@ -291,6 +291,18 @@ final class TargetConnectionOwnerTestSupport {
             ));
         }
 
+        void fallback(long ordinal) {
+            completions.computeIfAbsent(
+                request(ordinal),
+                ignored -> new CompletableFuture<>()
+            ).complete(new RequestPreparationReady<>(
+                new TestPrepared("fallback-" + ordinal),
+                HttpRequestTransformationStatus.makeError(
+                    new IllegalArgumentException("use original request")
+                )
+            ));
+        }
+
         void filtered(long ordinal) {
             completions.computeIfAbsent(
                 request(ordinal),

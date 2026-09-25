@@ -5,8 +5,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
@@ -15,6 +18,10 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.replay.intake.ReplayIntakeInput;
@@ -27,6 +34,9 @@ import org.opensearch.migrations.replay.kafkasource.KafkaSourceInputQueue;
 import org.opensearch.migrations.replay.kafkasource.KafkaSourceOwner;
 import org.opensearch.migrations.replay.kafkasource.WakeupController;
 import org.opensearch.migrations.replay.lifecycle.RequestReplayOwner;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationCancelled;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationReady;
+import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.RequestPreparationResult;
 import org.opensearch.migrations.replay.lifecycle.TargetAttemptPermitProvider;
 import org.opensearch.migrations.replay.lifecycle.TargetChannelPort;
 import org.opensearch.migrations.replay.lifecycle.TargetConnectionOwner;
@@ -39,8 +49,11 @@ import org.opensearch.migrations.replay.sink.TupleSink;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.utils.TrackedFuture;
 
+import io.netty.buffer.Unpooled;
 import io.netty.channel.EventLoop;
 import lombok.NonNull;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -305,6 +318,140 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
                 transformer.close();
             }
         };
+    }
+
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestTransformerAndSender.transformAllData + PacketToTransformingHttpHandlerFactory.create ->
+    // deployedRequestPreparer, which feeds the inherited HttpJsonTransformingConsumer with the
+    // request owner's transformation context and returns the new typed preparation result.
+    // REBUILD-TRACE-END(G5,target)
+    public static RequestReplayOwner.RequestPreparer<
+        HttpMessageAndTimestamp.Request,
+        NettyPacketToHttpConsumer.PreparedRequest
+    > deployedRequestPreparer(
+        @NonNull Supplier<IJsonTransformer> transformerSupplier,
+        IAuthTransformerFactory authTransformerFactory,
+        @NonNull Duration packetInterval
+    ) {
+        if (packetInterval.isNegative()) {
+            throw new IllegalArgumentException("packetInterval must not be negative");
+        }
+        return (requestId, sourceRequest, replayContext) -> {
+            var completion = new CompletableFuture<RequestPreparationResult<
+                NettyPacketToHttpConsumer.PreparedRequest
+            >>();
+            var settled = new AtomicBoolean();
+            final IJsonTransformer transformer;
+            try {
+                transformer = Objects.requireNonNull(
+                    transformerSupplier.get(),
+                    "request transformer supplier returned null"
+                );
+            } catch (Throwable failure) {
+                completion.completeExceptionally(failure);
+                return preparationOperation(completion, settled);
+            }
+            var consumer = new HttpJsonTransformingConsumer<ByteBufListProducer>(
+                transformer,
+                authTransformerFactory,
+                new TransformedPacketReceiver(),
+                replayContext
+            );
+            try {
+                sourceRequest.stream().forEach(packet -> {
+                    var input = Unpooled.wrappedBuffer(packet);
+                    consumer.consumeBytes(input).future.join();
+                });
+                consumer.finalizeRequest().future.whenComplete((transformed, failure) -> {
+                    Throwable terminalFailure = TrackedFuture.unwindPossibleCompletionException(failure);
+                    try {
+                        transformer.close();
+                    } catch (Throwable closeFailure) {
+                        if (terminalFailure == null) {
+                            terminalFailure = closeFailure;
+                        } else if (terminalFailure != closeFailure) {
+                            terminalFailure.addSuppressed(closeFailure);
+                        }
+                    }
+                    if (terminalFailure != null) {
+                        completion.completeExceptionally(terminalFailure);
+                        return;
+                    }
+                    if (transformed == null) {
+                        completion.completeExceptionally(new NullPointerException(
+                            "request transformation completed without a result"
+                        ));
+                        return;
+                    }
+                    var prepared = transformed.transformedOutput == null
+                        ? null
+                        : new NettyPacketToHttpConsumer.PreparedRequest(
+                            transformed.transformedOutput,
+                            packetInterval
+                        );
+                    var result = new RequestPreparationReady<>(
+                        prepared,
+                        transformed.transformationStatus
+                    );
+                    if (!completion.complete(result) && prepared != null) {
+                        prepared.close();
+                    }
+                });
+            } catch (Throwable failure) {
+                try {
+                    transformer.close();
+                } catch (Throwable closeFailure) {
+                    if (failure != closeFailure) {
+                        failure.addSuppressed(closeFailure);
+                    }
+                }
+                completion.completeExceptionally(
+                    TrackedFuture.unwindPossibleCompletionException(failure)
+                );
+            }
+            return preparationOperation(completion, settled);
+        };
+    }
+
+    private static RequestReplayOwner.PreparationOperation<
+        NettyPacketToHttpConsumer.PreparedRequest
+    > preparationOperation(
+        CompletableFuture<RequestPreparationResult<
+            NettyPacketToHttpConsumer.PreparedRequest
+        >> completion,
+        AtomicBoolean settled
+    ) {
+        completion.whenComplete((ignored, failure) -> settled.set(true));
+        return new RequestReplayOwner.PreparationOperation<>() {
+            @Override
+            public CompletionStage<RequestPreparationResult<
+                NettyPacketToHttpConsumer.PreparedRequest
+            >> completion() {
+                return completion.minimalCompletionStage();
+            }
+
+            @Override
+            public void cancel(CancellationException cause) {
+                if (settled.compareAndSet(false, true)) {
+                    completion.complete(new RequestPreparationCancelled<>(cause));
+                }
+            }
+        };
+    }
+
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // TrafficReplayerCore.packageAndWriteTuple + ParsedHttpMessagesAsDicts construction/toTupleMap ->
+    // deployedTupleFactory + ParsedHttpMessagesAsDicts(RequestResult).
+    // REBUILD-TRACE-END(G5,target)
+    public static RequestReplayOwner.TupleFactory<
+        HttpMessageAndTimestamp.Request,
+        NettyPacketToHttpConsumer.PreparedRequest,
+        AggregatedRawResponse,
+        HttpMessageAndTimestamp.Response,
+        Map<String, Object>
+    > deployedTupleFactory() {
+        return (replayContext, result) ->
+            new ParsedHttpMessagesAsDicts(replayContext, result).toTupleMap(result);
     }
 
     public static ManagedPhysicalTupleSink<Map<String, Object>> deployedTupleSink(
