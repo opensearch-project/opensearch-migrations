@@ -213,7 +213,7 @@ class KafkaConsumerSourcePortTest {
     @Test
     void aLocalTimeoutOnAnAsynchronousSubmissionIsUnknownRatherThanFatal() {
         var port = new KafkaConsumerSourcePort(
-            new ScriptedCommitConsumer(null, null, new TimeoutException("stopped waiting")),
+            new ScriptedCommitConsumer(null, new TimeoutException("stopped waiting"), null),
             Duration.ofSeconds(1)
         );
         var resolutions = new ArrayList<KafkaSourcePort.CommitOutcome>();

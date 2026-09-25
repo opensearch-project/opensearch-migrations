@@ -76,12 +76,16 @@ class KafkaSourceOwnerTest {
     }
 
     private KafkaSourceOwner ownerFor(PumpedKafkaSource port) {
+        return ownerFor(port, GRACE);
+    }
+
+    private KafkaSourceOwner ownerFor(PumpedKafkaSource port, Duration cancellationGrace) {
         return new KafkaSourceOwner(
             port,
             sourceInputs,
             intakeInputs,
             wakeupController,
-            GRACE,
+            cancellationGrace,
             clockNanos::get,
             // A non-blocking wait that still honours the contract: false means the deadline has passed, so when
             // there is nothing to wait for it advances the injected clock to the deadline before saying so.
@@ -1606,7 +1610,7 @@ class KafkaSourceOwnerTest {
     @Test
     void rejectedAndUnknownOperationsHaveDistinctRetirementAccounting() throws Exception {
         var rejectedPort = pumpedSource(List.of(PARTITION_0));
-        var rejectedOwner = ownerFor(rejectedPort);
+        var rejectedOwner = ownerFor(rejectedPort, Duration.ZERO);
         var rejectedGeneration = assignAndGetGeneration(rejectedOwner, rejectedPort, PARTITION_0);
         sourceInputs.submit(new KafkaSourceInput.RequestNextPartitionBatch(
             new PartitionBatchRequestId(rejectedGeneration, 1)));
@@ -1619,7 +1623,6 @@ class KafkaSourceOwnerTest {
         rejectedOwner.runOnce();
 
         rejectedPort.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
-        rejectedPort.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
         rejectedPort.scriptRebalanceDuringNextPoll(() ->
             rejectedOwner.onPartitionsRevoked(List.of(PARTITION_0)));
         rejectedOwner.runOnce();
@@ -1663,8 +1666,9 @@ class KafkaSourceOwnerTest {
         }
         unknownSourceInputs.submit(new KafkaSourceInput.RecordProcessingFinished(
             new KafkaRecordId(unknownGeneration, 20)));
-        unknownPort.scriptNeverResolveAsyncCommits();
+        unknownPort.scriptCommitAsyncRejection(KafkaSourcePort.CommitOutcome.RETRIABLE);
         unknownOwner.runOnce();
+        unknownPort.scriptCommitOutcome(KafkaSourcePort.CommitOutcome.RETRIABLE);
         unknownPort.scriptRebalanceDuringNextPoll(() ->
             unknownOwner.onPartitionsRevoked(List.of(PARTITION_1)));
         unknownOwner.runOnce();
@@ -1730,6 +1734,26 @@ class KafkaSourceOwnerTest {
             owner.stagedCommitPosition(PARTITION_0),
             "the poison record blocks itself and later offsets, not a valid earlier prefix"
         );
+    }
+
+    @Test
+    void lateProtocolViolationPreservesTheProtocolFatalPathWithoutMutatingRetiredState() {
+        var port = pumpedSource(List.of(PARTITION_0));
+        var owner = ownerFor(port);
+        var generation = assignAndGetGeneration(owner, port, PARTITION_0);
+        port.scriptRebalanceDuringNextPoll(() -> owner.onPartitionsLost(List.of(PARTITION_0)));
+        owner.runOnce();
+        sourceInputs.submit(new KafkaSourceInput.CaptureProtocolViolationDetected(
+            new KafkaRecordId(generation, 10),
+            "late poison"
+        ));
+
+        Assertions.assertThrows(KafkaSourceOwner.CaptureProtocolViolation.class, owner::runOnce);
+
+        Assertions.assertTrue(owner.partitionState(PARTITION_0).isEmpty());
+        Assertions.assertEquals(0, commitMetrics.recordsCommitIneligible);
+        Assertions.assertEquals(0, commitMetrics.recordsOutstanding);
+        commitMetrics.assertConservation();
     }
 
     private static int indexOfType(List<ReplayIntakeInput> inputs, Class<?> type) {
