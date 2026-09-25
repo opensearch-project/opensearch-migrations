@@ -1,10 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import java.io.IOException;
-
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseDiagnostic;
-import org.opensearch.migrations.replay.lifecycle.ReplayOutcomes.TargetAttemptOutcome.NoTargetResponseKind;
 import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
@@ -33,16 +30,11 @@ public interface TargetPacketConsumer extends IPacketFinalizingConsumer<Aggregat
             }
         }
 
-        record NoTargetResponseObtained(@NonNull IOException cause) implements PacketSendOutcome {
-            public NoTargetResponseDiagnostic diagnostic() {
-                return NoTargetResponseDiagnostic.fromCause(
-                    NoTargetResponseKind.TRANSPORT_FAILURE,
-                    cause
-                );
-            }
-
+        record NoTargetResponseObtained(
+            @NonNull NoTargetResponseDiagnostic diagnostic
+        ) implements PacketSendOutcome {
             public String reason() {
-                return diagnostic().description();
+                return diagnostic.description();
             }
 
             @Override

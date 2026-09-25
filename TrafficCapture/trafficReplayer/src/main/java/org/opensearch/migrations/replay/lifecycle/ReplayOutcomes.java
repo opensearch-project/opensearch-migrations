@@ -7,51 +7,15 @@ import lombok.NonNull;
 public final class ReplayOutcomes {
     private ReplayOutcomes() {}
 
-    public sealed interface PreparationOutcome<T>
-        permits PreparationOutcome.Prepared,
-            PreparationOutcome.Filtered,
-            PreparationOutcome.Failed,
-            PreparationOutcome.Cancelled {
+    public sealed interface RequestPreparationResult<T>
+        permits RequestPreparationResult.RequestPreparationReady,
+            RequestPreparationResult.RequestPreparationCancelled {
 
-        <R> R visit(Visitor<T, R> visitor);
+        record RequestPreparationReady<T>(@NonNull T value) implements RequestPreparationResult<T> {}
 
-        interface Visitor<T, R> {
-            R onPrepared(Prepared<T> outcome);
-
-            R onFiltered(Filtered<T> outcome);
-
-            R onFailed(Failed<T> outcome);
-
-            R onCancelled(Cancelled<T> outcome);
-        }
-
-        record Prepared<T>(@NonNull T value) implements PreparationOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onPrepared(this);
-            }
-        }
-
-        record Filtered<T>(@NonNull String reason) implements PreparationOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onFiltered(this);
-            }
-        }
-
-        record Failed<T>(@NonNull Throwable cause) implements PreparationOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onFailed(this);
-            }
-        }
-
-        record Cancelled<T>(@NonNull CancellationException cause) implements PreparationOutcome<T> {
-            @Override
-            public <R> R visit(Visitor<T, R> visitor) {
-                return visitor.onCancelled(this);
-            }
-        }
+        record RequestPreparationCancelled<T>(
+            @NonNull CancellationException cause
+        ) implements RequestPreparationResult<T> {}
     }
 
     public sealed interface TargetAttemptOutcome<T>
@@ -67,18 +31,7 @@ public final class ReplayOutcomes {
         record NoTargetResponseDiagnostic(
             @NonNull NoTargetResponseKind kind,
             @NonNull String description
-        ) {
-            public static NoTargetResponseDiagnostic fromCause(
-                NoTargetResponseKind kind,
-                Throwable cause
-            ) {
-                return new NoTargetResponseDiagnostic(
-                    kind,
-                    cause.getClass().getName()
-                        + (cause.getMessage() == null ? "" : ": " + cause.getMessage())
-                );
-            }
-        }
+        ) {}
 
         <R> R visit(Visitor<T, R> visitor);
 

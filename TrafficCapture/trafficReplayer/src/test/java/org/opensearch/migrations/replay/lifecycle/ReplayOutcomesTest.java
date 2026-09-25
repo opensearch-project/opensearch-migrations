@@ -6,6 +6,30 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class ReplayOutcomesTest {
+    @Test
+    void requestPreparationHasExactlyReadyAndCancelledDomainResults() {
+        var ready =
+            new ReplayOutcomes.RequestPreparationResult.RequestPreparationReady<>("prepared");
+        var cancelled =
+            new ReplayOutcomes.RequestPreparationResult.RequestPreparationCancelled<String>(
+                new CancellationException("cancelled")
+            );
+
+        Assertions.assertEquals("ready:prepared", describePreparation(ready));
+        Assertions.assertEquals("cancelled:cancelled", describePreparation(cancelled));
+    }
+
+    private static String describePreparation(
+        ReplayOutcomes.RequestPreparationResult<String> result
+    ) {
+        return switch (result) {
+            case ReplayOutcomes.RequestPreparationResult.RequestPreparationReady<String> ready ->
+                "ready:" + ready.value();
+            case ReplayOutcomes.RequestPreparationResult.RequestPreparationCancelled<String> cancelled ->
+                "cancelled:" + cancelled.cause().getMessage();
+        };
+    }
+
 // REBUILD-LIMBO-START(G5)
 // Both methods are about the four outcome families marked in ReplayOutcomes, and both assert that a visitor
 // defined inside the test covers the type it was written against -- which the compiler already guarantees for
