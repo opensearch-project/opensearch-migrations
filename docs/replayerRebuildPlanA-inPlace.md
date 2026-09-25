@@ -568,7 +568,7 @@ rather than shells, since this is the milestone that gives them consumers and th
 `RequestPreparationResult` is `connLLD §6`'s two cases and **only** those two: an unexpected preparation
 throw is process-fatal, not an outcome value. Strike `PreparationOutcome.Filtered` and `.Failed` from
 `ReplayOutcomes` as part of this — expected transformation fallback travels inside
-`RequestPreparationReady` via `HttpRequestTransformationStatus`.
+`RequestPreparationReady` via `HttpRequestTransformationStatus`; filtering follows `connLLD §6`.
 
 `TargetConnectionOwner` with separated admission and execution queues, `RequestReplayOwner`,
 `TargetChannelPort`, `TargetAttemptPermitProvider`, `TupleWriter`. Two milestones per request:
@@ -581,15 +581,32 @@ across backoff, source-response waits, or tuple writes. `FirstTargetWriteSubmitt
 They answer different questions and both are needed: first-write decides whether a cancelled
 request's channel must be closed rather than reused, and final-write decides whether graceful
 cancellation waits on the request at all (`connLLD §8`, `§17.1`). `TargetAttemptOutcome` replaces exception-carried
-no-response. Tuple output is unconditional and retried to durability.
+no-response. Tuple output follows `connLLD §12`, including intentional transformation drop as
+successful logical completion.
 
 Request admission and every correctness-required callback use the typed links defined by `connLLD §3` and
 `procCommit §4.2`: acceptance or rejection reaches replay intake exactly once, normal source-response and
 request-owner results reach their required receiver exactly once, and the receiver's completion closes the
 linked operation. Register each outstanding linked operation before submission, retain it until its typed
-completion is processed, and expose that same registry to fixed-cardinality active-operation metrics and the
-activity monitor. Observability is derived from those owner transitions; no parallel callback-accounting
-model is introduced.
+completion is processed, and expose that same registry to the activity monitor. Diagnostics observe those
+owner transitions directly; no parallel callback-accounting model is introduced.
+
+G5 restores all 33 replay-pipeline metric names shipped on `main`, with their existing units and
+fixed-cardinality attributes. Its source-record, pacing/retry, connection-lifecycle, physical target-channel,
+and target-byte events are emitted by the G5 context/owner/Netty chain. Request preparation receives the
+transformation context whose parser and transformation callbacks emit the remaining transformation metrics,
+and tuple construction receives the tuple context whose close emits `tupleComparison`. G9 only constructs
+those already-defined adapters from deployed configuration; it must not replace semantic producers with owner
+transition approximations.
+
+**Deferred to G9 — configured bounded tuple-writer placement and stable sink identity.** G5 proves the
+logical transform/drop/retry/durability chain with a temporary writer owned by each connection binding. G9
+replaces that placement with the configured positive number of bounded writer workers, each owning one
+non-concurrently invoked tuple transformer and physical sink. Each worker retains a stable integer index,
+passed through deployed sink construction so S3 naming remains stable, and G9 owns configured construction,
+closure, and deletion of G5's per-connection transformer/sink placement. G5's scope and Exit exclude only
+that deployed placement/configuration change, not tuple transformation, intentional drop, retry, durability,
+or processing-completion ordering.
 
 **Deferred to POST1 — target interim-response preservation.** G5 builds the target response and tuple-input
 chain, but it does not preserve target `1xx` responses in tuples. The current target handler may continue to
@@ -610,12 +627,14 @@ the permit count at 1, exactly one target attempt is in flight and queued reques
 **preparation has exactly the two outcomes `connLLD §6` names, and an unexpected preparation throw reaches
 the process-failure boundary rather than becoming a value**. Admission acceptance/rejection and every normal
 source-response, turn, processing, attempt, and tuple result reaches its required receiver exactly once through
-a typed link; the link completes only after the receiver, and active-operation metrics/activity diagnostics
-are projections of the same registered operations. The real Kafka source → replay intake →
+a typed link; the link completes only after the receiver, and activity diagnostics observe the same registered
+operations. The real Kafka source → replay intake →
 connection/request path is constructed and reachable through its production queues, with no test-only caller
 standing in for a missing consumer. G5 does not claim target-interim tuple preservation; POST1 receives and
 proves that obligation after the rewrite. The inherited connection-lifetime assertions above run against the
-new owner and context chain. Covers `D6`, `D7`, `D10`, `D17`; contributes `R2`, `R8`, `R10`.
+new owner and context chain. Required evidence includes the filtered and intentional-drop cases in
+`connLLD §19.3` and the completion/force race in `§19.5`. Covers `D6`, `D7`, `D10`, `D17`; contributes
+`R2`, `R8`, `R10`.
 
 ### G6 — Retry boundary and broker-time expiration
 
@@ -721,14 +740,24 @@ the intake fence; no unbounded doubling loop; no join on a group that may be dea
 config surface from previous-plan §7, including every deprecated parse-and-warn alias. Startup rejects
 `P < 1`, `T_threads < 1`, `W <= 0`, `E <= 0`, `S < 0`.
 
-**Inherited from G0 — the shells for `TupleWriter` and `TupleWriteResult`**, which G0 never declared. The
-threading contract that must survive is in the register's `TupleWriter` row.
+**Inherited from G5 — construct the preserved metric producers from deployed configuration.** Startup selects
+the G5 request-preparation, target-channel, pacing/retry, source-read, and tuple-construction adapters without
+changing their metric names, units, attributes, or semantic events. Do not substitute owner-transition
+approximations for parser, physical-channel, byte, or tuple-comparison events.
+
+**Inherited from G5 — replace temporary tuple-writer placement.** Construct the configured positive number of
+bounded writer workers; each worker owns one transformer and sink that are never invoked concurrently and are
+closed explicitly. Preserve a stable integer worker index and pass it to deployed sink construction, including
+S3 object naming. Delete G5's per-connection transformer/sink creation and closure when the worker pool is
+wired. `TupleWriter` and `TupleWriteResult` are already live G5 types, not G9 shells.
 
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
 dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
 behavioral effect, and does not fail as an unrecognized key; the already-integrated replay application from
 G5 is started and stopped through the supervisor and deployed configuration, without replacing its owner or
-queue construction. Covers `D13`, `D14`; contributes `R1`, `R19`.
+queue construction; configured startup selects every preserved replay-pipeline metric producer without
+changing its semantics; the bounded writer workers retain stable sink indices and G5's temporary
+per-connection writer placement is gone. Covers `D13`, `D14`; contributes `R1`, `R19`.
 
 ### G9.5 — Full correctness review at production-complete
 
