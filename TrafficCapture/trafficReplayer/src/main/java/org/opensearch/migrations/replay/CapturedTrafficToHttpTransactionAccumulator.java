@@ -634,6 +634,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 //     Accumulation,ITrafficStreamKey,TrafficObservation,KafkaRecordId) ->
 //     SourceConnectionState.apply(TrafficObservation,KafkaRecordId,long,ITrafficStreamsLifecycleContext)
 // REBUILD-TRACE-END(G5,source)
+// REBUILD-TRACE-START(G6,source): retain through the rebuild; remove in final pre-merge cleanup.
+// CapturedTrafficToHttpTransactionAccumulator.addObservationToAccumulation(
+//     Accumulation,ITrafficStreamKey,TrafficObservation,KafkaRecordId) ->
+//     ReplayIntakeOwner.applyRecord
+// REBUILD-TRACE-END(G6,source)
 // REBUILD-LIMBO-START(G11)
 /*
     private CONNECTION_STATUS addObservationToAccumulation(

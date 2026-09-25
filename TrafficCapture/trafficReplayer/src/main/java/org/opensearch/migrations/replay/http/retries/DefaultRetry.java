@@ -53,6 +53,16 @@ public class DefaultRetry implements RequestRetryEvaluator {
         return TextTrackedFuture.completedFuture(d, () -> msg);
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G6,source): retain through the rebuild; remove in final pre-merge cleanup.
+// DefaultRetry.shouldRetry(
+//     ByteBuf,List<AggregatedRawResponse>,AggregatedRawResponse,
+//     TrackedFuture<String,? extends IRequestResponsePacketPair>) ->
+//     RequestReplayOwner.applyRetryDecision
+// REBUILD-TRACE-END(G6,source)
+// REBUILD-LIMBO-START(G5)
+/*
     @Override
     public TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>
     shouldRetry(ByteBuf targetRequestBytes,

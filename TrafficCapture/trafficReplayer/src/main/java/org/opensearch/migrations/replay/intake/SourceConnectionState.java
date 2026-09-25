@@ -244,6 +244,9 @@ public final class SourceConnectionState {
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
     // CapturedTrafficToHttpTransactionAccumulator.close -> SourceConnectionState.expire
     // REBUILD-TRACE-END(G5,target)
+    // REBUILD-TRACE-START(G6,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // Accumulation.expire -> SourceConnectionState.expire
+    // REBUILD-TRACE-END(G6,target)
     public ObservationOutcome expire() {
         if (lifetime != Lifetime.OPEN) {
             return ObservationOutcome.none();

@@ -636,6 +636,9 @@ public final class PartitionIntakeState {
     /**
      * Expires every current lifetime for one writer and returns owners that need the matching target command.
      */
+    // REBUILD-TRACE-START(G6,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ExpiringKeyQueue.expireItemsBefore -> PartitionIntakeState.expireConnectionsForWriter
+    // REBUILD-TRACE-END(G6,target)
     public WriterExpirationResult expireConnectionsForWriter(@NonNull String writerNodeId) {
         ownerThreadGuard.requireOwnerThread();
         var ownersToExpire = new ArrayList<ConnectionProcessingId>();
