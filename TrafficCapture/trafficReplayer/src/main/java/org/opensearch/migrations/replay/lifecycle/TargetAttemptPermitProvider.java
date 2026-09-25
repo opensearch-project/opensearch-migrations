@@ -48,6 +48,9 @@ public final class TargetAttemptPermitProvider {
             public void acquisitionCancelled() {}
 
             @Override
+            public void acquisitionFailed() {}
+
+            @Override
             public void permitAcquired() {}
 
             @Override
@@ -65,6 +68,8 @@ public final class TargetAttemptPermitProvider {
         void acquisitionPendingChanged(int delta);
 
         void acquisitionCancelled();
+
+        void acquisitionFailed();
 
         void permitAcquired();
 
@@ -165,12 +170,12 @@ public final class TargetAttemptPermitProvider {
 
     public Acquisition acquire(@NonNull ReplayRequestId requestId) {
         var acquisition = new PendingAcquisition(requestId);
+        recordMetric(metrics::acquisitionRequested, "recording a requested target-attempt permit");
         var existingFatalFailure = fatalFailure.get();
         if (existingFatalFailure != null) {
             acquisition.fail(existingFatalFailure);
             return acquisition;
         }
-        recordMetric(metrics::acquisitionRequested, "recording a requested target-attempt permit");
 
         var reservation = reserveAttempt();
         if (reservation == Reservation.RESERVED) {
@@ -347,10 +352,8 @@ public final class TargetAttemptPermitProvider {
 
     private Error reportFatal(String message, Throwable cause) {
         var proposed = new Error(message, cause);
-        if (fatalFailure.compareAndSet(null, proposed)) {
-            fatalHandler.onFatal(proposed);
-            return proposed;
-        }
+        fatalFailure.compareAndSet(null, proposed);
+        fatalHandler.onFatal(proposed);
         return fatalFailure.get();
     }
 
@@ -431,6 +434,10 @@ public final class TargetAttemptPermitProvider {
             }
             pendingAcquisitions.remove(this);
             clearPending();
+            recordMetric(
+                metrics::acquisitionFailed,
+                "recording a failed target-attempt permit acquisition"
+            );
             completion.completeExceptionally(failure);
         }
     }
