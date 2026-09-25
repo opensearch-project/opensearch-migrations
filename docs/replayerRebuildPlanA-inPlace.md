@@ -683,10 +683,13 @@ the Kafka half. See the register's deferral ledger for the row behind each case.
 `RequestNextPartitionBatch` / `PartitionRecordBatch`, one assignment bootstrap entitlement plus at
 most one intake-issued request per partition generation, `N = P * T_threads` over requests with
 resolved retry input and unfinished target turns. Empty polls resolve neither entitlement and do
-not reach intake. No record or byte cap exists to be removed.
+not reach intake. No record or byte cap exists to be removed. G7 owns the shared
+`finishedOrCancelled` supply transition and proves it directly; G8 receives the typed cancellation
+producer that must invoke that transition before generation cleanup.
 
 **Exit:** intake requests another batch only while retry-ready supply is below `N`; a fast complete
-response satisfies supply before `B + W`; a target-finished or cancelled request cannot re-enter supply;
+response satisfies supply before `B + W`; a target-finished request cannot re-enter supply, and the shared
+cancelled-request transition is directly proved for G8 to invoke;
 no cap can block the reads needed to reach retry or heartbeat evidence; **intake enforces at most one
 intake-issued batch request per generation on its own side, recomputes demand after every input
 including assignment, applies bootstrap and explicit batches completely in delivery order, and a
@@ -708,7 +711,8 @@ conditions for cleanup completeness. Connection side `connLLD §17:658-699`. Pro
 *accepts* force cancellation. Typed per-owner cleanup results that never authorize commit; successor
 generations stay paused until `GenerationCleanupFinished`. `ProtocolViolationTerminator`: mark the record
 commit-ineligible, block commits at and past that offset, pause intake, fixed 60-second drain limit,
-terminate with a code distinct from 80, poison pill on restart.
+terminate with a code distinct from 80, poison pill on restart. Every cancellation-ended target turn invokes
+G7's `finishedOrCancelled` supply transition exactly once before cleanup; later retry input cannot re-add it.
 
 **Inherited lifecycle evidence from G3.** Refactor the revocation and synthetic-close tests into the typed
 generation-cancellation model: stale source assembly is released before successor-generation records apply,
@@ -726,6 +730,8 @@ previous one's cleanup; unrelated partitions continue throughout; a corrupted re
 the drain limit without committing past the violating offset and stops at the same record on restart. The
 inherited revocation/cleanup assertions above pass through typed cancellation and cleanup inputs, and the
 process-wide active-record-tracker gauge returns to its pre-generation value when cleanup completes.
+Cancellation removes every counted retry-ready request from supply exactly once before cleanup and late
+retry input cannot re-add it.
 Contributes `R15`, `R16`, `R17`.
 
 Per `../AGENTS.md` §4 and the human's explicit direction: `R16` and `R17` must have solid, fast,
