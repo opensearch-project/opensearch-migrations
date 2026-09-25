@@ -524,6 +524,7 @@ class SourceReconstructionTest {
     @Test
     void ordinaryWriteIsNeverAcceptedAsAnInterimCompatibilityEncoding() {
         var ordinaryWrite = "HTTP/1.1 100 Continue\r\n\r\n";
+        var ordinarySegmentedWrite = "HTTP/1.1 102 Processing\r\n\r\n";
         var finalResponse = "HTTP/1.1 204 No Content\r\n\r\n";
         var script = new RecordScript(TOPIC).addTraffic(
             0,
@@ -549,7 +550,146 @@ class SourceReconstructionTest {
         Assertions.assertEquals(List.of(REQUEST_BYTES), sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList());
         Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
         Assertions.assertTrue(sink.interimResponses.isEmpty());
-        Assertions.assertEquals(List.of(finalResponse), sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList());
+        Assertions.assertEquals(
+            List.of(ordinaryWrite + ordinarySegmentedWrite + finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void wholeFinalWriteBeforeRequestEndIsAttachedAtEomWithoutChangingTheRequest() {
+        var requestPrefix = "POST /thing HTTP/1.1\r\nContent-Length: 4\r\n\r\na";
+        var finalResponse = "HTTP/1.1 413 Content Too Large\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, requestPrefix),
+                write(2, finalResponse),
+                read(3, "bcd"),
+                endOfMessage(4),
+                close(5)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            List.of(requestPrefix + "bcd"),
+            sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertTrue(sink.interimResponses.isEmpty());
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void segmentedFinalWriteBeforeRequestEndIsAttachedAtEomWithoutChangingTheRequest() {
+        var requestPrefix = "POST /thing HTTP/1.1\r\nContent-Length: 4\r\n\r\na";
+        var finalResponse = "HTTP/1.1 417 Expectation Failed\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                read(1, requestPrefix),
+                writeSegment(2, "HTTP/1.1 417 Expectation "),
+                writeSegment(3, "Failed\r\nContent-Length: 0\r\n\r\n"),
+                segmentEnd(4),
+                read(5, "bcd"),
+                endOfMessage(6),
+                close(7)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertEquals(
+            List.of(requestPrefix + "bcd"),
+            sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(0L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertTrue(sink.interimResponses.isEmpty());
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void typedInterimsBeforeAnyRequestAreIgnoredAndNeverAttachedForward() {
+        var finalResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            stream(
+                0,
+                interim(1, "HTTP/1.1 102 Processing\r\n\r\n"),
+                interimSegment(2, "HTTP/1.1 103 Early "),
+                interimSegment(3, "Hints\r\n\r\n"),
+                segmentEnd(4),
+                read(5, REQUEST_BYTES),
+                endOfMessage(6),
+                write(7, finalResponse),
+                close(8)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertTrue(sink.interimResponses.isEmpty());
+        Assertions.assertEquals(
+            List.of(REQUEST_BYTES),
+            sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+    }
+
+    @Test
+    void typedInterimDoesNotEndInheritedTailDiscardOrAttachToTheNextRequest() {
+        var finalResponse = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        var script = new RecordScript(TOPIC).addTraffic(
+            0,
+            0,
+            Instant.ofEpochMilli(1_000),
+            WRITER,
+            resumedStream(
+                0,
+                interim(1, "HTTP/1.1 103 Early Hints\r\n\r\n"),
+                read(2, "inherited tail"),
+                endOfMessage(3),
+                read(4, REQUEST_BYTES),
+                endOfMessage(5),
+                write(6, finalResponse),
+                close(7)
+            )
+        );
+
+        applyAll(script);
+
+        Assertions.assertTrue(sink.interimResponses.isEmpty());
+        Assertions.assertEquals(
+            List.of(REQUEST_BYTES),
+            sink.requests.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
+        Assertions.assertEquals(1L, sink.requestIds.get(0).capturedRequestOrdinal());
+        Assertions.assertEquals(
+            List.of(finalResponse),
+            sink.responses.stream().map(SourceReconstructionTest::bytesOf).toList()
+        );
     }
 
     /**

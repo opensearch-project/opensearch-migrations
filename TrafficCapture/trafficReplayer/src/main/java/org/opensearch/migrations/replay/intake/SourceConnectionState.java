@@ -111,13 +111,13 @@ public final class SourceConnectionState {
     private Long nextExpectedObservationSequence;
 
     private Phase phase;
-    private boolean discardingFinalWriteSegmentsBeforeRequestEnd;
     private boolean requestEverReconstituted;
     private long currentCapturedRequestOrdinal;
     private HttpMessageAndTimestamp.Request incomingRequest;
     private IReplayContexts.IRequestContext requestContext;
     private IReplayContexts.IRequestAccumulationContext requestAccumulationContext;
     private IReplayContexts.IResponseAccumulationContext responseAccumulationContext;
+    private HttpMessageAndTimestamp.Response finalResponseBeforeRequestEnd;
     private HttpMessageAndTimestamp.InterimResponse interimResponseUnderAssembly;
     private final List<HttpMessageAndTimestamp.InterimResponse> pendingInterimResponses =
         new ArrayList<>();
@@ -337,9 +337,10 @@ public final class SourceConnectionState {
             if (interimResponseUnderAssembly != null) {
                 return finalizeInterimResponseSegment(assembly, timestamp);
             }
-            if (discardingFinalWriteSegmentsBeforeRequestEnd) {
-                discardingFinalWriteSegmentsBeforeRequestEnd = false;
-                return ObservationOutcome.none();
+            if (finalResponseBeforeRequestEnd != null
+                && finalResponseBeforeRequestEnd.hasInProgressSegment()) {
+                finalResponseBeforeRequestEnd.finalizeRequestSegments(timestamp);
+                return added(assembly);
             }
             var request = requireRequestUnderAssembly();
             if (!request.hasInProgressSegment()) {
@@ -352,11 +353,24 @@ public final class SourceConnectionState {
             return reconstituteRequest(timestamp, logAppendTimeMillis, containingRecord);
         }
         if (observation.hasWrite()) {
-            return ObservationOutcome.none();
+            if (finalResponseBeforeRequestEnd != null
+                && finalResponseBeforeRequestEnd.hasInProgressSegment()) {
+                throw new CaptureProtocolViolation(
+                    "whole final response for " + connectionProcessingId
+                        + " arrived while a segmented final response was under assembly"
+                );
+            }
+            appendTo(
+                finalResponseBeforeRequestEnd(timestamp),
+                observation.getWrite().getData().toByteArray(),
+                timestamp
+            );
+            return added(assembly);
         }
         if (observation.hasWriteSegment()) {
-            discardingFinalWriteSegmentsBeforeRequestEnd = true;
-            return ObservationOutcome.none();
+            finalResponseBeforeRequestEnd(timestamp)
+                .addSegment(observation.getWriteSegment().getData().toByteArray());
+            return added(assembly);
         }
         return ObservationOutcome.none();
     }
@@ -445,12 +459,14 @@ public final class SourceConnectionState {
         var requestAssociation = new RecordAssociationId.Request(replayRequestId);
 
         incomingRequest = null;
-        discardingFinalWriteSegmentsBeforeRequestEnd = false;
         responseBeingAssembledFor = replayRequestId;
         responseStateByRequest.put(
             replayRequestId,
-            new HttpMessageAndTimestamp.Response(requestEndOfMessageSourceTime)
+            finalResponseBeforeRequestEnd == null
+                ? new HttpMessageAndTimestamp.Response(requestEndOfMessageSourceTime)
+                : finalResponseBeforeRequestEnd
         );
+        finalResponseBeforeRequestEnd = null;
         requestEverReconstituted = true;
         phase = Phase.ASSEMBLING_RESPONSE;
         if (requestContext != null) {
@@ -586,7 +602,7 @@ public final class SourceConnectionState {
         incomingRequest = null;
         closeIncompleteRequestContexts();
         clearInterimResponses();
-        discardingFinalWriteSegmentsBeforeRequestEnd = false;
+        finalResponseBeforeRequestEnd = null;
         currentCapturedRequestOrdinal++;
         phase = Phase.BETWEEN_REQUESTS;
         return new ObservationOutcome(List.of(), finished, List.of(), false);
@@ -614,7 +630,7 @@ public final class SourceConnectionState {
             closeIncompleteRequestContexts();
         }
         clearInterimResponses();
-        discardingFinalWriteSegmentsBeforeRequestEnd = false;
+        finalResponseBeforeRequestEnd = null;
         if (responseBeingAssembledFor != null) {
             completeResponse(false);
         }
@@ -641,7 +657,7 @@ public final class SourceConnectionState {
             closeIncompleteRequestContexts();
         }
         clearInterimResponses();
-        discardingFinalWriteSegmentsBeforeRequestEnd = false;
+        finalResponseBeforeRequestEnd = null;
         if (responseBeingAssembledFor != null) {
             var requestId = responseBeingAssembledFor;
             responseStateByRequest.remove(requestId);
@@ -743,6 +759,13 @@ public final class SourceConnectionState {
             );
         }
         return incomingRequest;
+    }
+
+    private HttpMessageAndTimestamp.Response finalResponseBeforeRequestEnd(Instant firstPacketTimestamp) {
+        if (finalResponseBeforeRequestEnd == null) {
+            finalResponseBeforeRequestEnd = new HttpMessageAndTimestamp.Response(firstPacketTimestamp);
+        }
+        return finalResponseBeforeRequestEnd;
     }
 
     private HttpMessageAndTimestamp.Response responseUnderAssembly(Instant firstPacketTimestamp) {
