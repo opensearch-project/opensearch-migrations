@@ -101,6 +101,15 @@ Codex owns implementation, integration, register updates, and final commit messa
   one mapping line per split target. A post-baseline target MUST identify only the inherited responsibility
   slice it received. You MUST NOT trace unchanged mainline responsibilities or branch-only responsibilities
   with no mainline predecessor because neither has an inherited behavior relocation to prove.
+- You MUST place each source record immediately before its exact inherited source method and each target
+  record immediately before its exact live target method. For a marked source, You MUST split the limbo
+  region without altering code lines and put the trace block immediately before the reopened member marker.
+  An in-place rewrite MUST colocate its source and target blocks immediately before the method.
+- You MUST retain each trace-eligible source member in limbo through the final completeness sweep, including
+  `RETIRED` members. The final sweep removes dead source bodies and trace records together only after every
+  retained baseline method has an exact disposition. If a source already disappeared before Plan A's carry
+  baseline, You MUST NOT restore it; put the source record at the surviving predecessor/replacement seam,
+  identify `2fe4538a`, and record the gap in the live register.
 - Before bulk trace editing for one phase, You MUST complete three to five representative mappings,
   including a moved or split responsibility and a rejected unchanged or net-new candidate, and obtain
   owner confirmation. You MUST NOT treat previously written broad trace prose as approved merely because

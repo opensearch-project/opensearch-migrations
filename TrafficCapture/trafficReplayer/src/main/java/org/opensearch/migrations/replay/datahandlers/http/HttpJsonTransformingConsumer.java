@@ -27,19 +27,6 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// HttpJsonTransformingConsumer.<init>(..., IReplayerHttpTransactionContext)
-//     -> RequestReplayOwner.beginPreparation [create request transformation context].
-// HttpJsonTransformingConsumer.finalizeRequest
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// HttpJsonTransformingConsumer.finalizeDeferredSigning
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// HttpJsonTransformingConsumer.finalizeNormalPath
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// HttpJsonTransformingConsumer.redriveWithoutTransformation
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// REBUILD-TRACE-END(G5,source)
-
 /**
  * This class implements a packet consuming interface by using an EmbeddedChannel to write individual
  * packets through handlers that will parse the request's HTTP headers, determine what may need to

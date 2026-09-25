@@ -34,7 +34,12 @@ what make the output usable, and a reviewer given only the scope reverts to list
 > a target only for an inherited baseline responsibility it received. Branch-only responsibilities with no
 > mainline predecessor and unchanged mainline responsibilities must not have inherited-behavior traces. Every eligible moved, split,
 > substantially rewritten, or retired responsibility must use matching source and target records with exact
-> `OldClass.oldMethod -> NewClass.newMethod` mappings rather than class-level or wildcard prose.
+> `OldClass.oldMethod -> NewClass.newMethod` mappings rather than class-level or wildcard prose. Each record
+> must sit immediately before the exact method it describes; an in-place rewrite has both records there.
+> Eligible baseline source methods remain marked through the final completeness sweep, including sources
+> mapped to `RETIRED`. A source already absent before Plan A's carry baseline must not be restored; its record
+> must identify `2fe4538a` at the surviving predecessor/replacement seam and the live register must record the
+> gap.
 >
 > ### Classify every finding, because the classification decides what happens to it
 >

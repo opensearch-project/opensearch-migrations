@@ -72,7 +72,7 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 // old setupRunAndWait*/doSetup*/wrapUpWorkAndEmitSummary/waitForRemainingWork/shutdown ->
 //     G9 process supervisor and owner-loop startup/shutdown
 // old shouldRetry -> RequestReplayOwner.RetryPolicy
-// old currentAccumulator/currentReplayEngine inspection -> typed owner registries/activitySnapshot
+// old currentReplayEngine inspection -> typed owner registries/activitySnapshot
 // REBUILD-TRACE-END(G5,target)
 
 /**
@@ -321,9 +321,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
     }
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-    // RequestTransformerAndSender.transformAllData + PacketToTransformingHttpHandlerFactory.create ->
-    // deployedRequestPreparer, which feeds the inherited HttpJsonTransformingConsumer with the
-    // request owner's transformation context and returns the new typed preparation result.
+    // RequestTransformerAndSender.transformAllData -> TrafficReplayerTopLevel.deployedRequestPreparer
+    //     [feed captured packets through request transformation and finalize the transformed request].
     // REBUILD-TRACE-END(G5,target)
     public static RequestReplayOwner.RequestPreparer<
         HttpMessageAndTimestamp.Request,
@@ -869,7 +868,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
 
 // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
 // The inert predecessor below supplies the source functions named by REBUILD-TRACE(G5,target):
-// getCurrentAccumulator, getCurrentReplayEngine, every constructor,
+// getCurrentReplayEngine, every constructor,
 // makeNettyPacketConsumerConnectionPool, loadSslContext, setupRunAndWaitForReplayToFinish,
 // doSetupRunAndWaitForReplayToFinish, wrapUpWorkAndEmitSummary,
 // setupRunAndWaitForReplayWithShutdownChecks, doSetupRunAndWaitForReplayWithShutdownChecks,
@@ -958,6 +957,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 */
 // REBUILD-LIMBO-END(G5)
     /** Returns the current accumulator, or null if not yet initialized. */
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// TrafficReplayerTopLevel.getCurrentAccumulator -> RETIRED
+//     [connLLD sections 2-4 assign live mutable source and connection state to their owners;
+//     Plan A G5 forbids restoring the predecessor source-owned connection registry].
+// REBUILD-TRACE-END(G5,source)
 // REBUILD-LIMBO-START(G5)
 /*
     public CapturedTrafficToHttpTransactionAccumulator getCurrentAccumulator() {

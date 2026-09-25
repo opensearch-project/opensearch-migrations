@@ -31,8 +31,15 @@ unchanged mainline responsibilities receive no trace.
 Use exact method mappings on both sides:
 
 ```text
-// REBUILD-TRACE(G5,source): OldOwner.submit(Request) -> NewOwner.submit(Request).
-// REBUILD-TRACE(G5,target): OldOwner.submit(Request) -> NewOwner.submit(Request).
+// Immediately before OldOwner.submit:
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// OldOwner.submit(Request) -> NewOwner.submit(Request).
+// REBUILD-TRACE-END(G5,source)
+
+// Immediately before NewOwner.submit:
+// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+// OldOwner.submit(Request) -> NewOwner.submit(Request).
+// REBUILD-TRACE-END(G5,target)
 ```
 
 For a split, repeat the source and use one target per line:
@@ -46,6 +53,13 @@ For a substantial rewrite in the same method, name the method on both sides and 
 responsibility. For removal, use `OldClass.oldMethod -> RETIRED` and cite the design or recorded owner
 decision. Do not use class-level summaries, wildcard phrases such as “constructors and helpers,” or
 `oldMethod -> same-named live behavior`.
+
+Keep every eligible source method marked at its shipping path through the final completeness sweep. Put its
+source trace block immediately before that method's limbo marker, splitting the surrounding region without
+changing a code line. The final sweep checks every retained source disposition before removing retired or
+moved source bodies and their trace records together. If the method was already absent before Plan A's carry
+baseline, do not restore it: put the source record at the surviving predecessor/replacement seam, identify
+`2fe4538a` as the source revision, and add the gap to the live register.
 
 Before applying a phase-wide trace audit, commit or present three to five representative decisions and
 obtain owner confirmation. A candidate rejected as unchanged or net-new is part of that sample even though

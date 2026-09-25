@@ -299,9 +299,19 @@ Where designs specify structure, they win. Otherwise:
   one exact target per line. A retirement uses `OldClass.oldMethod -> RETIRED` and names the design or owner
   decision that made the behavior unnecessary. Phrases such as “constructors and helpers,” “same-named live
   behavior,” or a class-to-class reachability summary are not equivalence mappings.
-- Put the source record beside the inherited source or its retained predecessor and the matching target record
-  beside the live target. A rewrite in place may colocate the two records. Trace comments are a bidirectional
-  index, so the source and target records must name the same mapping; they do not prove equivalence.
+- Put each source record immediately before the exact inherited source method and each matching target record
+  immediately before the exact live target method. For a marked source, split the surrounding limbo region
+  without changing a code line and put the trace block immediately before the member's reopened marker. A
+  rewrite in place colocates matching source and target records immediately before the rewritten method. Trace
+  comments are a bidirectional index, so paired records must name the same mapping; they do not prove
+  equivalence.
+- Retain every trace-eligible baseline source member in limbo through the final completeness sweep, including a
+  member whose disposition is `RETIRED`; do not delete it merely because its target is live or its retirement is
+  decided. The final sweep verifies that every retained baseline method has an exact moved, split, rewritten, or
+  retired disposition, then removes dead source bodies and trace records together. If a baseline source already
+  disappeared before Plan A's history-preserving carry baseline, do not create a restore-deleted commit: place
+  its source record at the surviving predecessor/replacement seam, name `2fe4538a`, and record the pre-existing
+  gap in `docs/replayerRebuildStatus.md`.
 - Before bulk-adding or materially revising one phase's trace records, complete three to five representative
   mappings, including at least one moved or split responsibility and one candidate rejected as unchanged or
   net-new, and obtain owner confirmation. Existing broad records are not grandfathered; audit them against this

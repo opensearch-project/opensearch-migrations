@@ -1,14 +1,5 @@
 package org.opensearch.migrations.replay;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// getRetryCheckVisitor -> RequestReplayOwner.evaluateTargetResponse/applyRetryDecision.
-// shouldRetry -> RequestReplayOwner.RetryPolicy.
-// perResponseConsumer -> RequestReplayOwner target-attempt history + TupleFactory input.
-// transformAndSendRequest overloads -> RequestReplayOwner request preparation,
-//     applyPreparationResult, and startAttempt.
-// transformAllData -> RequestReplayOwner.RequestPreparer with IRequestTransformationContext.
-// REBUILD-TRACE-END(G5,source)
-
 // REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
 // regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
 // Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
@@ -169,6 +160,14 @@ public class RequestTransformerAndSender<T> {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestTransformerAndSender.transformAllData -> TrafficReplayerTopLevel.deployedRequestPreparer
+//     [feed captured packets through request transformation and finalize the transformed request].
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private static <R> TrackedFuture<String, R> transformAllData(
         IPacketFinalizingConsumer<R> packetHandler,
         Supplier<Stream<byte[]>> packetSupplier
