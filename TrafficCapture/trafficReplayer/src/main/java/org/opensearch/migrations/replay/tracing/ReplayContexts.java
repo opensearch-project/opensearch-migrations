@@ -1,15 +1,6 @@
 package org.opensearch.migrations.replay.tracing;
 
-// REBUILD-LIMBO(G2) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: ISourceTrafficChannelKey ITrafficStreamKey UniqueReplayerRequestKey . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
 
-// REBUILD-LIMBO-START(G2)
-/*
 
 import java.time.Duration;
 import java.time.Instant;
@@ -851,43 +842,31 @@ public interface ReplayContexts extends IReplayContexts {
             meterIncrementEvent(getMetrics().resultCounter, 1, attributesBuilderForAggregate);
         }
 
-*/
-// REBUILD-LIMBO-END(G2)
         /**
          * Convert everything in the 2xx range to 200; 300-399 to 300
          *
          * @param status
          * @return
          */
-// REBUILD-LIMBO-START(G2)
-/*
         public static long categorizeStatus(int status) {
             return (status / 100L) * 100L;
         }
 
-*/
-// REBUILD-LIMBO-END(G2)
         /**
          * Like httpVersion, Endpoint doesn't have a field because it isn't used as an attribute for metrics
          * (it would create too much cardinality pressure).  So just drop an attribute into a span instead of
          * stashing it for both the span and final metric.
          */
-// REBUILD-LIMBO-START(G2)
-/*
         @Override
         public void setEndpoint(String endpointUrl) {
             setAttribute(ENDPOINT_KEY, endpointUrl);
         }
 
-*/
-// REBUILD-LIMBO-END(G2)
         /**
          * Like Endpoint, httpVersion doesn't have a field because it isn't used as an attribute for metrics
          * (it just isn't expected to be super-useful and could create too much cardinality pressure).
          * So just drop an attribute into a span instead of stashing it for both the span and final metric.
          */
-// REBUILD-LIMBO-START(G2)
-/*
         @Override
         public void setHttpVersion(String httpVersion) {
             setAttribute(HTTP_VERSION_KEY, httpVersion);
@@ -900,5 +879,3 @@ public interface ReplayContexts extends IReplayContexts {
     }
 }
 
-*/
-// REBUILD-LIMBO-END(G2)
