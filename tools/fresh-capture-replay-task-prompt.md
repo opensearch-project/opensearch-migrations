@@ -14,6 +14,11 @@ rows. Before editing, map every responsibility through producer, queue, owner, c
 observability, construction path, and evidence. Search REBUILD-LIMBO and history before creating or
 replacing anything; preserve inherited paths and blame. Read REBUILD-TRACE records as navigation aids,
 but use tools/java-without-limbo.py for executable-code searches and verify every mapping against code.
+Trace only behavior executable at the settled mainline rebuild baseline: use exact old-method → new-method
+mappings for moved, split, rewritten, or retired responsibilities. A post-baseline method may be the target
+only for the inherited responsibility slice it receives; do not trace unchanged responsibilities or
+branch-only responsibilities with no mainline predecessor.
+Before bulk trace editing, show three to five representative decisions and obtain owner confirmation.
 
 Stop at red lines with one batched decision table. Otherwise implement the complete usable chains,
 their observability, wiring, and focused evidence. Invoke Gradle only through

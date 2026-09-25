@@ -73,6 +73,10 @@ Before editing, map every responsibility the milestone must create, move, remove
   `REBUILD-LIMBO` bodies and `REBUILD-TRACE` equivalence records cannot contaminate the live-code analysis.
 - You MUST read the selected milestone's `REBUILD-TRACE` records as a bidirectional source/target map, but
   MUST verify every mapping against executable code and history rather than treating the comment as proof.
+- You MUST compare trace candidates with the settled mainline rebuild baseline named by `AGENTS.md`.
+  A post-baseline method may be a trace target only for the inherited baseline responsibility it receives.
+  Responsibilities added only on the rebuild branch are net-new, and unchanged mainline responsibilities
+  are not trace candidates.
 - Before proposing any new file, class, method, or test, You MUST search marked regions and history
   for its predecessor because Plan A preserves inherited source and blame in place.
 - You MUST NOT begin implementation before each responsibility has a complete usable chain or a
@@ -91,9 +95,18 @@ Codex owns implementation, integration, register updates, and final commit messa
   the rejection is an explicit recorded decision.
 - You MUST keep tests with the production behavior they prove and add observability with the
   component that needs it.
-- For every function whose responsibility is rewritten, split, moved, or deliberately retired, You MUST
-  add a bidirectional `REBUILD-TRACE` source/target record. These records remain through later milestones
-  for equivalence review and are removed only during the owner's final pre-merge cleanup.
+- For every mainline function whose responsibility is moved, split, merged, substantially rewritten in
+  place, or deliberately retired, You MUST add matching `REBUILD-TRACE` source and target records using
+  exact `OldClass.oldMethod -> NewClass.newMethod` mappings. You MUST qualify ambiguous overloads and use
+  one mapping line per split target. A post-baseline target MUST identify only the inherited responsibility
+  slice it received. You MUST NOT trace unchanged mainline responsibilities or branch-only responsibilities
+  with no mainline predecessor because neither has an inherited behavior relocation to prove.
+- Before bulk trace editing for one phase, You MUST complete three to five representative mappings,
+  including a moved or split responsibility and a rejected unchanged or net-new candidate, and obtain
+  owner confirmation. You MUST NOT treat previously written broad trace prose as approved merely because
+  it already exists.
+- These records remain through later milestones for equivalence review and are removed only during the
+  owner's final pre-merge cleanup.
 - You MUST use direct `codex exec` CLI workers only where `AGENTS.md` permits isolated work.
 - You MUST NOT use Brazil because this repository's required build path is Gradle.
 - You MUST NOT launch API-based subagents because `AGENTS.md` requires direct CLI workers.

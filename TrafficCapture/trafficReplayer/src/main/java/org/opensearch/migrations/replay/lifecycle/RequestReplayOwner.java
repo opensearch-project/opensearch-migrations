@@ -41,42 +41,17 @@ import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// RequestTransformerAndSender.transformAndSendRequest/transformAllData ->
-//     BeginRequestPreparation handling + applyPreparationResult
-// RequestTransformerAndSender.shouldRetry/perResponseConsumer ->
-//     RetryPolicy + evaluateTargetResponse/applyRetryDecision
-// RequestSenderOrchestrator.scheduleRequest/scheduleSendRequestOnConnectionReplaySession ->
-//     TargetConnectionOwner execution-head turn + startAttempt
-// RequestSenderOrchestrator.sendPackets -> TargetChannelPort.startAttempt and typed outcome
-// RequestSenderOrchestrator bindNettySchedule* retry work ->
-//     scheduleRetry/retryTimerFired; the permit is released before this wait
-// old first-write callback -> observeFirstWrite; final-write ownership -> observeFinalWrite
-// old target result future chain -> applyTargetAttemptOutcome/evaluateTargetResponse
-// old source-response retry/final tuple coupling -> sourceResponseChanged + explicit source states
-// old tuple construction/write callback -> tryStartTuple/applyTupleResult/TupleWriter
-// old request completion callback -> emitConnectionTurnFinished + tryEmitProcessingFinished
-// old cancellation/future exception discovery -> cancelPreparation/cancelTargetWork/abortAttempt/
-//     cancelTuple/tryEmitCleanup with typed cancellation states
-// old request-owned cleanup -> close*Context + releaseRequestResources
-// REBUILD-TRACE-END(G5,source)
 // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// applyPreparationResult/startAttempt -> RequestTransformerAndSender transformAndSendRequest/
-//     transformAllData and RequestSenderOrchestrator scheduleSendRequestOnConnectionReplaySession.
-// evaluateTargetResponse/applyRetryDecision -> RequestTransformerAndSender getRetryCheckVisitor/
-//     shouldRetry/perResponseConsumer.
-// startAttempt/applyTargetAttemptOutcome -> RequestSenderOrchestrator sendRequestWithRetries.
-// scheduleRetry/retryTimerFired -> RequestSenderOrchestrator bindNettySchedule* retry branch.
-// observeFirstWrite/observeFinalWrite -> predecessor first-write callback plus the designed final-write
-//     boundary that had no predecessor.
-// sourceResponseChanged/tryStartTuple/applyTupleResult ->
-//     predecessor source-response future and tuple-write chain; RequestResult retains completed,
-//     fallback-error, and intentionally skipped transformation status for tuple construction.
-// emitConnectionTurnFinished/tryEmitProcessingFinished ->
-//     predecessor request completion callback split into the two designed milestones.
-// cancelPreparation/cancelTargetWork/abortAttempt/cancelTuple/tryEmitCleanup ->
-//     predecessor cancellation and exceptional-future discovery.
-// close*Context/releaseRequestResources -> predecessor request-local cleanup.
+// HttpJsonTransformingConsumer.<init>(..., IReplayerHttpTransactionContext)
+//     -> RequestReplayOwner.beginPreparation [create request transformation context].
+// HttpJsonTransformingConsumer.finalizeRequest
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
+// HttpJsonTransformingConsumer.finalizeDeferredSigning
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
+// HttpJsonTransformingConsumer.finalizeNormalPath
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
+// HttpJsonTransformingConsumer.redriveWithoutTransformation
+//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
 // REBUILD-TRACE-END(G5,target)
 
 /**

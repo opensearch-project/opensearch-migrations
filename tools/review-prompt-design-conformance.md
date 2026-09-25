@@ -29,7 +29,12 @@ what make the output usable, and a reviewer given only the scope reverts to list
 > **Use `REBUILD-TRACE` records only as navigation aids.** They map legacy source functions to replacement
 > targets for equivalence review, but they are comments, not evidence of reachability or preserved behavior.
 > Use `tools/java-without-limbo.py` for executable-code searches so traceability prose cannot create false
-> callers or symbols, then verify each relevant mapping against code and history.
+> callers or symbols, then verify each relevant mapping against code and history. The baseline is executable
+> behavior at mainline commit `2fe4538aef16eafa098545e76545873335bf2d11`. A post-baseline method may be
+> a target only for an inherited baseline responsibility it received. Branch-only responsibilities with no
+> mainline predecessor and unchanged mainline responsibilities must not have inherited-behavior traces. Every eligible moved, split,
+> substantially rewritten, or retired responsibility must use matching source and target records with exact
+> `OldClass.oldMethod -> NewClass.newMethod` mappings rather than class-level or wildcard prose.
 >
 > ### Classify every finding, because the classification decides what happens to it
 >

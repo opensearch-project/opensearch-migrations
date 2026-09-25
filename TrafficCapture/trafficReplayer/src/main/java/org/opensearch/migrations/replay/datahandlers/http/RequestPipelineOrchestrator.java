@@ -25,13 +25,6 @@ import io.netty.handler.logging.LoggingHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// constructor and every add/remove pipeline method -> same-named live transformation behavior.
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// HttpJsonTransformingConsumer invokes this pipeline with RequestReplayOwner's transformation context.
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * This class is meant to be the single place for all pipeline manipulations for HttpRequests.
  * Comments are strewn through pipeline additions that show the types of messages that are

@@ -18,14 +18,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
 
-// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
-// constructor/channelRead/handlerRemoved/future packaging -> same-named live offload behavior.
-// legacy transaction-context type -> normative IRequestContext from the transformation context.
-// REBUILD-TRACE-END(G5,source)
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// RequestPipelineOrchestrator offloads transformed packets while retaining request context identity.
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * This class is responsible for sending the ByteBufs to the downstream packet receiver,
  * which in many cases will be the thing that sends the request over the network.
