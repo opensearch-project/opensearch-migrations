@@ -321,16 +321,16 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
         cancelConnectionDeadline();
         cancelRequestAssemblyDeadline();
-        reportRemainingBytesWrittenToClient();
-        if (!captureProcessState.shouldCapture()) {
-            pendingSourceResponseBytes.reset();
-            captureCloseFuture = CompletableFuture.completedFuture(null);
-            return captureCloseFuture;
-        }
         try {
-            flushUnclassifiedSourceResponseBytes(timestamp);
-            trafficOffloader.addCloseEvent(timestamp);
-            captureCloseFuture = trafficOffloader.flushCommitAndResetStream(true);
+            reportRemainingBytesWrittenToClient();
+            if (!captureProcessState.shouldCapture()) {
+                pendingSourceResponseBytes.reset();
+                captureCloseFuture = CompletableFuture.completedFuture(null);
+            } else {
+                flushUnclassifiedSourceResponseBytes(timestamp);
+                trafficOffloader.addCloseEvent(timestamp);
+                captureCloseFuture = trafficOffloader.flushCommitAndResetStream(true);
+            }
         } catch (Throwable t) {
             captureCloseFuture = CompletableFuture.failedFuture(t);
         }
@@ -780,10 +780,12 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         var timestamp = Instant.now();
         try {
             if (captureProcessState.shouldCapture()) {
-                // Bytes held because their interim-response header never ended are an ordinary final
-                // response. Replay intake keeps them only if they precede the diagnostic exception.
-                flushUnclassifiedSourceResponseBytes(timestamp);
-                trafficOffloader.addExceptionCaughtEvent(timestamp, cause);
+                runRequiredCaptureOperation(ctx, () -> {
+                    // Bytes held because their interim-response header never ended are an ordinary final
+                    // response. Replay intake keeps them only if they precede the diagnostic exception.
+                    flushUnclassifiedSourceResponseBytes(timestamp);
+                    trafficOffloader.addExceptionCaughtEvent(timestamp, cause);
+                });
             }
             messageContext.addCaughtException(cause);
             httpDecoderChannel.close();

@@ -142,6 +142,28 @@ class SourceInterimResponseCaptureTest {
         }
     }
 
+    @Test
+    void exceptionFlushFailureUsesTheRequiredCaptureFailurePolicy() throws Exception {
+        var offloader = new RecordingOffloader();
+        offloader.failFinalWrites = true;
+        var captureProcessState = new CaptureProcessState(CaptureFailurePolicy.FAIL_CLOSED);
+        try (var rootContext = new TestRootContext()) {
+            var channel = channel(rootContext, offloader, captureProcessState);
+            channel.pipeline().addLast(new ExceptionConsumingHandler());
+            channel.writeInbound(ascii("GET /thing HTTP/1.1\r\nHost: source\r\n\r\n"));
+            channel.writeOutbound(ascii("HTTP/1.1 100 Cont"));
+
+            channel.pipeline().fireExceptionCaught(new IOException("source connection broke"));
+            channel.runPendingTasks();
+
+            Assertions.assertEquals(CaptureProcessState.State.TERMINATING, captureProcessState.state());
+            Assertions.assertFalse(channel.isOpen());
+            Assertions.assertTrue(offloader.events.isEmpty());
+            channel.releaseOutbound();
+            channel.releaseInbound();
+        }
+    }
+
     private static long bytesWritten(TestRootContext rootContext) {
         return InMemoryInstrumentationBundle.getMetricValueOrZero(
             rootContext.instrumentationBundle.getFinishedMetrics(),
@@ -151,6 +173,18 @@ class SourceInterimResponseCaptureTest {
 
     private static EmbeddedChannel channel(TestRootContext rootContext, RecordingOffloader offloader)
         throws IOException {
+        return channel(
+            rootContext,
+            offloader,
+            new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
+        );
+    }
+
+    private static EmbeddedChannel channel(
+        TestRootContext rootContext,
+        RecordingOffloader offloader,
+        CaptureProcessState captureProcessState
+    ) throws IOException {
         return new EmbeddedChannel(
             new ConditionallyReliableLoggingHttpHandler<>(
                 rootContext,
@@ -159,7 +193,7 @@ class SourceInterimResponseCaptureTest {
                 ignored -> offloader,
                 new RequestCapturePredicate(),
                 request -> false,
-                new CaptureProcessState(CaptureFailurePolicy.FAIL_OPEN)
+                captureProcessState
             )
         );
     }
@@ -172,6 +206,7 @@ class SourceInterimResponseCaptureTest {
         private final List<String> interimResponses = new ArrayList<>();
         private final List<String> finalWrites = new ArrayList<>();
         private final List<String> events = new ArrayList<>();
+        private boolean failFinalWrites;
 
         @Override
         public void addInterimResponseEvent(Instant timestamp, ByteBuf buffer) {
@@ -181,7 +216,10 @@ class SourceInterimResponseCaptureTest {
         }
 
         @Override
-        public void addWriteEvent(Instant timestamp, ByteBuf buffer) {
+        public void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {
+            if (failFinalWrites) {
+                throw new IOException("final write capture failed");
+            }
             var bytes = asString(buffer);
             finalWrites.add(bytes);
             events.add("write:" + bytes);
