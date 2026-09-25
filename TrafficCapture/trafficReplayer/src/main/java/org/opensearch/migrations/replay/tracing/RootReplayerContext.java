@@ -39,11 +39,11 @@ public class RootReplayerContext extends RootOtelContext {
     public final KafkaConsumerContexts.RebalanceCallbackScopeContext.MetricInstruments
         rebalanceCallbackInstruments;
     public final ReplayIntakeMetrics replayIntakeMetrics;
+    public final TargetAttemptPermitMetrics targetAttemptPermitMetrics;
 
 // REBUILD-LIMBO-START(G5)
 // Instruments for owners and operations built in G5 and later.
 /*
-    public final AsyncPermitPoolMetrics permitPoolMetrics;
     public final ConnectionActorMetrics connectionActorMetrics;
     public final TargetExchangeStateMetrics targetExchangeStateMetrics;
     public final ReplayTransactionMetrics replayTransactionMetrics;
@@ -102,11 +102,11 @@ public class RootReplayerContext extends RootOtelContext {
         rebalanceCallbackInstruments =
             KafkaConsumerContexts.RebalanceCallbackScopeContext.makeMetrics(meter);
         replayIntakeMetrics = new ReplayIntakeMetrics(meter);
+        targetAttemptPermitMetrics = new TargetAttemptPermitMetrics(meter);
 
 // REBUILD-LIMBO-START(G5)
 // Construction returns with the owner and operation instruments above.
 /*
-        permitPoolMetrics = new AsyncPermitPoolMetrics(meter);
         connectionActorMetrics = new ConnectionActorMetrics(meter);
         targetExchangeStateMetrics = new TargetExchangeStateMetrics(meter);
         replayTransactionMetrics = new ReplayTransactionMetrics(meter);

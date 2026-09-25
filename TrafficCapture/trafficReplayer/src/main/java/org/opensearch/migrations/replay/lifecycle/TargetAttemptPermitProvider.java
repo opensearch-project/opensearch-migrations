@@ -1,88 +1,94 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The OpenSearch Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
+
 package org.opensearch.migrations.replay.lifecycle;
 
-// REBUILD-LIMBO(G5) -- nothing in this file is live yet. Javadoc is left outside the marked
-// regions so it needs no escaping and keeps its blame; it documents code that is not compiled.
-// Resolve each region to dead, keep, or refactor deliberately. If a member is deleted, delete its
-// javadoc with it. See AGENTS.md section 8a.
-// Cascade from the left-behind legacy set. Unresolved: ReplayIntakeInput . Carried byte-identical so the behaviour stays enumerable; its milestone strips the legacy references and un-marks it.
-// Un-mark a member by deleting the delimiter lines around it and splitting this region; the
-// code between them is verbatim, so blame survives. Read this before writing anything new
-
-// REBUILD-LIMBO-START(G5)
-/*
-
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.Deque;
+import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
-import java.util.function.Predicate;
 
-import org.opensearch.migrations.replay.lifecycle.ReplayIdentity.ReplayRequestId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 
 import lombok.NonNull;
 
+/**
+ * Enforces the application-wide limit on target attempts without blocking a connection event loop.
+ *
+ * <p>The composition root owns the shared active-attempt counter and supplies this provider to every
+ * connection owner. Pending acquisitions are provider-owned until they either produce a permit or are
+ * cancelled. Queue order is deliberately not part of the contract.</p>
+ */
 public final class TargetAttemptPermitProvider {
-    public sealed interface Input extends ReplayIntakeInput permits
-        AcquireRequested,
-        CancelRequested,
-        CloseRequested,
-        PermitReleased {}
-
-    private record AcquireRequested(
-        @NonNull ReplayRequestId requestId,
-        int cost,
-        @NonNull CompletableFuture<Permit> completion
-    ) implements Input {}
-
-    private record CancelRequested(
-        @NonNull Predicate<ReplayRequestId> selector,
-        @NonNull CancellationException cause,
-        @NonNull CompletableFuture<Integer> completion
-    ) implements Input {}
-
-    private record CloseRequested(
-        @NonNull CancellationException cause,
-        @NonNull CompletableFuture<Void> completion
-    ) implements Input {}
-
-    private record PermitReleased(int cost, long acquiredNanos) implements Input {}
+    @FunctionalInterface
+    public interface FatalHandler {
+        void onFatal(Error failure);
+    }
 
     public interface Metrics {
         Metrics NOOP = new Metrics() {
             @Override
-            public void availableChanged(int delta) {
-                // Metrics are optional for non-production pool instances.
-            }
+            public void acquisitionRequested() {}
 
             @Override
-            public void queuedChanged(int delta) {
-                // Metrics are optional for non-production pool instances.
-            }
+            public void acquisitionPendingChanged(int delta) {}
 
             @Override
-            public void permitHeld(Duration duration) {
-                // Metrics are optional for non-production pool instances.
-            }
+            public void acquisitionCancelled() {}
 
             @Override
-            public void cancelled(int count) {
-                // Metrics are optional for non-production pool instances.
-            }
+            public void permitAcquired() {}
+
+            @Override
+            public void activePermitsChanged(int delta) {}
+
+            @Override
+            public void permitReleased() {}
+
+            @Override
+            public void permitHeld(Duration duration) {}
         };
 
-        void availableChanged(int delta);
+        void acquisitionRequested();
 
-        void queuedChanged(int delta);
+        void acquisitionPendingChanged(int delta);
+
+        void acquisitionCancelled();
+
+        void permitAcquired();
+
+        void activePermitsChanged(int delta);
+
+        void permitReleased();
 
         void permitHeld(Duration duration);
+    }
 
-        void cancelled(int count);
+    public sealed interface AcquisitionResult permits PermitAcquired, AcquisitionCancelled {}
+
+    public record PermitAcquired(@NonNull Permit permit) implements AcquisitionResult {}
+
+    public record AcquisitionCancelled(
+        @NonNull CancellationException cause
+    ) implements AcquisitionResult {}
+
+    public interface Acquisition {
+        ReplayRequestId requestId();
+
+        CompletionStage<AcquisitionResult> completion();
+
+        boolean cancel(CancellationException cause);
     }
 
     public interface Permit extends AutoCloseable {
@@ -92,208 +98,288 @@ public final class TargetAttemptPermitProvider {
         void close();
     }
 
-    private static final class Waiter {
-        private final ReplayRequestId requestId;
-        private final int cost;
-        private final CompletableFuture<Permit> completion;
+    private enum AcquisitionState {
+        WAITING,
+        ACQUIRED,
+        CANCELLED
+    }
 
-        private Waiter(ReplayRequestId requestId, int cost, CompletableFuture<Permit> completion) {
-            this.requestId = requestId;
-            this.cost = cost;
-            this.completion = completion;
-        }
-
-        private ReplayRequestId requestId() {
-            return requestId;
-        }
-
-        private int cost() {
-            return cost;
-        }
-
-        private CompletableFuture<Permit> completion() {
-            return completion;
-        }
+    private enum Reservation {
+        RESERVED,
+        FULL,
+        INVALID
     }
 
     private final int capacity;
-    private final Consumer<Input> ownerInputSink;
-    private final OwnerThreadGuard ownerThreadGuard =
-        new OwnerThreadGuard("asynchronous permit pool");
+    private final AtomicInteger activeTargetAttempts;
     private final Metrics metrics;
+    private final FatalHandler fatalHandler;
     private final LongSupplier nanoTime;
-    private final Deque<Waiter> waiters = new ArrayDeque<>();
-    private int available;
-    private boolean closed;
-    private CancellationException closeCause;
-
-    public TargetAttemptPermitProvider(int capacity, @NonNull Executor ownerExecutor) {
-        this(capacity, ownerExecutor, Metrics.NOOP);
-    }
-
-    public TargetAttemptPermitProvider(int capacity, @NonNull Executor ownerExecutor, @NonNull Metrics metrics) {
-        this(capacity, ownerExecutor, metrics, System::nanoTime);
-    }
+    private final ConcurrentLinkedQueue<PendingAcquisition> pendingAcquisitions =
+        new ConcurrentLinkedQueue<>();
+    private final AtomicBoolean draining = new AtomicBoolean();
 
     public TargetAttemptPermitProvider(
         int capacity,
-        @NonNull Consumer<Input> ownerInputSink,
-        @NonNull Metrics metrics
+        @NonNull AtomicInteger activeTargetAttempts,
+        @NonNull Metrics metrics,
+        @NonNull FatalHandler fatalHandler
     ) {
-        this(capacity, ownerInputSink, metrics, System::nanoTime);
+        this(capacity, activeTargetAttempts, metrics, fatalHandler, System::nanoTime);
     }
 
     TargetAttemptPermitProvider(
         int capacity,
-        @NonNull Executor ownerExecutor,
+        @NonNull AtomicInteger activeTargetAttempts,
         @NonNull Metrics metrics,
+        @NonNull FatalHandler fatalHandler,
         @NonNull LongSupplier nanoTime
     ) {
-        validateCapacity(capacity);
-        this.capacity = capacity;
-        this.available = capacity;
-        this.ownerInputSink = input -> ownerExecutor.execute(() -> apply(input));
-        this.metrics = metrics;
-        this.nanoTime = nanoTime;
-        metrics.availableChanged(capacity);
-    }
-
-    TargetAttemptPermitProvider(
-        int capacity,
-        @NonNull Consumer<Input> ownerInputSink,
-        @NonNull Metrics metrics,
-        @NonNull LongSupplier nanoTime
-    ) {
-        validateCapacity(capacity);
-        this.capacity = capacity;
-        this.available = capacity;
-        this.ownerInputSink = ownerInputSink;
-        this.metrics = metrics;
-        this.nanoTime = nanoTime;
-        metrics.availableChanged(capacity);
-    }
-
-    private static void validateCapacity(int capacity) {
         if (capacity <= 0) {
             throw new IllegalArgumentException("capacity must be positive");
         }
-    }
+        this.capacity = capacity;
+        this.activeTargetAttempts = activeTargetAttempts;
+        this.metrics = metrics;
+        this.fatalHandler = fatalHandler;
+        this.nanoTime = nanoTime;
 
-    public CompletionStage<Permit> acquire(@NonNull ReplayRequestId requestId, int cost) {
-        if (cost <= 0 || cost > capacity) {
-            throw new IllegalArgumentException("cost must be between one and capacity");
+        var initialCount = activeTargetAttempts.get();
+        if (initialCount != 0) {
+            var failure = new IllegalStateException(
+                "application target-attempt counter must start at zero but was " + initialCount
+            );
+            reportFatal("invalid application target-attempt counter at construction", failure);
+            throw failure;
         }
-        var completion = new CompletableFuture<Permit>();
-        ownerInputSink.accept(new AcquireRequested(requestId, cost, completion));
-        return completion.minimalCompletionStage();
     }
 
-    public CompletionStage<Integer> cancel(
-        @NonNull Predicate<ReplayRequestId> selector,
-        @NonNull CancellationException cause
-    ) {
-        var completion = new CompletableFuture<Integer>();
-        ownerInputSink.accept(new CancelRequested(selector, cause, completion));
-        return completion.minimalCompletionStage();
+    public Acquisition acquire(@NonNull ReplayRequestId requestId) {
+        var acquisition = new PendingAcquisition(requestId);
+        recordMetric(metrics::acquisitionRequested, "recording a requested target-attempt permit");
+
+        var reservation = reserveAttempt();
+        if (reservation == Reservation.RESERVED) {
+            grantReservedAttempt(acquisition);
+        } else if (reservation == Reservation.FULL) {
+            acquisition.markPending();
+            pendingAcquisitions.add(acquisition);
+            drainPendingAcquisitions();
+        }
+        return acquisition;
     }
 
-    public CompletionStage<Void> close(@NonNull CancellationException cause) {
-        var completion = new CompletableFuture<Void>();
-        ownerInputSink.accept(new CloseRequested(cause, completion));
-        return completion.minimalCompletionStage();
-    }
-
-    void apply(@NonNull Input input) {
-        ownerThreadGuard.guard(() -> {
-            switch (input) {
-                case AcquireRequested acquire -> applyAcquire(acquire);
-                case CancelRequested cancel -> applyCancel(cancel);
-                case CloseRequested close -> applyClose(close);
-                case PermitReleased release -> applyRelease(release);
+    private Reservation reserveAttempt() {
+        while (true) {
+            var active = activeTargetAttempts.get();
+            if (active < 0 || active > capacity) {
+                reportInvariantFailure(
+                    "active target-attempt count " + active + " is outside [0, " + capacity + "]"
+                );
+                return Reservation.INVALID;
             }
-        }).run();
+            if (active == capacity) {
+                return Reservation.FULL;
+            }
+            if (activeTargetAttempts.compareAndSet(active, active + 1)) {
+                return Reservation.RESERVED;
+            }
+        }
     }
 
-    private void applyAcquire(AcquireRequested acquire) {
-        var completion = acquire.completion();
-        if (closed) {
-            metrics.cancelled(1);
-            completion.completeExceptionally(closeCause);
+    private void grantReservedAttempt(PendingAcquisition acquisition) {
+        if (!acquisition.state.compareAndSet(AcquisitionState.WAITING, AcquisitionState.ACQUIRED)) {
+            releaseUnusedReservation();
             return;
         }
-        waiters.addLast(new Waiter(acquire.requestId(), acquire.cost(), completion));
-        metrics.queuedChanged(1);
-        drainWaiters();
-    }
 
-    private void applyCancel(CancelRequested cancel) {
-        int cancelled = 0;
-        var iterator = waiters.iterator();
-        while (iterator.hasNext()) {
-            var waiter = iterator.next();
-            if (cancel.selector().test(waiter.requestId())) {
-                iterator.remove();
-                waiter.completion().completeExceptionally(cancel.cause());
-                cancelled++;
-            }
-        }
-        if (cancelled > 0) {
-            metrics.queuedChanged(-cancelled);
-            metrics.cancelled(cancelled);
-        }
-        cancel.completion().complete(cancelled);
-    }
-
-    private void applyClose(CloseRequested close) {
-        if (!closed) {
-            closed = true;
-            closeCause = close.cause();
-            var queued = waiters.size();
-            while (!waiters.isEmpty()) {
-                waiters.removeFirst().completion().completeExceptionally(close.cause());
-            }
-            if (queued > 0) {
-                metrics.queuedChanged(-queued);
-                metrics.cancelled(queued);
-            }
-            metrics.availableChanged(-available);
-        }
-        close.completion().complete(null);
-    }
-
-    private void applyRelease(PermitReleased release) {
-        metrics.permitHeld(Duration.ofNanos(Math.max(0, nanoTime.getAsLong() - release.acquiredNanos())));
-        available += release.cost();
-        if (available > capacity) {
-            throw new IllegalStateException("released more permits than the pool owns");
-        }
-        if (!closed) {
-            metrics.availableChanged(release.cost());
-        }
-        drainWaiters();
-    }
-
-    private void drainWaiters() {
-        while (!waiters.isEmpty() && waiters.peekFirst().cost() <= available) {
-            var waiter = waiters.removeFirst();
-            metrics.queuedChanged(-1);
-            available -= waiter.cost();
-            metrics.availableChanged(-waiter.cost());
-            waiter.completion().complete(
-                new OwnedPermit(waiter.requestId(), waiter.cost(), nanoTime.getAsLong())
+        acquisition.clearPending();
+        var permit = new OwnedPermit(acquisition.requestId, nanoTime.getAsLong());
+        recordMetric(metrics::permitAcquired, "recording an acquired target-attempt permit");
+        recordMetric(
+            () -> metrics.activePermitsChanged(1),
+            "recording an active target-attempt permit"
+        );
+        if (!acquisition.completion.complete(new PermitAcquired(permit))) {
+            reportInvariantFailure(
+                "acquisition completed more than once for " + acquisition.requestId
             );
+            permit.releaseAfterFailedDelivery();
+        }
+    }
+
+    private void drainPendingAcquisitions() {
+        if (!draining.compareAndSet(false, true)) {
+            return;
+        }
+        while (true) {
+            drainWhileCapacityIsAvailable();
+            draining.set(false);
+            if (pendingAcquisitions.isEmpty()
+                || activeTargetAttempts.get() >= capacity
+                || !draining.compareAndSet(false, true)) {
+                return;
+            }
+        }
+    }
+
+    private void drainWhileCapacityIsAvailable() {
+        while (true) {
+            var acquisition = pendingAcquisitions.poll();
+            if (acquisition == null) {
+                return;
+            }
+            if (acquisition.state.get() != AcquisitionState.WAITING) {
+                acquisition.clearPending();
+                continue;
+            }
+
+            var reservation = reserveAttempt();
+            if (reservation == Reservation.FULL) {
+                pendingAcquisitions.add(acquisition);
+                return;
+            }
+            if (reservation == Reservation.INVALID) {
+                pendingAcquisitions.add(acquisition);
+                return;
+            }
+            grantReservedAttempt(acquisition);
+        }
+    }
+
+    private void releaseUnusedReservation() {
+        while (true) {
+            var active = activeTargetAttempts.get();
+            if (active <= 0 || active > capacity) {
+                reportInvariantFailure(
+                    "cannot release an undelivered reservation from active count " + active
+                );
+                return;
+            }
+            if (activeTargetAttempts.compareAndSet(active, active - 1)) {
+                return;
+            }
+        }
+    }
+
+    private void releasePermit(OwnedPermit permit) {
+        while (true) {
+            var active = activeTargetAttempts.get();
+            if (active <= 0 || active > capacity) {
+                reportInvariantFailure(
+                    "cannot release permit for "
+                        + permit.requestId
+                        + " from active count "
+                        + active
+                );
+                return;
+            }
+            if (activeTargetAttempts.compareAndSet(active, active - 1)) {
+                break;
+            }
+        }
+
+        recordMetric(
+            () -> metrics.activePermitsChanged(-1),
+            "recording a released active target-attempt permit"
+        );
+        recordMetric(metrics::permitReleased, "recording a released target-attempt permit");
+        recordMetric(
+            () -> metrics.permitHeld(
+                Duration.ofNanos(Math.max(0, nanoTime.getAsLong() - permit.acquiredNanos))
+            ),
+            "recording target-attempt permit held duration"
+        );
+        drainPendingAcquisitions();
+    }
+
+    private void recordMetric(Runnable recorder, String operation) {
+        try {
+            recorder.run();
+        } catch (Throwable failure) {
+            reportFatal("failed while " + operation, failure);
+        }
+    }
+
+    private void reportInvariantFailure(String message) {
+        reportFatal(
+            "target-attempt permit invariant failed",
+            new IllegalStateException(message)
+        );
+    }
+
+    private void reportFatal(String message, Throwable cause) {
+        fatalHandler.onFatal(new Error(message, cause));
+    }
+
+    private final class PendingAcquisition implements Acquisition {
+        private final ReplayRequestId requestId;
+        private final CompletableFuture<AcquisitionResult> completion = new CompletableFuture<>();
+        private final CompletionStage<AcquisitionResult> readOnlyCompletion =
+            completion.minimalCompletionStage();
+        private final AtomicReference<AcquisitionState> state =
+            new AtomicReference<>(AcquisitionState.WAITING);
+        private final AtomicBoolean countedPending = new AtomicBoolean();
+
+        private PendingAcquisition(ReplayRequestId requestId) {
+            this.requestId = Objects.requireNonNull(requestId);
+        }
+
+        @Override
+        public ReplayRequestId requestId() {
+            return requestId;
+        }
+
+        @Override
+        public CompletionStage<AcquisitionResult> completion() {
+            return readOnlyCompletion;
+        }
+
+        @Override
+        public boolean cancel(@NonNull CancellationException cause) {
+            if (!state.compareAndSet(AcquisitionState.WAITING, AcquisitionState.CANCELLED)) {
+                return false;
+            }
+            pendingAcquisitions.remove(this);
+            clearPending();
+            recordMetric(
+                metrics::acquisitionCancelled,
+                "recording a cancelled target-attempt permit acquisition"
+            );
+            if (!completion.complete(new AcquisitionCancelled(cause))) {
+                reportInvariantFailure(
+                    "cancelled acquisition completed more than once for " + requestId
+                );
+            }
+            return true;
+        }
+
+        private void markPending() {
+            if (countedPending.compareAndSet(false, true)) {
+                recordMetric(
+                    () -> metrics.acquisitionPendingChanged(1),
+                    "recording a pending target-attempt permit acquisition"
+                );
+            }
+        }
+
+        private void clearPending() {
+            if (countedPending.compareAndSet(true, false)) {
+                recordMetric(
+                    () -> metrics.acquisitionPendingChanged(-1),
+                    "recording a settled target-attempt permit acquisition"
+                );
+            }
         }
     }
 
     private final class OwnedPermit implements Permit {
         private final ReplayRequestId requestId;
-        private final int cost;
         private final long acquiredNanos;
         private final AtomicBoolean released = new AtomicBoolean();
 
-        private OwnedPermit(ReplayRequestId requestId, int cost, long acquiredNanos) {
+        private OwnedPermit(ReplayRequestId requestId, long acquiredNanos) {
             this.requestId = requestId;
-            this.cost = cost;
             this.acquiredNanos = acquiredNanos;
         }
 
@@ -304,12 +390,19 @@ public final class TargetAttemptPermitProvider {
 
         @Override
         public void close() {
+            if (!released.compareAndSet(false, true)) {
+                reportInvariantFailure(
+                    "permit released more than once for " + requestId
+                );
+                return;
+            }
+            releasePermit(this);
+        }
+
+        private void releaseAfterFailedDelivery() {
             if (released.compareAndSet(false, true)) {
-                ownerInputSink.accept(new PermitReleased(cost, acquiredNanos));
+                releasePermit(this);
             }
         }
     }
 }
-
-*/
-// REBUILD-LIMBO-END(G5)
