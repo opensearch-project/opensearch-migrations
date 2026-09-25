@@ -17,11 +17,16 @@ permissions:
 
 jobs:
   get-require-approval:
-    # Skip all jenkins jobs if not on main repo
-    if: ${{ github.repository == 'opensearch-project/opensearch-migrations' }}
+    # Skip all jenkins jobs if not on main repo, or if triggered by a label other than a run-* test label.
+    # Without the label check, bots that add several labels at PR creation (e.g. dependabot) spawn
+    # duplicate runs that cancel each other via the per-job concurrency groups and report failure.
+    if: |
+      github.repository == 'opensearch-project/opensearch-migrations' &&
+      (github.event.action != 'labeled' || startsWith(github.event.label.name, 'run-'))
     uses: ./.github/workflows/require-approval.yml
 
   sanitize-input:
+    if: github.event.action != 'labeled' || startsWith(github.event.label.name, 'run-')
     uses: ./.github/workflows/sanitize-repo-details.yml
 
   full-es68-e2e-aws-test:
