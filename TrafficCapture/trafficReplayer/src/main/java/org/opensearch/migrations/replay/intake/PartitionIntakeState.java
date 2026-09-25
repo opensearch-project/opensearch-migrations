@@ -8,6 +8,7 @@
 
 package org.opensearch.migrations.replay.intake;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +22,7 @@ import org.opensearch.migrations.replay.identity.CapturedConnectionId;
 import org.opensearch.migrations.replay.identity.ConnectionProcessingId;
 import org.opensearch.migrations.replay.identity.KafkaRecordId;
 import org.opensearch.migrations.replay.identity.PartitionGenerationId;
+import org.opensearch.migrations.replay.identity.ReplayRequestId;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.replay.lifecycle.OwnerThreadGuard;
 
@@ -37,9 +39,6 @@ import lombok.NonNull;
  * <p>Every map is changed only by the replay-intake thread, which {@link OwnerThreadGuard} enforces on each
  * mutator. A record completing on a Netty loop instead would race the Kafka source's commit prefix.
  *
- * <p>REBUILD-LIMBO-NOTE(G6): {@code §6} also lists {@code writerTimeStateByWriterNodeId} and
- * {@code unresolvedRetryBoundaries}. Both need types {@code §10.2} and {@code §11} define, and the
- * {@code §10.1} fatal backward-skew check belongs with them; {@link #observeLogAppendTime} is where it lands.
  * <p>REBUILD-LIMBO-NOTE(G7): {@code §6}'s {@code requestStateByReplayRequestId},
  * {@code retryReadyRequestSupplyCount}, {@code bootstrapBatchState = pending | applying | consumed}, and
  * {@code requestedBatchState = idle | requested | applying}, which are {@code §9.1} and {@code §13}'s
@@ -49,8 +48,105 @@ import lombok.NonNull;
  */
 public final class PartitionIntakeState {
 
+    public record BrokerTimeConfiguration(
+        long heartbeatExpirationMillis,
+        long maximumBackwardSkewMillis,
+        long sourceResponseRetryWindowMillis
+    ) {
+        public BrokerTimeConfiguration {
+            if (heartbeatExpirationMillis <= 0) {
+                throw new IllegalArgumentException("heartbeatExpirationMillis must be positive");
+            }
+            if (maximumBackwardSkewMillis < 0) {
+                throw new IllegalArgumentException("maximumBackwardSkewMillis must not be negative");
+            }
+            if (sourceResponseRetryWindowMillis <= 0) {
+                throw new IllegalArgumentException("sourceResponseRetryWindowMillis must be positive");
+            }
+            Math.addExact(heartbeatExpirationMillis, maximumBackwardSkewMillis);
+            Math.addExact(
+                heartbeatExpirationMillis,
+                Math.multiplyExact(2, maximumBackwardSkewMillis)
+            );
+        }
+    }
+
+    public sealed interface ExpirationReference
+        permits ExactHeartbeat, FirstTrafficFallback {
+
+        long logAppendTimeMillis();
+    }
+
+    public record ExactHeartbeat(long logAppendTimeMillis) implements ExpirationReference {}
+
+    public record FirstTrafficFallback(long logAppendTimeMillis) implements ExpirationReference {}
+
+    public enum WriterTimeTransition {
+        NONE,
+        EXACT_HEARTBEAT_STARTED,
+        FIRST_TRAFFIC_FALLBACK_STARTED,
+        FALLBACK_REPLACED_BY_HEARTBEAT,
+        TIMELY_HEARTBEAT_ACCEPTED,
+        LATE_HEARTBEAT_IGNORED
+    }
+
+    public record WriterExpirationResult(
+        int expiredSourceConnections,
+        List<ConnectionProcessingId> targetOwnersToExpire
+    ) {
+        public WriterExpirationResult {
+            targetOwnersToExpire = List.copyOf(targetOwnersToExpire);
+        }
+    }
+
+    private enum RetryInputState {
+        UNRESOLVED,
+        COMPLETE,
+        UNAVAILABLE
+    }
+
+    private enum FinalInputState {
+        UNRESOLVED,
+        COMPLETE,
+        INCOMPLETE
+    }
+
+    private static final class RequestIntakeState {
+        private final long requestCompletingLogAppendTime;
+        private RetryInputState retryInput = RetryInputState.UNRESOLVED;
+        private FinalInputState finalInput = FinalInputState.UNRESOLVED;
+        private boolean finishedOrCancelled;
+
+        private RequestIntakeState(long requestCompletingLogAppendTime) {
+            this.requestCompletingLogAppendTime = requestCompletingLogAppendTime;
+        }
+    }
+
+    private static final class WriterPartitionTimeState {
+        private ExpirationReference reference;
+        private long heartbeatIntervalMillis;
+        private Long emittedAtMillis;
+
+        private WriterPartitionTimeState(
+            ExpirationReference reference,
+            long heartbeatIntervalMillis,
+            Long emittedAtMillis
+        ) {
+            this.reference = reference;
+            this.heartbeatIntervalMillis = heartbeatIntervalMillis;
+            this.emittedAtMillis = emittedAtMillis;
+        }
+    }
+
+    public static final class BrokerTimeViolation extends IllegalStateException {
+        private BrokerTimeViolation(String message) {
+            super(message);
+        }
+    }
+
     private final PartitionGenerationId generation;
     private final OwnerThreadGuard ownerThreadGuard;
+    private final BrokerTimeConfiguration brokerTimeConfiguration;
     /** Emits {@code RecordProcessingFinished} for a record whose work is done ({@code §7} step 9). */
     private final Consumer<KafkaRecordId> recordCompletionSink;
     /**
@@ -98,6 +194,10 @@ public final class PartitionIntakeState {
      */
     private final Map<ConnectionProcessingId, SourceConnectionState> activeConnectionProcessingById =
         new LinkedHashMap<>();
+    private final Map<String, WriterPartitionTimeState> writerTimeStateByWriterNodeId =
+        new LinkedHashMap<>();
+    private final Map<ReplayRequestId, RequestIntakeState> requestStateByReplayRequestId =
+        new LinkedHashMap<>();
     private long nextConnectionLocalSequence;
 
     private long greatestObservedLogAppendTime = Long.MIN_VALUE;
@@ -110,11 +210,30 @@ public final class PartitionIntakeState {
         @NonNull IntConsumer activeRecordTrackersChanged,
         @NonNull Runnable recordTrackerRetired
     ) {
+        this(
+            generation,
+            currentThreadIsOwner,
+            recordCompletionSink,
+            activeRecordTrackersChanged,
+            recordTrackerRetired,
+            new BrokerTimeConfiguration(30_000, 0, 5_000)
+        );
+    }
+
+    public PartitionIntakeState(
+        @NonNull PartitionGenerationId generation,
+        @NonNull BooleanSupplier currentThreadIsOwner,
+        @NonNull Consumer<KafkaRecordId> recordCompletionSink,
+        @NonNull IntConsumer activeRecordTrackersChanged,
+        @NonNull Runnable recordTrackerRetired,
+        @NonNull BrokerTimeConfiguration brokerTimeConfiguration
+    ) {
         this.generation = generation;
         this.ownerThreadGuard = new OwnerThreadGuard("replay intake " + generation, currentThreadIsOwner);
         this.recordCompletionSink = recordCompletionSink;
         this.activeRecordTrackersChanged = activeRecordTrackersChanged;
         this.recordTrackerRetired = recordTrackerRetired;
+        this.brokerTimeConfiguration = brokerTimeConfiguration;
     }
 
     public PartitionGenerationId generation() {
@@ -290,22 +409,257 @@ public final class PartitionIntakeState {
         activeSourceConnectionsByCapturedConnectionId.remove(id.capturedConnectionId(), lifetime);
     }
 
+    public void registerRequest(
+        @NonNull ReplayRequestId requestId,
+        long requestCompletingLogAppendTime
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        requireSameGeneration(requestId.connectionProcessingId());
+        if (requestStateByReplayRequestId.putIfAbsent(
+            requestId,
+            new RequestIntakeState(requestCompletingLogAppendTime)
+        ) != null) {
+            throw new IllegalStateException("Replay request was already registered: " + requestId);
+        }
+    }
+
+    /**
+     * Freezes a complete response for final tuple output and, when still unresolved, for retry policy too.
+     *
+     * @return true when the retry receiver must receive this response
+     */
+    public boolean sourceResponseCompleted(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        var request = requireRequest(requestId);
+        if (request.finalInput != FinalInputState.UNRESOLVED) {
+            throw new IllegalStateException("Final source response was already supplied for " + requestId);
+        }
+        request.finalInput = FinalInputState.COMPLETE;
+        if (request.retryInput == RetryInputState.UNRESOLVED) {
+            request.retryInput = RetryInputState.COMPLETE;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Freezes an incomplete final response and resolves a still-open retry input as unavailable.
+     *
+     * @return true when the retry receiver must receive unavailable
+     */
+    public boolean sourceResponseIncomplete(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        var request = requireRequest(requestId);
+        if (request.finalInput != FinalInputState.UNRESOLVED) {
+            throw new IllegalStateException("Final source response was already supplied for " + requestId);
+        }
+        request.finalInput = FinalInputState.INCOMPLETE;
+        if (request.retryInput == RetryInputState.UNRESOLVED) {
+            request.retryInput = RetryInputState.UNAVAILABLE;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Irreversibly freezes every retry boundary crossed by this record before its payload is applied.
+     */
+    public List<ReplayRequestId> resolveRetryBoundaries(long recordLogAppendTimeMillis) {
+        ownerThreadGuard.requireOwnerThread();
+        var resolved = new ArrayList<ReplayRequestId>();
+        requestStateByReplayRequestId.forEach((requestId, request) -> {
+            if (request.retryInput == RetryInputState.UNRESOLVED
+                && reaches(
+                    recordLogAppendTimeMillis,
+                    request.requestCompletingLogAppendTime,
+                    brokerTimeConfiguration.sourceResponseRetryWindowMillis()
+                )) {
+                request.retryInput = RetryInputState.UNAVAILABLE;
+                resolved.add(requestId);
+            }
+        });
+        return List.copyOf(resolved);
+    }
+
+    /** A finalized archive has no later timestamp, but it still proves that no retry response can arrive. */
+    public List<ReplayRequestId> resolveAllRetryBoundaries() {
+        ownerThreadGuard.requireOwnerThread();
+        var resolved = new ArrayList<ReplayRequestId>();
+        requestStateByReplayRequestId.forEach((requestId, request) -> {
+            if (request.retryInput == RetryInputState.UNRESOLVED) {
+                request.retryInput = RetryInputState.UNAVAILABLE;
+                resolved.add(requestId);
+            }
+        });
+        return List.copyOf(resolved);
+    }
+
+    public void connectionRequestFinished(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        var request = requireRequest(requestId);
+        if (request.finishedOrCancelled) {
+            throw new IllegalStateException("Connection request was already finished: " + requestId);
+        }
+        request.finishedOrCancelled = true;
+    }
+
+    public boolean requestCanCountAsRetryReadySupply(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        var request = requireRequest(requestId);
+        return !request.finishedOrCancelled && request.retryInput != RetryInputState.UNRESOLVED;
+    }
+
+    public void removeRequest(@NonNull ReplayRequestId requestId) {
+        ownerThreadGuard.requireOwnerThread();
+        if (requestStateByReplayRequestId.remove(requestId) == null) {
+            throw new IllegalStateException("No replay-intake request state for " + requestId);
+        }
+    }
+
     // ------------------------------------------------------------------ broker time
 
     /**
-     * {@code §6}'s {@code greatestObservedLogAppendTime}, advanced by {@code §7} step 3.
-     *
-     * <p>REBUILD-LIMBO-NOTE(G6): {@code §10.1}'s rule that a higher-offset record more than {@code S} below
-     * this value is process-fatal is checked here, before any payload is applied.
+     * {@code §10.1}: validates a higher-offset record before it authorizes any time decision or payload.
      */
     public void observeLogAppendTime(long logAppendTimeMillis) {
         ownerThreadGuard.requireOwnerThread();
+        if (greatestObservedLogAppendTime != Long.MIN_VALUE
+            && exceedsByMoreThan(
+                greatestObservedLogAppendTime,
+                logAppendTimeMillis,
+                brokerTimeConfiguration.maximumBackwardSkewMillis()
+            )) {
+            throw new BrokerTimeViolation(
+                "Kafka LogAppendTime moved backward by more than "
+                    + brokerTimeConfiguration.maximumBackwardSkewMillis()
+                    + "ms in "
+                    + generation.topicPartition()
+                    + ": greatest="
+                    + greatestObservedLogAppendTime
+                    + ", current="
+                    + logAppendTimeMillis
+            );
+        }
         greatestObservedLogAppendTime = Math.max(greatestObservedLogAppendTime, logAppendTimeMillis);
     }
 
     public long greatestObservedLogAppendTime() {
         ownerThreadGuard.requireOwnerThread();
         return greatestObservedLogAppendTime;
+    }
+
+    public WriterTimeTransition observeTrafficWriter(
+        @NonNull String writerNodeId,
+        long logAppendTimeMillis
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        if (writerTimeStateByWriterNodeId.containsKey(writerNodeId)) {
+            return WriterTimeTransition.NONE;
+        }
+        writerTimeStateByWriterNodeId.put(
+            writerNodeId,
+            new WriterPartitionTimeState(
+                new FirstTrafficFallback(logAppendTimeMillis),
+                0,
+                null
+            )
+        );
+        return WriterTimeTransition.FIRST_TRAFFIC_FALLBACK_STARTED;
+    }
+
+    public WriterTimeTransition observeHeartbeat(
+        @NonNull String writerNodeId,
+        long logAppendTimeMillis,
+        long heartbeatIntervalMillis,
+        Long emittedAtMillis
+    ) {
+        ownerThreadGuard.requireOwnerThread();
+        var state = writerTimeStateByWriterNodeId.get(writerNodeId);
+        if (state == null) {
+            writerTimeStateByWriterNodeId.put(
+                writerNodeId,
+                new WriterPartitionTimeState(
+                    new ExactHeartbeat(logAppendTimeMillis),
+                    heartbeatIntervalMillis,
+                    emittedAtMillis
+                )
+            );
+            return WriterTimeTransition.EXACT_HEARTBEAT_STARTED;
+        }
+        if (state.reference instanceof FirstTrafficFallback) {
+            state.reference = new ExactHeartbeat(logAppendTimeMillis);
+            state.heartbeatIntervalMillis = heartbeatIntervalMillis;
+            state.emittedAtMillis = emittedAtMillis;
+            return WriterTimeTransition.FALLBACK_REPLACED_BY_HEARTBEAT;
+        }
+        var exact = (ExactHeartbeat) state.reference;
+        if (!reaches(
+            logAppendTimeMillis,
+            exact.logAppendTimeMillis(),
+            brokerTimeConfiguration.heartbeatExpirationMillis()
+        )) {
+            state.reference = new ExactHeartbeat(logAppendTimeMillis);
+            state.heartbeatIntervalMillis = heartbeatIntervalMillis;
+            state.emittedAtMillis = emittedAtMillis;
+            return WriterTimeTransition.TIMELY_HEARTBEAT_ACCEPTED;
+        }
+        return WriterTimeTransition.LATE_HEARTBEAT_IGNORED;
+    }
+
+    public List<String> writersExpiredAt(long recordLogAppendTimeMillis) {
+        ownerThreadGuard.requireOwnerThread();
+        var expired = new ArrayList<String>();
+        writerTimeStateByWriterNodeId.forEach((writerNodeId, state) -> {
+            var threshold = switch (state.reference) {
+                case ExactHeartbeat ignored -> Math.addExact(
+                    brokerTimeConfiguration.heartbeatExpirationMillis(),
+                    brokerTimeConfiguration.maximumBackwardSkewMillis()
+                );
+                case FirstTrafficFallback ignored -> Math.addExact(
+                    brokerTimeConfiguration.heartbeatExpirationMillis(),
+                    Math.multiplyExact(2, brokerTimeConfiguration.maximumBackwardSkewMillis())
+                );
+            };
+            if (reaches(recordLogAppendTimeMillis, state.reference.logAppendTimeMillis(), threshold)) {
+                expired.add(writerNodeId);
+            }
+        });
+        return List.copyOf(expired);
+    }
+
+    /**
+     * Expires every current lifetime for one writer and returns owners that need the matching target command.
+     */
+    public WriterExpirationResult expireConnectionsForWriter(@NonNull String writerNodeId) {
+        ownerThreadGuard.requireOwnerThread();
+        var ownersToExpire = new ArrayList<ConnectionProcessingId>();
+        var expiredSourceConnections = 0;
+        var lifetimes = List.copyOf(activeSourceConnectionsByCapturedConnectionId.values());
+        for (var lifetime : lifetimes) {
+            if (lifetime.lifetime() != SourceConnectionState.Lifetime.OPEN
+                || !lifetime.connectionProcessingId().capturedConnectionId().writerNodeId().equals(writerNodeId)) {
+                continue;
+            }
+            var hasConnectionOwner = lifetime.hasConnectionOwner();
+            var outcome = lifetime.expire();
+            expiredSourceConnections++;
+            if (!outcome.associationsToAdd().isEmpty() || !outcome.relabels().isEmpty()) {
+                throw new IllegalStateException("Expiration created new record work for " + lifetime);
+            }
+            outcome.associationsFinished().forEach(this::associationFinished);
+            retireLifetime(lifetime);
+            if (hasConnectionOwner) {
+                ownersToExpire.add(lifetime.connectionProcessingId());
+            }
+        }
+        writerTimeStateByWriterNodeId.remove(writerNodeId);
+        return new WriterExpirationResult(expiredSourceConnections, ownersToExpire);
+    }
+
+    ExpirationReference expirationReferenceFor(String writerNodeId) {
+        ownerThreadGuard.requireOwnerThread();
+        var state = writerTimeStateByWriterNodeId.get(writerNodeId);
+        return state == null ? null : state.reference;
     }
 
     /**
@@ -338,6 +692,35 @@ public final class PartitionIntakeState {
                 "Connection " + connectionProcessingId + " does not belong to generation " + generation
             );
         }
+    }
+
+    private RequestIntakeState requireRequest(ReplayRequestId requestId) {
+        requireSameGeneration(requestId.connectionProcessingId());
+        var request = requestStateByReplayRequestId.get(requestId);
+        if (request == null) {
+            throw new IllegalStateException("No replay-intake request state for " + requestId);
+        }
+        return request;
+    }
+
+    private static boolean reaches(long observed, long reference, long threshold) {
+        if (observed < reference) {
+            return false;
+        }
+        if (reference > Long.MAX_VALUE - threshold) {
+            return false;
+        }
+        return observed >= reference + threshold;
+    }
+
+    private static boolean exceedsByMoreThan(long greater, long lesser, long permittedDifference) {
+        if (greater <= lesser) {
+            return false;
+        }
+        if (lesser > Long.MAX_VALUE - permittedDifference) {
+            return false;
+        }
+        return greater > lesser + permittedDifference;
     }
 
     private RecordWorkTracker requireTracker(KafkaRecordId recordId) {

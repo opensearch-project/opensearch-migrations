@@ -295,6 +295,114 @@ class PartitionIntakeStateTest {
     }
 
     @Test
+    void exactHeartbeatAndRestartFallbackUseTheirDistinctBrokerTimeThresholds() {
+        var configuration = new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50);
+        var exact = ownerState(new ArrayList<>(), configuration);
+
+        Assertions.assertEquals(
+            PartitionIntakeState.WriterTimeTransition.EXACT_HEARTBEAT_STARTED,
+            exact.observeHeartbeat("writer", 100, 25, 90L)
+        );
+        Assertions.assertInstanceOf(
+            PartitionIntakeState.ExactHeartbeat.class,
+            exact.expirationReferenceFor("writer")
+        );
+        Assertions.assertTrue(exact.writersExpiredAt(209).isEmpty());
+        Assertions.assertEquals(List.of("writer"), exact.writersExpiredAt(210));
+
+        var fallback = ownerState(new ArrayList<>(), configuration);
+        Assertions.assertEquals(
+            PartitionIntakeState.WriterTimeTransition.FIRST_TRAFFIC_FALLBACK_STARTED,
+            fallback.observeTrafficWriter("writer", 100)
+        );
+        Assertions.assertInstanceOf(
+            PartitionIntakeState.FirstTrafficFallback.class,
+            fallback.expirationReferenceFor("writer")
+        );
+        Assertions.assertTrue(fallback.writersExpiredAt(219).isEmpty());
+        Assertions.assertEquals(List.of("writer"), fallback.writersExpiredAt(220));
+    }
+
+    @Test
+    void firstHeartbeatReplacesFallbackAndOnlyTimelyHeartbeatsAdvanceExactReference() {
+        var intake = ownerState(
+            new ArrayList<>(),
+            new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50)
+        );
+        intake.observeTrafficWriter("writer", 100);
+
+        Assertions.assertEquals(
+            PartitionIntakeState.WriterTimeTransition.FALLBACK_REPLACED_BY_HEARTBEAT,
+            intake.observeHeartbeat("writer", 500, 25, 490L)
+        );
+        Assertions.assertEquals(
+            new PartitionIntakeState.ExactHeartbeat(500),
+            intake.expirationReferenceFor("writer")
+        );
+        Assertions.assertEquals(
+            PartitionIntakeState.WriterTimeTransition.TIMELY_HEARTBEAT_ACCEPTED,
+            intake.observeHeartbeat("writer", 599, 25, 590L)
+        );
+        Assertions.assertEquals(
+            PartitionIntakeState.WriterTimeTransition.LATE_HEARTBEAT_IGNORED,
+            intake.observeHeartbeat("writer", 699, 25, 690L)
+        );
+        Assertions.assertEquals(
+            new PartitionIntakeState.ExactHeartbeat(599),
+            intake.expirationReferenceFor("writer")
+        );
+    }
+
+    @Test
+    void higherOffsetBeyondBackwardSkewIsFatalBeforeBecomingTimeEvidence() {
+        var intake = ownerState(
+            new ArrayList<>(),
+            new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50)
+        );
+
+        intake.observeLogAppendTime(100);
+        intake.observeLogAppendTime(90);
+        Assertions.assertEquals(100, intake.greatestObservedLogAppendTime());
+        Assertions.assertThrows(
+            PartitionIntakeState.BrokerTimeViolation.class,
+            () -> intake.observeLogAppendTime(89)
+        );
+        Assertions.assertEquals(100, intake.greatestObservedLogAppendTime());
+    }
+
+    @Test
+    void retryBoundaryIsIrreversibleAndFinishedRequestsNeverBecomeRetryReadySupply() {
+        var intake = ownerState(
+            new ArrayList<>(),
+            new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50)
+        );
+        var crossingRequest = new ReplayRequestId(LIFETIME, 20);
+        intake.registerRequest(crossingRequest, 100);
+
+        Assertions.assertTrue(intake.resolveRetryBoundaries(149).isEmpty());
+        intake.connectionRequestFinished(crossingRequest);
+        Assertions.assertEquals(
+            List.of(crossingRequest),
+            intake.resolveRetryBoundaries(150)
+        );
+        Assertions.assertFalse(intake.requestCanCountAsRetryReadySupply(crossingRequest));
+        Assertions.assertFalse(
+            intake.sourceResponseCompleted(crossingRequest),
+            "a later final response must not replace the retry input frozen at the first crossing"
+        );
+        Assertions.assertThrows(
+            IllegalStateException.class,
+            () -> intake.sourceResponseCompleted(crossingRequest),
+            "final input is also accepted exactly once"
+        );
+
+        var fastRequest = new ReplayRequestId(LIFETIME, 21);
+        intake.registerRequest(fastRequest, 200);
+        Assertions.assertTrue(intake.sourceResponseCompleted(fastRequest));
+        Assertions.assertTrue(intake.resolveRetryBoundaries(300).isEmpty());
+    }
+
+    @Test
     void randomizedSharedRecordsWaitForEveryAssociatedRequest() {
         var random = new Random(0x5A4B_C0DEL);
         for (int trial = 0; trial < 200; trial++) {
@@ -349,12 +457,23 @@ class PartitionIntakeStateTest {
     }
 
     private static PartitionIntakeState ownerState(List<KafkaRecordId> completions) {
+        return ownerState(
+            completions,
+            new PartitionIntakeState.BrokerTimeConfiguration(30_000, 0, 5_000)
+        );
+    }
+
+    private static PartitionIntakeState ownerState(
+        List<KafkaRecordId> completions,
+        PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration
+    ) {
         return new PartitionIntakeState(
             GENERATION,
             () -> true,
             completions::add,
             ignored -> {},
-            () -> {}
+            () -> {},
+            brokerTimeConfiguration
         );
     }
 }

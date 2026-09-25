@@ -179,6 +179,12 @@ class TrafficReplayerTopLevelConstructionTest {
                 },
                 ignored -> {},
                 Duration.ofMillis(1),
+                new org.opensearch.migrations.replay.intake.PartitionIntakeState.BrokerTimeConfiguration(
+                    30_000,
+                    1_000,
+                    5_000
+                ),
+                4,
                 1
             );
             var rootContext = new RootReplayerContext(telemetry.openTelemetrySdk);
@@ -199,7 +205,7 @@ class TrafficReplayerTopLevelConstructionTest {
                 var generation = replayer.sourceOwner().partitionState(TOPIC_PARTITION)
                     .orElseThrow()
                     .generation();
-                intakeFence(replayer, generation);
+                intakeFence(replayer);
 
                 replayer.sourceInputs().submit(
                     new KafkaSourceInput.RequestNextPartitionBatch(
@@ -223,7 +229,7 @@ class TrafficReplayerTopLevelConstructionTest {
                     ));
                 });
                 replayer.runSourceOnce();
-                intakeFence(replayer, generation);
+                intakeFence(replayer);
 
                 eventLoop.runUntilIdle();
 
@@ -247,11 +253,11 @@ class TrafficReplayerTopLevelConstructionTest {
                 tupleCompletion.complete(null);
                 eventLoop.advance(Duration.ofSeconds(3));
                 eventLoop.runUntilIdle();
-                intakeFence(replayer, generation);
+                intakeFence(replayer);
                 eventLoop.runUntilIdle();
-                intakeFence(replayer, generation);
+                intakeFence(replayer);
                 eventLoop.runUntilIdle();
-                intakeFence(replayer, generation);
+                intakeFence(replayer);
                 eventLoop.runUntilIdle();
 
                 Assertions.assertEquals(
@@ -825,20 +831,9 @@ class TrafficReplayerTopLevelConstructionTest {
     }
 
     private static void intakeFence(
-        TrafficReplayerTopLevel<?, ?, ?> replayer,
-        org.opensearch.migrations.replay.identity.PartitionGenerationId generation
+        TrafficReplayerTopLevel<?, ?, ?> replayer
     ) {
-        var fenceConnection = new ConnectionProcessingId(
-            generation,
-            new CapturedConnectionId("fence", "fence"),
-            0
-        );
-        replayer.intakeInputs().submitAndAwaitHandling(
-            new ReplayIntakeInput.ConnectionRequestFinished(
-                generation,
-                new ReplayRequestId(fenceConnection, 0)
-            )
-        ).toCompletableFuture().join();
+        replayer.intakeInputs().awaitPriorInputsHandled().toCompletableFuture().join();
     }
 
     private static CaptureRecord requestResponseAndClose() {

@@ -258,6 +258,10 @@ public final class SourceConnectionState {
         );
     }
 
+    public boolean hasConnectionOwner() {
+        return requestEverReconstituted;
+    }
+
     // ------------------------------------------------------------------ phases
 
     // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.

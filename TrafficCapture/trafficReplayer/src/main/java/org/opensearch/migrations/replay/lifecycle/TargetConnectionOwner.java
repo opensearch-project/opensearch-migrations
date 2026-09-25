@@ -51,9 +51,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     public sealed interface ConnectionInput<S, F>
         permits AdmitReconstitutedRequest,
             AdmitCapturedClose,
-            SourceResponseComplete,
+            RetrySourceResponseComplete,
             SourceResponseUnavailableForRetry,
-            SourceResponseIncomplete,
+            FinalSourceResponseComplete,
+            FinalSourceResponseIncomplete,
             CapturedConnectionExpired,
             GracefulConnectionCancellation,
             ForceConnectionCancellation {
@@ -97,12 +98,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull Instant replayTime
     ) implements ConnectionInput<S, F> {}
 
-    public record SourceResponseComplete<S, F>(
+    public record RetrySourceResponseComplete<S, F>(
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ReplayRequestId requestId,
-        @NonNull F response,
-        boolean keptAlive
+        @NonNull F response
     ) implements ConnectionInput<S, F> {}
 
     public record SourceResponseUnavailableForRetry<S, F>(
@@ -111,7 +111,15 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull ReplayRequestId requestId
     ) implements ConnectionInput<S, F> {}
 
-    public record SourceResponseIncomplete<S, F>(
+    public record FinalSourceResponseComplete<S, F>(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull PartitionGenerationId partitionGenerationId,
+        @NonNull ReplayRequestId requestId,
+        @NonNull F response,
+        boolean keptAlive
+    ) implements ConnectionInput<S, F> {}
+
+    public record FinalSourceResponseIncomplete<S, F>(
         @NonNull ConnectionProcessingId connectionProcessingId,
         @NonNull PartitionGenerationId partitionGenerationId,
         @NonNull ReplayRequestId requestId,
@@ -303,6 +311,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private final Function<Instant, Instant> replayTimeMapper;
     private final RequestReplayOwner.RequestPreparer<S, P> preparer;
     private final RequestReplayOwner.RetryPolicy<R, F> retryPolicy;
+    private final int maximumResponseAttempts;
     private final TargetChannelPort<P, R> targetChannel;
     private final TupleWriter<T> tupleWriter;
     private final RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory;
@@ -365,6 +374,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             lifecycleSink,
             fatalHandler,
             countHook,
+            4,
             () -> {}
         );
     }
@@ -387,6 +397,49 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull OutstandingOperationRegistry.CountHook countHook,
         @NonNull Runnable ownerTerminated
     ) {
+        this(
+            connectionProcessingId,
+            eventLoop,
+            clock,
+            nanoTime,
+            replayTimeMapper,
+            preparer,
+            retryPolicy,
+            targetChannel,
+            tupleWriter,
+            tupleFactory,
+            resourceReleaser,
+            permitProvider,
+            lifecycleSink,
+            fatalHandler,
+            countHook,
+            4,
+            ownerTerminated
+        );
+    }
+
+    public TargetConnectionOwner(
+        @NonNull ConnectionProcessingId connectionProcessingId,
+        @NonNull EventLoop eventLoop,
+        @NonNull Clock clock,
+        @NonNull LongSupplier nanoTime,
+        @NonNull Function<Instant, Instant> replayTimeMapper,
+        @NonNull RequestReplayOwner.RequestPreparer<S, P> preparer,
+        @NonNull RequestReplayOwner.RetryPolicy<R, F> retryPolicy,
+        @NonNull TargetChannelPort<P, R> targetChannel,
+        @NonNull TupleWriter<T> tupleWriter,
+        @NonNull RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory,
+        @NonNull RequestReplayOwner.ResourceReleaser<S, P, R, F> resourceReleaser,
+        @NonNull TargetAttemptPermitProvider permitProvider,
+        @NonNull LifecycleSink lifecycleSink,
+        @NonNull FatalHandler fatalHandler,
+        @NonNull OutstandingOperationRegistry.CountHook countHook,
+        int maximumResponseAttempts,
+        @NonNull Runnable ownerTerminated
+    ) {
+        if (maximumResponseAttempts <= 0) {
+            throw new IllegalArgumentException("maximumResponseAttempts must be positive");
+        }
         this.connectionProcessingId = connectionProcessingId;
         this.partitionGenerationId = connectionProcessingId.generation();
         this.eventLoop = eventLoop;
@@ -395,6 +448,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         this.replayTimeMapper = replayTimeMapper;
         this.preparer = preparer;
         this.retryPolicy = retryPolicy;
+        this.maximumResponseAttempts = maximumResponseAttempts;
         this.targetChannel = targetChannel;
         this.tupleWriter = tupleWriter;
         this.tupleFactory = tupleFactory;
@@ -467,7 +521,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return submitNonAdmissionInput(input);
     }
 
-    public CompletionStage<InputApplied> submit(@NonNull SourceResponseComplete<S, F> input) {
+    public CompletionStage<InputApplied> submit(@NonNull RetrySourceResponseComplete<S, F> input) {
         return submitNonAdmissionInput(input);
     }
 
@@ -477,7 +531,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return submitNonAdmissionInput(input);
     }
 
-    public CompletionStage<InputApplied> submit(@NonNull SourceResponseIncomplete<S, F> input) {
+    public CompletionStage<InputApplied> submit(@NonNull FinalSourceResponseComplete<S, F> input) {
+        return submitNonAdmissionInput(input);
+    }
+
+    public CompletionStage<InputApplied> submit(@NonNull FinalSourceResponseIncomplete<S, F> input) {
         return submitNonAdmissionInput(input);
     }
 
@@ -560,14 +618,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 applyCapturedClose(close);
                 yield new InputApplied();
             }
-            case SourceResponseComplete<S, F> complete -> {
+            case RetrySourceResponseComplete<S, F> complete -> {
                 validateIdentity(complete);
                 var request = routeRequest(complete.requestId());
                 if (request != null) {
-                    request.sourceResponseComplete(
-                        complete.response(),
-                        complete.keptAlive()
-                    );
+                    request.retrySourceResponseComplete(complete.response());
                 }
                 yield new InputApplied();
             }
@@ -579,11 +634,22 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
                 }
                 yield new InputApplied();
             }
-            case SourceResponseIncomplete<S, F> incomplete -> {
+            case FinalSourceResponseComplete<S, F> complete -> {
+                validateIdentity(complete);
+                var request = routeRequest(complete.requestId());
+                if (request != null) {
+                    request.finalSourceResponseComplete(
+                        complete.response(),
+                        complete.keptAlive()
+                    );
+                }
+                yield new InputApplied();
+            }
+            case FinalSourceResponseIncomplete<S, F> incomplete -> {
                 validateIdentity(incomplete);
                 var request = routeRequest(incomplete.requestId());
                 if (request != null) {
-                    request.sourceResponseIncomplete(incomplete.reason());
+                    request.finalSourceResponseIncomplete(incomplete.reason());
                 }
                 yield new InputApplied();
             }
@@ -662,7 +728,8 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             resourceReleaser,
             new RequestCallbacks(),
             fatalHandler::onFatal,
-            countHook
+            countHook,
+            maximumResponseAttempts
         );
         var entry = new RequestEntry<S, P, R, F, T>(
             nominalTargetTime,

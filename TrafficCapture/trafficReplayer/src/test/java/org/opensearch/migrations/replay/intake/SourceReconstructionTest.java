@@ -60,7 +60,9 @@ class SourceReconstructionTest {
         sourceInputs,
         sink,
         failure -> Assertions.fail("replay intake failed: " + failure.getMessage()),
-        rootContext.replayIntakeMetrics
+        rootContext.replayIntakeMetrics,
+        ReplayIntakeOwner.RecordObserver.NOOP,
+        new PartitionIntakeState.BrokerTimeConfiguration(30_000, 10_000, 5_000)
     );
 
     @AfterEach
@@ -215,15 +217,16 @@ class SourceReconstructionTest {
         var expiring = owner.partitionState(first.generation(0)).orElseThrow()
             .lifetimeOf(sink.requestIds.get(0).connectionProcessingId()).orElseThrow();
 
-        // The trigger for this is §10.3's broker-time evaluation, which G6 builds; the transition itself is
-        // production code and is what the fresh lifetime below has to coexist with.
-        var outcome = expiring.expire();
-        owner.partitionState(first.generation(0)).orElseThrow().retireLifetime(expiring);
-        outcome.associationsFinished()
-            .forEach(owner.partitionState(first.generation(0)).orElseThrow()::associationFinished);
+        var crossing = new RecordScript(TOPIC, first.generation(0).localSequence()).addProbe(
+            0, 1, Instant.ofEpochMilli(51_000), "other-writer", "expiration-proof"
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(crossing.generation(0), 1),
+            crossing.records()
+        ));
 
         var second = new RecordScript(TOPIC, first.generation(0).localSequence()).addTraffic(
-            0, 1, Instant.ofEpochMilli(2_000), WRITER,
+            0, 2, Instant.ofEpochMilli(51_001), WRITER,
             stream(1, read(1, REQUEST_BYTES), endOfMessage(2))
         );
         owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
@@ -248,6 +251,86 @@ class SourceReconstructionTest {
             SourceConnectionState.Lifetime.EXPIRED,
             expiring.lifetime(),
             "the expired lifetime is not revived by its successor"
+        );
+        Assertions.assertEquals(
+            List.of(expired),
+            sink.expiredConnections,
+            "only the old process-local owner receives the expiration command"
+        );
+    }
+
+    @Test
+    void retryBoundaryIsEmittedBeforeTheCrossingRecordPayloadCompletesTheFinalResponse() {
+        var first = new RecordScript(TOPIC).addTraffic(
+            0, 0, Instant.ofEpochMilli(1_000), WRITER,
+            stream(0, read(1, REQUEST_BYTES), endOfMessage(2))
+        );
+        applyAll(first);
+
+        var crossing = new RecordScript(TOPIC, first.generation(0).localSequence()).addTraffic(
+            0, 1, Instant.ofEpochMilli(6_000), WRITER,
+            stream(1, write(3, "HTTP/1.1 200 OK\r\n\r\n"), connectionException(4))
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(crossing.generation(0), 1),
+            crossing.records()
+        ));
+
+        Assertions.assertEquals(
+            List.of("retry-unavailable", "final-complete"),
+            sink.sourceResponseEvents,
+            "R - B >= W freezes retry input before the crossing payload can complete the final response"
+        );
+        Assertions.assertEquals(
+            List.of(sink.requestIds.get(0)),
+            sink.unavailableRetryResponses
+        );
+        Assertions.assertTrue(
+            sink.completeRetryResponses.isEmpty(),
+            "the later final response cannot reverse the boundary"
+        );
+    }
+
+    @Test
+    void backwardSkewBeyondSIsFatalBeforeTheHigherOffsetPayloadIsApplied() {
+        var appliedOffsets = new ArrayList<Long>();
+        var localSink = new RecordingSink();
+        var localOwner = new ReplayIntakeOwner(
+            new ReplayIntakeInputQueue(),
+            sourceInputs,
+            localSink,
+            failure -> Assertions.fail("inline owner unexpectedly reported asynchronously: " + failure),
+            rootContext.replayIntakeMetrics,
+            record -> appliedOffsets.add(record.recordId().offset()),
+            new PartitionIntakeState.BrokerTimeConfiguration(100, 10, 50)
+        );
+        var script = new RecordScript("fatal-skew")
+            .addProbe(0, 0, Instant.ofEpochMilli(1_000), "first-writer", "baseline")
+            .addTraffic(
+                0,
+                1,
+                Instant.ofEpochMilli(989),
+                "late-writer",
+                stream(0, read(1, REQUEST_BYTES), endOfMessage(2))
+            );
+        var generation = script.generation(0);
+        localOwner.applyOnCallingThread(new ReplayIntakeInput.PartitionGenerationAssigned(generation));
+
+        Assertions.assertThrows(
+            PartitionIntakeState.BrokerTimeViolation.class,
+            () -> localOwner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+                new PartitionBatchRequestId(generation, 0),
+                script.records()
+            ))
+        );
+        Assertions.assertEquals(
+            List.of(0L),
+            appliedOffsets,
+            "the invalid higher-offset record must fail before its payload observer"
+        );
+        Assertions.assertTrue(
+            localSink.requests.isEmpty(),
+            "the invalid record must not create source assembly or a request"
         );
     }
 
@@ -709,10 +792,13 @@ class SourceReconstructionTest {
             stream(0, read(1, REQUEST_BYTES), endOfMessage(2), write(3, "HTTP/1.1 200 OK\r\n"))
         );
         applyAll(script);
-        var lifetime = owner.partitionState(script.generation(0)).orElseThrow()
-            .lifetimeOf(sink.requestIds.get(0).connectionProcessingId()).orElseThrow();
-
-        lifetime.expire();
+        var crossing = new RecordScript(TOPIC, script.generation(0).localSequence()).addProbe(
+            0, 1, Instant.ofEpochMilli(51_000), "other-writer", "expiration-proof"
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(crossing.generation(0), 1),
+            crossing.records()
+        ));
 
         Assertions.assertEquals(
             List.of(sink.requestIds.get(0)),
@@ -787,6 +873,10 @@ class SourceReconstructionTest {
         private final List<ReplayRequestId> unprovenResponses = new ArrayList<>();
         private final List<ReplayRequestId> incompleteResponses = new ArrayList<>();
         private final List<ConnectionProcessingId> closes = new ArrayList<>();
+        private final List<ReplayRequestId> completeRetryResponses = new ArrayList<>();
+        private final List<ReplayRequestId> unavailableRetryResponses = new ArrayList<>();
+        private final List<ConnectionProcessingId> expiredConnections = new ArrayList<>();
+        private final List<String> sourceResponseEvents = new ArrayList<>();
 
         @Override
         public void onRequestReconstituted(
@@ -810,6 +900,7 @@ class SourceReconstructionTest {
             HttpMessageAndTimestamp.Response response,
             boolean keptAlive
         ) {
+            sourceResponseEvents.add("final-complete");
             completeResponses.add(replayRequestId);
             responses.add(response);
             if (!keptAlive) {
@@ -818,7 +909,23 @@ class SourceReconstructionTest {
         }
 
         @Override
+        public void onRetrySourceResponseComplete(
+            ReplayRequestId replayRequestId,
+            HttpMessageAndTimestamp.Response response
+        ) {
+            sourceResponseEvents.add("retry-complete");
+            completeRetryResponses.add(replayRequestId);
+        }
+
+        @Override
+        public void onSourceResponseUnavailableForRetry(ReplayRequestId replayRequestId) {
+            sourceResponseEvents.add("retry-unavailable");
+            unavailableRetryResponses.add(replayRequestId);
+        }
+
+        @Override
         public void onSourceResponseIncomplete(ReplayRequestId replayRequestId, IncompleteReason reason) {
+            sourceResponseEvents.add("final-incomplete");
             incompleteResponses.add(replayRequestId);
         }
 
@@ -833,6 +940,11 @@ class SourceReconstructionTest {
 
         @Override
         public void onConnectionOwnerFinished(ConnectionProcessingId connectionProcessingId) {}
+
+        @Override
+        public void onCapturedConnectionExpired(ConnectionProcessingId connectionProcessingId) {
+            expiredConnections.add(connectionProcessingId);
+        }
 
         private void assertExactlyOneFinalResponseResultPerRequest() {
             var finalResults = new ArrayList<ReplayRequestId>(
