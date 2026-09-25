@@ -621,6 +621,13 @@ generation. Refactor the applicable members of `ActiveConnectionTrackingTest` an
 `PartitionRevocationStaleStateTest` onto the G5 owner chain; do not restore the predecessor's source-owned
 connection registry.
 
+**G5 trace-evidence boundary.** Before G5 exits, audit every baseline method whose responsibility G5 moved,
+split, substantially rewrote, or retired under `AGENTS.md` §7. Put each exact source and target record
+immediately before its method. Keep trace-eligible source members marked through the final completeness sweep,
+including `RETIRED` members; that sweep removes dead sources and trace records together. Do not restore a
+source already absent before Plan A's carry baseline: anchor its record to `2fe4538a` at the surviving
+predecessor/replacement seam and record the gap in the live register.
+
 **Exit:** every admitted request produces at most one turn completion and at most one processing
 completion, and a normal completion produces both in order with the second after tuple durability; with
 the permit count at 1, exactly one target attempt is in flight and queued requests consume no permits;
@@ -634,7 +641,8 @@ standing in for a missing consumer. G5 does not claim target-interim tuple prese
 proves that obligation after the rewrite. The inherited connection-lifetime assertions above run against the
 new owner and context chain. Required evidence includes the filtered and intentional-drop cases in
 `connLLD §19.3` and the completion/force race in `§19.5`. Covers `D6`, `D7`, `D10`, `D17`; contributes
-`R2`, `R8`, `R10`.
+`R2`, `R8`, `R10`. The method-local G5 trace audit is complete and every retained baseline source has an exact
+moved, split, rewritten, or retired disposition, with any pre-carry source gap recorded.
 
 ### G6 — Retry boundary and broker-time expiration
 

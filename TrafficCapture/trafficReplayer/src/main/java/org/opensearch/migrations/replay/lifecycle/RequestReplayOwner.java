@@ -41,19 +41,6 @@ import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.NonNull;
 
-// REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
-// HttpJsonTransformingConsumer.<init>(..., IReplayerHttpTransactionContext)
-//     -> RequestReplayOwner.beginPreparation [create request transformation context].
-// HttpJsonTransformingConsumer.finalizeRequest
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// HttpJsonTransformingConsumer.finalizeDeferredSigning
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// HttpJsonTransformingConsumer.finalizeNormalPath
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// HttpJsonTransformingConsumer.redriveWithoutTransformation
-//     -> RequestReplayOwner.applyPreparationResult [close request transformation context].
-// REBUILD-TRACE-END(G5,target)
-
 /**
  * Exhaustive event-loop-confined lifecycle owner for one replay request.
  */

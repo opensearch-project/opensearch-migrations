@@ -13,8 +13,6 @@ package org.opensearch.migrations.replay;
 // bindNettyScheduleToCompletableFuture overloads ->
 //     TargetConnectionOwner scheduleAdmissionHead/scheduleExecutionHead and
 //     RequestReplayOwner.scheduleRetry/retryTimerFired.
-// scheduleSendRequestOnConnectionReplaySession/scheduleOnConnectionReplaySession ->
-//     TargetConnectionOwner.evaluateExecutionHead/acquirePermit/applyPermitResult.
 // now/getDelayFromNowMs -> injected Clock + TargetConnectionOwner.nonNegativeDelay.
 // doubleRetryDelayCapped -> RequestReplayOwner.RetryPolicy/configured retry decision.
 // sendRequestWithRetries -> RequestReplayOwner.startAttempt/applyTargetAttemptOutcome/
@@ -604,6 +602,18 @@ public class RequestSenderOrchestrator {
         }
     }
 
+*/
+// REBUILD-LIMBO-END(G5)
+// REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+// RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleAdmissionHead
+//     [preparation-time scheduling].
+// RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleExecutionHead
+//     [execution-time scheduling].
+// The baseline source predates the Plan A carry and is inspected at 2fe4538a; restoring its deleted
+// body here would violate the history-preserving carry baseline.
+// REBUILD-TRACE-END(G5,source)
+// REBUILD-LIMBO-START(G5)
+/*
     private final class RuntimeTargetExchange implements TargetConnectionOwner.TargetExchange<PreparedActorRequest, Object> {
         private final ActorRuntime runtime;
         private final Map<ScheduledFuture<?>, CompletableFuture<Void>> cancellableSchedules = new LinkedHashMap<>();

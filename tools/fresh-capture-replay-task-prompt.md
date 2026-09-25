@@ -18,6 +18,10 @@ Trace only behavior executable at the settled mainline rebuild baseline: use exa
 mappings for moved, split, rewritten, or retired responsibilities. A post-baseline method may be the target
 only for the inherited responsibility slice it receives; do not trace unchanged responsibilities or
 branch-only responsibilities with no mainline predecessor.
+Place each trace immediately before the exact method it describes. Keep eligible source methods in limbo
+through the final completeness sweep, including sources mapped to RETIRED; remove source and trace together
+only after that sweep. Do not restore a source already absent before Plan A's carry baseline—anchor its source
+record to `2fe4538a` at the surviving replacement seam and record the gap.
 Before bulk trace editing, show three to five representative decisions and obtain owner confirmation.
 
 Stop at red lines with one batched decision table. Otherwise implement the complete usable chains,

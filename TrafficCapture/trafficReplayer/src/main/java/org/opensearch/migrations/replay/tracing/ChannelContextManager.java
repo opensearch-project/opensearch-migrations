@@ -13,16 +13,12 @@ import lombok.NonNull;
 //     ConnectionProcessingId, including partition generation and process-local lifetime
 // old separate map lookup then atomic refcount increment -> ConcurrentHashMap.compute in
 //     retainOrCreateContext
-// old separate decrement then map removal -> releaseContextFor's single compute transition
-// old context close by unrelated callers -> final-reference close inside releaseContextFor
 // REBUILD-TRACE-END(G5,source)
 // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
 // constructor -> predecessor constructor with the root context narrowed to IRootReplayerContext.
 // apply/retainOrCreateContext -> predecessor apply/retainOrCreateContext, keyed by
 //     ConnectionProcessingId and using one atomic compute transition.
 // RefCountedContext.retain -> predecessor incrementRefCount, now checked inside compute.
-// releaseContextFor/RefCountedContext.isFinalReference/releaseRetainedReference ->
-//     predecessor releaseContextFor/release, with decrement/removal/close in one compute transition.
 // REBUILD-TRACE-END(G5,target)
 
 /**
@@ -97,6 +93,14 @@ public class ChannelContextManager
         ).context;
     }
 
+    // REBUILD-TRACE-START(G5,source): retain through the rebuild; remove in final pre-merge cleanup.
+    // ChannelContextManager.releaseContextFor -> ChannelContextManager.releaseContextFor
+    //     [atomically validate identity, decrement, close the final context, and remove its map entry].
+    // REBUILD-TRACE-END(G5,source)
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // ChannelContextManager.releaseContextFor -> ChannelContextManager.releaseContextFor
+    //     [atomically validate identity, decrement, close the final context, and remove its map entry].
+    // REBUILD-TRACE-END(G5,target)
     public IReplayContexts.IConnectionContext releaseContextFor(
         @NonNull IReplayContexts.IConnectionContext context
     ) {

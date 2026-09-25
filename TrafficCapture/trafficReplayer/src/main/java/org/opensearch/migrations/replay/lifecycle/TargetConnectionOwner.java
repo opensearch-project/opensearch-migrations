@@ -48,8 +48,6 @@ import lombok.NonNull;
 // RequestSenderOrchestrator.scheduleWork/scheduleRequest/scheduleClose ->
 //     submit/applyRequestAdmission/applyCapturedClose plus admission/execution queues
 // RequestSenderOrchestrator bindNettySchedule* -> scheduleAdmissionHead/scheduleExecutionHead
-// RequestSenderOrchestrator scheduleOnConnectionReplaySession ->
-//     evaluateExecutionHead/acquirePermit/applyPermitResult
 // old cached ConnectionReplaySession turn ownership -> activeTurn + requestRegistry
 // old first-write callback -> firstTargetWriteSubmitted; new final boundary ->
 //     finalTargetWriteSubmitted
@@ -61,8 +59,6 @@ import lombok.NonNull;
 // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
 // submit/applyRequestAdmission/applyCapturedClose ->
 //     RequestSenderOrchestrator scheduleWork/scheduleRequest/scheduleClose.
-// scheduleAdmissionHead/promoteDueAdmissions/scheduleExecutionHead ->
-//     RequestSenderOrchestrator bindNettySchedule* and scheduleOnConnectionReplaySession.
 // evaluateExecutionHead/acquirePermit/applyPermitResult ->
 //     scheduleSendRequestOnConnectionReplaySession and cached ConnectionReplaySession turn ownership.
 // firstTargetWriteSubmitted/finalTargetWriteSubmitted ->
@@ -729,6 +725,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         return true;
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleAdmissionHead
+    //     [preparation-time scheduling].
+    // REBUILD-TRACE-END(G5,target)
     private void scheduleAdmissionHead() {
         requireOwnerThread();
         cancelAdmissionTimer();
@@ -786,6 +786,10 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         evaluateExecutionHead();
     }
 
+    // REBUILD-TRACE-START(G5,target): retain through the rebuild; remove in final pre-merge cleanup.
+    // RequestSenderOrchestrator.scheduleOnConnectionReplaySession -> TargetConnectionOwner.scheduleExecutionHead
+    //     [execution-time scheduling].
+    // REBUILD-TRACE-END(G5,target)
     private void scheduleExecutionHead() {
         cancelExecutionTimer();
         if (executionQueue.isEmpty()
