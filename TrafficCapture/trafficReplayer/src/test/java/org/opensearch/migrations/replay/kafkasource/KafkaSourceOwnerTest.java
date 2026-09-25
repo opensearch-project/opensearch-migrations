@@ -370,7 +370,7 @@ class KafkaSourceOwnerTest {
         );
     }
 
-    /** §17.4: an empty poll leaves the outstanding batch request in place, and the partition resumed. */
+    /** §17.4: an empty poll consumes neither entitlement and leaves the partition resumed. */
     @Test
     void anEmptyPollCompletesNoRequestAndLeavesThePartitionReadable() {
         var port = pumpedSource(List.of(PARTITION_0));
@@ -385,6 +385,10 @@ class KafkaSourceOwnerTest {
         var state = owner.partitionState(PARTITION_0).orElseThrow();
         Assertions.assertEquals(requestId, state.outstandingRequest().orElseThrow(),
             "an empty poll must not consume the request");
+        Assertions.assertTrue(
+            state.isAssignmentBootstrapPending(),
+            "an empty poll must not consume the assignment bootstrap entitlement"
+        );
         Assertions.assertTrue(state.isReadable());
         Assertions.assertFalse(port.isPaused(PARTITION_0), "the partition should stay resumed to keep polling");
         Assertions.assertTrue(drainIntake().stream()
