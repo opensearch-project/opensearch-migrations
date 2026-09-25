@@ -203,6 +203,44 @@ class TargetConnectionOwnerCancellationTest {
     }
 
     @Test
+    void gracefulCancellationPartwayThroughSendingAbortsAndEmitsOnlyCleanup() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(9, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+        fixture.preparer.ready(9);
+        fixture.eventLoop.runUntilIdle();
+        fixture.targetChannel.attempt(0).firstWrite();
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.GracefulConnectionCancellation<>(
+            CONNECTION,
+            GENERATION,
+            new CancellationDeadline(Duration.ofSeconds(5).toNanos()),
+            new CancellationException("graceful revocation during request write")
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(1, fixture.targetChannel.attempt(0).abortCalls);
+        Assertions.assertEquals(
+            1,
+            fixture.activePermits.get(),
+            "the target-attempt permit remains held until asynchronous channel teardown completes"
+        );
+        Assertions.assertTrue(fixture.lifecycleEvents.isEmpty());
+
+        fixture.targetChannel.attempt(0).abort.complete(null);
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertEquals(0, fixture.activePermits.get());
+        Assertions.assertEquals(
+            java.util.List.of("cleanup-finished"),
+            fixture.lifecycleEvents
+        );
+        assertOnlyCompletionDeliveryRemainsAtOwnerCleanup(fixture);
+        Assertions.assertTrue(fixture.fatalFailures.isEmpty());
+    }
+
+    @Test
     void cancellationBeforeSendingProducesCleanupWithoutNormalRequestMilestones() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();
         fixture.admit(7, Instant.EPOCH.plusSeconds(10));
