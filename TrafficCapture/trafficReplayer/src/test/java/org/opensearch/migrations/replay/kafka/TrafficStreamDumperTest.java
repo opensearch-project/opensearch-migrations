@@ -15,6 +15,9 @@ import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
+import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseObservation;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
@@ -74,6 +77,31 @@ class TrafficStreamDumperTest {
             .setTs(ts(epochSeconds))
             .setWrite(WriteObservation.newBuilder()
                 .setData(ByteString.copyFrom(data)))
+            .build();
+    }
+
+    private static TrafficObservation interimObs(long epochSeconds, String data) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setInterimResponse(
+                InterimResponseObservation.newBuilder().setData(ByteString.copyFromUtf8(data))
+            )
+            .build();
+    }
+
+    private static TrafficObservation interimSegmentObs(long epochSeconds, String data) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setInterimResponseSegment(
+                InterimResponseSegmentObservation.newBuilder().setData(ByteString.copyFromUtf8(data))
+            )
+            .build();
+    }
+
+    private static TrafficObservation segmentEndObs(long epochSeconds) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setSegmentEnd(EndOfSegmentsIndication.getDefaultInstance())
             .build();
     }
 
@@ -193,6 +221,34 @@ class TrafficStreamDumperTest {
 
         Assertions.assertTrue(result.contains("R[3]: REQ"));
         Assertions.assertTrue(result.contains("W[3]: RSP"));
+    }
+
+    @Test
+    void formatsWholeAndSegmentedInterimResponsesDistinctFromFinalWrites() {
+        var first = "HTTP/1.1 100 Continue\r\n\r\n";
+        var secondStart = "HTTP/1.1 103 Early ";
+        var secondEnd = "Hints\r\n\r\n";
+        var finalResponse = "HTTP/1.1 200 OK\r\n\r\n";
+        var ts = TrafficStream.newBuilder()
+            .setNodeId("n").setConnectionId("c").setNumber(0)
+            .addSubStream(interimObs(100, first))
+            .addSubStream(interimSegmentObs(101, secondStart))
+            .addSubStream(interimSegmentObs(102, secondEnd))
+            .addSubStream(segmentEndObs(103))
+            .addSubStream(writeObs(104, finalResponse))
+            .build();
+
+        var result = TrafficStreamDumper.format(ts, -1, -1, 128, 128);
+
+        Assertions.assertTrue(result.contains(
+            "I[" + (first.length() + secondStart.length() + secondEnd.length()) + "]: "
+                + first.replace("\r\n", "..")
+                + secondStart
+                + secondEnd.replace("\r\n", "..")
+        ));
+        Assertions.assertTrue(result.contains("W[" + finalResponse.length() + "]: HTTP/1.1 200 OK"));
+        Assertions.assertEquals(1, countOccurrences(result, "I["));
+        Assertions.assertFalse(result.contains("SEGMENT_END"));
     }
 
     @Test

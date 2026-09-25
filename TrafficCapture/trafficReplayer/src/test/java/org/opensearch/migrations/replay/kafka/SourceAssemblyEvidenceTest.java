@@ -11,9 +11,12 @@ package org.opensearch.migrations.replay.kafka;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.trafficcapture.protos.CaptureRecord;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -58,7 +61,28 @@ class SourceAssemblyEvidenceTest {
 
     @BeforeAll
     static void captureTheTraffic() throws Exception {
-        supply = ProxyWrittenTopic.start("g3-assembly-evidence");
+        var finalBody = "it works".getBytes(StandardCharsets.UTF_8);
+        supply = ProxyWrittenTopic.startWithSourceResponses(
+            "g3-assembly-evidence",
+            List.of(
+                new SimpleHttpResponse(Map.of(), new byte[0], "Continue", 100),
+                new SimpleHttpResponse(
+                    Map.of("Link", "</style.css>; rel=preload"),
+                    new byte[0],
+                    "Early Hints",
+                    103
+                ),
+                new SimpleHttpResponse(
+                    Map.of(
+                        "Content-Type", "text/plain",
+                        "Content-Length", String.valueOf(finalBody.length)
+                    ),
+                    finalBody,
+                    "OK",
+                    200
+                )
+            )
+        );
         Assertions.assertEquals(200, supply.sendGet("/reconstruct-me"));
         // Waits for a durable TrafficStream rather than for any record: the proxy's startup capability probe
         // is a record, and gating on "at least one" would let the dumps run before the traffic arrived.
@@ -67,6 +91,40 @@ class SourceAssemblyEvidenceTest {
             "no captured traffic reached the topic"
         );
         supply.produceDirectly(0, truncatedTransaction().toByteArray());
+    }
+
+    @Test
+    void realProxyAndTopicPreserveTypedSourceInterimsBeforeTheFinalResponse() throws Exception {
+        var output = dump("dump-http");
+        var requestLine = output.lines()
+            .filter(line -> line.contains("REQ[") && line.contains("/reconstruct-me"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError(
+                "the proxy-captured request was not reconstructed. Output:\n" + output
+            ));
+        var connectionIdentity = requestLine.substring(
+            requestLine.indexOf(" nc:"),
+            requestLine.indexOf(" REQ[")
+        );
+        var connectionLines = output.lines()
+            .filter(line -> line.contains(connectionIdentity))
+            .toList();
+
+        Assertions.assertTrue(
+            connectionLines.stream().anyMatch(line -> line.contains(" INT[")
+                && line.contains("HTTP/1.1 100 Continue")),
+            () -> "the typed 100 response did not survive proxy, Kafka, intake, and dump. Output:\n" + output
+        );
+        Assertions.assertTrue(
+            connectionLines.stream().anyMatch(line -> line.contains(" INT[")
+                && line.contains("HTTP/1.1 103 Early Hints")),
+            () -> "the typed 103 response did not survive proxy, Kafka, intake, and dump. Output:\n" + output
+        );
+        Assertions.assertTrue(
+            connectionLines.stream().anyMatch(line -> line.contains(" RSP[")
+                && line.contains("HTTP/1.1 200 OK")),
+            () -> "the later final response did not reconstruct normally. Output:\n" + output
+        );
     }
 
     @AfterAll

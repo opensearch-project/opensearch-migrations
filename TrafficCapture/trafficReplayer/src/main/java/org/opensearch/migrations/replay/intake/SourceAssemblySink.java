@@ -20,7 +20,8 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
  *
  * <p>This is the replay-intake side of {@code connLLD §3}'s connection-input link. Production construction
  * routes each method to the process-local {@code TargetConnectionOwner} selected by the complete
- * {@code ConnectionProcessingId}.
+ * {@code ConnectionProcessingId}. Source interim responses remain on this source-observation seam and are
+ * not routed into target aggregation.
  *
  * <p>Called only on the replay-intake thread, synchronously from within one record's application, so an
  * implementation must not block.
@@ -42,6 +43,12 @@ public interface SourceAssemblySink {
         Instant requestFirstByteSourceTime,
         Instant requestEndOfMessageSourceTime,
         long requestCompletingLogAppendTime
+    );
+
+    /** A typed source interim response, preserved independently from the final response. */
+    void onSourceInterimResponse(
+        ReplayRequestId replayRequestId,
+        HttpMessageAndTimestamp.InterimResponse interimResponse
     );
 
     /**

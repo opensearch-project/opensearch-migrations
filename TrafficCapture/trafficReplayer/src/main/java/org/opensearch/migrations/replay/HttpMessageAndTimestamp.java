@@ -45,6 +45,17 @@ public class HttpMessageAndTimestamp {
         }
     }
 
+    public static class InterimResponse extends HttpMessageAndTimestamp {
+        public InterimResponse(Instant firstPacketTimestamp) {
+            super(firstPacketTimestamp);
+        }
+
+        @Override
+        public String toString() {
+            return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.RESPONSE));
+        }
+    }
+
     @Getter
     private Instant firstPacketTimestamp;
     @Getter
@@ -120,4 +131,3 @@ public class HttpMessageAndTimestamp {
     }
 
 }
-

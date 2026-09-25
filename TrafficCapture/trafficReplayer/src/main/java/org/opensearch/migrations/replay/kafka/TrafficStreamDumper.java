@@ -25,6 +25,18 @@ import com.google.protobuf.ByteString;
  */
 public class TrafficStreamDumper {
 
+    private enum PayloadKind {
+        READ('R'),
+        WRITE('W'),
+        INTERIM('I');
+
+        private final char token;
+
+        PayloadKind(char token) {
+            this.token = token;
+        }
+    }
+
     private TrafficStreamDumper() {}
 
     public static String format(
@@ -123,10 +135,15 @@ public class TrafficStreamDumper {
         int i = 0;
         while (i < observations.size()) {
             var obs = observations.get(i);
-            if (isRead(obs)) {
-                i = appendCoalesced(sb, observations, i, true, previewRead);
-            } else if (isWrite(obs)) {
-                i = appendCoalesced(sb, observations, i, false, previewWrite);
+            var payloadKind = payloadKind(obs);
+            if (payloadKind != null) {
+                i = appendCoalesced(
+                    sb,
+                    observations,
+                    i,
+                    payloadKind,
+                    payloadKind == PayloadKind.READ ? previewRead : previewWrite
+                );
             } else {
                 sb.append(' ').append(tokenFor(obs));
                 i++;
@@ -136,16 +153,21 @@ public class TrafficStreamDumper {
         return sb.toString();
     }
 
-    private static boolean isRead(TrafficObservation obs) {
-        return obs.hasRead() || obs.hasReadSegment();
-    }
-
-    private static boolean isWrite(TrafficObservation obs) {
-        return obs.hasWrite() || obs.hasWriteSegment();
+    private static PayloadKind payloadKind(TrafficObservation obs) {
+        if (obs.hasRead() || obs.hasReadSegment()) {
+            return PayloadKind.READ;
+        }
+        if (obs.hasWrite() || obs.hasWriteSegment()) {
+            return PayloadKind.WRITE;
+        }
+        if (obs.hasInterimResponse() || obs.hasInterimResponseSegment()) {
+            return PayloadKind.INTERIM;
+        }
+        return null;
     }
 
     /**
-     * Coalesce consecutive read or write observations into a single token.
+     * Coalesce consecutive observations of one payload kind into a single token.
      * SegmentEnd observations are absorbed into the current run since they're
      * just internal framing from the capture proxy's chunking mechanism.
      * Returns the index past the last coalesced observation.
@@ -157,7 +179,7 @@ public class TrafficStreamDumper {
      * request captured as one Read observation.
      */
     private static int appendCoalesced(StringBuilder sb, List<TrafficObservation> observations,
-                                       int start, boolean reads, int previewBytes) {
+                                       int start, PayloadKind payloadKind, int previewBytes) {
         // We only ever need up to `previewBytes` of bytes copied for the preview;
         // capture them eagerly into a fixed buffer and just tally the rest.
         byte[] previewBuf = previewBytes > 0 ? new byte[previewBytes] : null;
@@ -168,19 +190,19 @@ public class TrafficStreamDumper {
             var obs = observations.get(i);
             if (obs.hasSegmentEnd()) {
                 i++; // absorb into current run
-            } else if (!isReadOrWritePayload(obs, reads)) {
+            } else if (payloadKind(obs) != payloadKind) {
                 break;
             } else {
-                int dataLen = dataLength(obs, reads);
+                int dataLen = dataLength(obs, payloadKind);
                 totalSize += dataLen;
                 if (previewBuf != null && previewCopied < previewBytes && dataLen > 0) {
-                    previewCopied += copyPreviewBytes(obs, reads, previewBuf, previewCopied);
+                    previewCopied += copyPreviewBytes(obs, payloadKind, previewBuf, previewCopied);
                 }
                 i++;
             }
         }
 
-        sb.append(' ').append(reads ? 'R' : 'W').append('[').append(totalSize).append(']');
+        sb.append(' ').append(payloadKind.token).append('[').append(totalSize).append(']');
         if (previewBytes > 0 && totalSize > 0) {
             sb.append(": ").append(formatPreview(previewBuf, previewCopied, totalSize));
         }
@@ -188,22 +210,8 @@ public class TrafficStreamDumper {
     }
 
     /** Return the payload byte length without materializing it. */
-    private static int dataLength(TrafficObservation obs, boolean reads) {
-        if (reads) {
-            if (obs.hasRead()) return obs.getRead().getData().size();
-            if (obs.hasReadSegment()) return obs.getReadSegment().getData().size();
-        } else {
-            if (obs.hasWrite()) return obs.getWrite().getData().size();
-            if (obs.hasWriteSegment()) return obs.getWriteSegment().getData().size();
-        }
-        return 0;
-    }
-
-    /** True if `obs` carries a read/write payload of the requested kind (even if zero-length). */
-    private static boolean isReadOrWritePayload(TrafficObservation obs, boolean reads) {
-        return reads
-            ? (obs.hasRead() || obs.hasReadSegment())
-            : (obs.hasWrite() || obs.hasWriteSegment());
+    private static int dataLength(TrafficObservation obs, PayloadKind payloadKind) {
+        return getPayloadData(obs, payloadKind).size();
     }
 
     /**
@@ -212,8 +220,13 @@ public class TrafficStreamDumper {
      * intermediate byte[] allocation that .toByteArray() would create.
      * Returns the number of bytes copied.
      */
-    private static int copyPreviewBytes(TrafficObservation obs, boolean reads, byte[] previewBuf, int copiedSoFar) {
-        ByteString data = getPayloadData(obs, reads);
+    private static int copyPreviewBytes(
+        TrafficObservation obs,
+        PayloadKind payloadKind,
+        byte[] previewBuf,
+        int copiedSoFar
+    ) {
+        ByteString data = getPayloadData(obs, payloadKind);
         int remaining = previewBuf.length - copiedSoFar;
         int toCopy = Math.min(data.size(), remaining);
         if (toCopy > 0) {
@@ -222,17 +235,14 @@ public class TrafficStreamDumper {
         return toCopy;
     }
 
-    private static ByteString getPayloadData(TrafficObservation obs, boolean reads) {
-        if (reads) {
-            if (obs.hasRead()) {
-                return obs.getRead().getData();
-            }
-            return obs.getReadSegment().getData();
-        }
-        if (obs.hasWrite()) {
-            return obs.getWrite().getData();
-        }
-        return obs.getWriteSegment().getData();
+    private static ByteString getPayloadData(TrafficObservation obs, PayloadKind payloadKind) {
+        return switch (payloadKind) {
+            case READ -> obs.hasRead() ? obs.getRead().getData() : obs.getReadSegment().getData();
+            case WRITE -> obs.hasWrite() ? obs.getWrite().getData() : obs.getWriteSegment().getData();
+            case INTERIM -> obs.hasInterimResponse()
+                ? obs.getInterimResponse().getData()
+                : obs.getInterimResponseSegment().getData();
+        };
     }
 
     private static String formatPreview(byte[] buf, int copied, long totalSize) {

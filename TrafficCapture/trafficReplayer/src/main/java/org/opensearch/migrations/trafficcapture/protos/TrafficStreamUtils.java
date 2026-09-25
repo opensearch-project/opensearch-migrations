@@ -50,6 +50,10 @@ public class TrafficStreamUtils {
             return tso.getWrite().getData().toByteArray();
         } else if (tso.hasWriteSegment()) {
             return tso.getWriteSegment().getData().toByteArray();
+        } else if (tso.hasInterimResponse()) {
+            return tso.getInterimResponse().getData().toByteArray();
+        } else if (tso.hasInterimResponseSegment()) {
+            return tso.getInterimResponseSegment().getData().toByteArray();
         } else {
             return null;
         }

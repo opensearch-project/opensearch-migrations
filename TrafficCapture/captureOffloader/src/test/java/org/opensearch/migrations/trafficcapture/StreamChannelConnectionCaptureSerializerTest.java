@@ -1,5 +1,6 @@
 package org.opensearch.migrations.trafficcapture;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -22,6 +23,7 @@ import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.InterimResponseSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
@@ -216,6 +218,83 @@ class StreamChannelConnectionCaptureSerializerTest {
             reconstructedData.append(stringChunk);
         }
         Assertions.assertEquals(packetData, reconstructedData.toString());
+    }
+
+    @Test
+    void wholeInterimResponsePreservesExactBytes() throws Exception {
+        var responseBytes = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n"
+            .getBytes(StandardCharsets.US_ASCII);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, 4096);
+        var buffer = Unpooled.wrappedBuffer(responseBytes);
+
+        serializer.addInterimResponseEvent(REFERENCE_TIMESTAMP, buffer);
+        serializer.flushCommitAndResetStream(true).get();
+        buffer.release();
+
+        var observations = outputBuffersCreated.stream()
+            .flatMap(bytes -> {
+                try {
+                    return TrafficStream.parseFrom(bytes).getSubStreamList().stream();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            })
+            .toList();
+        Assertions.assertEquals(1, observations.size());
+        Assertions.assertTrue(observations.get(0).hasInterimResponse());
+        Assertions.assertArrayEquals(
+            responseBytes,
+            observations.get(0).getInterimResponse().getData().toByteArray()
+        );
+    }
+
+    @Test
+    void segmentedInterimResponsePreservesExactBytesAndTerminatesWithSegmentEnd() throws Exception {
+        var responseBytes = "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n".repeat(20)
+            .getBytes(StandardCharsets.US_ASCII);
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        var streamOverheadBytes = CodedOutputStream.computeStringSize(
+            TrafficStream.CONNECTIONID_FIELD_NUMBER,
+            TEST_TRAFFIC_RECORD_ID_STRING
+        ) + CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, TEST_NODE_ID_STRING);
+        var spaceNeededForFlush = CodedOutputStream.computeInt32Size(
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            responseBytes.length
+        );
+        var bufferSize = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(
+            REFERENCE_TIMESTAMP,
+            TrafficObservation.INTERIMRESPONSESEGMENT_FIELD_NUMBER,
+            InterimResponseSegmentObservation.DATA_FIELD_NUMBER,
+            Unpooled.wrappedBuffer(responseBytes, 0, 8),
+            1
+        ) + streamOverheadBytes + spaceNeededForFlush;
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, bufferSize);
+        var buffer = Unpooled.wrappedBuffer(responseBytes);
+
+        serializer.addInterimResponseEvent(REFERENCE_TIMESTAMP, buffer);
+        serializer.flushCommitAndResetStream(true).get();
+        buffer.release();
+
+        var observations = new ArrayList<TrafficObservation>();
+        for (var bytes : outputBuffersCreated) {
+            observations.addAll(TrafficStream.parseFrom(bytes).getSubStreamList());
+        }
+        var reconstructed = new ByteArrayOutputStream();
+        observations.stream()
+            .filter(TrafficObservation::hasInterimResponseSegment)
+            .forEach(observation ->
+                reconstructed.writeBytes(observation.getInterimResponseSegment().getData().toByteArray()));
+
+        Assertions.assertArrayEquals(responseBytes, reconstructed.toByteArray());
+        Assertions.assertTrue(
+            observations.get(observations.size() - 1).hasSegmentEnd(),
+            "segmented interim response must have an explicit terminal marker"
+        );
+        Assertions.assertTrue(
+            observations.stream().noneMatch(TrafficObservation::hasWrite),
+            "interim bytes must not fall back to ordinary Write"
+        );
     }
 
     @Test
