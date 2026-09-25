@@ -250,17 +250,19 @@ The execution queue preserves the same order as admission:
 ConnectionExecutionEntry
     command identity
     nominal execution time
-    preparation = not required | waiting | ready
+    preparation = not required | waiting | ready for target | ready filtered
 ```
 
-`RequestPreparationReady` can change only the matching entry from waiting to ready. A later entry
-cannot pass an earlier one.
+`RequestPreparationReady` can change only the matching entry from waiting to the ready variant
+identified by its transformation status. A later entry cannot pass an earlier one.
 
 At or after the nominal execution time, the connection owner considers only the head:
 
 - if another request owns the connection turn, it waits;
 - if preparation is still pending, it waits without blocking the event loop;
-- if a request is ready, it begins permit acquisition for that head;
+- if a request is ready for target replay, it begins permit acquisition for that head;
+- if request preparation intentionally filtered the request, it completes that request's
+  connection turn without acquiring a permit or opening target I/O;
 - if a close is ready and every earlier target turn is finished, it closes the target channel.
 
 An overdue entry runs as soon as its other prerequisites are satisfied.
@@ -290,6 +292,13 @@ sealed interface RequestPreparationResult permits
 Expected transformation fallback behavior remains part of the existing transformation policy and
 is represented inside `RequestPreparationReady`. An unexpected transformation throw or exceptional
 completion is process-fatal.
+
+Request filtering is one expected transformation result inside `RequestPreparationReady`. It
+retains the existing `HttpRequestTransformationStatus` that identifies the request as skipped but
+contains no request representation to send to the target. When that request reaches the execution
+head, the request owner acquires no target-attempt permit, opens no target exchange, and completes
+the connection turn normally. The request remains responsible for its final source-response input
+and tuple path. Filtering is neither preparation cancellation nor request-processing failure.
 
 The request owner retains the prepared representation. The connection owner receives only the
 identity and readiness result needed to update its execution entry.
@@ -439,6 +448,7 @@ policy.
 The request owner emits exactly one `ConnectionTurnFinished` when:
 
 - sending and retrying the request against the target server has finished; or
+- expected request filtering intentionally skipped target replay; or
 - cancellation has ended a previously started target turn.
 
 Before emitting it, the request owner:
@@ -498,23 +508,31 @@ separate retry-source-response input.
 
 Tuple output begins once both are available:
 
-- sending and retrying the request against the target server has finished; and
+- target replay has either finished or been intentionally skipped by request filtering; and
 - the final complete or incomplete source-response outcome.
 
-The request owner constructs one complete tuple containing the established request and replay
-outputs, including:
+The request owner constructs one complete tuple candidate containing the established request and
+replay outputs, including:
 
 - the source request;
 - complete or explicitly incomplete captured source response;
-- target attempt history and terminal response outcome;
-- source-versus-target HTTP and bulk comparison required by user output; and
+- target attempt history and terminal response outcome when target replay occurred;
+- an explicit skipped transformation status and no target response when request filtering skipped
+  target replay;
+- source-versus-target HTTP and bulk comparison required by user output when target replay
+  occurred; and
 - existing replay and transformation metadata.
 
 The request owner sends one logical `WriteTuple` request.
 
-`TupleWriter` owns all tuple-sink retries. A permissions error, missing bucket, unavailable sink,
-or other persistent sink error keeps retrying while the generation and process remain valid. The
-request owner does not schedule physical tuple-write retries.
+`TupleWriter` applies the configured tuple transformation to every tuple candidate, including a
+candidate produced for a request filtered before target replay. The transformation either produces
+a tuple for the configured sink or intentionally drops the whole tuple. An intentional drop is
+successful logical tuple completion: no physical sink write occurs, and the writer returns
+`TupleDurable`. Otherwise `TupleWriter` owns all tuple-sink retries. A permissions error, missing
+bucket, unavailable sink, or other persistent sink error keeps retrying while the generation and
+process remain valid. The request owner does not schedule transformation or physical tuple-write
+retries.
 
 The typed result is:
 
@@ -524,7 +542,8 @@ sealed interface TupleWriteResult permits
     TupleWriteCancelled {}
 ```
 
-`TupleDurable` means the complete tuple reached the configured durable-output condition.
+`TupleDurable` means either the transformed tuple reached the configured durable-output condition
+or tuple transformation intentionally dropped the whole tuple.
 
 `TupleWriteCancelled` occurs only through scoped generation cancellation or process shutdown. It
 does not produce normal request-processing completion.
@@ -560,6 +579,7 @@ PreparationState
 
 TargetServerState
     not started
+    filtered
     waiting for permit
     attempt in progress
     waiting for retry source response
@@ -628,9 +648,9 @@ retains the required attempt history through tuple durability or cancellation.
 
 ### 15.4 Tuple data
 
-The request owner owns the complete tuple until `TupleWriter` accepts it. The tuple writer owns any
-references needed across retries and releases them after `TupleDurable` or
-`TupleWriteCancelled`.
+The request owner owns the complete tuple candidate until `TupleWriter` accepts it. The tuple writer
+owns any references needed across transformation and retries and releases them after `TupleDurable`
+or `TupleWriteCancelled`.
 
 Every transfer has a one-shot acceptance guard. Duplicate acceptance or release is an invariant
 failure.
@@ -682,15 +702,16 @@ and request owners compare it only with the same monotonic clock.
 On `GracefulConnectionCancellation(deadline)`, the connection owner:
 
 - rejects new admissions;
-- cancels every request that has not reached `FinalTargetWriteSubmitted`, which includes both a
-  request that has not begun sending and one that is **partway through** sending;
+- cancels every request whose target path is not complete: one that has neither reached
+  `FinalTargetWriteSubmitted` nor been intentionally filtered, including both a request that has
+  not begun sending and one that is **partway through** sending;
 - closes rather than reuses the channel of any cancelled request that had reached
   `FirstTargetWriteSubmitted`, because a partial request leaves the target's stream framing undefined
   (§8);
 - cancels pending preparation and permit acquisition for those requests;
 - prevents the execution queue from beginning another unsent request;
-- allows a request that reached `FinalTargetWriteSubmitted` to continue its target and required tuple
-  chain until the deadline; and
+- allows a request that reached `FinalTargetWriteSubmitted` or was intentionally filtered to
+  continue its required tuple chain until the deadline; and
 - allows a tuple already required by such a request to begin and finish during the grace interval.
 
 The boundary is the **final** request write, not the first. A request only partly written cannot
@@ -698,9 +719,12 @@ complete however long the interval is, since finishing it means issuing further 
 graceful cancellation starts no new external work. Waiting on it would spend the interval — during
 which every partition this consumer holds is stalled — on work that cannot finish.
 
-The grace interval relaxes none of the conditions for commit. A record still commits only when its
-response was obtained, no retry remains outstanding, and its tuple is durable. Work that reaches the
-deadline short of all three is force-cancelled and redelivered, exactly as if it had never started.
+The grace interval relaxes none of the conditions for commit. A record is commit-eligible only when
+its target path completed—either with a response obtained and no retry remaining or with expected
+request filtering that intentionally skipped target replay—and its tuple is durable. Work that
+reaches the deadline before those conditions are established is force-cancelled and emits no normal
+processing completion or commit request. Kafka ownership, commit attempts, and later delivery from
+an uncommitted position follow `kafkaLLD §5.7` and `procCommit §9.4`.
 
 An admitted request cancelled before it begins sending returns cancellation cleanup and emits no
 `ConnectionRequestFinished`.
@@ -711,9 +735,9 @@ A request whose target turn finishes normally or during graceful cancellation em
 ### 17.2 Force cancellation
 
 On `ForceConnectionCancellation`, the owner upgrades the same scope and immediately forwards force
-cancellation to every remaining request owner.
+cancellation to every remaining unfinished request owner.
 
-Each request owner:
+Each unfinished request owner:
 
 - cancels pending timers and permit acquisition;
 - releases any held permit;
@@ -721,6 +745,12 @@ Each request owner:
 - cancels tuple output;
 - releases all request-owned references; and
 - emits `RequestCleanupFinished`, not `RequestProcessingFinished`.
+
+Force cancellation does not reclassify a request whose normal completion conditions were already
+established before that request owner handles the force input. Such a request continues its normal
+`RequestProcessingFinished` path. Replay intake may consequently submit a commit request even when
+cancellation is concurrently being processed. Its disposition follows the existing Kafka-source
+commit authority in `kafkaLLD §5.7` and `procCommit §6.3`, `§9.4`.
 
 The connection owner aggregates request cleanup, closes the channel, releases its queues and
 timers, and emits `ConnectionCleanupFinished`.
@@ -786,10 +816,16 @@ Long-running activity reporting observes these registrations but cannot complete
 - Complete source response before target completion is retained for retry and tuple use.
 - Retry input may freeze unavailable while final response later becomes complete.
 - Incomplete final response contains no partial bytes represented as complete.
-- Tuple output waits until target-server sending and retries have finished and the final
+- Tuple output waits until target replay has finished or been intentionally skipped and the final
   source-response outcome is available.
+- A request filtered during preparation acquires no target permit, opens no target exchange,
+  completes its connection turn, and still sends a skipped tuple candidate through tuple
+  transformation.
+- Tuple transformation may intentionally drop the whole tuple; that path performs no sink write
+  and returns one durable result.
 - Tuple writer owns retries and returns one durable result.
-- Source-versus-target comparison remains in tuple and user-facing output.
+- Source-versus-target comparison remains in tuple and user-facing output when target replay
+  occurred.
 
 ### 19.4 Connection lifecycle
 
@@ -809,7 +845,10 @@ Long-running activity reporting observes these registrations but cannot complete
 - A request whose final bytes are on the wire may finish target and tuple work before the deadline.
 - A request that reaches the deadline with a response obtained but its tuple not yet durable is
   force-cancelled and commits nothing.
-- Force cancellation produces cleanup results rather than normal processing completion.
+- Force cancellation produces cleanup results rather than normal processing completion for work
+  that was unfinished when its request owner handled force.
+- A request whose target path and tuple durability were complete before force was handled continues
+  normal processing completion; its resulting commit request follows `procCommit §9.4`.
 - No permit, timer, target buffer, transformed request, response, tuple, or registry entry leaks.
 - Every per-attempt signed buffer list is released exactly once.
 - Cancellation cleanup never emits Kafka-record completion.

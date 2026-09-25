@@ -1147,13 +1147,15 @@ rebalance while it runs.
 When Kafka revokes the partition, the replayer stops accepting records from the revoked
 generation and immediately cancels every request whose complete bytes are not already on the wire —
 including one partway through sending, which cannot finish without further target writes that
-graceful cancellation will not issue. A fully sent request, and the tuple work needed to finish it,
-get the grace interval — completions during that wait may still commit, and only when the response
-was obtained, no retry remains, and the tuple is durable. At the deadline it sends force cancellation, and `onPartitionsRevoked`
-returns once replay intake accepts that notification, without waiting for every forced cleanup to
-finish. Cancelled work requires redelivery rather than counting as successful processing, and a
-newer generation of the partition does not process records until the old generation's in-process
-work and cleanup finish.
+graceful cancellation will not issue. A request whose target path is complete—because its request
+was fully sent or intentionally filtered—and the tuple work needed to finish it get the grace
+interval. Completions during that wait may still commit only when the target path completed and the
+tuple is durable. At the deadline it sends force cancellation, and
+`onPartitionsRevoked` returns once replay intake accepts that notification, without waiting for
+every forced cleanup to finish. Cancelled work emits no completion or commit request. Its
+uncommitted records remain eligible for delivery to a future partition generation; the current
+process does not redeliver them. A newer generation of the partition does not process records until
+the old generation's in-process work and cleanup finish.
 
 Because a revocation commits only the contiguous prefix of finished records, a partition whose
 earliest uncommitted record outlives the grace interval commits nothing, and repeated revocations
@@ -1232,9 +1234,9 @@ process kill.
 
 Normal shutdown applies the revocation pattern process-wide: stop accepting new Kafka records,
 run the same graceful-then-forced cancellation with the configured grace interval, complete Kafka
-commits that become valid while partitions are still owned, mark unfinished whole records for
-redelivery, and close Kafka, tuple output, transformation resources, and event loops after
-process-local cleanup. Cancellation never causes a Kafka commit.
+commits that become valid while partitions are still owned, leave unfinished whole records
+uncommitted for a future owner, and close Kafka, tuple output, transformation resources, and event
+loops after process-local cleanup. Cancellation never causes a Kafka commit.
 [Replayer Processing and Commit Architecture §10.1](replayerProcessingAndCommitArchitecture.md#101-normal-shutdown)
 defines the ordered steps.
 
