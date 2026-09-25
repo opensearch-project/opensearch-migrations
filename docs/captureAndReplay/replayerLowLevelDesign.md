@@ -201,23 +201,36 @@ result.
 
 Cancellation is scoped to one `PartitionGenerationId`.
 
-`GracefulGenerationCancellation`:
+`GracefulGenerationCancellation` carries one typed grace mode:
 
-- immediately cancels work that has not begun an external target operation;
-- permits a request already sent to the target, and the tuple chain required by that request, to
-  finish before the deadline; and
-- permits a tuple write already in progress to finish before the deadline.
+- `Revocation(deadline)` immediately cancels work whose complete request bytes are not already on
+  the target wire, permits a fully sent or intentionally filtered request and its required tuple
+  chain to finish before the deadline, and permits a tuple write already in progress to finish
+  before the deadline.
+- `Shutdown` stops new admission but lets every already-admitted request continue through its
+  ordinary target, retry, and tuple path. It has no process-local deadline.
+
+Both modes put tuple output into eager-flush operation and cause the Kafka source owner to attempt
+each newly eligible contiguous commit position without intentional batching delay. Existing
+one-operation commit serialization and commit authority remain unchanged.
 
 `ForceGenerationCancellation`:
 
-- upgrades the same scope;
+- upgrades only a `Revocation` scope;
 - causes every remaining owner to begin immediate local cancellation; and
 - does not wait for all cleanup before `onPartitionsRevoked` returns.
 
-Each owner later returns a typed cleanup result. Cleanup completion is not request-processing
-completion and never authorizes Kafka commit. Replay intake reports the partition generation clean
-only after every owned source object, connection object, request object, timer, permit, tuple
-operation, and record tracker in that generation has reached its required cleanup state.
+Each owner cancelled by revocation later returns a typed cleanup result. Cleanup completion is not
+request-processing completion and never authorizes Kafka commit. An owner draining during shutdown
+returns its ordinary terminal milestones instead. Replay intake reports the partition generation
+clean only after every owned source object, connection object, request object, timer, permit, tuple
+operation, and record tracker in that generation has reached its required final state.
+
+Orderly shutdown never sends `ForceGenerationCancellation`. It exits when every admitted operation
+has drained, every tuple is durable, every eligible commit has resolved while ownership remains
+valid, and process-local cleanup is complete. If that does not happen, the replayer remains in
+shutdown grace until its host environment terminates it. Fatal process failure and protocol
+violation retain their separately bounded behavior.
 
 ## 7. Data and reference lifetime
 

@@ -192,8 +192,8 @@ These are events that replay intake processes, not states:
 | --- | --- | --- |
 | `PartitionGenerationAssigned` | Kafka assigned a partition, the source allocated a new process-local generation, and its bootstrap batch entitlement is open. | Creates the corresponding `PartitionIntakeState` expecting the bootstrap batch, then runs the ordinary demand pass over all assigned generations and may emit one `RequestNextPartitionBatch`. |
 | `PartitionRecordBatch` | Kafka returned the records that satisfy one outstanding request for this partition generation. | Applies every record in order, closes that batch request, recomputes demand, and may submit the next request. |
-| `GracefulGenerationCancellation` | Kafka began revoking the partition and supplied the grace deadline. | Stops admitting records from the generation, cancels work that has not started an external operation, and distributes scoped graceful cancellation. |
-| `ForceGenerationCancellation` | Cancellation of everything remaining in this generation is now required. Sent when the revocation's grace interval ends — at its deadline, or earlier once every revoked generation has reported cleanup. | Records forced cancellation and distributes it to every remaining connection and request owner in the generation. |
+| `GracefulGenerationCancellation` | The generation entered typed grace: `Revocation(deadline)` or unbounded orderly `Shutdown`. | Stops admitting records from the generation and distributes the typed grace mode. Revocation cancels work whose complete request bytes are not on the target wire; shutdown drains every already-admitted request. Both modes make tuple output flush eagerly and Kafka commits run without intentional batching delay. |
+| `ForceGenerationCancellation` | Revocation cancellation of everything remaining in this generation is now required. Sent when revocation grace ends — at its deadline, or earlier once every revoked generation has reported cleanup. | Records forced cancellation and distributes it to every remaining connection and request owner in the generation. Orderly shutdown never sends it. |
 | `FinalizedArchivePartitionEnd` | A finalized imported partition has no later record. | Applies the finite-input expiration rules without creating Kafka timestamp or offset evidence. |
 | `ConnectionRequestFinished` | The request has finished all target sends and retries, so the next request from the same captured connection may start. Tuple work may still be unfinished. | Removes the request from retry-ready Kafka demand supply if it was counted and prevents later retry-input resolution from adding it back. |
 | `RequestProcessingFinished` | Target sending and retries are finished, the captured source response is either complete or known to be incomplete, the tuple is durable, and the request's resources have been released. | Marks this request's required processing complete for every Kafka record containing its request or response observations. A record may then finish if no other request or incomplete source reconstruction still depends on it. |
@@ -201,9 +201,10 @@ These are events that replay intake processes, not states:
 | `ConnectionCleanupFinished` | A connection owner and all of its requests have finished cancellation cleanup after Kafka revoked the partition. | Records that this connection no longer prevents cleanup of the revoked partition assignment. Cancelled Kafka work does not become committable. |
 
 Duplicate or already-cleaned delivery of `ForceGenerationCancellation` is inert. It is distributed to every
-remaining connection and request owner in the generation, which is the empty set once that generation's cleanup
-has completed, and it creates no state. The Kafka source therefore submits it unconditionally, including when
-the grace wait returned early because every revoked generation had already reported cleanup.
+remaining connection and request owner in a revoking generation, which is the empty set once that generation's
+cleanup has completed, and it creates no state. The Kafka source therefore submits it unconditionally for
+revocation, including when the grace wait returned early because every revoked generation had already reported
+cleanup. Orderly shutdown never submits it.
 
 Any future input must be a named immutable value and its design must state:
 
@@ -1044,11 +1045,26 @@ During `onPartitionsRevoked`, `KafkaSourceOwner` submits the following value to
 `ReplayIntakeInputQueue`:
 
 ```java
+sealed interface CancellationGrace permits
+    CancellationGrace.Revocation,
+    CancellationGrace.Shutdown {
+
+    record Revocation(CancellationDeadline deadline)
+        implements CancellationGrace {}
+
+    enum Shutdown implements CancellationGrace {
+        INSTANCE
+    }
+}
+
 record GracefulGenerationCancellation(
     PartitionGenerationId generation,
-    CancellationDeadline deadline
+    CancellationGrace grace
 ) {}
 ```
+
+Revocation supplies `new CancellationGrace.Revocation(deadline)`. Orderly process shutdown supplies
+`CancellationGrace.Shutdown.INSTANCE` as specified in §15.5.
 
 The deadline is measured with a process-local monotonic clock. Wall-clock changes cannot shorten
 or extend the configured grace interval. **One monotonic source serves the whole deadline**: the value
@@ -1077,6 +1093,9 @@ that graceful cancellation will not start. A fully written request, and the tupl
 finish it, may continue until the deadline. `connLLD §17.1` defines the boundary and `§8` the two
 write milestones it rests on.
 
+Every tuple sink serving a revoking generation flushes when grace begins and after every tuple it
+accepts during grace, so tuple durability does not wait for an ordinary size or age threshold.
+
 While the callback waits for the grace deadline, the Kafka thread processes commit-related and
 lifecycle inputs already submitted to `KafkaSourceInputQueue`. Queue submission signals the
 callback's wait directly; it does not call `KafkaConsumer.wakeup()` while callback handling is
@@ -1084,7 +1103,7 @@ protected from wakeup.
 
 ### 15.2 Force cancellation
 
-At the deadline, the Kafka source submits:
+At the revocation deadline, the Kafka source submits:
 
 ```java
 record ForceGenerationCancellation(PartitionGenerationId generation) {}
@@ -1098,16 +1117,23 @@ Replay intake records the force input when it removes it from the queue and subm
 corresponding force-cancellation message to every remaining connection owner. Downstream cleanup
 continues asynchronously.
 
+`CancellationGrace.Shutdown` has no deadline and is never upgraded to force cancellation.
+
 ### 15.3 Cleanup completion
 
 `GenerationCleanupTracker` is complete only when:
 
 - no source accumulator remains;
-- every connection owner has returned cleanup completion;
-- every request and tuple operation has returned cleanup completion through its connection owner;
+- every connection owner has returned revocation cleanup or ordinary shutdown completion;
+- every request and tuple operation has returned revocation cleanup or ordinary shutdown completion
+  through its connection owner;
 - every generation-scoped timer and permit is released;
 - no required completion input for the generation remains unapplied; and
 - every record tracker and request association for the generation has been removed.
+
+Revocation satisfies those conditions through typed cancellation cleanup. Shutdown grace satisfies
+them through ordinary request and connection completion for admitted complete requests, plus
+cancellation cleanup only for incomplete source assembly that cannot finish after intake stops.
 
 Uncommitted records are discarded from process-local bookkeeping without a commit request.
 
@@ -1144,6 +1170,41 @@ one that committed nothing — which is precisely the case these exist to make v
 
 The owner records the values; it draws no conclusion from them and changes no behavior in response.
 The grace interval is configuration, never adapted at runtime (§9.5).
+
+### 15.5 Orderly shutdown grace
+
+Orderly shutdown is host-bounded rather than deadline-bounded. `KafkaSourceOwner` pauses every
+currently assigned partition, preserves the assignment with the polls or touches Kafka requires,
+and submits this input for each active generation:
+
+```java
+new GracefulGenerationCancellation(
+    generation,
+    CancellationGrace.Shutdown.INSTANCE
+)
+```
+
+Replay intake rejects later record batches, ends source bootstrap and explicit batch entitlement,
+and cancels incomplete source assembly that cannot finish after intake stops. Every complete
+request already admitted before shutdown continues through preparation, permit acquisition,
+target writes, retries, source-response handling already available to it, and tuple durability.
+That includes a request queued or unsent when shutdown begins and a request partway through target
+writing. No new request is admitted after the shutdown input.
+
+Every tuple sink flushes when shutdown grace begins and after every tuple it accepts while shutdown
+grace remains active. `KafkaSourceOwner` attempts each newly eligible contiguous commit position as
+soon as no commit operation is in flight. It continues applying commit callbacks and immediately
+offers a later staged position after the prior operation resolves; it does not add a shutdown-only
+batching delay. The one-operation limit, contiguous-head rule, and all existing commit authority
+remain unchanged.
+
+Orderly shutdown sends no `ForceGenerationCancellation` and has no shutdown-grace command-line
+option or process-local timeout. Once every admitted operation has drained, tuple durability has
+resolved, every eligible commit has resolved while ownership remains valid, and generation
+bookkeeping is clean, the source closes Kafka and the application closes tuple, transformation,
+and event-loop resources. If those conditions never become true, the application remains in
+shutdown grace until the host environment terminates it. This does not change the fixed protocol-
+violation drain or fatal-process termination behavior in §16.
 
 ## 16. Protocol violation and fatal failure
 
@@ -1243,6 +1304,7 @@ the process supervisor immediately.
 - Graceful cancellation immediately cancels unsent work, and work partway through sending.
 - Fully sent target work, and the tuple work it requires, may finish and commit during the grace
   interval.
+- Tuple output flushes eagerly during grace rather than waiting for ordinary age or size rotation.
 - Successful force-cancellation queue submission allows the callback to return before cleanup
   finishes.
 - The successor generation stays paused until `GenerationCleanupFinished`.
@@ -1255,3 +1317,17 @@ the process supervisor immediately.
   readable.
 - A generation whose earliest uncommitted record does not finish within the grace interval retires
   reporting zero commits and a non-zero read count.
+
+### 17.6 Orderly shutdown
+
+- Shutdown grace pauses all intake and admits no later request.
+- Every complete request admitted before shutdown, including queued, unsent, and partly written
+  work, may finish through tuple durability.
+- Incomplete source assembly is released without authorizing commit.
+- Tuple sinks flush on grace entry and after each tuple accepted during grace.
+- Every newly eligible contiguous commit position is attempted without intentional batching delay,
+  with at most one commit operation in flight.
+- No force-cancellation input or shutdown deadline is created.
+- A fully drained process exits after final commit resolution and resource closure.
+- Work that cannot drain leaves the process waiting for host termination and remains uncommitted
+  after a hard kill.

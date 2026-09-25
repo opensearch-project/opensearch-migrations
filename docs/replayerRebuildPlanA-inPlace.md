@@ -700,19 +700,30 @@ hard-cap deadlock cannot recur because no cap exists to saturate. Contributes `R
 
 **Design refs:** cancellation model `replayerLLD §6:198-219`; `kafkaLLD §15:849-921` — `§15.1` graceful
 including what the Kafka thread does while awaiting the deadline, `§15.2` force, `§15.3` the six
-conditions for cleanup completeness. Connection side `connLLD §17:658-699`. Protocol violation
+conditions for cleanup completeness, and `§15.5` orderly shutdown grace. Connection side
+`connLLD §17:658-699`. Protocol violation
 `kafkaLLD §16:922-938` and `procCommit §10.2:1390-1404`. Architecture `procCommit §3.7:376-392` and
-`§9:1249-1370`, especially `§9.2:1261-1332` for the eight-step grace sequence and `§9.3` read gating.
+`§9:1249-1370`, especially `§9.2:1261-1332` for the eight-step revocation sequence, `§9.3` read gating,
+and `§10.1` orderly shutdown.
 **Required tests: `kafkaLLD §17.5:996-1005`, `kafkaLLD §17.4` case 28, and
-`connLLD §19.5:774-781`.**
+`kafkaLLD §17.6`, and `connLLD §19.5:774-781`.**
 
-`GracefulGenerationCancellation(deadline)` and `ForceGenerationCancellation` scoped to
-`PartitionGenerationId`, 5-second default grace. `onPartitionsRevoked` returns as soon as intake
+`GracefulGenerationCancellation(CancellationGrace.Revocation(deadline))` and
+`ForceGenerationCancellation` scoped to `PartitionGenerationId`, 1-second default revocation grace.
+`onPartitionsRevoked` returns as soon as intake
 *accepts* force cancellation. Typed per-owner cleanup results that never authorize commit; successor
 generations stay paused until `GenerationCleanupFinished`. `ProtocolViolationTerminator`: mark the record
 commit-ineligible, block commits at and past that offset, pause intake, fixed 60-second drain limit,
 terminate with a code distinct from 80, poison pill on restart. Every cancellation-ended target turn invokes
 G7's `finishedOrCancelled` supply transition exactly once before cleanup; later retry input cannot re-add it.
+
+G8 also owns the orderly-shutdown grace producer and drain chain. It submits
+`GracefulGenerationCancellation(CancellationGrace.Shutdown.INSTANCE)` for every active generation,
+stops new intake, releases incomplete source assembly, and lets every complete request already admitted
+drain without a deadline or force cancellation. Both grace modes flush tuple output eagerly and attempt each
+newly eligible contiguous commit position without intentional batching delay. A drained shutdown exits;
+otherwise it remains in grace until the host terminates it. G9 still owns deployed startup/configuration,
+fatal supervision and watchdog behavior, and tuple-writer worker-pool placement.
 
 **Inherited lifecycle evidence from G3.** Refactor the revocation and synthetic-close tests into the typed
 generation-cancellation model: stale source assembly is released before successor-generation records apply,
@@ -731,7 +742,9 @@ the drain limit without committing past the violating offset and stops at the sa
 inherited revocation/cleanup assertions above pass through typed cancellation and cleanup inputs, and the
 process-wide active-record-tracker gauge returns to its pre-generation value when cleanup completes.
 Cancellation removes every counted retry-ready request from supply exactly once before cleanup and late
-retry input cannot re-add it.
+retry input cannot re-add it. Orderly shutdown drains all admitted complete requests, eagerly flushes tuple
+output, promptly commits every eligible contiguous prefix, sends no force cancellation, and exits only after
+drain and resource closure; otherwise it remains host-bounded.
 Contributes `R15`, `R16`, `R17`.
 
 Per `../AGENTS.md` §4 and the human's explicit direction: `R16` and `R17` must have solid, fast,
@@ -749,8 +762,9 @@ inline-JSON surface, including every deprecated parse-and-warn alias, is `replay
 **Required tests: `connLLD §19.6:783-788` and `procCommit §13.5:1708-1716`.**
 
 `ProcessSupervisor` and the fatal ladder: `System.exit` → bounded hooks (ten minutes) → thread dump to
-stderr → `Runtime.halt` with the same code. Bounded shutdown with one named limit; the fatal path skips
-the intake fence; no unbounded doubling loop; no join on a group that may be dead. The full CLI and
+stderr → `Runtime.halt` with the same code. Fatal shutdown skips the intake fence; no unbounded doubling
+loop and no join on a group that may be dead. Orderly shutdown consumes G8's host-bounded drain chain and
+adds no shutdown deadline. The full CLI and
 config surface from previous-plan §7, including every deprecated parse-and-warn alias. Startup rejects
 `P < 1`, `T_threads < 1`, `W <= 0`, `E <= 0`, `S < 0`.
 
@@ -768,7 +782,8 @@ wired. `TupleWriter` and `TupleWriteResult` are already live G5 types, not G9 sh
 **Exit:** killing a target event loop under load yields exit code 80 with bounded hook time and a thread
 dump at the watchdog bound, and cannot hang; every retired deployed option parses, warns, has no
 behavioral effect, and does not fail as an unrecognized key; the already-integrated replay application from
-G5 is started and stopped through the supervisor and deployed configuration, without replacing its owner or
+G5 is started through deployed configuration, invokes G8's orderly host-bounded drain on normal shutdown,
+and uses the supervisor only for fatal termination, without replacing its owner or
 queue construction; configured startup selects every preserved replay-pipeline metric producer without
 changing its semantics; the bounded writer workers retain stable sink indices and G5's temporary
 per-connection writer placement is gone. Covers `D13`, `D14`; contributes `R1`, `R19`.

@@ -73,7 +73,7 @@ This document does not define:
 This document settles the required behavior but does not choose:
 
 - the exact Java names of cancellation and cleanup result types;
-- the command-line option name for the cancellation grace interval; or
+- the command-line option name for the revocation grace interval; or
 - concrete queue and wakeup classes used to service replay-intake inputs.
 
 Those names and classes belong in the next lower-level design. They may not change the behaviors
@@ -381,11 +381,12 @@ Completion of one observation cannot partially commit its containing Kafka recor
 
 ### 3.7 Cancellation never means completion
 
-Cancellation includes partition revocation and normal process shutdown. It may stop incomplete HTTP
-assembly, request preparation, permit acquisition, target work, retry timers, source-response
-assembly, tuple output, and connection work.
+Generation grace includes partition revocation and normal process shutdown. Revocation cancellation
+may stop incomplete HTTP assembly, request preparation, permit acquisition, target work, retry
+timers, source-response assembly, tuple output, and connection work. Orderly shutdown stops new
+admission and incomplete source assembly but drains every complete request already admitted.
 
-Cancellation:
+Work actually cancelled:
 
 - prevents the cancelled work from requesting Kafka commit;
 - drives created or retained data and I/O objects to a defined cleanup state;
@@ -1342,8 +1343,8 @@ clean. A successor generation cannot overtake that accepted batch.
 
 ### 9.2 Bounded revocation grace and scoped cancellation
 
-The replayer uses one startup-configured cancellation grace interval for partition revocation and
-normal shutdown. **Its default is one second, and it is raised or lowered by a command-line option.**
+The replayer uses one startup-configured cancellation grace interval for partition revocation.
+**Its default is one second, and it is raised or lowered by a command-line option.**
 The default is deliberately the smallest useful value rather than a generous one: the callback stalls
 every partition this consumer holds, not only the revoked ones, and it blocks the whole consumer
 group's rebalance for its duration. A deployment raises it only when it has measured that it needs
@@ -1353,7 +1354,8 @@ exceeding it fences the member, converting a graceful revocation into a lost one
 staged position.
 
 When revocation begins, the Kafka source submits one scoped graceful-cancellation input to replay
-intake. That input identifies the revoked partition generation and the grace deadline.
+intake. That input identifies the revoked partition generation and carries
+`CancellationGrace.Revocation(deadline)`.
 
 1. replay intake stops admitting new work from that partition generation;
 2. as each owner processes the cancellation, it immediately cancels every request whose target
@@ -1365,7 +1367,8 @@ intake. That input identifies the revoked partition generation and the grace dea
 3. a request whose final bytes are on the wire may finish target processing and durable tuple output
    during the grace interval;
 4. a tuple write already in flight may finish during that interval;
-5. completed work may still produce commit requests and the Kafka source owner may attempt them;
+5. tuple output flushes eagerly, completed work may still produce commit requests, and the Kafka
+   source owner attempts each newly eligible contiguous position without intentional batching delay;
 6. when the grace deadline arrives, the Kafka source submits a scoped force-cancellation input;
 7. `onPartitionsRevoked` waits only until replay intake accepts that force-cancellation input and
    then returns; and
@@ -1506,19 +1509,23 @@ short generations with no commits.
 Normal shutdown:
 
 1. pauses every currently assigned partition so no new records are admitted;
-2. submits the same scoped graceful-cancellation input used for revocation and continues the Kafka
-   polls or touches needed to keep the current assignment during the configured cancellation grace
-   interval;
-3. applies the same state-sensitive rule as revocation: unsent work cancels immediately, while
-   already-sent target and tuple work may finish during the interval;
-4. attempts commits for work that completes while the assignment remains valid;
-5. submits force cancellation for remaining unfinished work when the interval expires;
-6. allows owners to finish process-local cleanup; and
-7. requests replay-intake stop after draining and waits for its termination within the shutdown
-   bound; and
-8. closes Kafka, tuple output, transformation resources, and event loops.
+2. submits scoped `CancellationGrace.Shutdown` inputs and continues the Kafka polls or touches needed
+   to keep the current assignment;
+3. cancels incomplete source assembly that cannot finish after intake stops, but lets every complete
+   request already admitted—including queued, unsent, preparing, partly written, retrying, and
+   tuple-writing work—continue to its ordinary terminal outcome;
+4. puts tuple output into eager-flush operation and attempts each newly eligible contiguous commit
+   position without intentional batching delay while preserving one-operation serialization;
+5. continues applying commit callbacks and lifecycle inputs while the assignment remains valid;
+6. after all admitted operations drain, all tuple writes are durable, every eligible commit resolves,
+   and generation bookkeeping is clean, requests replay-intake stop after draining;
+7. closes Kafka, tuple output, transformation resources, and event loops; and
+8. otherwise remains in shutdown grace without a process-local deadline until the host environment
+   terminates it.
 
 Normal shutdown never treats cancellation as successful replay.
+It sends no force cancellation and has no shutdown-grace command-line option. Fatal failure and
+protocol violation retain their separately bounded termination paths.
 
 ### 10.2 Protocol violation
 
@@ -1835,8 +1842,11 @@ output, and Kafka-record completion remain independent and may continue afterwar
 - Commits completed during revocation grace are attempted; broker rejection after ownership loss
   leaves the record available for redelivery.
 - Unknown broker commit outcome after revocation is not retried under the old generation.
-- Normal shutdown pauses intake before its grace period and attempts commits only while Kafka still
-  accepts them.
+- Normal shutdown pauses intake, drains every already-admitted request without a deadline, flushes
+  tuple output eagerly, and immediately attempts each newly eligible contiguous commit while Kafka
+  still accepts it.
+- A drained shutdown exits after final commit resolution and resource closure; a shutdown that
+  cannot drain remains host-bounded and manufactures no completion when killed.
 
 The assignment, pause/resume, commit-race, redelivery, and multi-consumer rebalance proofs require
 real Kafka tests in addition to deterministic unit tests.
