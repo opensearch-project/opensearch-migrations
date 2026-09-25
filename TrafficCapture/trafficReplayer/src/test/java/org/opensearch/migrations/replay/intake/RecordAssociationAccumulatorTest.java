@@ -235,6 +235,43 @@ class RecordAssociationAccumulatorTest {
         );
     }
 
+    @Test
+    void earlyFinalResponseRecordIsRelabeledAndHeldUntilRequestProcessingFinishes() {
+        var requestPrefix = stream(0, read(1, "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n"));
+        var earlyFinal = stream(1, write(2, "HTTP/1.1 413 Content Too Large\r\n\r\n"));
+        var completion = stream(2, read(3, "x"), endOfMessage(4), close(5));
+        var script = new RecordScript(TOPIC)
+            .addTraffic(0, 0, Instant.ofEpochMilli(1_000), WRITER, requestPrefix)
+            .addTraffic(0, 1, Instant.ofEpochMilli(2_000), WRITER, earlyFinal)
+            .addTraffic(0, 2, Instant.ofEpochMilli(3_000), WRITER, completion);
+        assignAndApply(script);
+
+        Assertions.assertTrue(
+            sourceCompletions().isEmpty(),
+            "the early-final record must retain the request assembly association through relabeling"
+        );
+        Assertions.assertEquals(
+            3,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(
+                telemetry.getFinishedMetrics(),
+                ReplayIntakeMetrics.MetricNames.ACTIVE_RECORD_TRACKERS
+            )
+        );
+
+        finishRequest(script, 0);
+
+        var completions = sourceCompletions();
+        Assertions.assertEquals(3, completions.size(), "each contributing record must finish exactly once");
+        Assertions.assertEquals(
+            Set.of(
+                new KafkaRecordId(script.generation(0), 0),
+                new KafkaRecordId(script.generation(0), 1),
+                new KafkaRecordId(script.generation(0), 2)
+            ),
+            Set.copyOf(completions)
+        );
+    }
+
     /**
      * {@code §17.1}: "A heartbeat-only or probe-only record completes immediately after application."
      *
