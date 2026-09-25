@@ -128,6 +128,36 @@ class RequestReplayOwnerTest {
     }
 
     @Test
+    void duplicateRetrySourceResponseIsAnImpossibleTransition() {
+        var fixture = new TargetConnectionOwnerTestSupport.Fixture();
+        fixture.admit(7, Instant.EPOCH);
+        fixture.eventLoop.runUntilIdle();
+
+        fixture.owner.submit(new TargetConnectionOwner.RetrySourceResponseComplete<>(
+            TargetConnectionOwnerTestSupport.CONNECTION,
+            TargetConnectionOwnerTestSupport.GENERATION,
+            TargetConnectionOwnerTestSupport.request(7),
+            "first"
+        ));
+        fixture.eventLoop.runUntilIdle();
+        fixture.owner.submit(new TargetConnectionOwner.RetrySourceResponseComplete<>(
+            TargetConnectionOwnerTestSupport.CONNECTION,
+            TargetConnectionOwnerTestSupport.GENERATION,
+            TargetConnectionOwnerTestSupport.request(7),
+            "second"
+        ));
+        fixture.eventLoop.runUntilIdle();
+
+        Assertions.assertTrue(
+            fixture.fatalFailures.stream().anyMatch(error ->
+                error.getCause().getMessage().contains(
+                    "retry source response was already supplied"
+                )
+            )
+        );
+    }
+
+    @Test
     void responsePathStopsAfterTheConfiguredFourRetries() {
         var fixture = new TargetConnectionOwnerTestSupport.Fixture();
         fixture.retryPolicy.decisions.addAll(List.of(

@@ -255,7 +255,25 @@ class SourceReconstructionTest {
         Assertions.assertEquals(
             List.of(expired),
             sink.expiredConnections,
-            "only the old process-local owner receives the expiration command"
+            "the first expiration routes only to the old process-local owner"
+        );
+
+        var nextProof = new RecordScript(TOPIC, first.generation(0).localSequence()).addProbe(
+            0, 3, Instant.ofEpochMilli(51_002), "other-writer", "retained-baseline-proof"
+        );
+        owner.applyOnCallingThread(new ReplayIntakeInput.PartitionRecordBatch(
+            new PartitionBatchRequestId(nextProof.generation(0), 3),
+            nextProof.records()
+        ));
+        Assertions.assertEquals(
+            List.of(expired, fresh),
+            sink.expiredConnections,
+            "the retained writer baseline must expire the fresh process-local lifetime independently"
+        );
+        Assertions.assertEquals(
+            SourceConnectionState.Lifetime.EXPIRED,
+            owner.partitionState(first.generation(0)).orElseThrow()
+                .lifetimeOf(fresh).orElseThrow().lifetime()
         );
     }
 

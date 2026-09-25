@@ -441,8 +441,8 @@ public final class SourceConnectionState {
             responseAccumulationContext = requestContext.createResponseAccumulationContext();
         }
 
-        // REBUILD-LIMBO-NOTE(G7): create §9.1's request-state bookkeeping for retry input, final source
-        // response and demand before admitting the request to its connection owner.
+        // REBUILD-LIMBO-NOTE(G7): update retry-ready demand before admitting the request to its connection
+        // owner. G6 already registers the retry and final source-response inputs at this callback boundary.
         if (requestContext == null) {
             sink.onRequestReconstituted(
                 replayRequestId,
