@@ -209,6 +209,7 @@ All P1–P12 defaults are reversible and owner-vetoable through G11 unless a row
 | `TupleWriter`, `TupleWriteResult` shells | G0 | G9 | Land with tuple path and threading contract | open |
 | `PartitionIntakeState` shell | G0 | G3 | Land with source assembly | proved; implementation and conformance review complete |
 | One-shot asynchronous commit resolution under callback/wakeup races | G3 | G4 | G4 owns the complete submission identity, in-flight state, callback owner, monotonic recommit, observability, and deterministic race evidence | open |
+| Rejected-versus-unknown commit outcome split | G2 | G4 | G2 closed without proving the distinction; G4 owns issuance, operation-level resolution, revocation abandonment, conservation instrumentation, and deterministic evidence | accepted by G4; implementation open |
 
 ## Scaffolding and known-broken-test ownership
 
@@ -315,7 +316,7 @@ Every row records explicit owner authorization. The detailed rationale is retain
 | Authoritative source-interim design still describes the superseded ordinary-`Write` fallback | open; blocks typed G3 closure | Obtain explicit authorization for the exact design amendment; PA2 item 5 and G3 then implement only typed observations |
 | Which preserved source timestamp anchors nominal target send time | open; blocks consuming G5/G7 wiring | Options are request first byte, request EOM, or another explicit formula. Recommendation: first byte; authorize the exact design amendment before consumption |
 | Conservation wording mismatch between AGENTS equation and D-3 decision | open, non-blocking | Owner confirmation required before semantic reconciliation |
-| Rejected-versus-unknown commit outcome split was assigned to G2 but not proved | open; milestone ownership discrepancy | Do not silently reassign it: amend G2 and a named receiving milestone plus this ledger under AGENTS §2 before closure |
+| Rejected-versus-unknown commit outcome split was assigned to G2 but not proved | resolved ownership discrepancy | G2 scope/Exit now excludes it; G4 scope/Exit and the deferral ledger own the complete issuance, resolution, abandonment, observability, and evidence chain |
 | `FinalTargetWriteSubmitted` was added as a second milestone by implication | open owner veto | Retain unless the owner rejects it; first-write still owns channel reuse while final-write owns graceful-cancellation completion |
 | Relocate `utils/TrackedFutureJsonFormatter.java` and `trafficcapture/protos/TrafficStreamUtils.java` to owning modules | open owner decision | Avoid split packages; remove `TrackedFutureJsonFormatter`'s mutable static `ObjectMapper` during the owning-module move |
 | Tuple-writer parallelism setting | reversible through G10 | Default remains bounded executor with one non-concurrently invoked transformer/sink per worker and explicit close |
