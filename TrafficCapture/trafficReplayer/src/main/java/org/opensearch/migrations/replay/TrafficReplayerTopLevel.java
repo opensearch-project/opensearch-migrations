@@ -128,7 +128,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
         @NonNull Consumer<T> tupleReleaser,
         @NonNull Duration tupleRetryDelay,
         @NonNull PartitionIntakeState.BrokerTimeConfiguration brokerTimeConfiguration,
-        int maximumResponseAttempts,
+        int maximumResponseRetries,
         int maximumTargetAttempts
     ) {
         public Configuration {
@@ -138,8 +138,8 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             if (maximumTargetAttempts <= 0) {
                 throw new IllegalArgumentException("maximumTargetAttempts must be positive");
             }
-            if (maximumResponseAttempts <= 0) {
-                throw new IllegalArgumentException("maximumResponseAttempts must be positive");
+            if (maximumResponseRetries <= 0) {
+                throw new IllegalArgumentException("maximumResponseRetries must be positive");
             }
         }
     }
@@ -547,7 +547,7 @@ public final class TrafficReplayerTopLevel<P extends AutoCloseable, R, T>
             assemblySink.new IntakeLifecycleSink(connectionId),
             fatalHandler::accept,
             org.opensearch.migrations.replay.lifecycle.OutstandingOperationRegistry.CountHook.NOOP,
-            configuration.maximumResponseAttempts(),
+            configuration.maximumResponseRetries(),
             () -> assemblySink.releaseTerminatedConnection(
                 connectionId,
                 Objects.requireNonNull(

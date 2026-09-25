@@ -311,7 +311,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
     private final Function<Instant, Instant> replayTimeMapper;
     private final RequestReplayOwner.RequestPreparer<S, P> preparer;
     private final RequestReplayOwner.RetryPolicy<R, F> retryPolicy;
-    private final int maximumResponseAttempts;
+    private final int maximumResponseRetries;
     private final TargetChannelPort<P, R> targetChannel;
     private final TupleWriter<T> tupleWriter;
     private final RequestReplayOwner.TupleFactory<S, P, R, F, T> tupleFactory;
@@ -434,11 +434,11 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull LifecycleSink lifecycleSink,
         @NonNull FatalHandler fatalHandler,
         @NonNull OutstandingOperationRegistry.CountHook countHook,
-        int maximumResponseAttempts,
+        int maximumResponseRetries,
         @NonNull Runnable ownerTerminated
     ) {
-        if (maximumResponseAttempts <= 0) {
-            throw new IllegalArgumentException("maximumResponseAttempts must be positive");
+        if (maximumResponseRetries <= 0) {
+            throw new IllegalArgumentException("maximumResponseRetries must be positive");
         }
         this.connectionProcessingId = connectionProcessingId;
         this.partitionGenerationId = connectionProcessingId.generation();
@@ -448,7 +448,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
         this.replayTimeMapper = replayTimeMapper;
         this.preparer = preparer;
         this.retryPolicy = retryPolicy;
-        this.maximumResponseAttempts = maximumResponseAttempts;
+        this.maximumResponseRetries = maximumResponseRetries;
         this.targetChannel = targetChannel;
         this.tupleWriter = tupleWriter;
         this.tupleFactory = tupleFactory;
@@ -729,7 +729,7 @@ public final class TargetConnectionOwner<S, P extends AutoCloseable, R, F, T> {
             new RequestCallbacks(),
             fatalHandler::onFatal,
             countHook,
-            maximumResponseAttempts
+            maximumResponseRetries
         );
         var entry = new RequestEntry<S, P, R, F, T>(
             nominalTargetTime,

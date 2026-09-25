@@ -324,7 +324,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
     private final LongSupplier nanoTime;
     private final RequestPreparer<S, P> preparer;
     private final RetryPolicy<R, F> retryPolicy;
-    private final int maximumResponseAttempts;
+    private final int maximumResponseRetries;
     private final TargetChannelPort<P, R> targetChannel;
     private final TupleFactory<S, P, R, F, T> tupleFactory;
     private final TupleWriter<T> tupleWriter;
@@ -371,10 +371,10 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         @NonNull ConnectionCallbacks callbacks,
         @NonNull FatalHandler fatalHandler,
         @NonNull OutstandingOperationRegistry.CountHook countHook,
-        int maximumResponseAttempts
+        int maximumResponseRetries
     ) {
-        if (maximumResponseAttempts <= 0) {
-            throw new IllegalArgumentException("maximumResponseAttempts must be positive");
+        if (maximumResponseRetries <= 0) {
+            throw new IllegalArgumentException("maximumResponseRetries must be positive");
         }
         this.nominalTargetTime = nominalTargetTime;
         this.sourceRequest = sourceRequest;
@@ -384,7 +384,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         this.nanoTime = nanoTime;
         this.preparer = preparer;
         this.retryPolicy = retryPolicy;
-        this.maximumResponseAttempts = maximumResponseAttempts;
+        this.maximumResponseRetries = maximumResponseRetries;
         this.targetChannel = targetChannel;
         this.tupleFactory = tupleFactory;
         this.tupleWriter = tupleWriter;
@@ -1054,7 +1054,7 @@ public final class RequestReplayOwner<S, P extends AutoCloseable, R, F, T> {
         }
         switch (decision) {
             case RetryDecision.RetryRequired ignored -> {
-                if (responseAttemptCount() >= maximumResponseAttempts) {
+                if (responseAttemptCount() > maximumResponseRetries) {
                     targetServerState = new TargetServerState.Finished<>(response);
                     emitConnectionTurnFinished(
                         ConnectionTurnCompletion.TARGET_WORK_FINISHED
